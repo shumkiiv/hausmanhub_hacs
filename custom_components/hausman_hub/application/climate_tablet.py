@@ -15,6 +15,8 @@ import time
 from typing import Protocol
 
 from ..correlation import resolve_correlation_id, validate_correlation_id
+from ..climate_revision import MAX_JS_SAFE_INTEGER, is_control_revision
+from ..climate_ledger_keyring import ClimateLedgerKeyring
 from .contour_apply import ContourApplyStatus, ContourApplyViolation
 from .contour_override import TemporaryTemperatureViolation
 from .home_climate_targets import HomeClimateTargetsViolation
@@ -261,12 +263,15 @@ def parse_climate_tablet_action(payload: object) -> ClimateTabletActionRequest:
     except ValueError as error:
         raise ClimateTabletViolation("climate action correlation id is invalid") from error
     revision = payload.get("expected_state_revision")
-    if type(revision) is not int or not 0 <= revision <= 9_007_199_254_740_991:
+    if not is_control_revision(revision):
         raise ClimateTabletViolation("climate action revision is invalid")
     reliability_profile = payload.get("reliability_profile")
     expected_control_revision = payload.get("expected_control_revision")
     if reliability_profile is not None:
-        if reliability_profile != "climate_reliability_v1" or type(expected_control_revision) is not int or expected_control_revision < 0:
+        if (
+            reliability_profile != "climate_reliability_v1"
+            or not is_control_revision(expected_control_revision)
+        ):
             raise ClimateTabletViolation("climate reliability profile is invalid")
     elif expected_control_revision is not None:
         raise ClimateTabletViolation("climate control revision requires reliability profile")
@@ -375,7 +380,7 @@ def climate_tablet_snapshot(
         or not isinstance(rooms_value, list)
         or not isinstance(contours_value, list)
         or not isinstance(reconciliation, Mapping)
-        or type(revision) is not int
+        or not is_control_revision(revision)
         or type(observed_at) is not int
     ):
         raise ClimateTabletUnavailable("climate home projection is invalid")
@@ -479,6 +484,16 @@ def climate_tablet_snapshot(
             and "set_room_mode" not in allowed_actions
         ):
             allowed_actions.append("set_room_mode")
+        if (
+            isinstance(temporary, Mapping)
+            and temporary.get("active") is True
+            and "set_room_target" in allowed_actions
+            and "clear_room_override" not in allowed_actions
+        ):
+            # Returning to the saved schedule is the inverse of a supported
+            # temporary target. It is a durable contour change and is routed
+            # through the same guarded native control boundary.
+            allowed_actions.append("clear_room_override")
         if allowed_actions:
             room_reasons = []
         if not room_reasons and not allowed_actions and isinstance(native_reasons, list):
@@ -675,9 +690,9 @@ class ClimateTabletService:
         self._store = store
         scope_key = getattr(store, "reliable_scope_integrity_key", None)
         self._reliable_scope_integrity_key = (
-            scope_key.encode("ascii")
-            if isinstance(scope_key, str) and re.fullmatch(r"[a-f0-9]{64}", scope_key)
-            else None
+            scope_key if isinstance(scope_key, ClimateLedgerKeyring) else
+            scope_key.encode("ascii") if isinstance(scope_key, str)
+            and re.fullmatch(r"[a-f0-9]{64}", scope_key) else None
         )
         self._operation_id_factory = operation_id_factory or (
             lambda: secrets.token_hex(16)
@@ -720,7 +735,7 @@ class ClimateTabletService:
         if payload.get("version") not in {1, 2, 3, 4, 5, 6} or not isinstance(payload.get("records"), list):
             raise ClimateTabletUnavailable("stored climate operation version is invalid")
         stored_revision = payload.get("control_revision", 0)
-        if type(stored_revision) is not int or stored_revision < 0:
+        if not is_control_revision(stored_revision):
             raise ClimateTabletUnavailable("stored climate control revision is invalid")
         load_bindings = getattr(self._store, "async_load_reliable_scope_bindings", None)
         if not callable(load_bindings):
@@ -1017,6 +1032,21 @@ class ClimateTabletService:
                         code="revision_conflict",
                     )
                 return {**prior.receipt, "duplicate": True}
+            # Legacy operations do not reserve through the shared coordinator,
+            # but their receipt still advances the public control revision.
+            # Refuse exhaustion before pruning, intent replacement, receipt
+            # creation or any persistence attempt.
+            if (
+                request.reliability_profile is None
+                and (
+                    not is_control_revision(self._control_revision)
+                    or self._control_revision >= MAX_JS_SAFE_INTEGER
+                )
+            ):
+                raise ClimateTabletViolation(
+                    "climate control revision is exhausted",
+                    code="revision_conflict",
+                )
             if len(self._records_by_request) >= MAX_RELIABLE_OPERATION_RECORDS:
                 self._prune_oldest_final()
             if len(self._records_by_request) >= MAX_RELIABLE_OPERATION_RECORDS:
@@ -1154,7 +1184,24 @@ class ClimateTabletService:
                     )
                     command_count = getattr(result, "command_count", None)
                     accepted_count = getattr(result, "accepted_count", None)
-                    if has_device_outcomes and not exact_device_outcomes:
+                    trusted_terminal_blocked = (
+                        exact_device_outcomes
+                        and (command_count, accepted_count) == (0, 0)
+                        and _has_trusted_terminal_blocked_outcomes(result)
+                    )
+                    if trusted_terminal_blocked:
+                        # The runtime explicitly says that its frozen plan had
+                        # no physical call. Keep that terminal 0/0 boundary;
+                        # treating it as an aggregate gap would fabricate a
+                        # retryable pending dispatch on the tablet.
+                        receipt = _expired_pending_reliable_receipt(
+                            receipt, self._safe_now(), blocked_immediately=True
+                        )
+                        receipt["resulting_control_revision"] = self._control_revision
+                        final_ledger = _reliable_dispatch_ledger(
+                            receipt, "blocked_before_dispatch"
+                        )
+                    elif has_device_outcomes and not exact_device_outcomes:
                         # A supplied but contradictory per-device map carries
                         # a possible physical boundary even when the aggregate
                         # counters say zero.  It must never be downgraded to a
@@ -1319,7 +1366,7 @@ class ClimateTabletService:
                         snapshot=snapshot,
                         resulting_control_revision=self._control_revision,
                     )
-            except Exception:
+            except Exception as error:
                 if request.reliability_profile == "climate_reliability_v1" and physical_started:
                     receipt = _ambiguous_started_reliable_receipt(
                         receipt, request, self._safe_now()
@@ -1692,7 +1739,7 @@ class ClimateTabletService:
         # request cannot advance the shared token a second time.
         reserved = getattr(self._runtime, "async_execute_reserved_tablet_action", None)
         if request.reliability_profile is not None and callable(reserved):
-            return await reserved(
+            result = await reserved(
                 action=request.action,
                 room_id=request.room_id,
                 parameters=dict(request.parameters),
@@ -1701,7 +1748,11 @@ class ClimateTabletService:
                 expected_control_revision=request.expected_control_revision,
                 resulting_control_revision=self._control_revision,
                 local_now=self._local_now(),
+                tablet_request_fingerprint=request.fingerprint,
+                tablet_action=request.action,
+                tablet_parameters=dict(request.parameters),
             )
+            return result
         if request.action == "set_home_targets":
             return await self._runtime.async_home_climate_targets(
                 {
@@ -1850,7 +1901,12 @@ class ClimateTabletService:
 
     async def _reserve_control_revision_unlocked(self, expected: object) -> int:
         """Use the shared store coordinator when available, with test fallback."""
-        if type(expected) is not int or expected != self._control_revision:
+        if (
+            not is_control_revision(expected)
+            or not is_control_revision(self._control_revision)
+            or expected != self._control_revision
+            or expected >= MAX_JS_SAFE_INTEGER
+        ):
             raise ClimateTabletViolation("climate control revision changed", code="revision_conflict")
         reserve = getattr(self._store, "async_reserve_control_revision", None)
         if not callable(reserve):
@@ -1859,7 +1915,7 @@ class ClimateTabletService:
             reserved = await reserve(expected)
         except Exception as error:
             raise ClimateTabletViolation("climate control revision changed", code="revision_conflict") from error
-        if type(reserved) is not int or reserved != expected + 1:
+        if not is_control_revision(reserved) or reserved != expected + 1:
             raise ClimateTabletUnavailable("climate control revision reservation is invalid")
         return reserved
 
@@ -1872,7 +1928,7 @@ class ClimateTabletService:
             value = await current()
         except Exception as error:
             raise ClimateTabletUnavailable("climate control revision is unavailable") from error
-        if type(value) is not int or value < 0:
+        if not is_control_revision(value):
             raise ClimateTabletUnavailable("climate control revision is invalid")
         self._control_revision = value
         return value
@@ -2770,7 +2826,7 @@ def _reliable_scope_binding(
         or not _valid_frozen_scope(scope, request)
         or not isinstance(operation_id, str)
         or _OPERATION_ID.fullmatch(operation_id) is None
-        or not isinstance(integrity_key, bytes)
+        or not _valid_integrity_key(integrity_key)
     ):
         raise ClimateTabletUnavailable("climate reliable scope is invalid")
     frozen_scope = json.loads(json.dumps(scope, ensure_ascii=False))
@@ -2837,7 +2893,7 @@ def _valid_reliable_scope_binding(
         and _valid_frozen_scope(binding_scope, request)
         and binding.get("scope_fingerprint") == _canonical_fingerprint(binding_scope)
         and scope == binding_scope
-        and isinstance(integrity_key, bytes)
+        and _valid_integrity_key(integrity_key)
         and isinstance(binding.get("integrity_tag"), str)
         and _valid_reliable_binding_sources(binding.get("source_observed_at"), binding_scope)
         and _reliable_receipt_matches_binding_sources(receipt, binding.get("source_observed_at"))
@@ -2845,10 +2901,7 @@ def _valid_reliable_scope_binding(
             binding.get("operation_checkpoints"), receipt, dispatch_ledger,
             integrity_key, unsigned,
         )
-        and hmac.compare_digest(
-            binding["integrity_tag"],
-            _reliable_scope_integrity_tag(integrity_key, unsigned),
-        )
+        and _reliable_scope_integrity_matches(integrity_key, binding["integrity_tag"], unsigned)
     )
 
 
@@ -2869,7 +2922,7 @@ def _tablet_state_payload(payload: Mapping[str, object]) -> dict[str, object]:
 def _tablet_state_with_checkpoint(
     previous: object, payload: Mapping[str, object], integrity_key: bytes | None,
 ) -> dict[str, object]:
-    if not isinstance(integrity_key, bytes):
+    if not _valid_integrity_key(integrity_key):
         raise ClimateTabletUnavailable("climate tablet state key is invalid")
     state = _tablet_state_payload(payload)
     fingerprint = _canonical_fingerprint(state)
@@ -2892,20 +2945,19 @@ def _tablet_state_with_only_current_checkpoint(
 def _valid_tablet_state_checkpoint(
     stored: object, payload: Mapping[str, object], integrity_key: bytes | None,
 ) -> bool:
-    if not isinstance(stored, Mapping) or set(stored) != {"checkpoints"} or not isinstance(integrity_key, bytes):
+    if not isinstance(stored, Mapping) or set(stored) != {"checkpoints"} or not _valid_integrity_key(integrity_key):
         return False
     checkpoints = stored.get("checkpoints")
     if not isinstance(checkpoints, list) or not 1 <= len(checkpoints) <= 2:
         return False
     state = _tablet_state_payload(payload)
     fingerprint = _canonical_fingerprint(state)
-    expected = _reliable_scope_integrity_tag(integrity_key, state)
     return any(
         isinstance(item, Mapping)
         and set(item) == {"fingerprint", "integrity_tag"}
         and item.get("fingerprint") == fingerprint
         and isinstance(item.get("integrity_tag"), str)
-        and hmac.compare_digest(item["integrity_tag"], expected)
+        and _reliable_scope_integrity_matches(integrity_key, item["integrity_tag"], state)
         for item in checkpoints
     )
 
@@ -2914,7 +2966,7 @@ def _binding_with_checkpoint(
     binding: Mapping[str, object], receipt: Mapping[str, object], ledger: object,
     integrity_key: bytes | None,
 ) -> dict[str, object]:
-    if not isinstance(integrity_key, bytes):
+    if not _valid_integrity_key(integrity_key):
         raise ClimateTabletUnavailable("climate reliable scope is invalid")
     base = {key: value for key, value in binding.items() if key != "operation_checkpoints"}
     unsigned = {key: value for key, value in base.items() if key != "integrity_tag"}
@@ -2945,19 +2997,22 @@ def _valid_operation_checkpoint(
         return False
     payload = _checkpoint_payload(binding, receipt, ledger)
     fingerprint = _canonical_fingerprint(payload)
-    expected = _reliable_scope_integrity_tag(integrity_key, payload)
     return any(
         isinstance(item, Mapping)
         and set(item) == {"fingerprint", "integrity_tag"}
         and item.get("fingerprint") == fingerprint
         and isinstance(item.get("integrity_tag"), str)
-        and hmac.compare_digest(item["integrity_tag"], expected)
+        and _reliable_scope_integrity_matches(integrity_key, item["integrity_tag"], payload)
         for item in checkpoints
     )
 
 
+def _valid_integrity_key(integrity_key: object) -> bool:
+    return isinstance(integrity_key, bytes) or isinstance(integrity_key, ClimateLedgerKeyring)
+
+
 def _reliable_scope_integrity_tag(
-    integrity_key: bytes,
+    integrity_key: bytes | ClimateLedgerKeyring,
     binding: Mapping[str, object],
 ) -> str:
     """Authenticate immutable scope and proof outside climate operation stores."""
@@ -2966,7 +3021,18 @@ def _reliable_scope_integrity_tag(
         binding,
         ensure_ascii=False, sort_keys=True, separators=(",", ":"),
     ).encode("utf-8")
-    return hmac.new(integrity_key, payload, hashlib.sha256).hexdigest()
+    key = integrity_key.active_key if isinstance(integrity_key, ClimateLedgerKeyring) else integrity_key
+    return hmac.new(key, payload, hashlib.sha256).hexdigest()
+
+
+def _reliable_scope_integrity_matches(
+    integrity_key: bytes | ClimateLedgerKeyring, tag: object, binding: Mapping[str, object],
+) -> bool:
+    if not isinstance(tag, str):
+        return False
+    payload = json.dumps(binding, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    keys = integrity_key.keys.values() if isinstance(integrity_key, ClimateLedgerKeyring) else (integrity_key,)
+    return any(hmac.compare_digest(tag, hmac.new(key, payload, hashlib.sha256).hexdigest()) for key in keys)
 
 
 def _valid_reliable_binding_sources(sources: object, scope: Mapping[str, object]) -> bool:
@@ -3035,7 +3101,7 @@ def _reliable_dispatch_ledger(
     sources: dict[str, dict[str, int]] = {}
     if state not in {
         "pending_dispatch", "pending_expired", "superseded_pre_dispatch",
-        "already_in_sync",
+        "already_in_sync", "blocked_before_dispatch",
     }:
         if type(dispatched_at) is not int:
             raise ClimateTabletUnavailable("climate dispatch boundary is invalid")
@@ -3106,7 +3172,7 @@ def _valid_reliable_dispatch_ledger(
                 for leaf in leaves
             )
         )
-    if state == "pending_expired":
+    if state in {"pending_expired", "blocked_before_dispatch"}:
         return (
             dispatched_at is None
             and sources == {}
@@ -3114,7 +3180,12 @@ def _valid_reliable_dispatch_ledger(
             and receipt.get("accepted") is True
             and receipt.get("confirmed") is False
             and receipt.get("final") is True
-            and _reliable_intent_has_status(receipt, "saved_apply_failed")
+            and _reliable_intent_has_status(
+                receipt,
+                "saved_blocked_before_dispatch"
+                if state == "blocked_before_dispatch"
+                else "saved_apply_failed",
+            )
             and receipt.get("reason") == "read_back_mismatch"
             and receipt.get("message_code") == "partial"
             and receipt.get("unfinished_device_count") == 0
@@ -3927,7 +3998,7 @@ def _superseded_receipt(
 
 
 def _expired_pending_reliable_receipt(
-    receipt: Mapping[str, object], now: int,
+    receipt: Mapping[str, object], now: int, *, blocked_immediately: bool = False,
 ) -> dict[str, object]:
     """Close an unstarted intent without claiming a physical acceptance."""
 
@@ -3946,7 +4017,11 @@ def _expired_pending_reliable_receipt(
                     "command_count": 0,
                     "accepted_count": 0,
                     "message_code": "configuration_error",
-                    "message": "Время ожидания истекло до отправки команды.",
+                    "message": (
+                        "Конфигурация устройства требует проверки."
+                        if blocked_immediately
+                        else "Время ожидания истекло до отправки команды."
+                    ),
                 }
                 for device_id in devices if isinstance(devices, Mapping)
             }
@@ -3955,11 +4030,19 @@ def _expired_pending_reliable_receipt(
                 "reason": "configuration_error",
                 "execution_state": "blocked_before_dispatch",
                 "message_code": "configuration_error",
-                "message": "Время ожидания истекло до отправки команды.",
+                "message": (
+                    "Конфигурация устройства требует проверки."
+                    if blocked_immediately
+                    else "Время ожидания истекло до отправки команды."
+                ),
                 "devices": rendered_devices,
             }
     intent = dict(receipt.get("intent", {}))
-    intent["status"] = "saved_apply_failed"
+    intent["status"] = (
+        "saved_blocked_before_dispatch"
+        if blocked_immediately
+        else "saved_apply_failed"
+    )
     result.update(
         status="partial", accepted=True, confirmed=False, final=True,
         reason="read_back_mismatch", message_code="partial",
@@ -4398,6 +4481,13 @@ def _has_exact_reliable_device_outcomes(
             return False
         if execution == "dispatched_not_accepted" and (commands, accepted) != (1, 0):
             return False
+        if execution == "blocked_before_dispatch" and (
+            (commands, accepted) != (0, 0)
+            or leaf.get("status") != "not_attempted"
+            or leaf.get("reason") != "configuration_error"
+            or leaf.get("message_code") != "configuration_error"
+        ):
+            return False
         if execution == "already_in_sync" and (
             (commands, accepted) != (0, 0)
             or leaf.get("status") != "confirmed"
@@ -4423,6 +4513,7 @@ def _has_exact_reliable_device_outcomes(
             "accepted_unverified",
             "dispatched_not_accepted",
             "already_in_sync",
+            "blocked_before_dispatch",
         }:
             return False
         command_count += commands
@@ -4434,6 +4525,21 @@ def _has_exact_reliable_device_outcomes(
         and type(result_accepted_count) is int
         and (result_command_count, result_accepted_count)
         == (command_count, accepted_count)
+    )
+
+
+def _has_trusted_terminal_blocked_outcomes(result: object) -> bool:
+    """Accept only an explicit zero-call, pre-dispatch terminal map."""
+
+    outcomes = getattr(result, "device_outcomes", None)
+    return isinstance(outcomes, Mapping) and bool(outcomes) and all(
+        isinstance(leaf, Mapping)
+        and leaf.get("status") == "not_attempted"
+        and leaf.get("reason") == "configuration_error"
+        and leaf.get("execution_state") == "blocked_before_dispatch"
+        and leaf.get("message_code") == "configuration_error"
+        and _strict_leaf_counts(leaf, 0, 0)
+        for leaf in outcomes.values()
     )
 
 
@@ -4594,6 +4700,15 @@ def _reliable_outcomes(
         for device_id in row["device_ids"]:
             device = devices.get(device_id, {})
             execution_leaf = execution_outcomes.get(device_id) if isinstance(execution_outcomes, Mapping) else None
+            if (
+                isinstance(execution_leaf, Mapping)
+                and execution_leaf.get("status") == "not_attempted"
+                and execution_leaf.get("reason") == "configuration_error"
+                and execution_leaf.get("execution_state") == "blocked_before_dispatch"
+                and _strict_leaf_counts(execution_leaf, 0, 0)
+            ):
+                leaves[device_id] = dict(execution_leaf)
+                continue
             if (
                 isinstance(execution_leaf, Mapping)
                 and execution_leaf.get("status") == "confirmed"
@@ -4845,11 +4960,10 @@ def _validate_receipt(receipt: dict[str, object]) -> dict[str, object]:
         raise ClimateTabletUnavailable("climate operation room is invalid")
     expected_revision = receipt.get("expected_state_revision")
     resulting_revision = receipt.get("resulting_state_revision")
-    if type(expected_revision) is not int or not 0 <= expected_revision <= 9_007_199_254_740_991:
+    if not is_control_revision(expected_revision):
         raise ClimateTabletUnavailable("climate operation revision is invalid")
     if resulting_revision is not None and (
-        type(resulting_revision) is not int
-        or not 0 <= resulting_revision <= 9_007_199_254_740_991
+        not is_control_revision(resulting_revision)
     ):
         raise ClimateTabletUnavailable("climate operation result revision is invalid")
     status = receipt.get("status")
@@ -4897,7 +5011,7 @@ def _validate_receipt(receipt: dict[str, object]) -> dict[str, object]:
         raise ClimateTabletUnavailable("pending climate operation is inconsistent")
     if status == "confirmed" and not (
         flags[:4] == (True, True, True, "none")
-        and type(resulting_revision) is int
+        and is_control_revision(resulting_revision)
         and read_back.get("attempted") is True
         and read_back.get("matched") is True
     ):
@@ -5087,7 +5201,7 @@ def _validate_desired_intent(key: str, value: Mapping[str, object]) -> dict[str,
     intent_fingerprint = value.get("intent_fingerprint")
     parameters = value.get("parameters")
     if (scope_key != key
-            or type(revision) is not int or revision < 0 or action not in _SUPPORTED_ACTIONS
+            or not is_control_revision(revision) or action not in _SUPPORTED_ACTIONS
             or room_id is not None and (not isinstance(room_id, str) or _STABLE_ID.fullmatch(room_id) is None)
             or not isinstance(fingerprint, str) or re.fullmatch(r"[a-f0-9]{64}", fingerprint) is None
             or not isinstance(origin_request_id, str) or _REQUEST_ID.fullmatch(origin_request_id) is None
@@ -5375,7 +5489,7 @@ def _recovery_preflight(snapshot: Mapping[str, object], room_id: str) -> dict[st
     if not desired:
         raise ClimateTabletViolation("recovery has no eligible devices", code="action_unsupported")
     control_revision = snapshot.get("control_revision", snapshot.get("state_revision"))
-    if type(control_revision) is not int or control_revision < 0:
+    if not is_control_revision(control_revision):
         raise ClimateTabletViolation("recovery revision is invalid", code="action_unsupported")
     scope = {"room_id": room_id, "control_revision": control_revision,
              "resolved_device_ids": sorted(desired), "desired_snapshot": desired}
@@ -5621,7 +5735,7 @@ def _valid_recovery_preflight_record(item: object) -> bool:
     available = preflight.get("available_device_ids")
     desired = preflight.get("desired_snapshot")
     if (not isinstance(room_id, str) or _STABLE_ID.fullmatch(room_id) is None
-            or type(revision) is not int or revision < 0
+            or not is_control_revision(revision)
             or not isinstance(ids, list) or not 1 <= len(ids) <= 32
             or any(not isinstance(device_id, str) or _STABLE_ID.fullmatch(device_id) is None for device_id in ids)
             or ids != sorted(ids) or len(set(ids)) != len(ids)

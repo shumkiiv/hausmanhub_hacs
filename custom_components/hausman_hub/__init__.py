@@ -11,11 +11,11 @@ strict climate-call executor used by trial, managed ticks, and settings applicat
 from __future__ import annotations
 
 from datetime import timedelta
-import secrets
 from typing import TYPE_CHECKING
 
 from .application.configuration import (
     ConfigurationViolation,
+    RELIABLE_SCOPE_EXTERNAL_KEYRING_INITIALIZED_FIELD,
     RELIABLE_SCOPE_INTEGRITY_INITIALIZED_FIELD,
     RELIABLE_SCOPE_INTEGRITY_KEY_FIELD,
     effective_configuration,
@@ -29,6 +29,27 @@ if TYPE_CHECKING:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Load observation, local climate facade, and optional narrow canaries."""
 
+    # Retired local signing material must leave ConfigEntry storage before any
+    # duplicate, keyring, configuration, or runtime failure can prevent cleanup.
+    cleaned_data = {
+        key: value for key, value in entry.data.items()
+        if key not in {
+            RELIABLE_SCOPE_INTEGRITY_KEY_FIELD,
+            RELIABLE_SCOPE_INTEGRITY_INITIALIZED_FIELD,
+        }
+    }
+    cleaned_options = {
+        key: value for key, value in entry.options.items()
+        if key not in {
+            RELIABLE_SCOPE_INTEGRITY_KEY_FIELD,
+            RELIABLE_SCOPE_INTEGRITY_INITIALIZED_FIELD,
+        }
+    }
+    if cleaned_data != entry.data or cleaned_options != entry.options:
+        update_entry = getattr(hass.config_entries, "async_update_entry", None)
+        if callable(update_entry):
+            update_entry(entry, data=cleaned_data, options=cleaned_options)
+
     configured_entry_ids = tuple(
         configured_entry.entry_id
         for configured_entry in hass.config_entries.async_entries(entry.domain)
@@ -38,22 +59,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _clear_restored_hausmanhub_records(hass, configured_entry_ids + (entry.entry_id,))
         return False
 
-    scope_integrity_key = entry.data.get(RELIABLE_SCOPE_INTEGRITY_KEY_FIELD)
-    if scope_integrity_key is None:
-        # This key detects corruption and partial writes across the two HA
-        # stores. It is not a defence against compromise of the HA process or
-        # its full configuration directory, where an attacker could replace
-        # both the key and the integration code.
-        scope_integrity_key = secrets.token_hex(32)
-        update_entry = getattr(hass.config_entries, "async_update_entry", None)
-        if callable(update_entry):
-            update_entry(
-                entry,
-                data={
-                    **entry.data,
-                    RELIABLE_SCOPE_INTEGRITY_KEY_FIELD: scope_integrity_key,
-                },
-            )
+    from .climate_ledger_keyring import (
+        ClimateLedgerKeyringError,
+        load_external_climate_ledger_keyring,
+    )
+    try:
+        scope_integrity_key = load_external_climate_ledger_keyring(
+            config_dir=getattr(getattr(hass, "config", None), "config_dir", None)
+        )
+    except ClimateLedgerKeyringError:
+        # The read-only integration remains available, but no climate writer
+        # may create an unauthenticated durable record.
+        scope_integrity_key = None
     try:
         configuration = effective_configuration(entry.data, entry.options)
     except ConfigurationViolation:
@@ -220,22 +237,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass,
         entry.entry_id,
         reliable_scope_integrity_key=scope_integrity_key,
-        allow_unsigned_migration=(
-            entry.data.get(RELIABLE_SCOPE_INTEGRITY_INITIALIZED_FIELD) is not True
-        ),
+        require_authenticated=True,
     )
-    if entry.data.get(RELIABLE_SCOPE_INTEGRITY_INITIALIZED_FIELD) is not True:
-        await climate_operation_store.async_migrate_integrity()
-        update_entry = getattr(hass.config_entries, "async_update_entry", None)
-        if callable(update_entry):
-            update_entry(
-                entry,
-                data={
-                    **entry.data,
-                    RELIABLE_SCOPE_INTEGRITY_KEY_FIELD: scope_integrity_key,
-                    RELIABLE_SCOPE_INTEGRITY_INITIALIZED_FIELD: True,
-                },
-            )
+    if scope_integrity_key is not None:
+        # Old local operation and Tablet history has no externally verifiable
+        # provenance. Create a new anchored ledger before runtime can inspect
+        # or replay any of it.
+        await climate_operation_store.async_initialize_external_ledger()
     climate_runtime = ClimateRuntime(
         entry_id=entry.entry_id,
         configuration=configuration,
@@ -256,6 +264,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     ir_code_service.set_binding_validator(climate_runtime)
     await climate_runtime.async_start()
+    if climate_runtime.direct_control_validation_failed:
+        # Do not sign, publish, or mark an entry whose unsigned direct
+        # history failed the authoritative startup validation.
+        return False
+    if scope_integrity_key is not None:
+        updated_data = {
+            **entry.data,
+            RELIABLE_SCOPE_EXTERNAL_KEYRING_INITIALIZED_FIELD: True,
+        }
+        if updated_data != entry.data:
+            update_entry = getattr(hass.config_entries, "async_update_entry", None)
+            if callable(update_entry):
+                update_entry(entry, data=updated_data)
     from .application.climate_tablet import (
         ClimateTabletService,
         ClimateTabletUnavailable,

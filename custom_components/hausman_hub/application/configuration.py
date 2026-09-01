@@ -61,6 +61,7 @@ NATIVE_TARGET_TEMPERATURE_FIELD = "native_target_temperature"
 NATIVE_TARGET_HUMIDITY_FIELD = "native_target_humidity"
 RELIABLE_SCOPE_INTEGRITY_KEY_FIELD = "reliable_scope_integrity_key"
 RELIABLE_SCOPE_INTEGRITY_INITIALIZED_FIELD = "reliable_scope_integrity_initialized"
+RELIABLE_SCOPE_EXTERNAL_KEYRING_INITIALIZED_FIELD = "reliable_scope_external_keyring_initialized"
 
 CONNECTION_MODE_FIELD = "connection_mode"
 CONNECTION_MODE_DEFAULT = "home_assistant"
@@ -181,20 +182,18 @@ def effective_configuration(
             AI_ASSISTANT_API_KEY_FIELD,
             RELIABLE_SCOPE_INTEGRITY_KEY_FIELD,
             RELIABLE_SCOPE_INTEGRITY_INITIALIZED_FIELD,
+            RELIABLE_SCOPE_EXTERNAL_KEYRING_INITIALIZED_FIELD,
         },
         "entry data",
     )
     if not {MODE_FIELD, DIRECT_EXECUTION_STATUS_FIELD}.issubset(entry_data):
         raise ConfigurationViolation("entry data is incomplete")
-    integrity_key = entry_data.get(RELIABLE_SCOPE_INTEGRITY_KEY_FIELD)
-    if integrity_key is not None and (
-        not isinstance(integrity_key, str)
-        or re.fullmatch(r"[a-f0-9]{64}", integrity_key) is None
-    ):
-        raise ConfigurationViolation("reliable scope integrity key is invalid")
-    integrity_initialized = entry_data.get(RELIABLE_SCOPE_INTEGRITY_INITIALIZED_FIELD)
-    if integrity_initialized is not None and type(integrity_initialized) is not bool:
-        raise ConfigurationViolation("reliable scope integrity state is invalid")
+    # The two retired local-integrity fields are accepted only long enough for
+    # setup to remove them. Do not inspect their values: they can contain the
+    # old signing secret and are never a source of trust for the new ledger.
+    external_keyring_initialized = entry_data.get(RELIABLE_SCOPE_EXTERNAL_KEYRING_INITIALIZED_FIELD)
+    if external_keyring_initialized is not None and type(external_keyring_initialized) is not bool:
+        raise ConfigurationViolation("external climate ledger keyring state is invalid")
     try:
         ai_assistant_binding_from_entry_data(entry_data)
     except AiAssistantViolation as error:

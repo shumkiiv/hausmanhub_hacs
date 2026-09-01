@@ -15,7 +15,10 @@ from custom_components.hausman_hub.application.climate_ha_observations import (
     ClimateHaEntityState,
 )
 from custom_components.hausman_hub.application.climate_registry import registry_from_payload
-from custom_components.hausman_hub.application.contour_apply import ContourApplyViolation
+from custom_components.hausman_hub.application.contour_apply import (
+    ContourApplyStatus,
+    ContourApplyViolation,
+)
 from custom_components.hausman_hub.application.contour_override import (
     TemporaryTemperatureViolation,
 )
@@ -79,12 +82,14 @@ from custom_components.hausman_hub.domain.climate_ha_calls import (
     ClimateHaCallLimit,
     ClimateHaHvacMode,
     ClimateHaService,
+    ClimateHaServiceCall,
 )
 from custom_components.hausman_hub.domain.climate_ownership import (
     ClimateOwnershipReason,
     ClimateOwnershipStatus,
 )
 from custom_components.hausman_hub.domain.climate_trial import (
+    ClimateTrialDecision,
     ClimateTrialReason,
     ClimateTrialStatus,
 )
@@ -177,15 +182,58 @@ class FailingProtectionStore(MemoryProtectionStore):
 
 
 class RecordingTrialExecutor:
-    def __init__(self, fail: bool = False) -> None:
+    def __init__(
+        self,
+        fail: bool = False,
+        *,
+        result: object | None = None,
+        completed: object = 0,
+    ) -> None:
         self.batches: list[tuple[object, ...]] = []
         self.fail = fail
+        self.result = result
+        self.completed = completed
 
     async def async_execute(self, calls):
         self.batches.append(calls)
         if self.fail:
-            raise RuntimeError("synthetic trial execution failure")
-        return len(calls)
+            error = RuntimeError("synthetic trial execution failure")
+            error.completed = self.completed  # type: ignore[attr-defined]
+            raise error
+        return len(calls) if self.result is None else self.result
+
+
+def replace_registry_device(
+    registry: ClimateRegistry,
+    *,
+    room_id: str,
+    source_id: str,
+    kind: ClimateDeviceKind,
+    **changes: object,
+) -> ClimateRegistry:
+    """Replace exactly one known fixture device without relying on ordering."""
+
+    matches = tuple(
+        device
+        for device in registry.devices
+        if (
+            device.room_id == room_id
+            and device.source_id == source_id
+            and device.kind is kind
+        )
+    )
+    if len(matches) != 1:
+        raise AssertionError("fixture climate device selection is ambiguous")
+    selected = matches[0]
+    return ClimateRegistry(
+        rooms=registry.rooms,
+        devices=tuple(
+            replace(device, **changes)
+            if device.device_id == selected.device_id
+            else device
+            for device in registry.devices
+        ),
+    )
 
 
 class FailingRegistryStore(MemoryStore):
@@ -1120,8 +1168,8 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             datetime(2026, 7, 19, 23, 5),
         )
         self.assertEqual("confirmed", cleared.status.value)
-        self.assertEqual(0, cleared.command_count)
-        self.assertEqual(1, len(executor.batches))
+        self.assertEqual(1, cleared.command_count)
+        self.assertEqual(2, len(executor.batches))
         room = contour_store.registry.contour("climate").rooms[0]  # type: ignore[union-attr]
         self.assertIsNone(room.temporary_override)
         self.assertEqual(25.0, room.target_temperature)
@@ -1279,11 +1327,124 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual("confirmed", restored.status.value)
-        self.assertEqual(0, restored.command_count)
+        # The explicit override updated the actuator setpoint. Returning to
+        # the scheduled target therefore restores that persisted setpoint.
+        self.assertEqual(1, restored.command_count)
         room = contour_store.registry.contour("climate").rooms[0]  # type: ignore[union-attr]
         self.assertIsNone(room.temporary_override)
         self.assertEqual(25.0, room.target_temperature)
         self.assertEqual([], bridge.executed)
+
+    async def test_explicit_target_aligns_idle_actuator_without_changing_mode(
+        self,
+    ) -> None:
+        bridge = MemoryBridge()
+        registry, contours = build_climate_contour_setup(
+            bridge.snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+            room_bounds={"living": {"min_temperature": 23.0, "max_temperature": 26.0}},
+        )
+        contours = with_active_climate_profile(contours, "day")
+        registry, state_view = native_application_inputs(registry)
+        control_entity = next(
+            endpoint.entity_id
+            for device in registry.devices
+            for endpoint in device.endpoints
+            if endpoint.role is ClimateEndpointRole.CONTROL
+        )
+        idle = state_view.states[control_entity]
+        state_view.states[control_entity] = replace(
+            idle,
+            state="off",
+            attributes={**idle.attributes, "current_temperature": 25.5, "temperature": 26.0},
+        )
+        executor = ReflectingStrictExecutor(state_view)
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateControlMode.MANAGED),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            strict_ha_call_executor=executor,
+            ha_state_view=state_view,
+            operation_id_factory=iter(("6" * 32, "7" * 32, "8" * 32)).__next__,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+        request = {
+            "request_id": "temporary-idle-setpoint",
+            "contour_id": "climate",
+            "room_id": "living",
+            "action": "set",
+            "target_temperature": 25.5,
+            "confirm": True,
+            "reliability_profile": "climate_reliability_v1",
+            "expected_control_revision": 0,
+        }
+
+        changed = await runtime.async_temporary_temperature(
+            request, datetime(2026, 7, 19, 12, 0)
+        )
+        duplicate = await runtime.async_temporary_temperature(
+            request, datetime(2026, 7, 19, 12, 1)
+        )
+        already_aligned = await runtime.async_temporary_temperature(
+            {
+                **request,
+                "request_id": "temporary-idle-aligned",
+                "expected_control_revision": 1,
+            },
+            datetime(2026, 7, 19, 12, 2),
+        )
+
+        self.assertEqual("confirmed", changed.status.value)
+        self.assertEqual(1, changed.command_count)
+        self.assertEqual(changed, duplicate)
+        self.assertEqual(1, len(executor.batches))
+        call = executor.batches[0][0]
+        self.assertEqual(ClimateHaService.CLIMATE_SET_TEMPERATURE, call.service)
+        self.assertEqual(25.5, call.temperature)
+        self.assertEqual("off", state_view.states[control_entity].state)
+        self.assertEqual(25.5, state_view.states[control_entity].attributes["temperature"])
+        self.assertEqual("confirmed", already_aligned.status.value)
+        self.assertEqual(0, already_aligned.command_count)
+        self.assertEqual(1, len(executor.batches))
+
+        # A later target must not rewrite the frozen target used to reobserve
+        # a prior pending operation.  Otherwise B's read-back could falsely
+        # confirm A without ever applying A's requested setpoint.
+        await runtime.async_temporary_temperature(
+            {
+                **request,
+                "request_id": "temporary-idle-new-target",
+                "target_temperature": 24.5,
+                "expected_control_revision": 2,
+            },
+            datetime(2026, 7, 19, 12, 3),
+        )
+        runtime._contour_applications.update(
+            "temporary-idle-setpoint",
+            status=ContourApplyStatus.PENDING,
+            accepted_count=1,
+            confirmed_room_count=0,
+            reasons=("state_not_confirmed",),
+        )
+        prior = runtime._contour_applications.by_request("temporary-idle-setpoint")
+        self.assertIsNotNone(prior)
+        reobserved = await runtime._async_reobserve_native_contour_application_unlocked(
+            "temporary-idle-setpoint",
+            prior,
+            runtime._climate_contour(),
+            room_ids=("living",),
+        )
+        self.assertEqual("pending", reobserved.status.value)
+        self.assertEqual(0, reobserved.confirmed_room_count)
+        self.assertEqual(2, len(executor.batches))
 
     async def test_home_targets_are_saved_before_one_confirmed_apply(self) -> None:
         bridge = MemoryBridge()
@@ -2712,25 +2873,21 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_humidity=45,
             strategy="normal",
         )
-        registry = ClimateRegistry(
-            rooms=registry.rooms,
-            devices=(
-                replace(
-                    registry.devices[0],
-                    control_scope=ClimateControlScope.CANARY,
-                    capabilities=(
-                        ClimateCapability.POWER,
-                        ClimateCapability.TARGET_TEMPERATURE,
-                        ClimateCapability.HVAC_MODE,
-                        ClimateCapability.FAN_MODE,
-                    ),
-                    endpoints=(
-                        ClimateEndpoint(
-                            ClimateEndpointRole.CONTROL,
-                            "climate.living_ac",
-                        ),
-                    ),
-                ),
+        registry = replace_registry_device(
+            registry,
+            room_id="living",
+            source_id="synthetic-ac-source-living",
+            kind=ClimateDeviceKind.AIR_CONDITIONER,
+            control_scope=ClimateControlScope.CANARY,
+            control_owner=ClimateControlOwner.CLIMATE_CORE,
+            capabilities=(
+                ClimateCapability.POWER,
+                ClimateCapability.TARGET_TEMPERATURE,
+                ClimateCapability.HVAC_MODE,
+                ClimateCapability.FAN_MODE,
+            ),
+            endpoints=(
+                ClimateEndpoint(ClimateEndpointRole.CONTROL, "climate.living_ac"),
             ),
         )
         registry = with_native_observation_bindings(registry)
@@ -2781,25 +2938,21 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_humidity=45,
             strategy="normal",
         )
-        registry = ClimateRegistry(
-            rooms=registry.rooms,
-            devices=(
-                replace(
-                    registry.devices[0],
-                    control_scope=ClimateControlScope.CANARY,
-                    capabilities=(
-                        ClimateCapability.POWER,
-                        ClimateCapability.TARGET_TEMPERATURE,
-                        ClimateCapability.HVAC_MODE,
-                        ClimateCapability.FAN_MODE,
-                    ),
-                    endpoints=(
-                        ClimateEndpoint(
-                            ClimateEndpointRole.CONTROL,
-                            "climate.living_ac",
-                        ),
-                    ),
-                ),
+        registry = replace_registry_device(
+            registry,
+            room_id="living",
+            source_id="synthetic-ac-source-living",
+            kind=ClimateDeviceKind.AIR_CONDITIONER,
+            control_scope=ClimateControlScope.CANARY,
+            control_owner=ClimateControlOwner.CLIMATE_CORE,
+            capabilities=(
+                ClimateCapability.POWER,
+                ClimateCapability.TARGET_TEMPERATURE,
+                ClimateCapability.HVAC_MODE,
+                ClimateCapability.FAN_MODE,
+            ),
+            endpoints=(
+                ClimateEndpoint(ClimateEndpointRole.CONTROL, "climate.living_ac"),
             ),
         )
         registry = with_native_observation_bindings(registry)
@@ -2857,23 +3010,19 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         denied = await shadow_runtime.async_run_climate_trial()
         self.assertIsNone(denied)
 
-        scoped_registry = ClimateRegistry(
-            rooms=registry.rooms,
-            devices=(
-                replace(
-                    registry.devices[0],
-                    control_scope=ClimateControlScope.CANARY,
-                    capabilities=(
-                        ClimateCapability.POWER,
-                        ClimateCapability.TARGET_TEMPERATURE,
-                    ),
-                    endpoints=(
-                        ClimateEndpoint(
-                            ClimateEndpointRole.CONTROL,
-                            "climate.living_ac",
-                        ),
-                    ),
-                ),
+        scoped_registry = replace_registry_device(
+            registry,
+            room_id="living",
+            source_id="synthetic-ac-source-living",
+            kind=ClimateDeviceKind.AIR_CONDITIONER,
+            control_scope=ClimateControlScope.CANARY,
+            control_owner=ClimateControlOwner.CLIMATE_CORE,
+            capabilities=(
+                ClimateCapability.POWER,
+                ClimateCapability.TARGET_TEMPERATURE,
+            ),
+            endpoints=(
+                ClimateEndpoint(ClimateEndpointRole.CONTROL, "climate.living_ac"),
             ),
         )
         scoped_registry = with_native_observation_bindings(scoped_registry)
@@ -2928,25 +3077,21 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_humidity=45,
             strategy="normal",
         )
-        registry = ClimateRegistry(
-            rooms=registry.rooms,
-            devices=(
-                replace(
-                    registry.devices[0],
-                    control_scope=ClimateControlScope.CANARY,
-                    capabilities=(
-                        ClimateCapability.POWER,
-                        ClimateCapability.TARGET_TEMPERATURE,
-                        ClimateCapability.HVAC_MODE,
-                        ClimateCapability.FAN_MODE,
-                    ),
-                    endpoints=(
-                        ClimateEndpoint(
-                            ClimateEndpointRole.CONTROL,
-                            "climate.living_ac",
-                        ),
-                    ),
-                ),
+        registry = replace_registry_device(
+            registry,
+            room_id="living",
+            source_id="synthetic-ac-source-living",
+            kind=ClimateDeviceKind.AIR_CONDITIONER,
+            control_scope=ClimateControlScope.CANARY,
+            control_owner=ClimateControlOwner.CLIMATE_CORE,
+            capabilities=(
+                ClimateCapability.POWER,
+                ClimateCapability.TARGET_TEMPERATURE,
+                ClimateCapability.HVAC_MODE,
+                ClimateCapability.FAN_MODE,
+            ),
+            endpoints=(
+                ClimateEndpoint(ClimateEndpointRole.CONTROL, "climate.living_ac"),
             ),
         )
         registry = with_native_observation_bindings(registry)
@@ -2972,6 +3117,60 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(1, failed.call_count)  # type: ignore[union-attr]
         self.assertEqual(0, failed.executed_count)  # type: ignore[union-attr]
+
+        malformed_result = RecordingTrialExecutor(result=True)
+        malformed_runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateControlMode.MANAGED),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            strict_ha_call_executor=malformed_result,
+            ha_state_view=state_view,
+            now_ms=lambda: 1784280005000,
+        )
+        await malformed_runtime.async_start()
+
+        malformed = await malformed_runtime.async_run_climate_trial()
+
+        self.assertIs(malformed.status, ClimateTrialStatus.FAILED)  # type: ignore[union-attr]
+        self.assertEqual(0, malformed.executed_count)  # type: ignore[union-attr]
+        self.assertEqual(1, len(malformed_result.batches))
+
+        malformed_completed = RecordingTrialExecutor(fail=True, completed="one")
+        malformed_completed_runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateControlMode.MANAGED),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            strict_ha_call_executor=malformed_completed,
+            ha_state_view=state_view,
+            now_ms=lambda: 1784280005000,
+        )
+        await malformed_completed_runtime.async_start()
+
+        malformed_exception = await malformed_completed_runtime.async_run_climate_trial()
+
+        self.assertIs(malformed_exception.status, ClimateTrialStatus.FAILED)  # type: ignore[union-attr]
+        self.assertEqual(0, malformed_exception.executed_count)  # type: ignore[union-attr]
+        self.assertEqual(1, len(malformed_completed.batches))
+
+        completed_after_error = RecordingTrialExecutor(fail=True, completed=1)
+        completed_after_error_runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateControlMode.MANAGED),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            strict_ha_call_executor=completed_after_error,
+            ha_state_view=state_view,
+            now_ms=lambda: 1784280005000,
+        )
+        await completed_after_error_runtime.async_start()
+
+        completed = await completed_after_error_runtime.async_run_climate_trial()
+
+        self.assertIs(completed.status, ClimateTrialStatus.APPLIED)  # type: ignore[union-attr]
+        self.assertEqual(1, completed.executed_count)  # type: ignore[union-attr]
+        self.assertEqual(1, len(completed_after_error.batches))
 
         executorless = ClimateRuntime(
             entry_id="entry",
@@ -3008,12 +3207,22 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_humidity=45,
             strategy="normal",
         )
+        kids_humidifier = next(
+            device
+            for device in registry.devices
+            if (
+                device.room_id == "kids"
+                and device.source_id == "synthetic-humidifier-source-kids"
+                and device.kind is ClimateDeviceKind.HUMIDIFIER
+            )
+        )
         registry = ClimateRegistry(
             rooms=registry.rooms,
-            devices=(
+            devices=tuple(
                 replace(
-                    registry.devices[0],
+                    device,
                     control_scope=ClimateControlScope.CANARY,
+                    control_owner=ClimateControlOwner.CLIMATE_CORE,
                     capabilities=(
                         ClimateCapability.POWER,
                         ClimateCapability.TARGET_HUMIDITY,
@@ -3024,8 +3233,10 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
                             "humidifier.kids",
                         ),
                     ),
-                ),
-                registry.devices[1],
+                )
+                if device.device_id == kids_humidifier.device_id
+                else device
+                for device in registry.devices
             ),
         )
         registry = with_native_observation_bindings(registry)
@@ -3050,6 +3261,31 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
         again = await runtime.async_climate_promote_room("kids")
         self.assertIs(again.status, ClimateOwnershipStatus.ALREADY_MANAGED)  # type: ignore[union-attr]
+
+        # The shared executor gate must reject a decision whose selected room
+        # differs from the one frozen into its strict control call.
+        executor.batches.clear()
+        cross_room = ClimateTrialDecision(
+            room_id="living",
+            observed_at=1784280005000,
+            permitted=True,
+            reasons=(),
+            calls=(
+                ClimateHaServiceCall(
+                    ClimateHaService.HUMIDIFIER_TURN_OFF,
+                    "humidifier.kids",
+                    owner_device_id=kids_humidifier.device_id,
+                ),
+            ),
+        )
+        rejected = await runtime._async_apply_trial_decision(
+            cross_room,
+            (),
+            required_scope=ClimateControlScope.MANAGED,
+        )
+        self.assertIs(rejected.status, ClimateTrialStatus.FAILED)
+        self.assertEqual(0, rejected.executed_count)
+        self.assertEqual([], executor.batches)
 
         bridge.snapshot = replace(
             bridge.snapshot,
@@ -3245,23 +3481,19 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_humidity=45,
             strategy="normal",
         )
-        registry = ClimateRegistry(
-            rooms=registry.rooms,
-            devices=(
-                replace(
-                    registry.devices[0],
-                    control_scope=ClimateControlScope.CANARY,
-                    capabilities=(
-                        ClimateCapability.POWER,
-                        ClimateCapability.TARGET_HUMIDITY,
-                    ),
-                    endpoints=(
-                        ClimateEndpoint(
-                            ClimateEndpointRole.CONTROL,
-                            "humidifier.kids",
-                        ),
-                    ),
-                ),
+        registry = replace_registry_device(
+            registry,
+            room_id="kids",
+            source_id="synthetic-humidifier-source-kids",
+            kind=ClimateDeviceKind.HUMIDIFIER,
+            control_scope=ClimateControlScope.CANARY,
+            control_owner=ClimateControlOwner.CLIMATE_CORE,
+            capabilities=(
+                ClimateCapability.POWER,
+                ClimateCapability.TARGET_HUMIDITY,
+            ),
+            endpoints=(
+                ClimateEndpoint(ClimateEndpointRole.CONTROL, "humidifier.kids"),
             ),
         )
         registry = with_native_observation_bindings(registry)

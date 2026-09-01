@@ -290,6 +290,89 @@ class ClimateControlReceiptTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((0, 0), (payload["command_count"], payload["accepted_count"]))
         self.assertIn("already_in_sync", payload["reasons"])
 
+    async def test_same_target_with_stale_device_proof_is_terminal_without_dispatch(self) -> None:
+        class DirectStore:
+            records: object | None = None
+
+            async def async_load_direct_control(self):
+                return self.records
+
+            async def async_save_direct_control(self, records):
+                self.records = records
+
+        states = native.safe_stop_states()
+        ac = states["climate.living_ac"]
+        states[ac.entity_id] = replace(
+            ac,
+            attributes={**ac.attributes, "temperature": 24.0},
+            last_updated_ms=native.NOW - 10_000_000,
+        )
+        store = DirectStore()
+        view = native.MutableStateView(states)
+        executor = native.ReflectingStrictExecutor(view)
+        runtime = native.native_application_runtime(
+            ClimateControlMode.MANAGED,
+            view,
+            executor,
+            direct_control_store=store,
+        )
+        await runtime.async_start()
+        request = {
+            "request_id": "reliable-stale-same-target-1",
+            "contour_id": "climate",
+            "room_id": "living",
+            "action": "set",
+            "target_temperature": 24.0,
+            "confirm": True,
+            "reliability_profile": "climate_reliability_v1",
+            "expected_control_revision": 0,
+        }
+        receipt = await runtime.async_temporary_temperature(
+            request, datetime(2026, 7, 19, 12, 0)
+        )
+        payload = receipt.as_payload()
+        leaf = payload["outcomes"]["rooms"]["living"]["devices"]["living_ac"]
+        self.assertEqual("rejected", payload["status"])
+        self.assertTrue(payload["final"])
+        self.assertEqual("not_attempted", payload["outcomes"]["rooms"]["living"]["status"])
+        self.assertEqual("blocked_before_dispatch", leaf["execution_state"])
+        self.assertEqual((0, 0), (leaf["command_count"], leaf["accepted_count"]))
+        self.assertEqual([], executor.calls)
+        Draft202012Validator(json.loads(SCHEMA.read_text(encoding="utf-8"))).validate(payload)
+
+        replay = await runtime.async_temporary_temperature(
+            request, datetime(2026, 7, 19, 12, 0)
+        )
+        self.assertEqual(payload, replay.as_payload())
+        self.assertEqual([], executor.calls)
+
+        restarted_view = native.MutableStateView(states)
+        restarted_executor = native.ReflectingStrictExecutor(restarted_view)
+        restarted = native.native_application_runtime(
+            ClimateControlMode.MANAGED,
+            restarted_view,
+            restarted_executor,
+            direct_control_store=store,
+        )
+        await restarted.async_start()
+        self.assertEqual(payload, await restarted.async_control_operation(payload["operation_id"]))
+        restored_replay = await restarted.async_temporary_temperature(
+            request, datetime(2026, 7, 19, 12, 0)
+        )
+        self.assertEqual(payload, restored_replay.as_payload())
+        self.assertEqual([], restarted_executor.calls)
+
+        fresh = states["climate.living_ac"]
+        states[fresh.entity_id] = replace(fresh, last_updated_ms=native.NOW)
+        successor = await restarted.async_temporary_temperature(
+            {**request, "request_id": "reliable-fresh-same-target-2", "expected_control_revision": 1},
+            datetime(2026, 7, 19, 12, 0),
+        )
+        successor_payload = successor.as_payload()
+        self.assertEqual("confirmed", successor_payload["status"])
+        self.assertEqual("already_in_sync", successor_payload["outcomes"]["rooms"]["living"]["devices"]["living_ac"]["execution_state"])
+        self.assertEqual([], restarted_executor.calls)
+
     async def test_direct_receipt_survives_restart_and_replay_does_not_dispatch(self) -> None:
         class DirectStore:
             records: object | None = None

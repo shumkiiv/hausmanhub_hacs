@@ -561,6 +561,45 @@ class ClimateTabletProjectionTest(unittest.TestCase):
         with self.assertRaises(ClimateTabletViolation):
             parse_climate_tablet_action(request)
 
+    def test_recovery_preflight_revision_is_js_safe(self) -> None:
+        from custom_components.hausman_hub.application.climate_tablet import (
+            _canonical_fingerprint,
+            _valid_recovery_preflight_record,
+        )
+        from custom_components.hausman_hub.climate_revision import MAX_JS_SAFE_INTEGER
+
+        token = "recovery.v2." + "a" * 32
+        item = {
+            "token": token,
+            "expires_at": 1,
+            "preflight": {
+                "room_id": "living",
+                "control_revision": MAX_JS_SAFE_INTEGER,
+                "resolved_device_ids": ["living_ac"],
+                "available_device_ids": [],
+                "desired_snapshot": {
+                    "living_ac": {
+                        "target_temperature": 24.0,
+                        "target_humidity": 45,
+                        "mode": "automatic",
+                        "source_observed_at": None,
+                    }
+                },
+                "preflight_snapshot_fingerprint": "",
+                "snapshot_token": token,
+            },
+        }
+        scope = {
+            "room_id": "living",
+            "control_revision": MAX_JS_SAFE_INTEGER,
+            "resolved_device_ids": ["living_ac"],
+            "desired_snapshot": item["preflight"]["desired_snapshot"],
+        }
+        item["preflight"]["preflight_snapshot_fingerprint"] = _canonical_fingerprint(scope)
+        self.assertTrue(_valid_recovery_preflight_record(item))
+        item["preflight"]["control_revision"] = MAX_JS_SAFE_INTEGER + 1
+        self.assertFalse(_valid_recovery_preflight_record(item))
+
 
 class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
@@ -2338,6 +2377,54 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
             "already_in_sync",
             restored._records_by_request[parsed.request_id].dispatch_ledger["state"],
         )
+
+    async def test_reliable_terminal_zero_call_blocked_result_is_not_reopened_as_pending(self) -> None:
+        async def terminal_blocked(payload: object, now: object) -> object:
+            del payload, now
+            return SimpleNamespace(
+                status=ContourApplyStatus.REJECTED,
+                command_count=0,
+                accepted_count=0,
+                confirmed_room_count=0,
+                device_outcomes={
+                    "living_ac": {
+                        "status": "not_attempted",
+                        "reason": "configuration_error",
+                        "execution_state": "blocked_before_dispatch",
+                        "message_code": "configuration_error",
+                        "message": "Конфигурация устройства требует проверки.",
+                        "command_count": 0,
+                        "accepted_count": 0,
+                    }
+                },
+            )
+
+        self.runtime.async_temporary_temperature = terminal_blocked
+        request = action_request(
+            self.home["state_revision"], request_id="tablet.climate.zero-blocked"
+        )
+        request.update(
+            reliability_profile="climate_reliability_v1",
+            expected_control_revision=0,
+        )
+        receipt = await self.service.async_execute(request)
+
+        leaf = receipt["outcomes"]["rooms"]["living"]["devices"]["living_ac"]
+        self.assertTrue(receipt["final"])
+        self.assertEqual("partial", receipt["status"])
+        self.assertEqual("blocked_before_dispatch", leaf["execution_state"])
+        self.assertEqual((0, 0), (leaf["command_count"], leaf["accepted_count"]))
+        self.assertEqual("blocked_before_dispatch", self.store.payload["records"][0]["dispatch_ledger"]["state"])
+        contract_validator("climate-operation-receipt.schema.json").validate(receipt)
+
+        duplicate = await self.service.async_execute(request)
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual("blocked_before_dispatch", duplicate["outcomes"]["rooms"]["living"]["devices"]["living_ac"]["execution_state"])
+        restored = ClimateTabletService(
+            FakeRuntime(self.runtime.home), self.store
+        )
+        await restored.async_load()
+        self.assertEqual(receipt, await restored.async_operation(receipt["operation_id"]))
 
     async def test_reliable_already_in_sync_without_evidence_stays_ambiguous(self) -> None:
         async def proofless_already_in_sync(payload: object, now: object) -> object:

@@ -6,6 +6,7 @@ import asyncio
 import copy
 import importlib
 import json
+import os
 import sys
 import tempfile
 import time
@@ -13,6 +14,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_MODULE = "custom_components.hausman_hub"
@@ -99,6 +101,21 @@ class FakeConfigEntries:
         self.reloaded: list[str] = []
         self.unloaded: list[tuple[object, tuple[object, ...]]] = []
         self.unload_succeeds = unload_succeeds
+        self.updated: list[tuple[object, dict[str, object] | None]] = []
+
+    def async_update_entry(
+        self,
+        entry: object,
+        *,
+        data: dict[str, object] | None = None,
+        options: dict[str, object] | None = None,
+        **_: object,
+    ) -> None:
+        self.updated.append((entry, data))
+        if data is not None:
+            entry.data = data
+        if options is not None:
+            entry.options = options
 
     def async_entries(self, domain: str) -> list[object]:
         """Return the synthetic saved entries for one integration domain."""
@@ -620,6 +637,183 @@ class LocalSummaryAccessTest(unittest.TestCase):
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, serialized)
+
+    def test_setup_resets_stale_history_when_keyring_is_replaced_after_marker(self) -> None:
+        """The ConfigEntry marker cannot authorize records under a new keyring."""
+
+        storage_module = importlib.import_module(
+            "custom_components.hausman_hub.climate_operation_storage"
+        )
+
+        class StaticStore:
+            backing: dict[str, object] = {
+                "hausman_hub.climate_operations.synthetic-hausmanhub-entry": {
+                    "version": 6,
+                    "records": [{"forged": True}],
+                    "recoveries": [{"forged": True}],
+                    "control_revision": 77,
+                    "desired_intents": {},
+                    "direct_control_records": [{"forged": True}],
+                },
+                "hausman_hub.climate_operation_scopes.synthetic-hausmanhub-entry": {
+                    "__tablet_state__": {"forged": True},
+                    "forged-request": {"forged": True},
+                },
+            }
+
+            def __class_getitem__(cls, _: object) -> type:
+                return cls
+
+            def __init__(self, hass: object, version: int, key: str, **_: object) -> None:
+                self.key = key
+
+            async def async_load(self) -> object | None:
+                return self.backing.get(self.key)
+
+            async def async_save(self, payload: object) -> None:
+                self.backing[self.key] = payload
+
+        with tempfile.TemporaryDirectory() as directory:
+            keyring_path = Path(directory) / "replacement-keyring.json"
+            keyring_path.write_text(
+                json.dumps({"active_key_id": "replacement", "keys": {"replacement": "a" * 64}}),
+                encoding="utf-8",
+            )
+            keyring_path.chmod(0o600)
+            replacement_hass = FakeHomeAssistant()
+            replacement_entry = FakeEntry(
+                {
+                    "mode": "read-only",
+                    "direct_execution_status": "direct_execution_blocked",
+                    "reliable_scope_external_keyring_initialized": True,
+                    "reliable_scope_integrity_key": "do-not-read",
+                },
+                {},
+            )
+            replacement_hass.config_entries.entries = [replacement_entry]
+            with patch.object(storage_module, "Store", StaticStore), patch.dict(
+                os.environ,
+                {"HAUSMAN_HUB_CLIMATE_LEDGER_KEYRING_PATH": str(keyring_path)},
+            ):
+                self.assertTrue(
+                    asyncio.run(
+                        self.integration.async_setup_entry(
+                            replacement_hass, replacement_entry
+                        )
+                    )
+                )
+
+            main = StaticStore.backing[
+                "hausman_hub.climate_operations.synthetic-hausmanhub-entry"
+            ]
+            self.assertEqual("hausman_climate_ledger_auth_v1", main["format"])
+            self.assertEqual(0, main["payload"]["control_revision"])
+            self.assertEqual([], main["payload"]["records"])
+            self.assertEqual([], main["payload"]["direct_control_records"])
+            self.assertNotIn("reliable_scope_integrity_key", replacement_entry.data)
+            self.assertNotIn("reliable_scope_integrity_initialized", replacement_entry.data)
+            self.assertTrue(
+                replacement_entry.data["reliable_scope_external_keyring_initialized"]
+            )
+            self.assertEqual(
+                {"__storage_state__"},
+                set(StaticStore.backing[
+                    "hausman_hub.climate_operation_scopes.synthetic-hausmanhub-entry"
+                ]["payload"]),
+            )
+            self.assertIn(
+                "synthetic-hausmanhub-entry",
+                json.loads(keyring_path.read_text(encoding="utf-8"))["ledger_anchors"],
+            )
+
+    def test_setup_scrubs_retired_fields_without_a_usable_keyring(self) -> None:
+        """Cleanup cannot depend on external keyring availability."""
+
+        def entry_with_retired_fields() -> FakeEntry:
+            return FakeEntry(
+                {
+                    "mode": "read-only",
+                    "direct_execution_status": "direct_execution_blocked",
+                    "reliable_scope_integrity_key": "legacy-secret",
+                    "reliable_scope_integrity_initialized": True,
+                },
+                {
+                    "reliable_scope_integrity_key": "legacy-option-secret",
+                    "reliable_scope_integrity_initialized": True,
+                },
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            unreadable = Path(directory) / "unreadable-keyring.json"
+            unreadable.write_text(
+                json.dumps({"active_key_id": "k1", "keys": {"k1": "a" * 64}}),
+                encoding="utf-8",
+            )
+            unreadable.chmod(0o640)
+            environments = ({}, {"HAUSMAN_HUB_CLIMATE_LEDGER_KEYRING_PATH": str(unreadable)})
+            for environment in environments:
+                with self.subTest(environment=environment):
+                    hass = FakeHomeAssistant()
+                    entry = entry_with_retired_fields()
+                    hass.config_entries.entries = [entry]
+                    with patch.dict(os.environ, environment, clear=True):
+                        self.assertTrue(asyncio.run(self.integration.async_setup_entry(hass, entry)))
+                    for values in (entry.data, entry.options):
+                        self.assertNotIn("reliable_scope_integrity_key", values)
+                        self.assertNotIn("reliable_scope_integrity_initialized", values)
+
+    def test_setup_scrubs_retired_fields_before_configuration_validation_failure(self) -> None:
+        """A rejected entry cannot retain an old local secret."""
+
+        hass = FakeHomeAssistant()
+        entry = FakeEntry(
+            {
+                "mode": "read-only",
+                "direct_execution_status": "not_blocked",
+                "reliable_scope_integrity_key": "legacy-secret",
+                "reliable_scope_integrity_initialized": True,
+            },
+            {
+                "reliable_scope_integrity_key": "legacy-option-secret",
+                "reliable_scope_integrity_initialized": True,
+            },
+        )
+        hass.config_entries.entries = [entry]
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(asyncio.run(self.integration.async_setup_entry(hass, entry)))
+        for values in (entry.data, entry.options):
+            self.assertNotIn("reliable_scope_integrity_key", values)
+            self.assertNotIn("reliable_scope_integrity_initialized", values)
+
+    def test_duplicate_setup_scrubs_retired_fields_before_rejecting_both_entries(self) -> None:
+        """The duplicate guard stays closed without retaining old secrets."""
+
+        def duplicate(entry_id: str) -> FakeEntry:
+            return FakeEntry(
+                {
+                    "mode": "read-only",
+                    "direct_execution_status": "direct_execution_blocked",
+                    "reliable_scope_integrity_key": f"legacy-{entry_id}",
+                    "reliable_scope_integrity_initialized": True,
+                },
+                {
+                    "reliable_scope_integrity_key": f"legacy-option-{entry_id}",
+                    "reliable_scope_integrity_initialized": True,
+                },
+                entry_id,
+            )
+
+        hass = FakeHomeAssistant()
+        first, second = duplicate("first"), duplicate("second")
+        hass.config_entries.entries = [first, second]
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(asyncio.run(self.integration.async_setup_entry(hass, first)))
+            self.assertFalse(asyncio.run(self.integration.async_setup_entry(hass, second)))
+        self.assertEqual([], hass.config_entries.forwarded)
+        for entry in (first, second):
+            for values in (entry.data, entry.options):
+                self.assertNotIn("reliable_scope_integrity_key", values)
+                self.assertNotIn("reliable_scope_integrity_initialized", values)
 
     def test_tablet_publishes_local_power_status_without_physical_commands(self) -> None:
         path = "/api/hausman_hub/v1/tablet-power-status"
@@ -3098,7 +3292,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.197", panel.payload["integration_version"])
+        self.assertEqual("1.52.198", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",

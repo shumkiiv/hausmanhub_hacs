@@ -9,16 +9,20 @@ from datetime import datetime
 import hashlib
 import json
 import logging
+import math
+import re
 import time
 from typing import Protocol
 
 from ..domain.climate import (
+    ClimateCapability,
     ClimateControlOwner,
     ClimateControlScope,
     ClimateDeviceKind,
     ClimateEndpointRole,
     ClimateRegistry,
 )
+from ..climate_revision import MAX_JS_SAFE_INTEGER, is_control_revision
 from ..domain.climate_command_guard import ClimateCommandGuardMemory
 from ..domain.ai_assistant_json import AiJsonObject
 from ..domain.climate_comparison import ClimateComparisonSnapshot
@@ -56,6 +60,12 @@ from ..domain.contours import ContourDefinition, ContourMode, ContourRegistry
 from ..domain.native_climate import NativeClimatePolicy, preview_native_climate
 from ..domain.climate_targets import ClimateTargetSnapshot
 from .climate_application import ClimateDesiredStateChanges
+from .climate_tablet import (
+    CLIMATE_ACTION_CONTRACT_NAME,
+    CLIMATE_TABLET_CONTRACT_VERSION,
+    ClimateTabletViolation,
+    parse_climate_tablet_action,
+)
 from .climate_command_guard import (
     GuardedClimatePlan,
     GuardedDeviceCalls,
@@ -84,6 +94,7 @@ from .ai_assistant_evidence import ai_evidence_from_observation
 from .climate_ha_adapters import build_climate_ha_call_plan
 from .ir_code_service import IRCodeService
 from .climate_ha_observations import (
+    MAX_NATIVE_STATE_AGE_MS,
     OUTDOOR_SOURCE_DIVERGENCE_ALERT_C,
     ClimateHaObservationViolation,
     ClimateHaStateView,
@@ -370,6 +381,7 @@ class ClimateRuntime:
         self._last_contour_apply_was_duplicate = False
         self._recovery_private_metadata: dict[tuple[str, str], dict[str, object]] = {}
         self.last_error: str | None = None
+        self._direct_control_validation_failed = False
 
     @property
     def room_count(self) -> int:
@@ -394,6 +406,12 @@ class ClimateRuntime:
         if self._registry is None:
             return "not_refreshed"
         return "fresh"
+
+    @property
+    def direct_control_validation_failed(self) -> bool:
+        """Whether startup rejected untrusted durable direct-control history."""
+
+        return self._direct_control_validation_failed
 
     @property
     def outdoor_temperature_source(self) -> str:
@@ -450,19 +468,9 @@ class ClimateRuntime:
         """Load local registry and best-effort initial read-only state."""
 
         async with self._lock:
+            validating_direct_control = False
+            self._direct_control_validation_failed = False
             try:
-                if self._direct_control_store is not None:
-                    loader = getattr(self._direct_control_store, "async_load_direct_control", None)
-                    if not callable(loader):
-                        raise ClimateRuntimeUnavailable("direct control store is invalid")
-                    self._contour_applications.restore(await loader())
-                    self._control_revision = self._contour_applications.control_revision
-                    revision_loader = getattr(self._direct_control_store, "async_current_control_revision", None)
-                    if callable(revision_loader):
-                        shared_revision = await revision_loader()
-                        if type(shared_revision) is not int or shared_revision < self._control_revision:
-                            raise ClimateRuntimeUnavailable("shared climate control revision is invalid")
-                        self._control_revision = shared_revision
                 registry = await self._registry_store.async_load()
                 contours = (
                     await self._contour_store.async_load()
@@ -486,6 +494,42 @@ class ClimateRuntime:
                     await self._registry_store.async_save(registry)
                 self._registry = registry
                 self._contours = contours
+                if self._direct_control_store is not None:
+                    loader = getattr(self._direct_control_store, "async_load_direct_control", None)
+                    if not callable(loader):
+                        raise ClimateRuntimeUnavailable("direct control store is invalid")
+                    authenticated = getattr(
+                        self._direct_control_store,
+                        "async_direct_control_is_authenticated", None,
+                    )
+                    trusted_history = await authenticated() if callable(authenticated) else False
+                    records = await loader()
+                    has_untrusted_records = (
+                        not trusted_history
+                        and records is not None
+                        and records != []
+                    )
+                    validating_direct_control = has_untrusted_records
+                    restore_arguments: dict[str, object] = {}
+                    if has_untrusted_records:
+                        restore_arguments = {
+                            "authoritative_contour": self._climate_contour(),
+                            "authoritative_registry": self._registry,
+                        }
+                    self._contour_applications.restore(
+                        records, **restore_arguments,
+                    )
+                    validating_direct_control = False
+                    self._control_revision = self._contour_applications.control_revision
+                    revision_loader = getattr(self._direct_control_store, "async_current_control_revision", None)
+                    if callable(revision_loader):
+                        shared_revision = await revision_loader()
+                        if (
+                            not is_control_revision(shared_revision)
+                            or shared_revision < self._control_revision
+                        ):
+                            raise ClimateRuntimeUnavailable("shared climate control revision is invalid")
+                        self._control_revision = shared_revision
                 now = self._safe_now()
                 loaded_protection = (
                     await self._protection_store.async_load()
@@ -557,6 +601,7 @@ class ClimateRuntime:
                 # Base HausmanHub remains available; climate endpoints fail closed and
                 # an administrator can replace a damaged local registry.
                 self.last_error = type(error).__name__
+                self._direct_control_validation_failed = validating_direct_control
 
     async def async_dashboard_climate_targets(
         self,
@@ -1104,6 +1149,9 @@ class ClimateRuntime:
         expected_control_revision: object,
         resulting_control_revision: object,
         local_now: object,
+        tablet_request_fingerprint: object,
+        tablet_action: object,
+        tablet_parameters: object,
     ) -> object:
         """Execute physical work for a tablet intent already reserved in store.
 
@@ -1111,41 +1159,97 @@ class ClimateRuntime:
         tablet ledger after the coordinator accepted ``expected -> expected+1``.
         Public direct APIs validate and reserve inside their own methods.
         """
+        # This private handoff receives values detached from the HTTP payload.
+        # Rebuild and parse the public envelope before touching a contour, the
+        # command guard or Home Assistant, so every action keeps exactly the
+        # same grammar as the public Tablet boundary.
+        try:
+            canonical = parse_climate_tablet_action({
+                "contract": {
+                    "name": CLIMATE_ACTION_CONTRACT_NAME,
+                    "version": CLIMATE_TABLET_CONTRACT_VERSION,
+                },
+                "request_id": request_id,
+                "correlation_id": correlation_id,
+                "expected_state_revision": 0,
+                "expected_control_revision": expected_control_revision,
+                "reliability_profile": "climate_reliability_v1",
+                "action": action,
+                "room_id": room_id,
+                "parameters": parameters,
+            })
+        except ClimateTabletViolation as error:
+            raise ClimateRuntimeUnavailable(
+                "reserved tablet climate action is invalid"
+            ) from error
+        if (
+            canonical.request_id != request_id
+            or canonical.correlation_id != correlation_id
+            or canonical.action != action
+            or canonical.room_id != room_id
+            or canonical.parameters != parameters
+        ):
+            raise ClimateRuntimeUnavailable("reserved tablet climate action is invalid")
         async with self._lock:
             current = await self._async_sync_control_revision_unlocked()
             if (
-                type(expected_control_revision) is not int
-                or type(resulting_control_revision) is not int
+                not is_control_revision(expected_control_revision)
+                or not is_control_revision(resulting_control_revision)
                 or resulting_control_revision != expected_control_revision + 1
                 or current != resulting_control_revision
             ):
                 raise ClimateRuntimeUnavailable("reserved climate control revision is stale")
-        if action == "set_home_targets":
+        if (
+            not isinstance(tablet_request_fingerprint, str)
+            or re.fullmatch(r"[a-f0-9]{64}", tablet_request_fingerprint) is None
+            or tablet_action != canonical.action
+            or not isinstance(tablet_parameters, dict)
+            or tablet_parameters != canonical.parameters
+        ):
+            raise ClimateRuntimeUnavailable("reserved tablet climate identity is invalid")
+        tablet_identity = {
+            "request_fingerprint": tablet_request_fingerprint,
+            "action": canonical.action,
+            "parameters": dict(tablet_parameters),
+        }
+        if canonical.action == "set_home_targets":
             return await self.async_home_climate_targets({
-                "correlation_id": correlation_id, "request_id": request_id,
-                "contour_id": "climate", "target_temperature": parameters.get("target_temperature"),
-                "target_humidity": parameters.get("target_humidity"), "confirm": True,
+                "correlation_id": canonical.correlation_id, "request_id": canonical.request_id,
+                "contour_id": "climate", "target_temperature": canonical.parameters.get("target_temperature"),
+                "target_humidity": canonical.parameters.get("target_humidity"), "confirm": True,
             })
-        if action == "synchronize_home":
+        if canonical.action == "synchronize_home":
             return await self.async_synchronize_climate()
-        if action == "set_room_mode":
-            return await self.async_set_room_mode(room_id, parameters.get("mode"))
-        if action == "set_device_mode":
-            return await self.async_set_device_mode(room_id, parameters.get("device_id"), parameters.get("mode"))
-        if action == "set_room_humidity_target":
-            return await self.async_room_humidity_target(request_id=request_id, room_id=room_id, target_humidity=parameters.get("target_humidity"))
-        if action == "set_room_min_target":
-            return await self.async_room_minimum_temperature(request_id=request_id, room_id=room_id, minimum_temperature=parameters.get("minimum_temperature"))
-        if action == "set_room_target_strategy":
-            return await self.async_room_target_strategy(request_id=request_id, room_id=room_id, target_strategy=parameters.get("target_strategy"))
-        if action == "turn_room_off":
-            return await self.async_turn_room_off(request_id=request_id, room_id=room_id)
+        if canonical.action == "set_room_mode":
+            return await self.async_set_room_mode(canonical.room_id, canonical.parameters.get("mode"))
+        if canonical.action == "set_device_mode":
+            return await self.async_set_device_mode(canonical.room_id, canonical.parameters.get("device_id"), canonical.parameters.get("mode"))
+        if canonical.action == "set_room_humidity_target":
+            return await self.async_room_humidity_target(request_id=canonical.request_id, room_id=canonical.room_id, target_humidity=canonical.parameters.get("target_humidity"))
+        if canonical.action == "set_room_min_target":
+            return await self.async_room_minimum_temperature(request_id=canonical.request_id, room_id=canonical.room_id, minimum_temperature=canonical.parameters.get("minimum_temperature"))
+        if canonical.action == "set_room_target_strategy":
+            return await self.async_room_target_strategy(request_id=canonical.request_id, room_id=canonical.room_id, target_strategy=canonical.parameters.get("target_strategy"))
+        if canonical.action == "turn_room_off":
+            return await self.async_turn_room_off(request_id=canonical.request_id, room_id=canonical.room_id)
+        if canonical.action == "set_room_target":
+            temporary_action = "set"
+            target_temperature = canonical.parameters["target_temperature"]
+        elif canonical.action == "clear_room_override":
+            temporary_action = "clear"
+            target_temperature = None
+        else:
+            raise ClimateRuntimeUnavailable("reserved tablet climate action is unsupported")
         return await self.async_temporary_temperature({
-            "correlation_id": correlation_id, "request_id": request_id,
-            "contour_id": "climate", "room_id": room_id,
-            "action": "set" if action == "set_room_target" else "clear",
-            "target_temperature": parameters.get("target_temperature"), "confirm": True,
-        }, local_now)
+            "correlation_id": canonical.correlation_id, "request_id": canonical.request_id,
+            "contour_id": "climate", "room_id": canonical.room_id,
+            "action": temporary_action, "target_temperature": target_temperature,
+            "confirm": True, "reliability_profile": "climate_reliability_v1",
+            "expected_control_revision": expected_control_revision,
+        }, local_now,
+        pre_reserved_resulting_control_revision=resulting_control_revision,
+        external_reliability_identity=tablet_identity,
+        )
 
     async def async_apply_contour(self, payload: object) -> ContourApplyReceipt:
         """Idempotently apply three supported settings after explicit consent."""
@@ -1251,6 +1355,9 @@ class ClimateRuntime:
         self,
         payload: object,
         now: datetime,
+        *,
+        pre_reserved_resulting_control_revision: int | None = None,
+        external_reliability_identity: Mapping[str, object] | None = None,
     ) -> ContourApplyReceipt:
         """Apply one room temperature until the next saved schedule boundary."""
 
@@ -1262,11 +1369,6 @@ class ClimateRuntime:
         async with self._lock:
             self._require_native_contour_apply_mode()
             await self._async_sync_control_revision_unlocked()
-            if (
-                request.reliability_profile is not None
-                and request.expected_control_revision != self._control_revision
-            ):
-                raise TemporaryTemperatureViolation("climate control revision is stale")
             contour = self._climate_contour()
             selected = contour.schedule.profile_at(hour=now.hour, minute=now.minute)
             if contour.mode is not ContourMode.AUTOMATIC or (
@@ -1316,6 +1418,8 @@ class ClimateRuntime:
                             context=context,
                             room_ids=room_scope,
                             desired_state_changes=ClimateDesiredStateChanges(0, 0, 0),
+                            reliability_request=request,
+                            external_reliability_identity=external_reliability_identity,
                         )
             try:
                 if request.action is TemporaryTemperatureAction.SET:
@@ -1376,16 +1480,49 @@ class ClimateRuntime:
                     context=context,
                     room_ids=room_scope,
                     desired_state_changes=ClimateDesiredStateChanges(0, 0, 0),
+                    reliability_request=request,
+                    external_reliability_identity=external_reliability_identity,
                 )
+            if (
+                request.reliability_profile is not None
+                and (
+                    (
+                        pre_reserved_resulting_control_revision is None
+                        and request.expected_control_revision != self._control_revision
+                    )
+                    or (
+                        pre_reserved_resulting_control_revision is not None
+                        and (
+                            pre_reserved_resulting_control_revision
+                            != request.expected_control_revision + 1
+                            or self._control_revision
+                            != pre_reserved_resulting_control_revision
+                        )
+                    )
+                )
+            ):
+                raise TemporaryTemperatureViolation("climate control revision is stale")
             # Reserve the shared revision before a mutable contour or a
             # dispatchable direct-control record can be saved.  The duplicate
             # branch above has already returned without changing the token.
             resulting_revision: int | None = None
             if request.reliability_profile is not None:
-                resulting_revision = await self._async_reserve_control_revision_unlocked(
-                    request.expected_control_revision
-                )
-                self._control_revision = resulting_revision
+                if pre_reserved_resulting_control_revision is None:
+                    resulting_revision = await self._async_reserve_control_revision_unlocked(
+                        request.expected_control_revision
+                    )
+                    self._control_revision = resulting_revision
+                elif (
+                    pre_reserved_resulting_control_revision
+                    == request.expected_control_revision + 1
+                    and self._control_revision
+                    == pre_reserved_resulting_control_revision
+                ):
+                    resulting_revision = pre_reserved_resulting_control_revision
+                else:
+                    raise TemporaryTemperatureViolation(
+                        "reserved climate control revision is stale"
+                    )
             # Reserve the desired temporary state in durable storage before the
             # first POST. A lost response therefore cannot trigger an automatic
             # retry; only another explicit user request may try again.
@@ -1405,6 +1542,7 @@ class ClimateRuntime:
                 desired_state_changes=desired_state_changes,
                 reliability_request=request,
                 resulting_control_revision=resulting_revision,
+                external_reliability_identity=external_reliability_identity,
             )
             await self._async_persist_direct_control_unlocked()
             return receipt
@@ -1675,13 +1813,21 @@ class ClimateRuntime:
             assignment = next((room for room in contour.rooms if room.room_id == room_id), None)
             if assignment is None:
                 raise ContourApplyViolation("climate room is not configured")
+            actuators = tuple(
+                self._registry.device(device_id)
+                for device_id in assignment.device_ids
+                if (device := self._registry.device(device_id)) is not None
+                and device.kind not in _PASSIVE_KINDS
+            )
             calls: list[ClimateHaServiceCall] = []
-            for device_id in assignment.device_ids:
-                device = next((item for item in self._registry.devices if item.device_id == device_id), None)
-                if device is None or device.control_scope is not ClimateControlScope.MANAGED:
-                    continue
+            if not actuators or not all(
+                self._is_unique_managed_core_control_device(device)
+                for device in actuators
+            ):
+                actuators = ()
+            for device in actuators:
                 endpoint = device.endpoint(ClimateEndpointRole.CONTROL)
-                if endpoint is None:
+                if endpoint is None:  # guarded above, retained for type narrowing
                     continue
                 if endpoint.entity_id.startswith("climate."):
                     calls.append(ClimateHaServiceCall(ClimateHaService.CLIMATE_TURN_OFF, endpoint.entity_id, owner_device_id=device.device_id))
@@ -1701,12 +1847,22 @@ class ClimateRuntime:
                     automatic_mode_changes=0, reasons=reasons, created_at=now, updated_at=now,
                     device_outcomes=device_outcomes,
                 )
-            if not calls or self._strict_ha_call_executor is None:
+            if (
+                not calls
+                or not self._calls_match_strict_registry(tuple(calls))
+                or self._strict_ha_call_executor is None
+            ):
                 return receipt(ContourApplyStatus.UNAVAILABLE, 0, ("command_result_unavailable",))
             try:
                 isolated = getattr(self._strict_ha_call_executor, "async_execute_isolated", None)
                 if callable(isolated):
                     outcomes = await isolated(tuple(calls))
+                    if (
+                        type(outcomes) is not tuple
+                        or len(outcomes) != len(calls)
+                        or any(type(value) is not bool for value in outcomes)
+                    ):
+                        return receipt(ContourApplyStatus.UNAVAILABLE, 0, ("command_result_unavailable",))
                     accepted = sum(1 for value in outcomes if value is True)
                     leaves = {
                         call.owner_device_id: {
@@ -1730,6 +1886,8 @@ class ClimateRuntime:
                     return receipt(status, accepted, () if accepted else ("command_result_unavailable",), leaves)
                 else:
                     accepted = await self._strict_ha_call_executor.async_execute(tuple(calls))
+                    if not self._valid_executor_count(accepted, len(calls)):
+                        return receipt(ContourApplyStatus.UNAVAILABLE, 0, ("command_result_unavailable",))
             except Exception as error:
                 self.last_error = type(error).__name__
                 accepted = _bounded_completed_count(getattr(error, "completed", 0), len(calls))
@@ -1838,14 +1996,18 @@ class ClimateRuntime:
             target = desired.get("target_temperature")
             humidity = desired.get("target_humidity")
             if endpoint.entity_id.startswith("climate.") and type(target) in {int, float}:
-                calls.append(ClimateHaServiceCall(ClimateHaService.CLIMATE_SET_TEMPERATURE, endpoint.entity_id, temperature=float(target)))
+                calls.append(ClimateHaServiceCall(ClimateHaService.CLIMATE_SET_TEMPERATURE, endpoint.entity_id, temperature=float(target), owner_device_id=device.device_id))
             elif endpoint.entity_id.startswith("humidifier.") and type(humidity) is int:
-                calls.append(ClimateHaServiceCall(ClimateHaService.HUMIDIFIER_SET_HUMIDITY, endpoint.entity_id, humidity=humidity))
+                calls.append(ClimateHaServiceCall(ClimateHaService.HUMIDIFIER_SET_HUMIDITY, endpoint.entity_id, humidity=humidity, owner_device_id=device.device_id))
             if not calls:
                 raise _recovery_pre_dispatch_unavailable(
                     "climate recovery desired state is unsupported"
                 )
-            await self._strict_ha_call_executor.async_execute(tuple(calls))
+            if not self._calls_match_strict_registry(tuple(calls)):
+                raise _recovery_pre_dispatch_unavailable("climate recovery control endpoint is invalid")
+            completed = await self._strict_ha_call_executor.async_execute(tuple(calls))
+            if not self._valid_executor_count(completed, len(calls)) or completed != len(calls):
+                raise ClimateRuntimeUnavailable("climate recovery command result is invalid")
             try:
                 await self._async_capture_hausman_contexts()
                 # Ownership changes only after the physical boundary accepted
@@ -1924,6 +2086,7 @@ class ClimateRuntime:
         desired_state_changes: ClimateDesiredStateChanges,
         reliability_request: object | None = None,
         resulting_control_revision: int | None = None,
+        external_reliability_identity: Mapping[str, object] | None = None,
     ) -> ContourApplyReceipt:
         self._require_native_contour_apply_mode()
         contour = contour_without_manual_devices(
@@ -1949,11 +2112,14 @@ class ClimateRuntime:
                 expected = getattr(reliability_request, "expected_control_revision", None)
                 if not isinstance(prior_scope, Mapping) or not isinstance(expected, int):
                     raise ContourApplyViolation("climate control request id conflicts")
-                candidate = _direct_reliability_request_fingerprint(
-                    request_id=request_id, correlation_id=correlation_id,
-                    context=context, scope=prior_scope,
-                    expected_control_revision=expected,
-                )
+                if external_reliability_identity is not None:
+                    candidate = external_reliability_identity.get("request_fingerprint")
+                else:
+                    candidate = _direct_reliability_request_fingerprint(
+                        request_id=request_id, correlation_id=correlation_id,
+                        context=context, scope=prior_scope,
+                        expected_control_revision=expected,
+                    )
                 if enhanced.get("request_fingerprint") != candidate:
                     raise ContourApplyViolation("climate control request id conflicts")
             elif prior.enhanced is not None:
@@ -1982,6 +2148,13 @@ class ClimateRuntime:
             observation,
             room_ids=room_ids,
             desired_state_changes=desired_state_changes,
+            explicit_temperature_alignment=(
+                context.action
+                in {
+                    ClimateControlAction.SET_TEMPORARY_TEMPERATURE,
+                    ClimateControlAction.RETURN_TO_SCHEDULE,
+                }
+            ),
         )
         record = self._contour_applications.begin(
             request_id,
@@ -1990,11 +2163,12 @@ class ClimateRuntime:
             correlation_id,
             enhanced=(
                 _contour_reliability_metadata(
-                    contour, plan, context, reliability_request,
+                    contour, plan, context, reliability_request, observation,
                     expected_control_revision=getattr(
                         reliability_request, "expected_control_revision", self._control_revision
                     ),
                     resulting_control_revision=resulting_control_revision,
+                    external_reliability_identity=external_reliability_identity,
                 )
                 if getattr(reliability_request, "reliability_profile", None)
                 == "climate_reliability_v1" else None
@@ -2033,8 +2207,20 @@ class ClimateRuntime:
         ledger = enhanced.get("leaf_ledger") if enhanced is not None else None
         scoped_ids = set(ledger) if isinstance(ledger, dict) else set()
         call_owners = [self._device_ids_for_climate_call(call) for call in plan.strict_calls]
-        if enhanced is not None and (
-            any(len(owners) != 1 or owners[0] not in scoped_ids for owners in call_owners)
+        if not self._calls_match_strict_registry(
+            plan.strict_calls, room_ids=plan.target_room_ids
+        ) or (
+            plan.explicit_temperature_alignment
+            and any(
+                len(owners) != 1 or not self._is_explicit_target_call(call, plan)
+                for call, owners in zip(plan.strict_calls, call_owners, strict=True)
+            )
+        ) or (
+            enhanced is not None
+            and any(
+                len(owners) != 1 or owners[0] not in scoped_ids
+                for owners in call_owners
+            )
         ):
             return self._contour_applications.update(
                 request_id,
@@ -2144,7 +2330,9 @@ class ClimateRuntime:
             raise ClimateRuntimeUnavailable("direct control store is invalid")
         await saver(self._contour_applications.serialized())
 
-    def _device_ids_for_climate_call(self, call) -> tuple[str, ...]:
+    def _device_ids_for_climate_call(
+        self, call, *, required_scope: ClimateControlScope = ClimateControlScope.MANAGED
+    ) -> tuple[str, ...]:
         """Return the single frozen plan leaf for a strict HA call.
 
         Never recover ownership by matching an HA entity id.  That would let a
@@ -2154,11 +2342,134 @@ class ClimateRuntime:
         device_id = getattr(call, "owner_device_id", None)
         if not isinstance(device_id, str):
             return ()
+        device = self._registry.device(device_id)
+        endpoint = None if device is None else device.endpoint(ClimateEndpointRole.CONTROL)
+        if (
+            device is None
+            or device.control_scope is not required_scope
+            or device.control_owner is not ClimateControlOwner.CLIMATE_CORE
+            or endpoint is None
+            or getattr(call, "entity_id", None) != endpoint.entity_id
+            or sum(
+                candidate.endpoint(ClimateEndpointRole.CONTROL) == endpoint
+                for candidate in self._registry.devices
+            ) != 1
+        ):
+            return ()
         return (device_id,)
+
+    def _is_explicit_target_call(self, call, plan) -> bool:
+        device_id = getattr(call, "owner_device_id", None)
+        device = None if not isinstance(device_id, str) else self._registry.device(device_id)
+        room_id = None if device is None else device.room_id
+        targets = dict(plan.explicit_temperature_targets)
+        expected = None if room_id is None else targets.get(room_id)
+        actual = getattr(call, "temperature", None)
+        endpoint = None if device is None else device.endpoint(ClimateEndpointRole.CONTROL)
+        return (
+            device is not None
+            and room_id in plan.target_room_ids
+            and type(expected) in {int, float}
+            and type(actual) in {int, float}
+            and math.isfinite(actual)
+            and actual == expected
+            and device.kind in {
+                ClimateDeviceKind.AIR_CONDITIONER,
+                ClimateDeviceKind.RADIATOR_THERMOSTAT,
+                ClimateDeviceKind.FLOOR_HEATING,
+            }
+            and ClimateCapability.TARGET_TEMPERATURE in device.capabilities
+            and endpoint is not None
+            and endpoint.entity_id.startswith("climate.")
+            and getattr(call, "service", None)
+            is ClimateHaService.CLIMATE_SET_TEMPERATURE
+            and getattr(call, "hvac_mode", None) is None
+        )
+
+    def _is_unique_managed_core_control_device(self, device) -> bool:
+        return bool(
+            self._is_unique_core_control_device(device)
+            and device.control_scope is ClimateControlScope.MANAGED
+        )
+
+    def _is_unique_core_control_device(self, device) -> bool:
+        endpoint = None if device is None else device.endpoint(ClimateEndpointRole.CONTROL)
+        return bool(
+            device is not None
+            and device.control_owner is ClimateControlOwner.CLIMATE_CORE
+            and endpoint is not None
+            and sum(
+                candidate.endpoint(ClimateEndpointRole.CONTROL) == endpoint
+                for candidate in self._registry.devices
+            ) == 1
+        )
+
+    def _calls_match_strict_registry(
+        self, calls: tuple[ClimateHaServiceCall, ...], *, room_ids: tuple[str, ...] | None = None,
+        required_scope: ClimateControlScope = ClimateControlScope.MANAGED,
+    ) -> bool:
+        return bool(calls) and all(
+            self._call_matches_strict_registry(call, room_ids=room_ids, required_scope=required_scope) for call in calls
+        )
+
+    def _call_matches_strict_registry(
+        self, call: ClimateHaServiceCall, *, room_ids: tuple[str, ...] | None = None,
+        required_scope: ClimateControlScope = ClimateControlScope.MANAGED,
+    ) -> bool:
+        owners = self._device_ids_for_climate_call(call, required_scope=required_scope)
+        if len(owners) != 1:
+            return False
+        device = self._registry.device(owners[0])
+        endpoint = None if device is None else device.endpoint(ClimateEndpointRole.CONTROL)
+        if device is None or endpoint is None:
+            return False
+        if room_ids is not None and device.room_id not in room_ids:
+            return False
+        service = call.service
+        if device.kind is ClimateDeviceKind.AIR_CONDITIONER:
+            if endpoint.entity_id.startswith("remote."):
+                return (
+                    service is ClimateHaService.REMOTE_SEND_COMMAND
+                    and call.device == device.device_id
+                    and isinstance(call.command, str)
+                    and bool(call.command)
+                )
+            return endpoint.entity_id.startswith("climate.") and service in {
+                ClimateHaService.CLIMATE_SET_TEMPERATURE, ClimateHaService.CLIMATE_SET_HVAC_MODE,
+                ClimateHaService.CLIMATE_SET_FAN_MODE, ClimateHaService.CLIMATE_TURN_OFF,
+            }
+        if device.kind is ClimateDeviceKind.RADIATOR_THERMOSTAT:
+            return endpoint.entity_id.startswith("climate.") and service in {
+                ClimateHaService.CLIMATE_SET_TEMPERATURE, ClimateHaService.CLIMATE_SET_HVAC_MODE,
+                ClimateHaService.CLIMATE_SET_FAN_MODE, ClimateHaService.CLIMATE_TURN_OFF,
+            }
+        if device.kind is ClimateDeviceKind.HUMIDIFIER:
+            return endpoint.entity_id.startswith("humidifier.") and service in {
+                ClimateHaService.HUMIDIFIER_TURN_ON, ClimateHaService.HUMIDIFIER_TURN_OFF,
+                ClimateHaService.HUMIDIFIER_SET_HUMIDITY,
+            }
+        if device.kind is ClimateDeviceKind.FLOOR_HEATING:
+            return (
+                (endpoint.entity_id.startswith("climate.") and service in {
+                    ClimateHaService.CLIMATE_SET_TEMPERATURE, ClimateHaService.CLIMATE_SET_HVAC_MODE,
+                    ClimateHaService.CLIMATE_TURN_OFF,
+                })
+                or (endpoint.entity_id.startswith("switch.") and service is ClimateHaService.SWITCH_TURN_OFF)
+            )
+        return False
+
+    @staticmethod
+    def _valid_executor_count(value: object, total: int) -> bool:
+        return type(value) is int and 0 <= value <= total
 
     async def _async_reserve_control_revision_unlocked(self, expected: object) -> int:
         """Allocate a negotiated revision through the shared climate ledger."""
-        if type(expected) is not int or expected != self._control_revision:
+        if (
+            not is_control_revision(expected)
+            or not is_control_revision(self._control_revision)
+            or expected != self._control_revision
+            or expected >= MAX_JS_SAFE_INTEGER
+        ):
             raise ContourApplyViolation("climate control revision is stale")
         reserve = getattr(self._direct_control_store, "async_reserve_control_revision", None)
         if not callable(reserve):
@@ -2167,7 +2478,7 @@ class ClimateRuntime:
             value = await reserve(expected)
         except Exception as error:
             raise ContourApplyViolation("climate control revision is stale") from error
-        if type(value) is not int or value != expected + 1:
+        if not is_control_revision(value) or value != expected + 1:
             raise ClimateRuntimeUnavailable("shared climate control revision is invalid")
         return value
 
@@ -2185,7 +2496,7 @@ class ClimateRuntime:
             value = await current()
         except Exception as error:
             raise ClimateRuntimeUnavailable("shared climate control revision is unavailable") from error
-        if type(value) is not int or value < 0:
+        if not is_control_revision(value):
             raise ClimateRuntimeUnavailable("shared climate control revision is invalid")
         self._control_revision = value
         return value
@@ -2202,6 +2513,20 @@ class ClimateRuntime:
         # never a dispatchable plan.  A poll may return that durable result,
         # but must not attempt to dereference or reconstruct mutable targets.
         if not isinstance(prior.plan, ContourApplyPlan):
+            return prior.receipt
+        if (
+            not prior.plan.strict_calls
+            and prior.plan.explicit_temperature_alignment
+            and isinstance(prior.enhanced, Mapping)
+            and isinstance(prior.enhanced.get("leaf_ledger"), Mapping)
+            and any(
+                state != "already_in_sync"
+                for state in prior.enhanced["leaf_ledger"].values()
+            )
+        ):
+            # This operation had no physical call to retry.  A stale or
+            # missing source observation must stay pending under its frozen
+            # scope; only a newly created request may establish new proof.
             return prior.receipt
         try:
             observation = await self._async_native_climate_observation_unlocked()
@@ -2225,6 +2550,8 @@ class ClimateRuntime:
             observation,
             room_ids=room_ids,
             desired_state_changes=prior.plan.desired_state_changes,
+            explicit_temperature_alignment=prior.plan.explicit_temperature_alignment,
+            explicit_temperature_targets=prior.plan.explicit_temperature_targets,
         )
         confirmed = len(verified.native_plan.initially_aligned_room_ids)
         if confirmed == len(verified.target_room_ids):
@@ -2283,6 +2610,8 @@ class ClimateRuntime:
                 observation,
                 room_ids=plan.target_room_ids,
                 desired_state_changes=plan.desired_state_changes,
+                explicit_temperature_alignment=plan.explicit_temperature_alignment,
+                explicit_temperature_targets=plan.explicit_temperature_targets,
             )
             confirmed = len(verified.native_plan.initially_aligned_room_ids)
             if confirmed == len(plan.target_room_ids):
@@ -2512,7 +2841,11 @@ class ClimateRuntime:
                 for device in guarded.devices
                 if device.room_id == trial_room_id
             )
-            return await self._async_apply_trial_decision(decision, devices)
+            return await self._async_apply_trial_decision(
+                decision,
+                devices,
+                required_scope=ClimateControlScope.CANARY,
+            )
 
     async def async_run_climate_managed(
         self,
@@ -2563,7 +2896,11 @@ class ClimateRuntime:
                     if device.room_id == room_id
                 )
                 receipts.append(
-                    await self._async_apply_trial_decision(decision, devices)
+                    await self._async_apply_trial_decision(
+                        decision,
+                        devices,
+                        required_scope=ClimateControlScope.MANAGED,
+                    )
                 )
             return tuple(receipts)
 
@@ -2638,6 +2975,12 @@ class ClimateRuntime:
                 confirmed_room_count=0,
                 accepted_count=0,
             )
+        if not self._calls_match_strict_registry(calls, room_ids=room_ids):
+            return _ClimateSynchronizationResult(
+                status=ContourApplyStatus.UNAVAILABLE,
+                confirmed_room_count=0,
+                accepted_count=0,
+            )
         if self._strict_ha_call_executor is None:
             return _ClimateSynchronizationResult(
                 status=ContourApplyStatus.UNAVAILABLE,
@@ -2669,6 +3012,13 @@ class ClimateRuntime:
                 ),
                 confirmed_room_count=0,
                 accepted_count=executed,
+            )
+        if not self._valid_executor_count(executed, len(calls)):
+            self.last_error = "ClimateSynchronizationInvalidExecutionResult"
+            return _ClimateSynchronizationResult(
+                status=ContourApplyStatus.UNAVAILABLE,
+                confirmed_room_count=0,
+                accepted_count=0,
             )
         executed = _bounded_completed_count(executed, len(calls))
         await self._async_record_direct_wifi_commands(
@@ -2758,18 +3108,20 @@ class ClimateRuntime:
         manual_rooms = set(
             effective_manual_room_ids(self._manual_memory, self._registry)
         )
-        trial_rooms = {
-            room.room_id
-            for room in contour.rooms
-            if room.room_id not in manual_rooms
-            if any(
-                device.control_scope is ClimateControlScope.CANARY
-                and device.kind not in _PASSIVE_KINDS
-                and device.device_id not in excluded_devices
-                for device in self._registry.devices
+        trial_rooms: set[str] = set()
+        for room in contour.rooms:
+            actuators = tuple(
+                device for device in self._registry.devices
                 if device.device_id in set(room.device_ids)
+                and device.kind not in _PASSIVE_KINDS
             )
-        }
+            if room.room_id not in manual_rooms and actuators and all(
+                device.control_scope is ClimateControlScope.CANARY
+                and device.device_id not in excluded_devices
+                and self._is_unique_core_control_device(device)
+                for device in actuators
+            ):
+                trial_rooms.add(room.room_id)
         if len(trial_rooms) != 1:
             return None
         return next(iter(trial_rooms))
@@ -2791,11 +3143,7 @@ class ClimateRuntime:
             )
             if not actuators:
                 continue
-            if all(
-                device.control_scope is ClimateControlScope.MANAGED
-                and device.endpoint(ClimateEndpointRole.CONTROL) is not None
-                for device in actuators
-            ):
+            if all(self._is_unique_managed_core_control_device(device) for device in actuators):
                 result.append(room.room_id)
         return tuple(result)
 
@@ -2803,6 +3151,8 @@ class ClimateRuntime:
         self,
         decision,
         devices: tuple[GuardedDeviceCalls, ...],
+        *,
+        required_scope: ClimateControlScope,
     ) -> ClimateTrialReceipt:
         if not decision.permitted:
             return climate_trial_skip_receipt(decision)
@@ -2810,6 +3160,16 @@ class ClimateRuntime:
             return climate_trial_failure_receipt(
                 decision,
                 reason=ClimateTrialReason.EXECUTOR_UNAVAILABLE,
+                executed_count=0,
+            )
+        if not self._calls_match_strict_registry(
+            decision.calls,
+            room_ids=(decision.room_id,),
+            required_scope=required_scope,
+        ):
+            return climate_trial_failure_receipt(
+                decision,
+                reason=ClimateTrialReason.SERVICE_ERROR,
                 executed_count=0,
             )
         try:
@@ -2827,7 +3187,10 @@ class ClimateRuntime:
             )
         except Exception as error:
             self.last_error = type(error).__name__
-            executed = getattr(error, "completed", 0)
+            executed = _bounded_completed_count(
+                getattr(error, "completed", 0),
+                len(decision.calls),
+            )
             await self._async_record_direct_wifi_commands(
                 decision.calls,
                 executed_count=executed,
@@ -2836,10 +3199,19 @@ class ClimateRuntime:
                 decision.calls,
                 executed_count=executed,
             )
+            if executed == len(decision.calls):
+                return climate_trial_applied_receipt(decision)
             return climate_trial_failure_receipt(
                 decision,
                 reason=ClimateTrialReason.SERVICE_ERROR,
                 executed_count=executed,
+            )
+        if not self._valid_executor_count(executed, len(decision.calls)):
+            self.last_error = "ClimateTrialInvalidExecutionResult"
+            return climate_trial_failure_receipt(
+                decision,
+                reason=ClimateTrialReason.SERVICE_ERROR,
+                executed_count=0,
             )
         await self._async_record_direct_wifi_commands(
             decision.calls,
@@ -3738,11 +4110,17 @@ class ClimateRuntime:
         )
         for retry in retries:
             accepted = False
-            if self._strict_ha_call_executor is not None:
+            if (
+                self._strict_ha_call_executor is not None
+                and self._calls_match_strict_registry(
+                    (retry.call,),
+                    room_ids=managed_room_ids,
+                    required_scope=ClimateControlScope.MANAGED,
+                )
+            ):
                 try:
-                    accepted = (
-                        await self._strict_ha_call_executor.async_execute((retry.call,))
-                    ) == 1
+                    result = await self._strict_ha_call_executor.async_execute((retry.call,))
+                    accepted = type(result) is int and result == 1
                 except Exception as error:
                     self.last_error = type(error).__name__
             await service.async_record_retry(
@@ -3944,9 +4322,11 @@ def _contour_reliability_metadata(
     plan,
     context: ClimateControlContext,
     request: object,
+    observation,
     *,
     expected_control_revision: int,
     resulting_control_revision: int | None = None,
+    external_reliability_identity: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Freeze the public scope and desired targets before first dispatch."""
 
@@ -3962,7 +4342,15 @@ def _contour_reliability_metadata(
         call.owner_device_id for call in plan.strict_calls
         if isinstance(call.owner_device_id, str)
     }
-    selected_ids = called_ids or {
+    explicit_ids: set[str] = set()
+    if plan.explicit_temperature_alignment:
+        explicit_ids = {
+            device.device_id
+            for room in plan.native_plan.call_plan.rooms
+            if room.room_id in set(plan.target_room_ids)
+            for device in room.devices
+        }
+    selected_ids = called_ids or explicit_ids or {
         device_id for room in selected for device_id in room.device_ids
     }
     devices_by_room = [
@@ -3981,6 +4369,8 @@ def _contour_reliability_metadata(
     for room in selected:
         settings = room.active_settings
         for device_id in room.device_ids:
+            if device_id not in selected_ids:
+                continue
             desired[device_id] = {
                 "target_temperature": settings.target_temperature,
                 "target_humidity": settings.target_humidity,
@@ -3991,6 +4381,123 @@ def _contour_reliability_metadata(
                 "synchronization": None,
                 "resulting_target_temperature": settings.target_temperature,
             }
+    already_in_sync_evidence: dict[str, dict[str, object]] = {}
+    if plan.explicit_temperature_alignment and not plan.strict_calls:
+        observed_devices = {
+            device.device_id: device
+            for device in getattr(observation, "devices", ())
+            if isinstance(getattr(device, "device_id", None), str)
+        }
+        observed_rooms = {
+            room.room_id: room
+            for room in getattr(observation, "rooms", ())
+            if isinstance(getattr(room, "room_id", None), str)
+        }
+        for device_id in device_ids:
+            observed = observed_devices.get(device_id)
+            expected = desired.get(device_id)
+            room_id = next(
+                (
+                    row["room_id"]
+                    for row in devices_by_room
+                    if device_id in row["device_ids"]
+                ),
+                None,
+            )
+            room_observation = observed_rooms.get(room_id)
+            observed_at = getattr(observed, "observed_at", None)
+            snapshot_observed_at = getattr(observation, "observed_at", None)
+            if (
+                expected is None
+                or observed is None
+                or not bool(getattr(observed, "available", False))
+                or type(observed_at) is not int
+                or type(snapshot_observed_at) is not int
+                or observed_at < 0
+                or snapshot_observed_at < 0
+                or observed_at > 9_007_199_254_740_991
+                or snapshot_observed_at > 9_007_199_254_740_991
+                or observed_at > snapshot_observed_at
+                or snapshot_observed_at - observed_at > MAX_NATIVE_STATE_AGE_MS
+            ):
+                continue
+            reported_temperature = getattr(
+                observed, "current_target_temperature", None
+            )
+            if reported_temperature is None:
+                reported_temperature = getattr(
+                    room_observation, "observed_target_temperature", None
+                )
+            reported_humidity = getattr(observed, "current_target_humidity", None)
+            if reported_humidity is None:
+                reported_humidity = getattr(
+                    room_observation, "observed_target_humidity", None
+                )
+            actual = {
+                **expected,
+                "target_temperature": reported_temperature,
+                "target_humidity": reported_humidity,
+            }
+            if actual["target_temperature"] != expected["target_temperature"]:
+                continue
+            if external_reliability_identity is not None:
+                tablet_parameters = external_reliability_identity["parameters"]
+                tablet_action = external_reliability_identity["action"]
+                target_temperature = tablet_parameters.get("target_temperature")
+                target_humidity = tablet_parameters.get("target_humidity")
+                reported_humidity = (
+                    actual["target_humidity"]
+                    if "target_humidity" in tablet_parameters else None
+                )
+                observed_actual = {
+                    "desired_target_temperature": target_temperature,
+                    "reported_target_temperature": actual["target_temperature"],
+                    "desired_target_humidity": target_humidity,
+                    "reported_target_humidity": reported_humidity,
+                }
+                if (
+                    tablet_action == "clear_room_override"
+                    and expected["override_state"] == "cleared"
+                ):
+                    # This is a durable desired-state transition, not a
+                    # physical call.  Bind the cleared override to the fresh
+                    # scheduled actuator read-back without manufacturing a
+                    # temperature command.
+                    observed_actual.update(
+                        desired_minimum_temperature=None,
+                        reported_minimum_temperature=expected["minimum_temperature"],
+                        desired_target_strategy=None,
+                        reported_target_strategy=expected["target_strategy"],
+                        desired_mode=None,
+                        reported_mode=None,
+                        desired_state=None,
+                        reported_state=None,
+                        desired_override_state="cleared",
+                        reported_override_state="cleared",
+                        desired_synchronization=None,
+                        reported_synchronization=None,
+                    )
+                already_in_sync_evidence[device_id] = {
+                    "desired_target_temperature": target_temperature,
+                    "desired_target_humidity": target_humidity,
+                    "reported_target_temperature": actual["target_temperature"],
+                    "reported_target_humidity": reported_humidity,
+                    "observed_actual": observed_actual,
+                    "observed_at": observed_at,
+                    "fresh": getattr(observation, "data_status", None)
+                    is ClimateDataStatus.FRESH,
+                }
+            else:
+                already_in_sync_evidence[device_id] = {
+                    "desired_target_temperature": expected["target_temperature"],
+                    "desired_target_humidity": expected["target_humidity"],
+                    "reported_target_temperature": actual["target_temperature"],
+                    "reported_target_humidity": actual["target_humidity"],
+                    "observed_actual": actual,
+                    "observed_at": observed_at,
+                    "fresh": getattr(observation, "data_status", None)
+                    is ClimateDataStatus.FRESH,
+                }
     if context.action is ClimateControlAction.APPLY_SCHEDULE_PROFILE:
         parameters: dict[str, object] = {"contour_id": "climate", "confirm": True,
                                          "schedule_profile": context.profile.value}
@@ -4003,15 +4510,45 @@ def _contour_reliability_metadata(
                       "action": "clear" if context.action is ClimateControlAction.RETURN_TO_SCHEDULE else "set",
                       "target_temperature": None if context.action is ClimateControlAction.RETURN_TO_SCHEDULE else context.target_temperature}
         kind = "temporary_clear" if context.action is ClimateControlAction.RETURN_TO_SCHEDULE else "temporary_set"
-    fingerprint = _direct_reliability_request_fingerprint(
-        request_id=getattr(request, "request_id"),
-        correlation_id=getattr(request, "correlation_id"), context=context,
-        scope=scope, expected_control_revision=expected_control_revision,
-    )
+    action_code = context.as_payload()["code"]
+    if external_reliability_identity is not None:
+        fingerprint = external_reliability_identity.get("request_fingerprint")
+        external_action = external_reliability_identity.get("action")
+        external_parameters = external_reliability_identity.get("parameters")
+        if (
+            not isinstance(fingerprint, str)
+            or re.fullmatch(r"[a-f0-9]{64}", fingerprint) is None
+            or not isinstance(external_action, str)
+            or not isinstance(external_parameters, Mapping)
+        ):
+            raise ContourApplyViolation("reserved tablet climate identity is invalid")
+        action_code = external_action
+        parameters = dict(external_parameters)
+    else:
+        fingerprint = _direct_reliability_request_fingerprint(
+            request_id=getattr(request, "request_id"),
+            correlation_id=getattr(request, "correlation_id"), context=context,
+            scope=scope, expected_control_revision=expected_control_revision,
+        )
     desired_fingerprint = hashlib.sha256(json.dumps(desired, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")).hexdigest()
     scope_fingerprint = hashlib.sha256(json.dumps(scope, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")).hexdigest()
     target = context.target_temperature
-    return {"kind": kind, "request_fingerprint": fingerprint, "parameters": parameters,
+    leaf_ledger = {device_id: "pending_dispatch" for device_id in device_ids}
+    if (
+        device_ids
+        and len(already_in_sync_evidence) == len(device_ids)
+        and all(
+            evidence.get("fresh") is True
+            for evidence in already_in_sync_evidence.values()
+        )
+    ):
+        leaf_ledger = {device_id: "already_in_sync" for device_id in device_ids}
+    elif plan.explicit_temperature_alignment and not plan.strict_calls:
+        # The frozen plan has no physical call.  Without device-level proof it
+        # is terminally blocked before dispatch, not pending for a command
+        # that cannot exist.
+        leaf_ledger = {device_id: "blocked_before_dispatch" for device_id in device_ids}
+    return {"kind": kind, "request_fingerprint": fingerprint, "action": action_code, "parameters": parameters,
             "resolved_scope": scope, "desired_snapshot": desired,
             "desired_snapshot_fingerprint": desired_fingerprint, "scope_fingerprint": scope_fingerprint,
             "expected_control_revision": expected_control_revision,
@@ -4021,7 +4558,8 @@ def _contour_reliability_metadata(
                 else expected_control_revision + 1
             ),
             "desired_target_temperature": target, "desired_target_humidity": None,
-            "leaf_ledger": {device_id: "pending_dispatch" for device_id in device_ids}}
+            "already_in_sync_evidence": already_in_sync_evidence,
+            "leaf_ledger": leaf_ledger}
 
 
 def _direct_reliability_request_fingerprint(

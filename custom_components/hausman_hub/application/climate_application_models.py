@@ -108,12 +108,24 @@ class ClimateApplicationPlan:
     strict_calls: tuple[ClimateHaServiceCall, ...]
     initially_aligned_room_ids: tuple[str, ...]
     denial_reasons: tuple[ClimateApplicationDenialReason, ...]
+    explicit_temperature_targets: tuple[tuple[str, float], ...]
 
     def __post_init__(self) -> None:
         _require_stable_id(self.contour_id, "application contour id")
         _require_room_ids(self.target_room_ids)
         _require_room_ids(self.initially_aligned_room_ids, allow_empty=True)
         _require_reasons(self.denial_reasons)
+        if (
+            type(self.explicit_temperature_targets) is not tuple
+            or any(
+                not isinstance(room_id, str)
+                or type(target) not in {int, float}
+                for room_id, target in self.explicit_temperature_targets
+            )
+            or len({room_id for room_id, _ in self.explicit_temperature_targets})
+            != len(self.explicit_temperature_targets)
+        ):
+            raise ClimateApplicationViolation("explicit target facts are invalid")
         if not isinstance(self.fingerprint, str) or _FINGERPRINT.fullmatch(self.fingerprint) is None:
             raise ClimateApplicationViolation("application fingerprint is invalid")
         if not isinstance(self.desired_state_changes, ClimateDesiredStateChanges):

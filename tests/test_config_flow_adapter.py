@@ -1029,6 +1029,9 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             ClimateControlMode,
             climate_bridge_target,
         )
+        from custom_components.hausman_hub.domain.climate_ha_calls import (
+            ClimateHaService,
+        )
         from custom_components.hausman_hub.domain.configuration import SafeConfiguration
         from custom_components.hausman_hub.domain.contours import ContourRegistry
         from tests.test_climate_import import source_payload
@@ -1411,6 +1414,7 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(contour_store.registry.contours[0].schedule.enabled)
         self.assertEqual("07:00", contour_store.registry.contours[0].schedule.day_start)
         self.assertEqual(1, len(executor.batches))
+        scheduled_batch = executor.batches[0]
 
         reads_before_schedule = state_view.read_count
         await runtime.async_run_climate_schedule(runtime._local_now())
@@ -1453,7 +1457,14 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             temporary_result["description_placeholders"]["status"],
         )
         self.assertGreater(state_view.read_count, reads_before_temporary)
-        self.assertEqual(1, len(executor.batches))
+        self.assertEqual(2, len(executor.batches))
+        self.assertEqual(scheduled_batch, executor.batches[0])
+        target_batch = executor.batches[1]
+        self.assertEqual(1, len(target_batch))
+        self.assertEqual(ClimateHaService.CLIMATE_SET_TEMPERATURE, target_batch[0].service)
+        self.assertEqual(23.5, target_batch[0].temperature)
+        self.assertIsNotNone(target_batch[0].owner_device_id)
+        self.assertIsNone(target_batch[0].hvac_mode)
         room_policy = contour_store.registry.contours[0].rooms[0]
         self.assertEqual(23.5, room_policy.target_temperature)
         self.assertEqual(24.5, room_policy.profile_settings.target_temperature)
@@ -1490,7 +1501,13 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             return_result["description_placeholders"]["status"],
         )
         self.assertGreater(state_view.read_count, reads_before_return)
-        self.assertEqual(1, len(executor.batches))
+        self.assertEqual(3, len(executor.batches))
+        restore_batch = executor.batches[2]
+        self.assertEqual(1, len(restore_batch))
+        self.assertEqual(ClimateHaService.CLIMATE_SET_TEMPERATURE, restore_batch[0].service)
+        self.assertEqual(24.5, restore_batch[0].temperature)
+        self.assertIsNotNone(restore_batch[0].owner_device_id)
+        self.assertIsNone(restore_batch[0].hvac_mode)
         self.assertIsNone(contour_store.registry.contours[0].rooms[0].temporary_override)
 
         blocked_manual_flow = self.config_flow.HausmanHubOptionsFlow()
@@ -1510,7 +1527,7 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("climate_bridge_target", disabled["data"])
         self.assertEqual("disabled", contour_store.registry.contours[0].mode.value)
         self.assertEqual([], bridge.executed)
-        self.assertEqual(1, len(executor.batches))
+        self.assertEqual(3, len(executor.batches))
 
     async def test_contour_wizard_collects_each_room_parameters_separately(
         self,

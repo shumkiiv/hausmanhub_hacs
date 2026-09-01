@@ -24,6 +24,17 @@ ENTRY = {
 
 
 class ClimateConfigurationTest(unittest.TestCase):
+    def test_retired_config_entry_secret_is_not_inspected(self) -> None:
+        class ExplosiveSecret:
+            def __str__(self) -> str:
+                raise AssertionError("retired climate secret was read")
+
+        configuration = effective_configuration(
+            {**ENTRY, "reliable_scope_integrity_key": ExplosiveSecret()}, {}
+        )
+
+        self.assertEqual("read-only", configuration.mode)
+
     def test_new_writes_make_home_assistant_the_only_runtime_authority(self) -> None:
         result = create_options(
             "read-only",

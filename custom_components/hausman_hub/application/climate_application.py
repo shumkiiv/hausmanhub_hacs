@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from ..domain.climate import (
+    ClimateCapability,
+    ClimateControlOwner,
     ClimateControlScope,
     ClimateDevice,
     ClimateDeviceKind,
@@ -12,7 +16,11 @@ from ..domain.climate_comparison import (
     ClimateComparisonSnapshot,
     ClimateComparisonStatus,
 )
-from ..domain.climate_ha_calls import ClimateHaCallPlanSnapshot, ClimateHaServiceCall
+from ..domain.climate_ha_calls import (
+    ClimateHaCallPlanSnapshot,
+    ClimateHaService,
+    ClimateHaServiceCall,
+)
 from ..domain.climate_isolation import ClimateIsolationSnapshot, ClimateRoomIsolationStatus
 from ..domain.climate_observation import ClimateObservationSnapshot
 from ..domain.contours import ContourDefinition, ContourMode
@@ -55,6 +63,7 @@ def build_climate_application_plan(
     target_room_ids: tuple[str, ...],
     desired_state_changes: ClimateDesiredStateChanges,
     ir_code_service: object | None = None,
+    explicit_temperature_targets: Mapping[str, float] | None = None,
 ) -> ClimateApplicationPlan:
     if not isinstance(contour, ContourDefinition) or contour.contour_id != "climate":
         raise ClimateApplicationViolation("climate contour is unavailable")
@@ -83,6 +92,8 @@ def build_climate_application_plan(
             isolation,
             comparison,
             call_plan,
+            observation,
+            None if explicit_temperature_targets is None else explicit_temperature_targets.get(room_id),
         )
         for room_id in target_ids
     )
@@ -117,6 +128,12 @@ def build_climate_application_plan(
             if gate.status is ClimateApplicationGateStatus.ALIGNED
         ),
         denial_reasons=denials,
+        explicit_temperature_targets=tuple(
+            (room_id, target)
+            for room_id in target_ids
+            if explicit_temperature_targets is not None
+            and (target := explicit_temperature_targets.get(room_id)) is not None
+        ),
     )
 
 
@@ -128,6 +145,8 @@ def _gate_room(
     isolation: ClimateIsolationSnapshot,
     comparison: ClimateComparisonSnapshot,
     call_plan: ClimateHaCallPlanSnapshot,
+    observation: ClimateObservationSnapshot,
+    explicit_temperature_target: float | None,
 ) -> ClimateApplicationRoomGate:
     reasons: list[ClimateApplicationDenialReason] = []
     if contour.mode is not ContourMode.AUTOMATIC:
@@ -147,10 +166,16 @@ def _gate_room(
     )
     if assignment is not None and not actuators:
         reasons.append(ClimateApplicationDenialReason.NO_ACTIVE_ACTUATOR)
-    if any(device.control_scope is not ClimateControlScope.MANAGED for device in actuators):
+    if any(
+        device.control_scope is not ClimateControlScope.MANAGED
+        or device.control_owner is not ClimateControlOwner.CLIMATE_CORE
+        for device in actuators
+    ):
         reasons.append(ClimateApplicationDenialReason.ACTUATOR_NOT_MANAGED)
     if any(device.endpoint(ClimateEndpointRole.CONTROL) is None for device in actuators):
         reasons.append(ClimateApplicationDenialReason.MISSING_CONTROL_ENDPOINT)
+    if any(_control_endpoint_is_shared(device, registry) for device in actuators):
+        reasons.append(ClimateApplicationDenialReason.TRANSLATION_INCOMPLETE)
     isolated = isolation.room(room_id)
     if isolated is None:
         reasons.append(ClimateApplicationDenialReason.ISOLATION_ROOM_MISSING)
@@ -168,6 +193,16 @@ def _gate_room(
         call_plan,
         reasons,
     )
+    if explicit_temperature_target is not None and not reasons:
+        explicit_calls = _explicit_temperature_calls_if_complete(
+            actuators,
+            observation,
+            explicit_temperature_target,
+        )
+        if explicit_calls is None:
+            reasons.append(ClimateApplicationDenialReason.TRANSLATION_INCOMPLETE)
+        else:
+            strict_calls = explicit_calls
     if reasons:
         return ClimateApplicationRoomGate(
             room_id=room_id,
@@ -175,7 +210,7 @@ def _gate_room(
             reasons=ordered_application_denial_reasons(reasons),
             strict_calls=(),
         )
-    if compared is not None and compared.status is ClimateComparisonStatus.ALIGNED:
+    if not strict_calls:
         return ClimateApplicationRoomGate(
             room_id=room_id,
             status=ClimateApplicationGateStatus.ALIGNED,
@@ -204,6 +239,16 @@ def _selected_actuators(
         elif device.kind not in _PASSIVE_KINDS:
             actuators.append(device)
     return tuple(actuators)
+
+
+def _control_endpoint_is_shared(device: ClimateDevice, registry: ClimateRegistry) -> bool:
+    endpoint = device.endpoint(ClimateEndpointRole.CONTROL)
+    if endpoint is None:
+        return False
+    return sum(
+        candidate.endpoint(ClimateEndpointRole.CONTROL) == endpoint
+        for candidate in registry.devices
+    ) != 1
 
 
 def _strict_calls_if_complete(
@@ -239,6 +284,50 @@ def _strict_calls_if_complete(
         if compared.status is ClimateComparisonStatus.DIVERGED
         else ()
     )
+
+
+def _explicit_temperature_calls_if_complete(
+    actuators: tuple[ClimateDevice, ...],
+    observation: ClimateObservationSnapshot,
+    target_temperature: float,
+) -> tuple[ClimateHaServiceCall, ...] | None:
+    """Build target-only calls for an explicit room target request.
+
+    A room can already be thermally aligned while an idle climate entity still
+    retains a different setpoint.  An explicit target request owns only that
+    setpoint: it never wakes the entity or changes its HVAC mode.
+    """
+
+    calls: list[ClimateHaServiceCall] = []
+    supported_kinds = {
+        ClimateDeviceKind.AIR_CONDITIONER,
+        ClimateDeviceKind.RADIATOR_THERMOSTAT,
+        ClimateDeviceKind.FLOOR_HEATING,
+    }
+    for device in actuators:
+        observed = observation.device(device.device_id)
+        endpoint = device.endpoint(ClimateEndpointRole.CONTROL)
+        if (
+            observed is None
+            or observed.current_target_temperature == target_temperature
+        ):
+            continue
+        if (
+            device.kind not in supported_kinds
+            or ClimateCapability.TARGET_TEMPERATURE not in device.capabilities
+            or endpoint is None
+            or endpoint.entity_id.split(".", 1)[0] != "climate"
+        ):
+            return None
+        calls.append(
+            ClimateHaServiceCall(
+                service=ClimateHaService.CLIMATE_SET_TEMPERATURE,
+                entity_id=endpoint.entity_id,
+                temperature=target_temperature,
+                owner_device_id=device.device_id,
+            )
+        )
+    return tuple(calls)
 
 
 def _contour_ordered_target_ids(
