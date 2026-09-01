@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 import os
+from pathlib import Path
 import sys
 import tempfile
 import types
@@ -1018,6 +1019,52 @@ class ClimateLedgerKeyringTest(unittest.IsolatedAsyncioTestCase):
         os.symlink(target, link)
         with self.assertRaises(ClimateLedgerKeyringError):
             load_external_climate_ledger_keyring(environ={KEYRING_PATH_ENV: link})
+
+    def test_home_assistant_os_creates_private_default_keyring(self) -> None:
+        from custom_components.hausman_hub.climate_ledger_keyring import (
+            load_external_climate_ledger_keyring,
+        )
+
+        path = Path(self.keyring_directory.name) / "ssl" / "hausman_hub" / "climate-ledger.json"
+        path.parent.mkdir(mode=0o700, parents=True)
+        keyring = load_external_climate_ledger_keyring(
+            environ={"HASSIO": "homeassistant"}, ha_os_keyring_path=path,
+        )
+
+        self.assertEqual(path, keyring.source_path)
+        self.assertEqual("haos-1", keyring.active_key_id)
+        self.assertEqual(32, len(keyring.active_key))
+        self.assertEqual(0o700, path.parent.stat().st_mode & 0o777)
+        self.assertEqual(0o600, path.stat().st_mode & 0o777)
+        self.assertEqual(
+            keyring.active_key,
+            load_external_climate_ledger_keyring(
+                environ={"HASSIO": "homeassistant"}, ha_os_keyring_path=path,
+            ).active_key,
+        )
+
+    def test_home_assistant_os_refuses_an_unsafe_default_directory(self) -> None:
+        from custom_components.hausman_hub.climate_ledger_keyring import (
+            ClimateLedgerKeyringError,
+            load_external_climate_ledger_keyring,
+        )
+
+        directory = Path(self.keyring_directory.name) / "unsafe"
+        directory.mkdir(mode=0o755)
+        with self.assertRaisesRegex(ClimateLedgerKeyringError, "permissions are unsafe"):
+            load_external_climate_ledger_keyring(
+                environ={"HASSIO": "homeassistant"},
+                ha_os_keyring_path=directory / "climate-ledger.json",
+            )
+
+    def test_non_haos_without_explicit_provider_remains_fail_closed(self) -> None:
+        from custom_components.hausman_hub.climate_ledger_keyring import (
+            ClimateLedgerKeyringError,
+            load_external_climate_ledger_keyring,
+        )
+
+        with self.assertRaisesRegex(ClimateLedgerKeyringError, "not configured"):
+            load_external_climate_ledger_keyring(environ={})
 
     async def test_key_rotation_reads_old_envelope_then_re_signs_with_active_key(self) -> None:
         from custom_components.hausman_hub.climate_ledger_keyring import ClimateLedgerKeyring

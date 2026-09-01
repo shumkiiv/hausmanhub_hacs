@@ -21,6 +21,8 @@ from typing import Mapping
 _KEY_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 _HEX_KEY = re.compile(r"[a-f0-9]{64}")
 KEYRING_PATH_ENV = "HAUSMAN_HUB_CLIMATE_LEDGER_KEYRING_PATH"
+HA_OS_KEYRING_PATH = Path("/ssl/hausman_hub/climate-ledger.json")
+_HA_OS_KEY_ID = "haos-1"
 
 
 class ClimateLedgerKeyringError(ValueError):
@@ -157,14 +159,25 @@ class ClimateLedgerKeyring:
 def load_external_climate_ledger_keyring(
     *, config_dir: str | os.PathLike[str] | None = None,
     environ: Mapping[str, str] | None = None,
+    ha_os_keyring_path: Path | None = None,
 ) -> ClimateLedgerKeyring:
-    """Load a strict keyring from an external, administrator-owned JSON file."""
+    """Load a strict keyring from an external, administrator-owned JSON file.
+
+    Home Assistant OS has a persistent ``/ssl`` volume mounted outside the
+    configuration directory. On that platform only, the integration creates a
+    private keyring there on first setup. Container and Supervised users keep
+    the explicit environment-variable provider.
+    """
 
     environment = os.environ if environ is None else environ
     raw_path = environment.get(KEYRING_PATH_ENV)
-    if not isinstance(raw_path, str) or not raw_path:
+    if isinstance(raw_path, str) and raw_path:
+        path = Path(raw_path).expanduser()
+    elif environment.get("HASSIO"):
+        path = ha_os_keyring_path or HA_OS_KEYRING_PATH
+        _ensure_ha_os_keyring(path)
+    else:
         raise ClimateLedgerKeyringError("external climate ledger keyring is not configured")
-    path = Path(raw_path).expanduser()
     if not path.is_absolute():
         raise ClimateLedgerKeyringError("external climate ledger keyring path is invalid")
     if config_dir is not None:
@@ -207,6 +220,46 @@ def load_external_climate_ledger_keyring(
     if anchors is not None and not isinstance(anchors, dict):
         raise ClimateLedgerKeyringError("external climate ledger anchor is invalid")
     return ClimateLedgerKeyring(active_key_id=active_key_id, keys=keys, source_path=path)
+
+
+def _ensure_ha_os_keyring(path: Path) -> None:
+    """Create the HA OS default keyring once, without weakening file safety."""
+
+    if not path.is_absolute():
+        raise ClimateLedgerKeyringError("external climate ledger keyring path is invalid")
+    directory = path.parent
+    try:
+        metadata = os.lstat(directory)
+    except FileNotFoundError:
+        try:
+            os.mkdir(directory, mode=0o700)
+        except OSError as error:
+            raise ClimateLedgerKeyringError("external climate ledger keyring is unavailable") from error
+        metadata = os.lstat(directory)
+    except OSError as error:
+        raise ClimateLedgerKeyringError("external climate ledger keyring is unavailable") from error
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_mode & 0o077
+    ):
+        raise ClimateLedgerKeyringError("external climate ledger keyring permissions are unsafe")
+    try:
+        file_metadata = os.lstat(path)
+    except FileNotFoundError:
+        document = {
+            "active_key_id": _HA_OS_KEY_ID,
+            "keys": {_HA_OS_KEY_ID: os.urandom(32).hex()},
+        }
+        try:
+            _replace_keyring_document(path, document)
+        except OSError as error:
+            raise ClimateLedgerKeyringError("external climate ledger keyring is unavailable") from error
+    except OSError as error:
+        raise ClimateLedgerKeyringError("external climate ledger keyring is unavailable") from error
+    else:
+        if stat.S_ISLNK(file_metadata.st_mode) or not stat.S_ISREG(file_metadata.st_mode):
+            raise ClimateLedgerKeyringError("external climate ledger keyring permissions are unsafe")
 
 
 def _read_keyring_document(path: Path) -> object:
