@@ -21,7 +21,7 @@ from typing import Mapping
 _KEY_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 _HEX_KEY = re.compile(r"[a-f0-9]{64}")
 KEYRING_PATH_ENV = "HAUSMAN_HUB_CLIMATE_LEDGER_KEYRING_PATH"
-HA_OS_KEYRING_PATH = Path("/ssl/hausman_hub/climate-ledger.json")
+HA_OS_KEYRING_PATH = Path("/media/hausman_hub/climate-ledger.json")
 _HA_OS_KEY_ID = "haos-1"
 
 
@@ -163,7 +163,7 @@ def load_external_climate_ledger_keyring(
 ) -> ClimateLedgerKeyring:
     """Load a strict keyring from an external, administrator-owned JSON file.
 
-    Home Assistant OS has a persistent ``/ssl`` volume mounted outside the
+    Home Assistant OS has a persistent ``/media`` volume mounted outside the
     configuration directory. On that platform only, the integration creates a
     private keyring there on first setup. Container and Supervised users keep
     the explicit environment-variable provider.
