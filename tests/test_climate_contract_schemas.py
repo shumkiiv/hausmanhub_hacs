@@ -264,6 +264,34 @@ class ClimateContractSchemasTest(unittest.TestCase):
         validator("v1/api-capabilities.schema.json").validate(ready)
         self.assertFalse(ready["capabilities"]["climate_reliability_v1"]["available"])
         self.assertFalse(ready["capabilities"]["climate_room_recovery_v1"]["available"])
+        self.assertFalse(ready["capabilities"]["climate_room_recovery_v2"]["available"])
+
+        route_only_recovery = api_capabilities_snapshot(
+            climate_runtime_available=True, climate_phase="managed",
+            climate_commands_enabled=True, climate_reliability_available=False,
+            climate_recovery_available=True,
+        )
+        self.assertFalse(
+            route_only_recovery["capabilities"]["climate_room_recovery_v2"]["available"]
+        )
+
+        reliable = api_capabilities_snapshot(
+            climate_runtime_available=True, climate_phase="managed",
+            climate_commands_enabled=True, climate_reliability_available=True,
+        )
+        validator("v1/api-capabilities.schema.json").validate(reliable)
+        reliability = reliable["capabilities"]["climate_reliability_v1"]
+        self.assertTrue(reliability["available"])
+        self.assertTrue(reliability["producer_guarantees_full_branch"])
+        self.assertFalse(reliable["capabilities"]["climate_room_recovery_v2"]["available"])
+        reliable_recovery = api_capabilities_snapshot(
+            climate_runtime_available=True, climate_phase="managed",
+            climate_commands_enabled=True, climate_reliability_available=True,
+            climate_recovery_available=True,
+        )
+        self.assertTrue(
+            reliable_recovery["capabilities"]["climate_room_recovery_v2"]["available"]
+        )
 
         matrix = device_feature_matrix_snapshot()
         validator("v1/device-feature-matrix.schema.json").validate(matrix)

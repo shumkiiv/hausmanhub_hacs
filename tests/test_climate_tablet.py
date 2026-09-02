@@ -23,6 +23,7 @@ from custom_components.hausman_hub.application.climate_tablet import (
     parse_climate_tablet_action,
 )
 from custom_components.hausman_hub.application.contour_apply import ContourApplyStatus
+from custom_components.hausman_hub.climate_ledger_keyring import ClimateLedgerKeyring
 from custom_components.hausman_hub.domain.climate_bridge import ClimateControlMode
 
 
@@ -152,6 +153,29 @@ class ScopeBindingSaveFailureStore(MemoryOperationStore):
     ) -> None:
         del bindings
         raise RuntimeError("injected reliable scope binding save failure")
+
+
+class AuthenticatedLedgerMemoryStore(MemoryOperationStore):
+    """Test double for a setup-verified external persistent ledger."""
+
+    authenticated_external_ledger_ready = True
+    reliable_scope_integrity_key = ClimateLedgerKeyring(
+        active_key_id="test-1",
+        keys={"test-1": b"1" * 32},
+        source_path=Path("/var/lib/hausman/climate-ledger.json"),
+    )
+
+
+class FailingAuthenticatedLedgerMemoryStore(AuthenticatedLedgerMemoryStore):
+    async def async_save(self, payload: dict[str, object]) -> None:
+        del payload
+        raise RuntimeError("injected authenticated ledger save failure")
+
+
+class FailingReservationStore(AuthenticatedLedgerMemoryStore):
+    async def async_reserve_control_revision(self, expected: int) -> int:
+        del expected
+        raise OSError("injected reservation backend failure")
 
 
 class FakeRuntime:
@@ -527,6 +551,8 @@ class ClimateTabletProjectionTest(unittest.TestCase):
 
         self.assertFalse(room["control"]["enabled"])
         self.assertEqual([], room["control"]["allowed_actions"])
+        self.assertNotIn("set_room_target", room["control"]["allowed_actions"])
+        self.assertNotIn("set_room_target", room["control"].get("action_inputs", {}))
         self.assertEqual(
             ["device_unavailable"],
             room["control"]["blocked_reasons"],
@@ -625,6 +651,93 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
             now_ms=lambda: self.now,
             local_now=lambda: datetime(2026, 8, 5, tzinfo=timezone.utc),
         )
+
+    async def test_reliability_readiness_is_off_until_external_ledger_loads(self) -> None:
+        self.assertFalse(self.service.reliability_ready)
+        await self.service.async_load()
+        # The ordinary in-memory runtime and an initialized service are not
+        # a substitute for the external authenticated ledger.
+        self.assertFalse(self.service.reliability_ready)
+
+    async def test_reliability_readiness_requires_verified_persistent_keyring(self) -> None:
+        ready = ClimateTabletService(self.runtime, AuthenticatedLedgerMemoryStore())
+        await ready.async_load()
+        self.assertTrue(ready.reliability_ready)
+
+        missing_keyring = ClimateTabletService(self.runtime, MemoryOperationStore())
+        await missing_keyring.async_load()
+        self.assertFalse(missing_keyring.reliability_ready)
+
+    async def test_reliability_readiness_closes_after_persistence_failure(self) -> None:
+        service = ClimateTabletService(
+            self.runtime, FailingAuthenticatedLedgerMemoryStore(),
+        )
+        await service.async_load()
+        self.assertTrue(service.reliability_ready)
+        safe_snapshot = await service.async_snapshot()
+        request = action_request(self.home["state_revision"])
+        request.update(
+            reliability_profile="climate_reliability_v1",
+            expected_control_revision=0,
+        )
+        with self.assertRaisesRegex(RuntimeError, "authenticated ledger save failure"):
+            await service.async_execute(request)
+        self.assertFalse(service.reliability_ready)
+        # Read-only projection remains available, while every reliable
+        # recovery surface closes before it can mutate expiry or read-back.
+        self.assertEqual(safe_snapshot, await service.async_snapshot())
+        with self.assertRaises(ClimateTabletUnavailable):
+            await service.async_recovery_v2_preflight("living")
+        with self.assertRaises(ClimateTabletUnavailable):
+            await service.async_recovery_operation("0123456789abcdef0123456789abcdef")
+
+    async def test_reservation_backend_failure_is_unavailable_not_a_cas_conflict(self) -> None:
+        service = ClimateTabletService(self.runtime, FailingReservationStore())
+        await service.async_load()
+        request = action_request(self.home["state_revision"])
+        request.update(
+            reliability_profile="climate_reliability_v1",
+            expected_control_revision=0,
+        )
+        with self.assertRaisesRegex(ClimateTabletUnavailable, "reservation is unavailable"):
+            await service.async_execute(request)
+        self.assertFalse(service.reliability_ready)
+        self.assertEqual([], self.runtime.commands)
+
+    async def test_enhanced_action_accepts_fresh_control_revision_after_telemetry_changes(self) -> None:
+        snapshot = await self.service.async_snapshot()
+        request = action_request(snapshot["state_revision"])
+        request.update(
+            reliability_profile="climate_reliability_v1",
+            expected_control_revision=snapshot["control_revision"],
+        )
+        # Reported telemetry is not the enhanced action CAS token.
+        self.runtime.home["state_revision"] += 1
+
+        receipt = await self.service.async_execute(request)
+
+        self.assertEqual("confirmed", receipt["status"])
+        self.assertEqual(1, len(self.runtime.commands))
+
+    async def test_enhanced_action_rejects_stale_control_revision_before_dispatch(self) -> None:
+        request = action_request(self.home["state_revision"])
+        request.update(
+            reliability_profile="climate_reliability_v1",
+            expected_control_revision=0,
+        )
+        self.service._control_revision = 1
+
+        with self.assertRaisesRegex(ClimateTabletViolation, "control revision changed"):
+            await self.service.async_execute(request)
+        self.assertEqual([], self.runtime.commands)
+
+    async def test_legacy_action_still_rejects_stale_state_before_dispatch(self) -> None:
+        request = action_request(self.home["state_revision"])
+        self.runtime.home["state_revision"] += 1
+
+        with self.assertRaisesRegex(ClimateTabletViolation, "state revision changed"):
+            await self.service.async_execute(request)
+        self.assertEqual([], self.runtime.commands)
 
     async def _recovery_v2_request(
         self,

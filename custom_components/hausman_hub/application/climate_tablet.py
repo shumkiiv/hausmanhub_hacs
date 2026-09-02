@@ -17,6 +17,7 @@ from typing import Protocol
 from ..correlation import resolve_correlation_id, validate_correlation_id
 from ..climate_revision import MAX_JS_SAFE_INTEGER, is_control_revision
 from ..climate_ledger_keyring import ClimateLedgerKeyring
+from ..climate_storage_errors import ClimateOperationRevisionConflict
 from .contour_apply import ContourApplyStatus, ContourApplyViolation
 from .contour_override import TemporaryTemperatureViolation
 from .home_climate_targets import HomeClimateTargetsViolation
@@ -694,6 +695,10 @@ class ClimateTabletService:
             scope_key.encode("ascii") if isinstance(scope_key, str)
             and re.fullmatch(r"[a-f0-9]{64}", scope_key) else None
         )
+        self._external_ledger_keyring = (
+            scope_key if isinstance(scope_key, ClimateLedgerKeyring)
+            and scope_key.source_path is not None else None
+        )
         self._operation_id_factory = operation_id_factory or (
             lambda: secrets.token_hex(16)
         )
@@ -714,7 +719,9 @@ class ClimateTabletService:
         # only after the corresponding main record is durably gone.
         self._reliable_scope_binding_cleanup: set[str] = set()
         self._persistence_failed = False
+        self._initialized = False
         self._last_reliability_metadata: dict[tuple[str, str], dict[str, object]] = {}
+        self._last_safe_snapshot: dict[str, object] | None = None
         self._lock = asyncio.Lock()
 
     async def async_load(self) -> None:
@@ -722,6 +729,7 @@ class ClimateTabletService:
 
         payload = await self._store.async_load()
         if payload is None:
+            self._initialized = True
             return
         if not isinstance(payload, Mapping) or set(payload) not in (
             {"version", "records"}, {"version", "records", "recoveries"},
@@ -943,11 +951,53 @@ class ClimateTabletService:
         self._control_revision = stored_revision
         if requires_save:
             await self._async_save()
+        self._initialized = True
+
+    @property
+    def reliability_ready(self) -> bool:
+        """Whether this service may advertise the reliable dispatch branch.
+
+        Read-only climate snapshots remain available without this proof.  The
+        capability is deliberately narrower: setup must have initialized an
+        external persistent authenticated ledger, this service must have
+        loaded successfully, and no persistence operation may have failed.
+        """
+
+        return (
+            self._initialized
+            and not self._persistence_failed
+            and self._external_ledger_keyring is not None
+            and getattr(self._store, "authenticated_external_ledger_ready", False)
+            is True
+        )
+
+    def _require_reliability_health(self) -> None:
+        """Close the external-ledger dispatch branch after any write failure."""
+
+        # Framework-free legacy fixtures have no external keyring and cannot
+        # represent this production-only boundary. A configured external
+        # keyring, however, must be healthy immediately before dispatch.
+        if self._external_ledger_keyring is not None and not self.reliability_ready:
+            raise ClimateTabletUnavailable("climate reliable ledger is unavailable")
+
+    def _maintenance_unhealthy(self) -> bool:
+        return self._persistence_failed or (
+            self._external_ledger_keyring is not None and not self.reliability_ready
+        )
+
+    def _remember_safe_snapshot(self, payload: dict[str, object]) -> dict[str, object]:
+        copied = json.loads(json.dumps(payload))
+        self._last_safe_snapshot = copied
+        return json.loads(json.dumps(copied))
 
     async def async_snapshot(self) -> dict[str, object]:
         """Read the canonical runtime projection without changing climate state."""
 
         async with self._lock:
+            if self._maintenance_unhealthy():
+                if self._last_safe_snapshot is None:
+                    raise ClimateTabletUnavailable("climate runtime has no safe snapshot")
+                return json.loads(json.dumps(self._last_safe_snapshot))
             await self._sync_control_revision_unlocked()
             await self._expire_pending_unlocked()
             await self._refresh_pending_unlocked()
@@ -971,7 +1021,7 @@ class ClimateTabletService:
                     generated_at=self._safe_now(),
                 )
                 projection["control_revision"] = self._control_revision
-                return projection
+                return self._remember_safe_snapshot(projection)
             try:
                 home = await self._runtime.async_public_snapshot()
             except Exception as error:
@@ -1009,16 +1059,18 @@ class ClimateTabletService:
             )
             projection["control_revision"] = self._control_revision
             self._last_reliability_metadata = metadata
-            return _with_reliability_projection(
+            return self._remember_safe_snapshot(_with_reliability_projection(
                 projection, self._desired_intents, self._control_revision,
                 self._last_reliability_metadata,
-            )
+            ))
 
     async def async_execute(self, payload: object) -> dict[str, object]:
         """Reserve, execute at most once, persist and return one operation receipt."""
 
         request = parse_climate_tablet_action(payload)
         async with self._lock:
+            if request.reliability_profile is not None:
+                self._require_reliability_health()
             if self._persistence_failed:
                 raise ClimateTabletUnavailable("climate persistence requires restart")
             await self._sync_control_revision_unlocked()
@@ -1406,6 +1458,8 @@ class ClimateTabletService:
         if not isinstance(operation_id, str) or _OPERATION_ID.fullmatch(operation_id) is None:
             raise ClimateTabletOperationNotFound(operation_id)
         async with self._lock:
+            if self._maintenance_unhealthy():
+                raise ClimateTabletUnavailable("climate operation persistence is unavailable")
             await self._expire_pending_unlocked()
             await self._refresh_pending_unlocked()
             request_id = self._request_by_operation.get(operation_id)
@@ -1430,6 +1484,7 @@ class ClimateTabletService:
         if not isinstance(payload, Mapping):
             raise ClimateTabletViolation("climate recovery request is invalid")
         async with self._lock:
+            self._require_reliability_health()
             # Expire unresolved physical boundaries before replay lookup. A
             # stale receipt must not stay indefinitely successful merely
             # because the caller repeats its original request id.
@@ -1554,6 +1609,7 @@ class ClimateTabletService:
                         recover_offline = getattr(self._runtime, "async_recover_offline_device", None)
                         if not callable(recover_offline):
                             raise ClimateTabletUnavailable("climate recovery ownership boundary is unavailable")
+                        self._require_reliability_health()
                         await recover_offline(
                             room_id=room_id, device_id=device_id,
                             expected_control_revision=self._control_revision,
@@ -1574,6 +1630,7 @@ class ClimateTabletService:
                 record["receipt"] = _recovery_receipt(request, preflight, operation_id, now, record["ledger"])
                 await self._async_save()
                 try:
+                    self._require_reliability_health()
                     await self._runtime.async_recover_device(
                         request_id=request["request_id"], room_id=room_id,
                         device_id=device_id,
@@ -1627,8 +1684,14 @@ class ClimateTabletService:
     async def async_recovery_v2_preflight(self, room_id: str) -> dict[str, object]:
         """Return a server-authored recovery v2 scope without dispatch."""
         async with self._lock:
+            self._require_reliability_health()
+            previous_preflights = dict(self._recovery_preflights)
             if self._prune_recovery_preflights_unlocked():
-                await self._async_save()
+                try:
+                    await self._async_save()
+                except Exception:
+                    self._recovery_preflights = previous_preflights
+                    raise
             snapshot = await self._snapshot_unlocked()
             preflight = _recovery_preflight(snapshot, room_id)
             rooms = snapshot.get("rooms")
@@ -1662,13 +1725,18 @@ class ClimateTabletService:
             self._recovery_preflights[token] = {"preflight": {**preflight, "desired_snapshot": desired,
                 "preflight_snapshot_fingerprint": fingerprint, "snapshot_token": token}, "expires_at": self._safe_now() + RECOVERY_PREFLIGHT_TTL_MS}
             self._prune_recovery_preflights_unlocked()
-            await self._async_save()
+            try:
+                await self._async_save()
+            except Exception:
+                self._recovery_preflights = previous_preflights
+                raise
             return result
 
     async def async_recovery_operation(self, operation_id: str) -> dict[str, object]:
         """No recovery receipt exists until authoritative preflight is enabled."""
 
         async with self._lock:
+            self._require_reliability_health()
             await self._expire_recoveries_unlocked()
             request_id = self._recovery_by_operation.get(operation_id)
             if request_id is None:
@@ -1737,6 +1805,8 @@ class ClimateTabletService:
         # Reliability reservation belongs to this service.  Native runtime
         # methods receive an explicit already-reserved handoff so a tablet
         # request cannot advance the shared token a second time.
+        if request.reliability_profile is not None:
+            self._require_reliability_health()
         reserved = getattr(self._runtime, "async_execute_reserved_tablet_action", None)
         if request.reliability_profile is not None and callable(reserved):
             result = await reserved(
@@ -1875,7 +1945,11 @@ class ClimateTabletService:
             prepared_bindings.get("__tablet_state__"), main_payload,
             self._reliable_scope_integrity_key,
         )
-        await save_bindings(prepared_bindings)
+        try:
+            await save_bindings(prepared_bindings)
+        except Exception:
+            self._persistence_failed = True
+            raise
         # Save scope provenance first.  An orphan binding is harmless, but an
         # unbound main record cannot be restored safely.
         try:
@@ -1895,12 +1969,18 @@ class ClimateTabletService:
             prepared_bindings["__tablet_state__"], main_payload,
             self._reliable_scope_integrity_key,
         )
-        await save_bindings(final_bindings)
+        try:
+            await save_bindings(final_bindings)
+        except Exception:
+            self._persistence_failed = True
+            raise
         self._reliable_scope_bindings = final_bindings
         self._reliable_scope_binding_cleanup.clear()
 
     async def _reserve_control_revision_unlocked(self, expected: object) -> int:
         """Use the shared store coordinator when available, with test fallback."""
+
+        self._require_reliability_health()
         if (
             not is_control_revision(expected)
             or not is_control_revision(self._control_revision)
@@ -1913,8 +1993,15 @@ class ClimateTabletService:
             return expected + 1
         try:
             reserved = await reserve(expected)
+        except ClimateOperationRevisionConflict as error:
+            raise ClimateTabletViolation(
+                "climate control revision changed", code="revision_conflict"
+            ) from error
         except Exception as error:
-            raise ClimateTabletViolation("climate control revision changed", code="revision_conflict") from error
+            self._persistence_failed = True
+            raise ClimateTabletUnavailable(
+                "climate control revision reservation is unavailable"
+            ) from error
         if not is_control_revision(reserved) or reserved != expected + 1:
             raise ClimateTabletUnavailable("climate control revision reservation is invalid")
         return reserved

@@ -472,14 +472,17 @@ class ClimateCapabilitiesView(_ClimateView):
                     climate_runtime_available
                     and climate_snapshot.get("commands_enabled") is True
                 )
-                # A successful snapshot proves both the initialized tablet
-                # service and its durable coordinator are usable. Discovery
-                # must not advertise negotiated receipts before that point.
-                climate_reliability_available = climate_runtime_available
+                # Snapshot freshness alone is not authority to advertise the
+                # negotiated physical branch.  The service must additionally
+                # prove its externally authenticated persistent ledger.
+                climate_reliability_available = (
+                    climate_runtime_available
+                    and climate_tablet.reliability_ready
+                )
                 # Route registration alone is not proof of a physical
                 # boundary. Once the initialized service exposes all three
                 # durable v2 operations, discovery may authorize its POST.
-                climate_recovery_available = climate_commands_enabled and all(
+                climate_recovery_available = climate_reliability_available and all(
                     callable(getattr(climate_tablet, method, None))
                     for method in (
                         "async_recovery_v2_preflight",

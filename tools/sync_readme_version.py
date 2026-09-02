@@ -21,7 +21,8 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = Path("custom_components/hausman_hub/manifest.json")
 README_PATH = Path("README.md")
 VERSION_LINE_PATTERN = re.compile(
-    r"Текущая версия — \*\*(?P<version>[^*]+)\*\*"
+    r"^Текущая версия - \*\*(?P<version>(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))\*\*\.$",
+    re.MULTILINE,
 )
 VERSION_PATTERN = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -63,7 +64,7 @@ def readme_version(text: str) -> str:
     match = VERSION_LINE_PATTERN.search(text)
     if match is None:
         raise ReadmeVersionSyncError(
-            "README has no 'Текущая версия — **X**' status line."
+            "README has no 'Текущая версия - **X.Y.Z**.' status line."
         )
     return match.group("version")
 
@@ -72,7 +73,7 @@ def synced_readme_text(text: str, version: str) -> str:
     """Return the README text with the manifest version on the status line."""
 
     return VERSION_LINE_PATTERN.sub(
-        f"Текущая версия — **{version}**", text, count=1
+        f"Текущая версия - **{version}**.", text, count=1
     )
 
 

@@ -96,6 +96,13 @@ def api_capabilities_snapshot(
 ) -> dict[str, object]:
     """Describe only the stable, local, tablet-facing HausmanHub API surface."""
 
+    # Recovery v2 crosses the same durable physical-dispatch boundary as the
+    # negotiated tablet branch. A caller cannot accidentally advertise it
+    # merely because its routes were registered.
+    climate_recovery_available = (
+        climate_recovery_available and climate_reliability_available
+    )
+
     return {
         "contract": {
             "name": API_CAPABILITIES_CONTRACT_NAME,
@@ -283,8 +290,10 @@ def api_capabilities_snapshot(
                 "preflight_contract": {"name": "hausman-hub-climate-room-recovery-v2-preflight", "version": 2},
             },
             "climate_reliability_v1": {
-                "available": False,
-                "producer_guarantees_full_branch": False,
+                # These two claims describe the same physical-dispatch
+                # boundary.  Never advertise one without the other.
+                "available": climate_reliability_available,
+                "producer_guarantees_full_branch": climate_reliability_available,
                 "runtime_path": CLIMATE_RUNTIME_PATH,
                 "runtime_method": "GET",
                 "runtime_contract": {"name": "hausman-hub-climate-runtime", "version": 1},

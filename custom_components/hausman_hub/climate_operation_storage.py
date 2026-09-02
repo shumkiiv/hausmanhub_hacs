@@ -14,6 +14,7 @@ from homeassistant.helpers.storage import Store
 
 from .climate_ledger_keyring import ClimateLedgerKeyring
 from .climate_revision import MAX_JS_SAFE_INTEGER, is_control_revision
+from .climate_storage_errors import ClimateOperationRevisionConflict
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -46,6 +47,11 @@ class HomeAssistantClimateOperationStore:
             self._integrity_key = self._keyring.active_key
         self._allow_unsigned_migration = allow_unsigned_migration
         self._require_authenticated = require_authenticated
+        # Set only by the explicit external-ledger initialization path.  A
+        # key object alone is not proof that the persistent authenticated
+        # ledger is usable.
+        self._authenticated_external_ledger_initialized = False
+        self._persistence_failed = False
         self._anchor_generation = 0
         self._store: Store[dict[str, object]] = Store(
             hass,
@@ -72,6 +78,7 @@ class HomeAssistantClimateOperationStore:
         """Atomically replace the complete bounded operation ledger."""
 
         async with self._lock:
+            self._require_mutation_ready()
             current = await self._load_main_unlocked()
             merged = dict(payload)
             if isinstance(current, dict):
@@ -101,6 +108,7 @@ class HomeAssistantClimateOperationStore:
         """Persist receipt scope provenance away from the public operation ledger."""
 
         async with self._lock:
+            self._require_mutation_ready()
             current = await self._load_sidecar_unlocked()
             merged = dict(bindings)
             if isinstance(current, dict) and "__storage_state__" in current:
@@ -136,6 +144,7 @@ class HomeAssistantClimateOperationStore:
         """Atomically merge direct receipts without discarding tablet records."""
 
         async with self._lock:
+            self._require_mutation_ready()
             payload = await self._load_main_unlocked()
             base = dict(payload) if isinstance(payload, dict) else {
                 "version": 2, "records": [], "recoveries": [], "control_revision": 0,
@@ -153,6 +162,7 @@ class HomeAssistantClimateOperationStore:
         if not is_control_revision(expected):
             raise ValueError("control revision is invalid")
         async with self._lock:
+            self._require_mutation_ready()
             payload = await self._load_main_unlocked()
             base = dict(payload) if isinstance(payload, dict) else {
                 "version": 2, "records": [], "recoveries": [],
@@ -162,9 +172,9 @@ class HomeAssistantClimateOperationStore:
             if not is_control_revision(current):
                 raise ValueError("stored control revision is invalid")
             if current != expected:
-                raise ValueError("control revision is stale")
+                raise ClimateOperationRevisionConflict("control revision is stale")
             if current >= MAX_JS_SAFE_INTEGER:
-                raise ValueError("control revision is exhausted")
+                raise ClimateOperationRevisionConflict("control revision is exhausted")
             base["version"] = max(2, int(base.get("version", 2)))
             base["control_revision"] = current + 1
             await self._save_main_unlocked(base)
@@ -184,6 +194,7 @@ class HomeAssistantClimateOperationStore:
         """Sign one pre-feature payload, then permanently close unsigned reads."""
 
         async with self._lock:
+            self._require_mutation_ready()
             if self._require_authenticated and self._keyring is None:
                 raise ValueError("external climate ledger keyring is unavailable")
             # This compatibility path is retained only for direct in-process
@@ -210,10 +221,14 @@ class HomeAssistantClimateOperationStore:
         if self._keyring is None or self._keyring.source_path is None:
             raise ValueError("external climate ledger keyring is unavailable")
         async with self._lock:
+            self._require_mutation_ready()
             if self._keyring.has_committed_ledger_anchor(self._entry_id):
                 # An anchored ledger must either validate or fail closed. A
                 # reset here would hide a rollback or local substitution.
-                await self._load_main_unlocked()
+                payload = await self._load_main_unlocked()
+                if payload is None:
+                    raise ValueError("committed climate ledger anchor has no authenticated payload")
+                self._authenticated_external_ledger_initialized = True
                 return False
             if self._keyring.has_ledger_anchor(self._entry_id):
                 # A pending first anchor may be the last step of a successful
@@ -221,13 +236,13 @@ class HomeAssistantClimateOperationStore:
                 # Any flat or mismatched local state is still untrusted and is
                 # overwritten below without parsing or replaying legacy data.
                 stored = await self._store.async_load()
-                if self._is_authenticated_envelope(stored):
-                    try:
-                        await self._load_main_unlocked()
-                    except ValueError:
-                        pass
-                    else:
-                        return False
+                if not self._is_authenticated_envelope(stored):
+                    raise ValueError("pending climate ledger anchor has no authenticated payload")
+                payload = await self._load_main_unlocked()
+                if payload is None:
+                    raise ValueError("pending climate ledger anchor has no authenticated payload")
+                self._authenticated_external_ledger_initialized = True
+                return False
             self._anchor_generation = 0
             await self._save_sidecar_unlocked({})
             await self._save_main_unlocked({
@@ -239,7 +254,26 @@ class HomeAssistantClimateOperationStore:
                 "direct_control_records": [],
             })
             self._allow_unsigned_migration = False
+            self._authenticated_external_ledger_initialized = True
             return True
+
+    @property
+    def authenticated_external_ledger_ready(self) -> bool:
+        """Whether setup verified the persistent external ledger boundary."""
+
+        return (
+            self._authenticated_external_ledger_initialized
+            and not self._persistence_failed
+            and self._require_authenticated
+            and self._keyring is not None
+            and self._keyring.source_path is not None
+        )
+
+    def _require_mutation_ready(self) -> None:
+        """A failed durable write remains terminal for this store instance."""
+
+        if self._persistence_failed:
+            raise RuntimeError("climate operation persistence requires restart")
 
     def _signed(self, payload: dict[str, object], *, ledger_generation: int | None = None) -> dict[str, object]:
         if self._integrity_key is None:
@@ -271,11 +305,15 @@ class HomeAssistantClimateOperationStore:
     async def _save_sidecar_unlocked(self, payload: dict[str, object]) -> None:
         # Store implementations may retain the supplied object until their
         # asynchronous write completes. Never mutate that object afterwards.
-        value: dict[str, object] = deepcopy(payload)
-        if self._keyring is not None:
-            value = self._authenticated_envelope(payload)
-            value["payload"] = deepcopy(payload)
-        await self._reliable_scope_store.async_save(value)
+        try:
+            value: dict[str, object] = deepcopy(payload)
+            if self._keyring is not None:
+                value = self._authenticated_envelope(payload)
+                value["payload"] = deepcopy(payload)
+            await self._reliable_scope_store.async_save(value)
+        except Exception:
+            self._persistence_failed = True
+            raise
 
     def _authenticated_envelope(self, payload: dict[str, object], *, ledger_generation: int | None = None) -> dict[str, object]:
         if self._keyring is None:
@@ -320,6 +358,13 @@ class HomeAssistantClimateOperationStore:
         return hmac.new(key, encoded, hashlib.sha256).hexdigest()
 
     async def _save_main_unlocked(self, payload: dict[str, object]) -> None:
+        try:
+            await self._save_main_unlocked_impl(payload)
+        except Exception:
+            self._persistence_failed = True
+            raise
+
+    async def _save_main_unlocked_impl(self, payload: dict[str, object]) -> None:
         if self._require_authenticated and self._keyring is None:
             raise ValueError("external climate ledger keyring is unavailable")
         generation = self._anchor_generation + 1 if self._keyring is not None and self._keyring.source_path is not None else None
@@ -387,6 +432,8 @@ class HomeAssistantClimateOperationStore:
             ).encode("utf-8")
             if not self._valid_generation(marker, encoded_envelope):
                 raise ValueError("stored climate operation generation is invalid")
+            if self._require_authenticated and self._keyring.source_path is not None:
+                self._authenticated_external_ledger_initialized = True
             return dict(payload)
         tag = payload.get("storage_integrity_tag")
         unsigned = {key: value for key, value in payload.items() if key != "storage_integrity_tag"}

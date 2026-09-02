@@ -1091,6 +1091,58 @@ class ClimateLedgerKeyringTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "external climate ledger keyring"):
             await store.async_save({"version": 2, "records": [], "recoveries": [], "control_revision": 0, "desired_intents": {}})
 
+    async def test_external_ledger_readiness_closes_after_every_write_path_failure(self) -> None:
+        """A verified anchor cannot remain advertised after any failed write."""
+        from custom_components.hausman_hub.climate_operation_storage import HomeAssistantClimateOperationStore
+
+        for write_path in ("save", "scope", "reserve", "direct"):
+            entry_id = f"ready-failure-{write_path}"
+            store = HomeAssistantClimateOperationStore(
+                self.hass, entry_id,
+                reliable_scope_integrity_key=self._external_migration_keyring(entry_id),
+                require_authenticated=True,
+            )
+            await store.async_initialize_external_ledger()
+            self.assertTrue(store.authenticated_external_ledger_ready)
+
+            async def fail(_: object) -> None:
+                raise OSError(f"{write_path} persistence failure")
+
+            if write_path in {"save", "reserve", "direct"}:
+                store._store.async_save = fail
+            else:
+                store._reliable_scope_store.async_save = fail
+            with self.subTest(write_path=write_path), self.assertRaisesRegex(OSError, "persistence failure"):
+                if write_path == "save":
+                    await store.async_save({"version": 2, "records": [], "recoveries": [], "control_revision": 0, "desired_intents": {}})
+                elif write_path == "scope":
+                    await store.async_save_reliable_scope_bindings({})
+                elif write_path == "reserve":
+                    await store.async_reserve_control_revision(0)
+                else:
+                    await store.async_save_direct_control([])
+            self.assertFalse(store.authenticated_external_ledger_ready)
+
+    async def test_stale_reservation_is_a_cas_conflict_not_a_sticky_storage_failure(self) -> None:
+        from custom_components.hausman_hub.climate_operation_storage import (
+            ClimateOperationRevisionConflict,
+            HomeAssistantClimateOperationStore,
+        )
+
+        entry_id = "ready-stale-reservation"
+        store = HomeAssistantClimateOperationStore(
+            self.hass, entry_id,
+            reliable_scope_integrity_key=self._external_migration_keyring(entry_id),
+            require_authenticated=True,
+        )
+        await store.async_initialize_external_ledger()
+        self.assertTrue(store.authenticated_external_ledger_ready)
+        self.assertEqual(1, await store.async_reserve_control_revision(0))
+
+        with self.assertRaises(ClimateOperationRevisionConflict):
+            await store.async_reserve_control_revision(0)
+        self.assertTrue(store.authenticated_external_ledger_ready)
+
     async def test_envelope_rollback_is_rejected_against_current_sidecar_checkpoint(self) -> None:
         from custom_components.hausman_hub.climate_ledger_keyring import ClimateLedgerKeyring
         from custom_components.hausman_hub.climate_operation_storage import HomeAssistantClimateOperationStore
@@ -1161,7 +1213,9 @@ class ClimateLedgerKeyringTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(await migrating.async_initialize_external_ledger())
         strict_store = HomeAssistantClimateOperationStore(
-            self.hass, "nested-migration", reliable_scope_integrity_key=self._reload_keyring("nested-migration")
+            self.hass, "nested-migration",
+            reliable_scope_integrity_key=self._reload_keyring("nested-migration"),
+            require_authenticated=True,
         )
         restarted = ClimateTabletService(FakeRuntime(runtime.home), strict_store)
         await restarted.async_load()
@@ -1246,7 +1300,7 @@ class ClimateLedgerKeyringTest(unittest.IsolatedAsyncioTestCase):
                 self.hass, entry_id, reliable_scope_integrity_key=self._reload_keyring(entry_id)
             ).async_load()
 
-    async def test_initial_reset_retries_after_main_write_failure_without_replaying_legacy(self) -> None:
+    async def test_initial_reset_never_replaces_an_incomplete_pending_anchor(self) -> None:
         from custom_components.hausman_hub.climate_operation_storage import HomeAssistantClimateOperationStore
 
         entry_id = "retry-first-reset"
@@ -1281,15 +1335,8 @@ class ClimateLedgerKeyringTest(unittest.IsolatedAsyncioTestCase):
             reliable_scope_integrity_key=self._reload_keyring(entry_id),
             require_authenticated=True,
         )
-        self.assertTrue(await resumed.async_initialize_external_ledger())
-        payload = await HomeAssistantClimateOperationStore(
-            self.hass, entry_id,
-            reliable_scope_integrity_key=self._reload_keyring(entry_id),
-        ).async_load()
-        self.assertEqual(0, payload["control_revision"])
-        self.assertEqual([], payload["records"])
-        self.assertEqual([], payload["recoveries"])
-        self.assertEqual([], payload["direct_control_records"])
+        with self.assertRaisesRegex(ValueError, "pending climate ledger anchor"):
+            await resumed.async_initialize_external_ledger()
 
     async def test_pending_anchor_recovers_each_local_save_boundary(self) -> None:
         from custom_components.hausman_hub.climate_operation_storage import HomeAssistantClimateOperationStore

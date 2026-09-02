@@ -2330,7 +2330,10 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 FakeRequest("192.168.1.20", tablet, path=capabilities_path)
             )
         )
-        self.assertTrue(
+        # The ordinary in-memory operation store is enough to exercise the
+        # typed action route and its idempotency, but it is not an external
+        # authenticated ledger. Recovery dispatch must stay undiscoverable.
+        self.assertFalse(
             capabilities.payload["capabilities"][
                 "climate_room_recovery_v2"
             ]["available"]
@@ -3292,7 +3295,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.200", panel.payload["integration_version"])
+        self.assertEqual("1.52.201", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",

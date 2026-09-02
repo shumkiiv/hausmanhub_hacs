@@ -1,7 +1,7 @@
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.200";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.200";
-import { canonicalRoomMdiIcon, ROOM_TYPE_OPTIONS, roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.200";
-import { renderRoomsSide } from "./hausman-hub-rooms-side.js?v=1.52.200";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.201";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.201";
+import { canonicalRoomMdiIcon, ROOM_TYPE_OPTIONS, roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.201";
+import { renderRoomsSide } from "./hausman-hub-rooms-side.js?v=1.52.201";
 
 function roomNormalized(value) {
   return String(value || "").trim().toLocaleLowerCase("ru");
@@ -199,6 +199,7 @@ function renderRoomCards(panel, container, dialogHost, rooms, grouped, deps) {
   const search = el("input", "rooms-canon-search");
   search.type = "search";
   search.placeholder = "Найти комнату";
+  setAttr(search, "aria-label", "Найти комнату");
   search.value = panel._roomsUi.query;
   controls.appendChild(search);
   const filters = el("div", "rooms-canon-filters");
