@@ -1312,6 +1312,31 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, len(contour_store.saved))
         self.assertEqual(1, store._control_revision)
 
+    async def test_reserved_home_target_invalid_final_call_never_saves_or_dispatches(self) -> None:
+        """Final owner validation happens before the mutable contour boundary."""
+        runtime, store, contour_store, executor = native_home_target_runtime(
+            include_humidifier=False,
+        )
+        await runtime.async_start()
+        before = contour_store.registry
+        runtime._calls_match_strict_registry = lambda *args, **kwargs: False
+        service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await service.async_load()
+        receipt = await service.async_execute({
+            "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+            "request_id": "tablet.climate.invalid-frozen-call",
+            "correlation_id": "corr.invalid-frozen-call",
+            "expected_state_revision": 0, "expected_control_revision": 0,
+            "reliability_profile": "climate_reliability_v1",
+            "action": "set_home_targets", "room_id": None,
+            "parameters": {"target_temperature": 25.5},
+        })
+
+        self.assertEqual("unavailable", receipt["status"])
+        self.assertEqual(before, contour_store.registry)
+        self.assertEqual([], contour_store.saved)
+        self.assertEqual([], executor.batches)
+
     async def test_reserved_home_humidity_target_rejects_missing_actuator_before_durable_or_executor_work(self) -> None:
         runtime, store, contour_store, executor = native_home_target_runtime(
             include_humidifier=False,

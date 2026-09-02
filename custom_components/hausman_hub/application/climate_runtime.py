@@ -2301,6 +2301,31 @@ class ClimateRuntime:
             self._contour_applications.discard_unpersisted(request_id)
             error.home_target_pre_dispatch = True  # type: ignore[attr-defined]
             raise
+        # Validate the final frozen calls and their exact owners before the
+        # user-visible contour is saved.  A malformed handoff must remain a
+        # durable pre-dispatch failure, never leave a saved contour behind.
+        enhanced = record.enhanced if isinstance(record.enhanced, dict) else None
+        ledger = enhanced.get("leaf_ledger") if enhanced is not None else None
+        scoped_ids = set(ledger) if isinstance(ledger, dict) else set()
+        call_owners = [self._device_ids_for_climate_call(call) for call in plan.strict_calls]
+        if not self._calls_match_strict_registry(
+            plan.strict_calls, room_ids=plan.target_room_ids
+        ) or (
+            plan.explicit_target_alignment
+            and any(
+                len(owners) != 1 or not self._is_explicit_target_call(call, plan)
+                for call, owners in zip(plan.strict_calls, call_owners, strict=True)
+            )
+        ) or (
+            enhanced is not None
+            and any(
+                len(owners) != 1 or owners[0] not in scoped_ids
+                for owners in call_owners
+            )
+        ):
+            error = ClimateRuntimeUnavailable("frozen climate call ownership is invalid")
+            error.home_target_pre_dispatch = True  # type: ignore[attr-defined]
+            raise error
         if contour_to_save is not None:
             try:
                 if self._contour_store is None:
@@ -4520,7 +4545,10 @@ def _contour_reliability_metadata(
             if room.room_id in set(plan.target_room_ids)
             for device in room.devices
         }
-    selected_ids = called_ids or explicit_ids or {
+    # Explicit target alignment must retain already-matching owners beside
+    # owners that still need a strict call.  Using only `called_ids` made a
+    # mixed operation lose its zero-call leaves from the frozen proof.
+    selected_ids = (called_ids | explicit_ids) or {
         device_id for room in selected for device_id in room.device_ids
     }
     devices_by_room = [
