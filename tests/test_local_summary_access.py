@@ -2538,6 +2538,12 @@ class LocalSummaryAccessTest(unittest.TestCase):
         first = asyncio.run(view.post(FakeJsonRequest(
             "192.168.1.20", reader_user("system-users"), path, payload,
         )))
+        from custom_components.hausman_hub.application.climate_tablet import _receipt_matches_request
+        stored = coordinator._records_by_request["tablet.climate.route-real-a"]
+        self.assertTrue(_receipt_matches_request(stored.receipt, stored.request), stored.receipt)
+        restarted = ClimateTabletService(runtime, store, now_ms=lambda: 1784280004000)
+        asyncio.run(restarted.async_load())
+        self.hass.data["hausman_hub"]["climate_tablet"] = restarted
         duplicate_payload = {**payload, "request_id": "tablet.climate.route-real-b"}
         duplicate = asyncio.run(view.post(FakeJsonRequest(
             "192.168.1.20", reader_user("system-users"), path, duplicate_payload,

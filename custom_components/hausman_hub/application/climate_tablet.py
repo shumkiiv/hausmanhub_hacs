@@ -5116,6 +5116,19 @@ def _reliable_outcomes(
                 and isinstance(execution_leaf.get("evidence"), Mapping)
             ):
                 leaf = dict(execution_leaf)
+                # Native executor evidence is intentionally minimal.  Before
+                # persisting a reliable receipt, bind the leaf to the exact
+                # tablet request and the authoritative post-dispatch view.
+                # Otherwise the service could create a receipt it rejects on
+                # its own restart.
+                leaf["evidence"] = _reliable_evidence(
+                    request,
+                    room if isinstance(room, Mapping) else {},
+                    device if isinstance(device, Mapping) else {},
+                    snapshot,
+                    reliability_metadata.get((room_id, device_id), {})
+                    if isinstance(reliability_metadata, Mapping) else {},
+                )
                 if leaf.get("execution_state") == "already_in_sync":
                     # The public reliability contract intentionally uses one
                     # stable confirmation vocabulary for both a read-back
@@ -5291,11 +5304,25 @@ def _reliable_evidence_matches_request(
         )
 
     if request.action in {"set_room_target", "set_home_targets"}:
-        if "target_temperature" in parameters and not matches("target_temperature"):
+        if (
+            "target_temperature" in parameters
+            and actual.get("reported_target_temperature") is not None
+            and not matches("target_temperature")
+        ):
             return False
     if request.action in {"set_room_humidity_target", "set_home_targets"}:
-        if "target_humidity" in parameters and not matches("target_humidity"):
+        if (
+            "target_humidity" in parameters
+            and actual.get("reported_target_humidity") is not None
+            and not matches("target_humidity")
+        ):
             return False
+    if request.action == "set_home_targets":
+        return any(
+            actual.get(f"reported_{axis}") is not None
+            for axis in ("target_temperature", "target_humidity")
+            if axis in parameters
+        )
     if request.action == "set_room_min_target":
         return matches("minimum_temperature")
     if request.action == "set_room_target_strategy":
