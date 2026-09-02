@@ -1708,7 +1708,15 @@ class ClimateRuntime:
                     or pre_reserved_resulting_control_revision != expected + 1
                     or current != pre_reserved_resulting_control_revision
                 ):
-                    raise ClimateRuntimeUnavailable("reserved climate control revision is stale")
+                    error = ClimateRuntimeUnavailable(
+                        "reserved climate control revision is stale"
+                    )
+                    # The tablet coordinator has already written its durable
+                    # started checkpoint, but this recheck happens before the
+                    # contour save or native plan can reach the executor.
+                    # Preserve that distinction for the coordinator's receipt.
+                    error.reserved_tablet_pre_dispatch_conflict = True  # type: ignore[attr-defined]
+                    raise error
             contour = self._climate_contour()
             try:
                 updated = with_home_climate_targets(

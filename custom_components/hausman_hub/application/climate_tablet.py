@@ -1423,7 +1423,34 @@ class ClimateTabletService:
                         resulting_control_revision=self._control_revision,
                     )
             except Exception as error:
-                if request.reliability_profile == "climate_reliability_v1" and physical_started:
+                if (
+                    request.reliability_profile == "climate_reliability_v1"
+                    and getattr(error, "reserved_tablet_pre_dispatch_conflict", False)
+                ):
+                    # The runtime rechecked the shared revision after this
+                    # coordinator released its lock and before it saved a
+                    # contour or called HA.  This request owns no physical
+                    # outcome, so close it as a conflict instead of retaining
+                    # a misleading started/partial receipt.
+                    self._desired_intents.pop(_intent_key(request), None)
+                    receipt = _terminal_receipt(
+                        request,
+                        operation_id,
+                        status="unavailable",
+                        # The v1 public contract has no separate CAS reason.
+                        # Keep its compatible unavailable code and preserve the
+                        # precise conflict only in the human message.
+                        reason="action_unsupported",
+                        message="Климатическая цель изменилась другой командой.",
+                        created_at=now,
+                        updated_at=self._safe_now(),
+                        snapshot=snapshot,
+                        resulting_control_revision=self._control_revision,
+                    )
+                    final_ledger = _reliable_dispatch_ledger(
+                        receipt, "blocked_before_dispatch"
+                    )
+                elif request.reliability_profile == "climate_reliability_v1" and physical_started:
                     receipt = _ambiguous_started_reliable_receipt(
                         receipt, request, self._safe_now()
                     )
@@ -4390,6 +4417,8 @@ def _reliable_receipt(
         },
         "outcomes": {"rooms": outcomes},
     })
+    if status in {"rejected", "unavailable"}:
+        return result
     accepted_leaf_count = 0
     confirmed_room_count = 0
     for room in outcomes.values():

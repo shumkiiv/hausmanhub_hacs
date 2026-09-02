@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 from datetime import datetime, timezone
 import hashlib
@@ -23,8 +24,18 @@ from custom_components.hausman_hub.application.climate_tablet import (
     parse_climate_tablet_action,
 )
 from custom_components.hausman_hub.application.contour_apply import ContourApplyStatus
+from custom_components.hausman_hub.application.climate_runtime import ClimateRuntime
 from custom_components.hausman_hub.climate_ledger_keyring import ClimateLedgerKeyring
 from custom_components.hausman_hub.domain.climate_bridge import ClimateControlMode
+from tests.test_climate_runtime import (
+    MemoryBridge,
+    MemoryContourStore,
+    MemoryStore,
+    ReflectingStrictExecutor,
+    build_climate_contour_setup,
+    configuration,
+    native_application_inputs,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -164,6 +175,33 @@ class AuthenticatedLedgerMemoryStore(MemoryOperationStore):
         keys={"test-1": b"1" * 32},
         source_path=Path("/var/lib/hausman/climate-ledger.json"),
     )
+
+
+class SharedAuthenticatedLedgerMemoryStore(AuthenticatedLedgerMemoryStore):
+    """One test store for tablet and direct-runtime revision ownership."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._direct_control_records: object | None = None
+        self._control_revision = 0
+        self._revision_lock = asyncio.Lock()
+
+    async def async_load_direct_control(self) -> object | None:
+        return copy.deepcopy(self._direct_control_records)
+
+    async def async_save_direct_control(self, records: object) -> None:
+        self._direct_control_records = copy.deepcopy(records)
+
+    async def async_current_control_revision(self) -> int:
+        async with self._revision_lock:
+            return self._control_revision
+
+    async def async_reserve_control_revision(self, expected: int) -> int:
+        async with self._revision_lock:
+            if expected != self._control_revision:
+                raise ValueError("stale climate control revision")
+            self._control_revision += 1
+            return self._control_revision
 
 
 class FailingAuthenticatedLedgerMemoryStore(AuthenticatedLedgerMemoryStore):
@@ -950,6 +988,146 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual("climate", runtime.commands[0]["contour_id"])
                 self.assertEqual(f"corr.home.{suffix}", runtime.commands[0]["correlation_id"])
                 self.assertTrue(runtime.commands[0]["confirm"])
+
+    async def test_reserved_home_target_loses_to_direct_writer_without_save_or_dispatch(self) -> None:
+        """A stale reserved tablet handoff never crosses the native boundary."""
+
+        class PausingHomeTargetRuntime(ClimateRuntime):
+            def __init__(self, **kwargs: object) -> None:
+                super().__init__(**kwargs)
+                self.home_target_entered = asyncio.Event()
+                self.resume_home_target = asyncio.Event()
+
+            async def async_home_climate_targets(self, payload: object, **kwargs: object):
+                self.home_target_entered.set()
+                await self.resume_home_target.wait()
+                return await super().async_home_climate_targets(payload, **kwargs)
+
+        store = SharedAuthenticatedLedgerMemoryStore()
+        registry, contours = build_climate_contour_setup(
+            MemoryBridge().snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        registry, state_view = native_application_inputs(registry)
+        executor = ReflectingStrictExecutor(state_view)
+        contour_store = MemoryContourStore(contours)
+        runtime = PausingHomeTargetRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateControlMode.MANAGED),
+            registry_store=MemoryStore(registry),
+            contour_store=contour_store,
+            strict_ha_call_executor=executor,
+            ha_state_view=state_view,
+            operation_id_factory=iter(("a" * 32, "b" * 32)).__next__,
+            now_ms=lambda: 1784280005000,
+            direct_control_store=store,
+        )
+        await runtime.async_start()
+        service = ClimateTabletService(
+            runtime,
+            store,
+            operation_id_factory=lambda: "c" * 32,
+            now_ms=lambda: 1784280005000,
+        )
+        await service.async_load()
+        request = {
+            "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+            "request_id": "tablet.climate.cross-writer",
+            "correlation_id": "corr.cross-writer",
+            "expected_state_revision": 0,
+            "expected_control_revision": 0,
+            "reliability_profile": "climate_reliability_v1",
+            "action": "set_home_targets",
+            "room_id": None,
+            "parameters": {"target_temperature": 25.5},
+        }
+
+        first_task = asyncio.create_task(service.async_execute(request))
+        await asyncio.wait_for(runtime.home_target_entered.wait(), timeout=1)
+        second = await runtime.async_temporary_temperature(
+            {
+                "request_id": "direct.climate.cross-writer",
+                "contour_id": "climate",
+                "room_id": "living",
+                "action": "set",
+                "target_temperature": 24.5,
+                "confirm": True,
+                "reliability_profile": "climate_reliability_v1",
+                "expected_control_revision": 1,
+            },
+            datetime(2026, 7, 19, 12, 0),
+        )
+        runtime.resume_home_target.set()
+        first = await asyncio.wait_for(first_task, timeout=1)
+
+        saved_room = contour_store.registry.contour("climate").rooms[0]  # type: ignore[union-attr]
+        self.assertEqual("confirmed", second.status.value)
+        self.assertEqual("unavailable", first["status"])
+        self.assertEqual("action_unsupported", first["reason"])
+        self.assertEqual(24.5, saved_room.target_temperature)
+        self.assertEqual(1, len(contour_store.saved))
+        self.assertEqual(1, len(executor.batches))
+
+    async def test_reserved_home_target_runs_once_and_duplicate_reuses_receipt(self) -> None:
+        """Without an interleaving, the reserved handoff has one dispatch."""
+
+        store = SharedAuthenticatedLedgerMemoryStore()
+        registry, contours = build_climate_contour_setup(
+            MemoryBridge().snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        registry, state_view = native_application_inputs(registry)
+        executor = ReflectingStrictExecutor(state_view)
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateControlMode.MANAGED),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            strict_ha_call_executor=executor,
+            ha_state_view=state_view,
+            operation_id_factory=lambda: "d" * 32,
+            now_ms=lambda: 1784280005000,
+            direct_control_store=store,
+        )
+        await runtime.async_start()
+        service = ClimateTabletService(
+            runtime,
+            store,
+            operation_id_factory=lambda: "e" * 32,
+            now_ms=lambda: 1784280005000,
+        )
+        await service.async_load()
+        request = {
+            "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+            "request_id": "tablet.climate.uncontended",
+            "correlation_id": "corr.uncontended",
+            "expected_state_revision": 0,
+            "expected_control_revision": 0,
+            "reliability_profile": "climate_reliability_v1",
+            "action": "set_home_targets",
+            "room_id": None,
+            "parameters": {"target_temperature": 25.5},
+        }
+
+        first = await service.async_execute(request)
+        duplicate = await service.async_execute(request)
+
+        self.assertNotEqual("unavailable", first["status"])
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(first["operation_id"], duplicate["operation_id"])
+        self.assertEqual(1, len(executor.batches))
 
     async def test_home_target_preflight_denial_never_reserves_or_dispatches(self) -> None:
         for name, mutate in (
