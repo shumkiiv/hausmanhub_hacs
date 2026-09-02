@@ -12,6 +12,11 @@
 writer уже изменил ревизию, зарезервированная команда закрывается до сохранения
 и физического вызова, без неоднозначной started-квитанции.
 
+До записи контура координатор собирает preflight для выбранных осей и сохраняет
+его как фиксированный план. Native apply использует этот же plan и observation,
+не выполняя повторного чтения между preflight и dispatch. Ошибка preflight,
+хранилища или отсутствующий executor закрывает запрос до физической границы.
+
 ## Статус
 
 Подготовка локальная. Публикация, установка и команды физическим устройствам не
@@ -20,14 +25,18 @@ writer уже изменил ревизию, зарезервированная 
 Локальная provenance привязана к `1.52.203` и digest
 `e241d45cb0b1cafa5c10638f8aca8490ead84a6af60b1024d09c92f63251d305`.
 Полная runtime-проверка с внешней сетью, браузерными взаимодействиями и
-mutation escape остаётся отдельной независимой проверкой до выпуска.
+mutation escape остаётся отдельной независимой проверкой до выпуска. На
+следующем полном запуске tester должен заново создать runtime report для
+точного prepared tree, даже при неизменном frontend digest.
 
 ## Совместимость старого endpoint
 
 `POST /api/hausman_hub/v1/contours/home-targets` сохранён с прежними полями
-запроса и обязательным `confirm=true`. Он сначала валидирует legacy request,
-получает свежие ревизии и передаёт запрос в `ClimateTabletService.async_execute`
-как `set_home_targets` с профилем `climate_reliability_v1`, поэтому не имеет
+запроса и обязательным `confirm=true`. Он сначала валидирует legacy request и
+передаёт его в атомарный `async_execute_legacy_home_targets`: повтор того же
+request ID возвращает сохранённую квитанцию до нового snapshot, а readiness,
+pending-gate и reservation проверяются как одна операция. Endpoint не имеет
 отдельного прямого вызова runtime. Ответ проецируется в совместимую квитанцию
-`hausman-hub-climate-control-receipt` v1 с исходным request ID, correlation ID
-и `Cache-Control: no-store`.
+`hausman-hub-climate-control-receipt` v1 с исходными request ID и correlation
+ID, `Cache-Control: no-store`, а также реальными status, reasons, read-back и
+счётчиками выполнения.
