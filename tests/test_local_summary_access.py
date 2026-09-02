@@ -1841,6 +1841,21 @@ class LocalSummaryAccessTest(unittest.TestCase):
             ]["available"]
         )
         self.assertEqual("no-store", capabilities_response.headers.get("Cache-Control"))
+        admin_capabilities_response = asyncio.run(
+            capabilities.get(
+                FakeRequest(
+                    "127.0.0.1",
+                    admin,
+                    path=capabilities_path,
+                )
+            )
+        )
+        self.assertEqual(200, admin_capabilities_response.status)
+        self.assertEqual("no-store", admin_capabilities_response.headers.get("Cache-Control"))
+        self.assertEqual(
+            capabilities_response.payload,
+            admin_capabilities_response.payload,
+        )
         self.assertEqual(
             404,
             asyncio.run(
@@ -1854,14 +1869,17 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 )
             ).status,
         )
-        for user in (admin, read_only):
-            with self.subTest(capabilities_user=user):
+        for remote, user in (
+            ("203.0.113.7", admin),
+            ("127.0.0.1", read_only),
+        ):
+            with self.subTest(capabilities_remote=remote, capabilities_user=user):
                 self.assertEqual(
                     403,
                     asyncio.run(
                         capabilities.get(
                             FakeRequest(
-                                "127.0.0.1",
+                                remote,
                                 user,
                                 path=capabilities_path,
                             )
@@ -3295,7 +3313,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.201", panel.payload["integration_version"])
+        self.assertEqual("1.52.202", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",

@@ -444,7 +444,7 @@ class ClimateCapabilitiesView(_ClimateView):
     async def get(self, request: Any) -> Any:
         if not _is_exact_request(request, CAPABILITIES_PATH):
             return _not_found(self)
-        if not _is_local_tablet_request(request):
+        if not _is_local_climate_control_request(request):
             return _forbidden(self)
         if self._runtime() is None:
             return self._unavailable()
