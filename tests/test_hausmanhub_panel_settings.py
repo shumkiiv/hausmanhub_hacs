@@ -8,6 +8,11 @@ import subprocess
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+PANEL_CACHE_VERSION = json.loads(
+    (ROOT / "custom_components" / "hausman_hub" / "manifest.json").read_text(
+        encoding="utf-8"
+    )
+)["version"]
 PANEL_JS = (
     ROOT
     / "custom_components"
@@ -4997,6 +5002,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             ":focus-visible",
         ):
             self.assertIn(rule, css)
+        expected_stylesheet = "hausman-hub-panel.css?v=" + PANEL_CACHE_VERSION
         script = panel_script(
             GET_PATHS,
             {},
@@ -5009,7 +5015,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.201")) {
+        if (!stylesheet || !String(stylesheet.href).includes(""" + repr(expected_stylesheet) + """)) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

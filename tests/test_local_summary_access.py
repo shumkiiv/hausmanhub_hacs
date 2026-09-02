@@ -2423,6 +2423,71 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual(operation_id, operation.payload["operation_id"])
         self.assertFalse(operation.payload["duplicate"])
 
+
+    def test_legacy_home_targets_route_projects_a_reliable_typed_receipt(self) -> None:
+        """The legacy request shape enters the typed coordinator without a runtime bypass."""
+
+        from custom_components.hausman_hub.application.climate_tablet import (
+            ClimateTabletService,
+        )
+        from tests.test_climate_tablet import FakeRuntime, MemoryOperationStore, managed_home
+
+        captured: list[dict[str, object]] = []
+
+        coordinator = ClimateTabletService(FakeRuntime(managed_home()), MemoryOperationStore())
+
+        async def snapshot() -> dict[str, int]:
+            return {"state_revision": 42, "control_revision": 7}
+
+        async def execute(payload: object) -> dict[str, object]:
+            captured.append(dict(payload))
+            return {
+                "contract": {
+                    "name": "hausman-hub-climate-operation-receipt",
+                    "version": 1,
+                },
+                "request_id": "tablet.climate.legacy-home.1",
+                "status": "confirmed",
+            }
+
+        coordinator.async_snapshot = snapshot
+        coordinator.async_execute = execute
+        self.hass.data["hausman_hub"]["climate_tablet"] = coordinator
+        path = "/api/hausman_hub/v1/contours/home-targets"
+        view = {item.url: item for item in self.hass.http.views}[path]
+        response = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    reader_user("system-users"),
+                    path,
+                    {
+                        "request_id": "tablet.climate.legacy-home.1",
+                        "contour_id": "climate",
+                        "target_temperature": 24.5,
+                        "target_humidity": None,
+                        "confirm": True,
+                    },
+                )
+            )
+        )
+
+        self.assertEqual(200, response.status)
+        self.assertEqual(
+            {"name": "hausman-hub-climate-operation-receipt", "version": 1},
+            response.payload["contract"],
+        )
+        self.assertEqual("tablet.climate.legacy-home.1", response.payload["request_id"])
+        self.assertEqual("confirmed", response.payload["status"])
+        self.assertEqual("tablet.climate.legacy-home.1", response.payload["correlation_id"])
+        self.assertEqual("no-store", response.headers.get("Cache-Control"))
+        self.assertEqual(1, len(captured))
+        self.assertEqual("set_home_targets", captured[0]["action"])
+        self.assertEqual("climate_reliability_v1", captured[0]["reliability_profile"])
+        self.assertEqual(42, captured[0]["expected_state_revision"])
+        self.assertEqual(7, captured[0]["expected_control_revision"])
+        self.assertEqual({"target_temperature": 24.5}, captured[0]["parameters"])
+
     def test_shadow_climate_route_returns_public_state_and_never_posts(self) -> None:
         """Exercise the native Android facade with an actual runtime."""
 
@@ -3313,7 +3378,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.202", panel.payload["integration_version"])
+        self.assertEqual("1.52.203", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
