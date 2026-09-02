@@ -350,6 +350,8 @@ def _explicit_temperature_calls_if_complete(
     setpoint: it never wakes the entity or changes its HVAC mode.
     """
 
+    if not actuators:
+        return None
     calls: list[ClimateHaServiceCall] = []
     supported_kinds = {
         ClimateDeviceKind.AIR_CONDITIONER,
@@ -387,6 +389,8 @@ def _explicit_humidity_calls_if_complete(
     target_humidity: int,
 ) -> tuple[ClimateHaServiceCall, ...] | None:
     """Build only humidifier target calls, without touching temperature or mode."""
+    if not actuators:
+        return None
     calls: list[ClimateHaServiceCall] = []
     for device in actuators:
         if device.kind is not ClimateDeviceKind.HUMIDIFIER:

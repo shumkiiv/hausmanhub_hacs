@@ -1782,7 +1782,9 @@ class ClimateRuntime:
                 contour_to_save=updated,
             )
 
-    async def async_preflight_home_climate_targets(self, payload: object) -> None:
+    async def async_preflight_home_climate_targets(
+        self, payload: object,
+    ) -> dict[str, object]:
         """Prove the exact native home-target scope without mutating state."""
 
         request = parse_home_climate_targets_request(payload)
@@ -1820,6 +1822,7 @@ class ClimateRuntime:
                 raise ClimateRuntimeUnavailable("home climate target scope is unavailable")
             if plan.strict_calls and self._strict_ha_call_executor is None:
                 raise ClimateRuntimeUnavailable("climate executor is unavailable")
+            return {"resolved_scope": _native_plan_resolved_scope(plan)}
 
     async def async_room_humidity_target(
         self, *, request_id: str, room_id: str, target_humidity: int
@@ -2450,6 +2453,16 @@ class ClimateRuntime:
             if isinstance(ledger, dict):
                 for device_id in ledger:
                     ledger[device_id] = "applied"
+                # Re-render the receipt after the durable per-leaf checkpoint.
+                # Returning the pre-checkpoint object would describe a fully
+                # confirmed operation as four unverified leaves.
+                verified = self._contour_applications.update(
+                    request_id,
+                    status=ContourApplyStatus.CONFIRMED,
+                    accepted_count=accepted_count,
+                    confirmed_room_count=verified.confirmed_room_count,
+                    reasons=(),
+                ).receipt
                 await self._async_persist_direct_control_unlocked()
         return verified
 
@@ -4717,6 +4730,26 @@ def _contour_reliability_metadata(
             "desired_target_temperature": target, "desired_target_humidity": None,
             "already_in_sync_evidence": already_in_sync_evidence,
             "leaf_ledger": leaf_ledger}
+
+
+def _native_plan_resolved_scope(plan: ContourApplyPlan) -> dict[str, object]:
+    """Return the canonical physical-owner scope of a frozen native plan."""
+
+    target_ids = set(plan.target_room_ids)
+    rows = [
+        {
+            "room_id": room.room_id,
+            "device_ids": sorted(device.device_id for device in room.devices),
+        }
+        for room in plan.native_plan.call_plan.rooms
+        if room.room_id in target_ids
+    ]
+    rows = sorted((row for row in rows if row["device_ids"]), key=lambda row: row["room_id"])
+    return {
+        "room_ids": [row["room_id"] for row in rows],
+        "device_ids": [device_id for row in rows for device_id in row["device_ids"]],
+        "devices_by_room": rows,
+    }
 
 
 def _direct_reliability_request_fingerprint(

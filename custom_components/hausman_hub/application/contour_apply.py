@@ -407,6 +407,23 @@ def _live_device_outcomes(
             # the existing receipt map if one was already present instead of
             # inventing fresh source evidence here.
             return None
+        elif state == "applied":
+            # The runtime reached this state only after a fresh native
+            # read-back confirmed the frozen owner.  Surface that terminal
+            # fact to the tablet coordinator instead of leaving a verified
+            # physical leaf indistinguishable from an unresolved acceptance.
+            outcomes[device_id] = {
+                "status": "confirmed",
+                "reason": "none",
+                "execution_state": "applied",
+                "message_code": "confirmed",
+                "command_count": 1,
+                "accepted_count": 1,
+                "evidence": {
+                    "native_read_back": True,
+                    "fresh": True,
+                },
+            }
         else:
             return None
     return outcomes

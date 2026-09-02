@@ -1156,6 +1156,7 @@ class ClimateTabletService:
             # revision reservation for both legacy and negotiated actions.
             if snapshot.get("phase") == "disabled":
                 _require_action_allowed(snapshot, request)
+            preflight_scope: dict[str, object] | None = None
             if (
                 request.reliability_profile == "climate_reliability_v1"
                 and request.action == "set_home_targets"
@@ -1165,7 +1166,7 @@ class ClimateTabletService:
                 )
                 if callable(preflight):
                     try:
-                        await preflight({
+                        preflight_result = await preflight({
                             "request_id": request.request_id,
                             "correlation_id": request.correlation_id,
                             "contour_id": "climate",
@@ -1173,6 +1174,18 @@ class ClimateTabletService:
                             "target_humidity": request.parameters.get("target_humidity"),
                             "confirm": True,
                         })
+                        candidate_scope = (
+                            preflight_result.get("resolved_scope")
+                            if isinstance(preflight_result, Mapping)
+                            else None
+                        )
+                        if not isinstance(candidate_scope, Mapping) or not _valid_frozen_scope(
+                            candidate_scope, request
+                        ):
+                            raise ClimateTabletUnavailable(
+                                "home climate target scope is unavailable"
+                            )
+                        preflight_scope = json.loads(json.dumps(candidate_scope))
                     except Exception as error:
                         raise ClimateTabletUnavailable(
                             "home climate target scope is unavailable"
@@ -1228,6 +1241,8 @@ class ClimateTabletService:
                 snapshot=snapshot,
                 resulting_control_revision=next_control_revision,
             )
+            if preflight_scope is not None:
+                receipt["action_snapshot"] = {"resolved_scope": preflight_scope}
             if receipt.get("accepted") is True:
                 self._control_revision = next_control_revision
                 intent_key = _intent_key(request)
@@ -4832,6 +4847,7 @@ def _has_exact_reliable_device_outcomes(
         if execution not in {
             "accepted_unverified",
             "dispatched_not_accepted",
+            "applied",
             "already_in_sync",
             "blocked_before_dispatch",
         }:

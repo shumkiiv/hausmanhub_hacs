@@ -32,6 +32,7 @@ from custom_components.hausman_hub.domain.climate import (
     ClimateDeviceKind,
     ClimateEndpoint,
     ClimateEndpointRole,
+    ClimateRegistry,
 )
 from custom_components.hausman_hub.domain.climate_bridge import ClimateControlMode
 from custom_components.hausman_hub.domain.climate_ha_calls import ClimateHaService
@@ -1293,7 +1294,7 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
             "parameters": {"target_temperature": 25.5, "target_humidity": 55},
         })
 
-        self.assertIn(receipt["status"], {"confirmed", "partial"}, receipt)
+        self.assertEqual("confirmed", receipt["status"], receipt)
         # Execution is checkpointed per physical owner, so the complete
         # four-device scope is four one-call batches, never one ambiguous
         # aggregate batch or a duplicate retry.
@@ -1330,6 +1331,41 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
             "action": "set_home_targets",
             "room_id": None,
             "parameters": {"target_humidity": 55},
+            })
+
+        self.assertEqual([], contour_store.saved)
+        self.assertEqual([], executor.batches)
+        self.assertEqual(0, store._control_revision)
+        self.assertIsNone(store.payload)
+
+    async def test_reserved_combined_home_target_rejects_missing_temperature_axis_before_durable_work(self) -> None:
+        """Each requested axis needs its own complete managed actuator set."""
+        runtime, store, contour_store, executor = native_home_target_runtime(
+            include_humidifier=True,
+        )
+        await runtime.async_start()
+        # Leave a valid humidifier, but remove every temperature actuator.
+        runtime._registry = ClimateRegistry(
+            rooms=runtime._registry.rooms,
+            devices=tuple(
+                device for device in runtime._registry.devices
+                if device.kind is ClimateDeviceKind.HUMIDIFIER
+            ),
+        )
+        service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await service.async_load()
+
+        with self.assertRaises(ClimateTabletUnavailable):
+            await service.async_execute({
+                "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+                "request_id": "tablet.climate.home-temperature-missing",
+                "correlation_id": "corr.home-temperature-missing",
+                "expected_state_revision": 0,
+                "expected_control_revision": 0,
+                "reliability_profile": "climate_reliability_v1",
+                "action": "set_home_targets",
+                "room_id": None,
+                "parameters": {"target_temperature": 25.5, "target_humidity": 55},
             })
 
         self.assertEqual([], contour_store.saved)
