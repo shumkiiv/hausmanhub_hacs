@@ -2512,6 +2512,50 @@ class LocalSummaryAccessTest(unittest.TestCase):
             receipt["reason_names"],
         )
 
+    def test_legacy_home_targets_route_uses_real_native_coordinator_and_replays_correlation(self) -> None:
+        """The HTTP compatibility route has no private execution bypass."""
+        from jsonschema import Draft202012Validator
+        from custom_components.hausman_hub.application.climate_tablet import ClimateTabletService
+        from tests.test_climate_tablet import native_home_target_runtime
+
+        runtime, store, _contours, executor = native_home_target_runtime(
+            include_humidifier=True,
+        )
+        asyncio.run(runtime.async_start())
+        coordinator = ClimateTabletService(runtime, store, now_ms=lambda: 1784280004000)
+        asyncio.run(coordinator.async_load())
+        self.hass.data["hausman_hub"]["climate_tablet"] = coordinator
+        path = "/api/hausman_hub/v1/contours/home-targets"
+        view = {item.url: item for item in self.hass.http.views}[path]
+        payload = {
+            "request_id": "tablet.climate.route-real-a",
+            "correlation_id": "corr.route-real",
+            "contour_id": "climate",
+            "target_temperature": 25.5,
+            "target_humidity": 55,
+            "confirm": True,
+        }
+        first = asyncio.run(view.post(FakeJsonRequest(
+            "192.168.1.20", reader_user("system-users"), path, payload,
+        )))
+        duplicate_payload = {**payload, "request_id": "tablet.climate.route-real-b"}
+        duplicate = asyncio.run(view.post(FakeJsonRequest(
+            "192.168.1.20", reader_user("system-users"), path, duplicate_payload,
+        )))
+
+        self.assertEqual(200, first.status)
+        self.assertEqual("confirmed", first.payload["status"])
+        self.assertGreater(
+            first.payload["command_count"], 0,
+            coordinator._records_by_request["tablet.climate.route-real-a"].receipt,
+        )
+        self.assertEqual(first.payload["command_count"], first.payload["accepted_count"])
+        self.assertTrue(first.payload["read_back"]["matched"])
+        self.assertEqual(first.payload["operation_id"], duplicate.payload["operation_id"])
+        self.assertEqual(4, len(executor.batches))
+        schema = json.loads((ROOT / "custom_components" / "hausman_hub" / "contracts" / "v1" / "climate-control-receipt.schema.json").read_text(encoding="utf-8"))
+        self.assertEqual([], list(Draft202012Validator(schema).iter_errors(first.payload)))
+
     def test_shadow_climate_route_returns_public_state_and_never_posts(self) -> None:
         """Exercise the native Android facade with an actual runtime."""
 

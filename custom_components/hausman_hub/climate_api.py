@@ -1942,6 +1942,9 @@ def _legacy_home_target_receipt(receipt: Mapping[str, object], correlation_id: s
     read_back = read_back if isinstance(read_back, Mapping) else {}
     reasons = receipt.get("reasons")
     reasons = list(reasons) if isinstance(reasons, list) and all(isinstance(item, str) for item in reasons) else []
+    execution = _legacy_home_execution_counts(receipt)
+    if not reasons:
+        reasons = execution["reasons"]
     return {
         "contract": {"name": "hausman-hub-climate-control-receipt", "version": 1},
         "operation_id": receipt["operation_id"], "request_id": receipt["request_id"],
@@ -1956,9 +1959,9 @@ def _legacy_home_target_receipt(receipt: Mapping[str, object], correlation_id: s
         "accepted": accepted, "confirmed": confirmed,
         "message": receipt.get("message", "Климатический контур обрабатывает новые цели."),
         "confirmation_window_ms": 8000,
-        "read_back": {"attempted": bool(read_back.get("attempted", confirmed)), "matched": bool(read_back.get("matched", confirmed)), "observed_at": read_back.get("observed_at", receipt.get("updated_at")), "confirmed_room_count": read_back.get("confirmed_room_count", receipt.get("confirmed_room_count", 0))},
-        "room_count": receipt.get("room_count", 0), "command_count": receipt.get("command_count", 0), "accepted_count": receipt.get("accepted_count", 0),
-        "confirmed_room_count": receipt.get("confirmed_room_count", 0),
+        "read_back": {"attempted": bool(read_back.get("attempted", confirmed)), "matched": bool(read_back.get("matched", confirmed)), "observed_at": read_back.get("observed_at", receipt.get("updated_at")), "confirmed_room_count": read_back.get("confirmed_room_count", execution["confirmed_room_count"])},
+        "room_count": receipt.get("room_count", execution["room_count"]), "command_count": receipt.get("command_count", execution["command_count"]), "accepted_count": receipt.get("accepted_count", execution["accepted_count"]),
+        "confirmed_room_count": receipt.get("confirmed_room_count", execution["confirmed_room_count"]),
         "changes": {"temperature": changes.get("temperature", 0), "strategy": changes.get("strategy", 0), "automatic_mode": changes.get("automatic_mode", 0)},
         "reasons": reasons,
         "reason_names": [
@@ -1968,6 +1971,39 @@ def _legacy_home_target_receipt(receipt: Mapping[str, object], correlation_id: s
         ],
         "created_at": receipt.get("created_at"), "updated_at": receipt.get("updated_at"),
     }
+
+
+def _legacy_home_execution_counts(receipt: Mapping[str, object]) -> dict[str, object]:
+    """Project persisted native leaf facts without inventing aggregate counts."""
+
+    rooms = receipt.get("outcomes", {}).get("rooms", {}) if isinstance(receipt.get("outcomes"), Mapping) else {}
+    if not isinstance(rooms, Mapping):
+        return {"room_count": 0, "command_count": 0, "accepted_count": 0,
+                "confirmed_room_count": 0, "reasons": []}
+    command_count = accepted_count = confirmed_room_count = 0
+    reasons: list[str] = []
+    for room in rooms.values():
+        if not isinstance(room, Mapping):
+            continue
+        if room.get("status") == "confirmed":
+            confirmed_room_count += 1
+        reason = room.get("reason")
+        if isinstance(reason, str) and reason != "none" and reason not in reasons:
+            reasons.append(reason)
+        devices = room.get("devices")
+        if not isinstance(devices, Mapping):
+            continue
+        for device in devices.values():
+            if not isinstance(device, Mapping):
+                continue
+            command_count += device.get("command_count", 0) if type(device.get("command_count")) is int else 0
+            accepted_count += device.get("accepted_count", 0) if type(device.get("accepted_count")) is int else 0
+            reason = device.get("reason")
+            if isinstance(reason, str) and reason != "none" and reason not in reasons:
+                reasons.append(reason)
+    return {"room_count": len(rooms), "command_count": command_count,
+            "accepted_count": accepted_count,
+            "confirmed_room_count": confirmed_room_count, "reasons": reasons}
 
 
 class ClimateAdminImportView(_ClimateView):
