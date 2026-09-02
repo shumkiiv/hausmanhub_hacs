@@ -28,6 +28,7 @@ from .climate_application import (
     ClimateDesiredStateChanges,
     build_climate_application_plan,
 )
+from .climate_application_models import ClimateTargetAxis
 
 
 CONTOUR_APPLY_REQUEST_CONTRACT_NAME = "hausman-hub-contour-apply-request"
@@ -733,13 +734,17 @@ def build_contour_apply_plan(
     explicit_temperature_alignment: bool = False,
     explicit_temperature_targets: Mapping[str, float] | None = None,
 ) -> ContourApplyPlan:
+    requested_temperature = (
+        ClimateTargetAxis.TEMPERATURE in desired_state_changes.requested_axes
+    )
     assignments = _selected_assignments(contour, room_ids)
     application_contour = _temperature_only_application_contour(
         contour,
         registry,
         target_room_ids=tuple(assignment.room_id for assignment in assignments),
         desired_state_changes=desired_state_changes,
-        force_temperature_only=explicit_temperature_alignment,
+        force_temperature_only=explicit_temperature_alignment or requested_temperature,
+        requested_axes=desired_state_changes.requested_axes,
     )
     try:
         native_plan = build_climate_application_plan(
@@ -758,9 +763,17 @@ def build_contour_apply_plan(
                         assignment.room_id: assignment.target_temperature
                         for assignment in assignments
                     }
-                    if explicit_temperature_alignment
+                    if explicit_temperature_alignment or requested_temperature
                     else None
                 )
+            ),
+            explicit_humidity_targets=(
+                {
+                    assignment.room_id: assignment.target_humidity
+                    for assignment in assignments
+                }
+                if ClimateTargetAxis.HUMIDITY in desired_state_changes.requested_axes
+                else None
             ),
         )
     except ClimateApplicationViolation as error:
@@ -777,6 +790,7 @@ def _temperature_only_application_contour(
     target_room_ids: tuple[str, ...],
     desired_state_changes: ClimateDesiredStateChanges,
     force_temperature_only: bool = False,
+    requested_axes: frozenset[ClimateTargetAxis] = frozenset(),
 ) -> ContourDefinition:
     """Limit an explicit temperature operation to its actual actuator."""
 
@@ -785,7 +799,8 @@ def _temperature_only_application_contour(
         or desired_state_changes.automatic_mode != 0
         or (
             not force_temperature_only
-            and desired_state_changes.temperature <= 0
+        and desired_state_changes.temperature <= 0
+        and not requested_axes
         )
     ):
         return contour
@@ -800,7 +815,15 @@ def _temperature_only_application_contour(
                     for device_id in room.device_ids
                     if (
                         (device := registry.device(device_id)) is not None
-                        and device.kind is ClimateDeviceKind.AIR_CONDITIONER
+                        and (
+                            device.kind is ClimateDeviceKind.AIR_CONDITIONER
+                            and (
+                                not requested_axes
+                                or ClimateTargetAxis.TEMPERATURE in requested_axes
+                            )
+                            or device.kind is ClimateDeviceKind.HUMIDIFIER
+                            and ClimateTargetAxis.HUMIDITY in requested_axes
+                        )
                     )
                 ),
             )
@@ -827,6 +850,7 @@ def local_desired_state_changes(
     assignments = _selected_assignments(current, target_room_ids)
     previous_rooms = {room.room_id: room for room in previous.rooms}
     temperature_changes = 0
+    humidity_changes = 0
     strategy_changes = 0
     for assignment in assignments:
         prior = previous_rooms.get(assignment.room_id)
@@ -834,10 +858,13 @@ def local_desired_state_changes(
             raise ContourApplyViolation("previous climate room is unavailable")
         if not _same_number(prior.target_temperature, assignment.target_temperature):
             temperature_changes += 1
+        if prior.target_humidity != assignment.target_humidity:
+            humidity_changes += 1
         if prior.strategy is not assignment.strategy:
             strategy_changes += 1
     return ClimateDesiredStateChanges(
         temperature=temperature_changes,
+        humidity=humidity_changes,
         strategy=strategy_changes,
         automatic_mode=0,
     )

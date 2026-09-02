@@ -459,18 +459,40 @@ class ClimateTabletProjectionTest(unittest.TestCase):
         self.assertEqual(device["deviation_guard"], projected["deviation_guard"])
         contract_validator("climate-runtime.schema.json").validate(payload)
 
-    def test_sync_stays_available_when_home_target_editing_is_blocked(self) -> None:
+    def test_typed_home_targets_do_not_depend_on_legacy_settings_apply(self) -> None:
         home = managed_home()
         home["contours"][0]["execution"]["settings_apply"]["available"] = False
 
         payload = climate_tablet_snapshot(home, climate_mode="managed")
 
         self.assertEqual(
-            ["synchronize_home"],
+            ["set_home_targets", "synchronize_home"],
             payload["home_control"]["allowed_actions"],
         )
         self.assertTrue(payload["home_control"]["enabled"])
         contract_validator("climate-runtime.schema.json").validate(payload)
+
+    def test_home_targets_fail_closed_for_every_native_preflight_gap(self) -> None:
+        cases: list[tuple[str, callable]] = [
+            ("not-managed", lambda home: home["rooms"][0]["devices"][0].update(control_scope="observed")),
+            ("stale", lambda home: home["climate"].update(fresh=False)),
+            ("registry", lambda home: home["reconciliation"].update(matches=False)),
+            ("nonautomatic-contour", lambda home: home["contours"][0].update(mode="manual")),
+            ("manual-exclusion", lambda home: home["rooms"][0].update(mode="manual")),
+            ("native-plan-incomplete", lambda home: home["rooms"][0]["control"].update(allowed_actions=[])),
+        ]
+        for name, mutate in cases:
+            with self.subTest(name=name):
+                home = managed_home()
+                mutate(home)
+                payload = climate_tablet_snapshot(home, climate_mode="managed")
+                self.assertNotIn("set_home_targets", payload["home_control"]["allowed_actions"])
+
+        pending = climate_tablet_snapshot(
+            managed_home(), climate_mode="managed",
+            active_operations=({"room_id": None, "status": "pending"},),
+        )
+        self.assertNotIn("set_home_targets", pending["home_control"]["allowed_actions"])
 
     def test_stale_projection_keeps_manual_exclusion_available(self) -> None:
         home = managed_home()
@@ -897,6 +919,61 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         unsafe["parameters"] = {"force": True}
         with self.assertRaises(ClimateTabletViolation):
             await self.service.async_execute(unsafe)
+
+    async def test_home_targets_dispatch_once_for_temperature_and_humidity_shapes(self) -> None:
+        for suffix, parameters in (
+            ("temperature", {"target_temperature": 24.5}),
+            ("both", {"target_temperature": 24.5, "target_humidity": 50}),
+        ):
+            with self.subTest(shape=suffix):
+                runtime = FakeRuntime(copy.deepcopy(self.home))
+                service = ClimateTabletService(
+                    runtime, MemoryOperationStore(),
+                    operation_id_factory=lambda: "0123456789abcdef0123456789abcdef",
+                    now_ms=lambda: self.now,
+                )
+                request = {
+                    "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+                    "request_id": f"tablet.climate.home.{suffix}",
+                    "correlation_id": f"corr.home.{suffix}",
+                    "expected_state_revision": runtime.home["state_revision"],
+                    "action": "set_home_targets",
+                    "room_id": None,
+                    "parameters": parameters,
+                }
+
+                receipt = await service.async_execute(request)
+
+                self.assertEqual("confirmed", receipt["status"])
+                self.assertTrue(receipt["confirmed"])
+                self.assertEqual(1, len(runtime.commands))
+                self.assertEqual("climate", runtime.commands[0]["contour_id"])
+                self.assertEqual(f"corr.home.{suffix}", runtime.commands[0]["correlation_id"])
+                self.assertTrue(runtime.commands[0]["confirm"])
+
+    async def test_home_target_preflight_denial_never_reserves_or_dispatches(self) -> None:
+        for name, mutate in (
+            ("storage", lambda home: home["rooms"][0]["control"].update(allowed_actions=[])),
+            ("executor", lambda home: home["climate"].update(fresh=False)),
+            ("native-preflight", lambda home: home["rooms"][0].update(mode="manual")),
+        ):
+            with self.subTest(name=name):
+                home = copy.deepcopy(self.home)
+                mutate(home)
+                runtime = FakeRuntime(home)
+                store = MemoryOperationStore()
+                service = ClimateTabletService(runtime, store)
+                request = {
+                    "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+                    "request_id": f"tablet.climate.denied.{name}",
+                    "expected_state_revision": home["state_revision"],
+                    "action": "set_home_targets", "room_id": None,
+                    "parameters": {"target_temperature": 24.5},
+                }
+                with self.assertRaises(ClimateTabletViolation):
+                    await service.async_execute(request)
+                self.assertEqual([], store.saved)
+                self.assertEqual([], runtime.commands)
 
     async def test_set_room_mode_dispatches_existing_contract_action(self) -> None:
         self.runtime.home["rooms"][0]["control"]["allowed_actions"].append(

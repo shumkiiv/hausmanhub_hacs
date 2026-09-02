@@ -1885,8 +1885,8 @@ class HomeClimateTargetsView(_ClimateView):
             return _not_found(self)
         if not _is_local_tablet_request(request):
             return _forbidden(self)
-        runtime = self._runtime()
-        if runtime is None:
+        tablet = self._climate_tablet()
+        if tablet is None:
             return self._unavailable()
         try:
             payload = await _request_json(request)
@@ -1895,7 +1895,24 @@ class HomeClimateTargetsView(_ClimateView):
                 field="correlation_id",
                 fallback=payload.get("request_id"),
             )
-            receipt = await runtime.async_home_climate_targets(payload)
+            snapshot = await tablet.async_snapshot()
+            parameters = {
+                key: payload[key]
+                for key in ("target_temperature", "target_humidity")
+                if key in payload and payload[key] is not None
+            }
+            receipt = await tablet.async_execute({
+                "contract": {
+                    "name": "hausman-hub-climate-action-request", "version": 1,
+                },
+                "request_id": payload["request_id"],
+                "correlation_id": correlation_id,
+                "expected_state_revision": snapshot["state_revision"],
+                "expected_control_revision": snapshot["control_revision"],
+                "reliability_profile": "climate_reliability_v1",
+                "action": "set_home_targets", "room_id": None,
+                "parameters": parameters,
+            })
         except (HomeClimateTargetsViolation, CorrelationIdError):
             return self.json_message(
                 "The home climate target request is invalid.",
@@ -1906,7 +1923,7 @@ class HomeClimateTargetsView(_ClimateView):
             return self._unavailable()
         except Exception:
             return self._unavailable()
-        response = receipt.as_payload()
+        response = dict(receipt)
         response["correlation_id"] = correlation_id
         publish_command_receipt(self._hass, response, operation="home_climate_targets")
         return self.json(response, headers=NO_STORE_HEADERS)

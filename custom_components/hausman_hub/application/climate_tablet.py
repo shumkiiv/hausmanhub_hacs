@@ -609,10 +609,6 @@ def climate_tablet_snapshot(
                 ],
             }
         )
-    execution = contour.get("execution") if isinstance(contour, Mapping) else None
-    settings_apply = (
-        execution.get("settings_apply") if isinstance(execution, Mapping) else None
-    )
     home_base_allowed = bool(
         not shadow
         and fresh
@@ -622,10 +618,18 @@ def climate_tablet_snapshot(
         and contour.get("mode") == "automatic"
         and not active_operations
     )
+    # Whole-home targets are dispatched through the typed native climate
+    # operation, not the legacy settings-apply endpoint.  Its preflight is
+    # represented by the same current room controls used by that operation.
+    # Do not let an unrelated legacy capability hide a valid typed command.
     home_targets_allowed = bool(
         home_base_allowed
-        and isinstance(settings_apply, Mapping)
-        and settings_apply.get("available") is True
+        and projected_rooms
+        and all(
+            room["mode"] == "automatic"
+            and "set_room_target" in room["control"]["allowed_actions"]
+            for room in projected_rooms
+        )
     )
     home_actions = [
         *(["set_home_targets"] if home_targets_allowed else []),

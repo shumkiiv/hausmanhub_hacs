@@ -32,8 +32,12 @@ from custom_components.hausman_hub.application.climate_native_projections import
     native_device_command_types,
 )
 from custom_components.hausman_hub.application.contour_apply import (
+    ClimateTargetAxis,
     ContourApplyViolation,
     contour_fingerprint,
+)
+from custom_components.hausman_hub.application.climate_application_models import (
+    ClimateDesiredStateChanges,
 )
 from custom_components.hausman_hub.application.contours import (
     build_climate_contour_setup,
@@ -210,6 +214,23 @@ class NativeAndroidParityTest(unittest.TestCase):
                 "unregistered_device_count": 0,
             },
             result["reconciliation"],
+        )
+
+
+class RequestedHomeTargetAxisTest(unittest.TestCase):
+    """The native plan carries only the axes the caller selected."""
+
+    def test_desired_changes_retain_exact_requested_axes(self) -> None:
+        changes = ClimateDesiredStateChanges(
+            temperature=1,
+            humidity=0,
+            strategy=0,
+            automatic_mode=0,
+            requested_axes=frozenset({ClimateTargetAxis.TEMPERATURE}),
+        )
+
+        self.assertEqual(
+            frozenset({ClimateTargetAxis.TEMPERATURE}), changes.requested_axes
         )
 
 

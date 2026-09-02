@@ -64,6 +64,7 @@ def build_climate_application_plan(
     desired_state_changes: ClimateDesiredStateChanges,
     ir_code_service: object | None = None,
     explicit_temperature_targets: Mapping[str, float] | None = None,
+    explicit_humidity_targets: Mapping[str, int] | None = None,
 ) -> ClimateApplicationPlan:
     if not isinstance(contour, ContourDefinition) or contour.contour_id != "climate":
         raise ClimateApplicationViolation("climate contour is unavailable")
@@ -94,6 +95,7 @@ def build_climate_application_plan(
             call_plan,
             observation,
             None if explicit_temperature_targets is None else explicit_temperature_targets.get(room_id),
+            None if explicit_humidity_targets is None else explicit_humidity_targets.get(room_id),
         )
         for room_id in target_ids
     )
@@ -147,6 +149,7 @@ def _gate_room(
     call_plan: ClimateHaCallPlanSnapshot,
     observation: ClimateObservationSnapshot,
     explicit_temperature_target: float | None,
+    explicit_humidity_target: int | None,
 ) -> ClimateApplicationRoomGate:
     reasons: list[ClimateApplicationDenialReason] = []
     if contour.mode is not ContourMode.AUTOMATIC:
@@ -203,6 +206,16 @@ def _gate_room(
             reasons.append(ClimateApplicationDenialReason.TRANSLATION_INCOMPLETE)
         else:
             strict_calls = explicit_calls
+    if explicit_humidity_target is not None and not reasons:
+        if explicit_temperature_target is None:
+            strict_calls = ()
+        explicit_calls = _explicit_humidity_calls_if_complete(
+            actuators, observation, explicit_humidity_target,
+        )
+        if explicit_calls is None:
+            reasons.append(ClimateApplicationDenialReason.TRANSLATION_INCOMPLETE)
+        else:
+            strict_calls = strict_calls + explicit_calls
     if reasons:
         return ClimateApplicationRoomGate(
             room_id=room_id,
@@ -327,6 +340,32 @@ def _explicit_temperature_calls_if_complete(
                 owner_device_id=device.device_id,
             )
         )
+    return tuple(calls)
+
+
+def _explicit_humidity_calls_if_complete(
+    actuators: tuple[ClimateDevice, ...], observation: ClimateObservationSnapshot,
+    target_humidity: int,
+) -> tuple[ClimateHaServiceCall, ...] | None:
+    """Build only humidifier target calls, without touching temperature or mode."""
+    calls: list[ClimateHaServiceCall] = []
+    for device in actuators:
+        if device.kind is not ClimateDeviceKind.HUMIDIFIER:
+            continue
+        observed = observation.device(device.device_id)
+        endpoint = device.endpoint(ClimateEndpointRole.CONTROL)
+        if observed is None or observed.current_target_humidity == target_humidity:
+            continue
+        if (
+            ClimateCapability.TARGET_HUMIDITY not in device.capabilities
+            or endpoint is None or endpoint.entity_id.split(".", 1)[0] != "humidifier"
+        ):
+            return None
+        calls.append(ClimateHaServiceCall(
+            service=ClimateHaService.HUMIDIFIER_SET_HUMIDITY,
+            entity_id=endpoint.entity_id, humidity=target_humidity,
+            owner_device_id=device.device_id,
+        ))
     return tuple(calls)
 
 

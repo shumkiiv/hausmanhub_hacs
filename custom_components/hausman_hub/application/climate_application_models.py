@@ -24,6 +24,13 @@ class ClimateApplicationGateStatus(StrEnum):
     DENIED = "denied"
 
 
+class ClimateTargetAxis(StrEnum):
+    """Closed set of whole-home target axes owned by one command."""
+
+    TEMPERATURE = "temperature"
+    HUMIDITY = "humidity"
+
+
 class ClimateApplicationDenialReason(StrEnum):
     CONTOUR_NOT_AUTOMATIC = "contour_not_automatic"
     RUNTIME_NOT_MANAGED = "runtime_not_managed"
@@ -49,15 +56,24 @@ class ClimateDesiredStateChanges:
     temperature: int
     strategy: int
     automatic_mode: int
+    humidity: int = 0
+    requested_axes: frozenset[ClimateTargetAxis] = frozenset()
 
     def __post_init__(self) -> None:
         if any(
             type(value) is not int or value < 0
-            for value in (self.temperature, self.strategy, self.automatic_mode)
+            for value in (
+                self.temperature, self.humidity, self.strategy, self.automatic_mode
+            )
         ):
             raise ClimateApplicationViolation(
                 "local desired-state changes must be non-negative integers"
             )
+        if (
+            not isinstance(self.requested_axes, frozenset)
+            or any(not isinstance(axis, ClimateTargetAxis) for axis in self.requested_axes)
+        ):
+            raise ClimateApplicationViolation("requested climate axes are invalid")
 
 
 @dataclass(frozen=True, slots=True)

@@ -205,6 +205,7 @@ from .contour_apply import (
     local_desired_state_changes,
     parse_contour_apply_request,
 )
+from .climate_application_models import ClimateTargetAxis
 
 _CLIMATE_READBACK_ATTEMPTS = 33
 _CLIMATE_READBACK_INTERVAL_SECONDS = 0.25
@@ -1217,7 +1218,9 @@ class ClimateRuntime:
                 "correlation_id": canonical.correlation_id, "request_id": canonical.request_id,
                 "contour_id": "climate", "target_temperature": canonical.parameters.get("target_temperature"),
                 "target_humidity": canonical.parameters.get("target_humidity"), "confirm": True,
-            })
+            }, reliability_request=canonical,
+            pre_reserved_resulting_control_revision=resulting_control_revision,
+            external_reliability_identity=tablet_identity)
         if canonical.action == "synchronize_home":
             return await self.async_synchronize_climate()
         if canonical.action == "set_room_mode":
@@ -1685,7 +1688,11 @@ class ClimateRuntime:
                 "changed": changed,
             }
 
-    async def async_home_climate_targets(self, payload: object) -> ContourApplyReceipt:
+    async def async_home_climate_targets(
+        self, payload: object, *, reliability_request: object | None = None,
+        pre_reserved_resulting_control_revision: int | None = None,
+        external_reliability_identity: Mapping[str, object] | None = None,
+    ) -> ContourApplyReceipt:
         """Save and apply one common temperature and/or humidity target."""
 
         request = parse_home_climate_targets_request(payload)
@@ -1693,6 +1700,15 @@ class ClimateRuntime:
             self._require_native_contour_apply_mode()
             if self._contour_store is None:
                 raise ClimateRuntimeUnavailable("contour storage is unavailable")
+            if pre_reserved_resulting_control_revision is not None:
+                current = await self._async_sync_control_revision_unlocked()
+                expected = getattr(reliability_request, "expected_control_revision", None)
+                if (
+                    not is_control_revision(expected)
+                    or pre_reserved_resulting_control_revision != expected + 1
+                    or current != pre_reserved_resulting_control_revision
+                ):
+                    raise ClimateRuntimeUnavailable("reserved climate control revision is stale")
             contour = self._climate_contour()
             try:
                 updated = with_home_climate_targets(
@@ -1707,6 +1723,15 @@ class ClimateRuntime:
                 contour,
                 updated_contour,
             )
+            axes = frozenset(
+                axis for axis, value in (
+                    (ClimateTargetAxis.TEMPERATURE, request.target_temperature),
+                    (ClimateTargetAxis.HUMIDITY, request.target_humidity),
+                ) if value is not None
+            )
+            desired_state_changes = replace(
+                desired_state_changes, requested_axes=axes,
+            )
             await self._contour_store.async_save(updated)
             self._contours = updated
             return await self._async_apply_native_contour_unlocked(
@@ -1717,6 +1742,9 @@ class ClimateRuntime:
                     action=ClimateControlAction.APPLY_SAVED_SETTINGS,
                 ),
                 desired_state_changes=desired_state_changes,
+                reliability_request=reliability_request,
+                resulting_control_revision=pre_reserved_resulting_control_revision,
+                external_reliability_identity=external_reliability_identity,
             )
 
     async def async_room_humidity_target(
