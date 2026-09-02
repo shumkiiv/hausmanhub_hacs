@@ -569,8 +569,8 @@ class NativeClimateApplicationPlannerTest(unittest.TestCase):
 
         self.assertEqual(living.device_ids, scoped.rooms[0].device_ids)
 
-    def test_same_explicit_target_keeps_ac_only_scope_in_a_mixed_room(self) -> None:
-        """A new same-target request must never widen to floor or radiator."""
+    def test_explicit_temperature_target_covers_all_temperature_actuators_in_a_mixed_room(self) -> None:
+        """An explicit temperature target covers AC, floor heat and radiator."""
 
         registry, contour, observation = _native_inputs()
         air_conditioner = next(
@@ -655,7 +655,11 @@ class NativeClimateApplicationPlannerTest(unittest.TestCase):
         )
 
         self.assertEqual(
-            (air_conditioner.device_id,),
+            (
+                air_conditioner.device_id,
+                floor.device_id,
+                radiator.device_id,
+            ),
             tuple(call.owner_device_id for call in same_target.strict_calls),
         )
 
@@ -667,7 +671,11 @@ class NativeClimateApplicationPlannerTest(unittest.TestCase):
                     current_target_temperature=25.0,
                     observed_at=NOW,
                 )
-                if device.device_id == air_conditioner.device_id
+                if device.device_id in {
+                    air_conditioner.device_id,
+                    floor.device_id,
+                    radiator.device_id,
+                }
                 else device
                 for device in observation.devices
             ),
@@ -706,13 +714,18 @@ class NativeClimateApplicationPlannerTest(unittest.TestCase):
         )
 
         scope = metadata["resolved_scope"]
-        self.assertEqual([air_conditioner.device_id], scope["device_ids"])
+        expected_device_ids = [
+            air_conditioner.device_id,
+            floor.device_id,
+            radiator.device_id,
+        ]
+        self.assertEqual(expected_device_ids, scope["device_ids"])
         self.assertEqual(
-            [{"room_id": "living", "device_ids": [air_conditioner.device_id]}],
+            [{"room_id": "living", "device_ids": expected_device_ids}],
             scope["devices_by_room"],
         )
         self.assertEqual(
-            {air_conditioner.device_id},
+            set(expected_device_ids),
             set(metadata["desired_snapshot"]),
         )
 
@@ -728,19 +741,18 @@ class NativeClimateApplicationPlannerTest(unittest.TestCase):
             enhanced=metadata,
         )
         payload = record.receipt.as_payload()
-        leaf = payload["outcomes"]["rooms"]["living"]["devices"][
-            air_conditioner.device_id
-        ]
         observed_at = aligned_observation.observed_at
-        self.assertEqual("confirmed", leaf["status"])
-        self.assertEqual("already_in_sync", leaf["execution_state"])
-        self.assertEqual((0, 0), (leaf["command_count"], leaf["accepted_count"]))
-        self.assertEqual(observed_at, leaf["evidence"]["observed_at"])
-        self.assertEqual(25.0, leaf["evidence"]["reported_target_temperature"])
-        self.assertEqual(
-            25.0,
-            leaf["evidence"]["observed_actual"]["target_temperature"],
-        )
+        for device_id in expected_device_ids:
+            leaf = payload["outcomes"]["rooms"]["living"]["devices"][device_id]
+            self.assertEqual("confirmed", leaf["status"])
+            self.assertEqual("already_in_sync", leaf["execution_state"])
+            self.assertEqual((0, 0), (leaf["command_count"], leaf["accepted_count"]))
+            self.assertEqual(observed_at, leaf["evidence"]["observed_at"])
+            self.assertEqual(25.0, leaf["evidence"]["reported_target_temperature"])
+            self.assertEqual(
+                25.0,
+                leaf["evidence"]["observed_actual"]["target_temperature"],
+            )
         schema = json.loads(
             (
                 Path(__file__).resolve().parents[1]
