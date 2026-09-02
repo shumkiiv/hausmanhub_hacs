@@ -1245,7 +1245,10 @@ class ClimateTabletService:
                 resulting_control_revision=next_control_revision,
             )
             if preflight_scope is not None:
-                receipt["action_snapshot"] = {"resolved_scope": preflight_scope}
+                receipt["action_snapshot"] = {
+                    **dict(receipt.get("action_snapshot", {})),
+                    "resolved_scope": preflight_scope,
+                }
             if receipt.get("accepted") is True:
                 self._control_revision = next_control_revision
                 intent_key = _intent_key(request)
@@ -1272,6 +1275,7 @@ class ClimateTabletService:
             await self._async_save()
             frozen_scope = receipt.get("action_snapshot", {}).get("resolved_scope", {})
             physical_started = False
+            native_terminal_checkpoint_failed = False
             dispatch_boundary: int | None = None
             pre_dispatch_metadata: dict[tuple[str, str], dict[str, object]] = {}
             try:
@@ -1489,15 +1493,22 @@ class ClimateTabletService:
                 ):
                     self._desired_intents.pop(_intent_key(request), None)
                     receipt = _terminal_receipt(
-                        request,
-                        operation_id,
-                        status="unavailable",
+                        request, operation_id, status="unavailable",
                         reason="action_unsupported",
                         message="Климатическая цель недоступна до отправки команды.",
-                        created_at=now,
-                        updated_at=self._safe_now(),
-                        snapshot=snapshot,
+                        created_at=now, updated_at=self._safe_now(), snapshot=snapshot,
                         resulting_control_revision=self._control_revision,
+                    )
+                    receipt["action_snapshot"] = {
+                        **dict(receipt.get("action_snapshot", {})),
+                        "resolved_scope": dict(frozen_scope),
+                    }
+                    receipt = _reliable_receipt(
+                        receipt, request, snapshot, self._control_revision,
+                        reliability_metadata=self._last_reliability_metadata,
+                    )
+                    native_terminal_checkpoint_failed = bool(
+                        getattr(error, "home_target_terminal_persist_failed", False)
                     )
                     final_ledger = _reliable_dispatch_ledger(
                         receipt, "blocked_before_dispatch"
@@ -1538,22 +1549,22 @@ class ClimateTabletService:
                     # a misleading started/partial receipt.
                     self._desired_intents.pop(_intent_key(request), None)
                     receipt = _terminal_receipt(
-                        request,
-                        operation_id,
-                        status="unavailable",
-                        # The v1 public contract has no separate CAS reason.
-                        # Keep its compatible unavailable code and preserve the
-                        # precise conflict only in the human message.
+                        request, operation_id, status="unavailable",
                         reason="action_unsupported",
-                        message=(
-                            "Климатическая цель изменилась другой командой."
-                            if getattr(error, "reserved_tablet_pre_dispatch_conflict", False)
-                            else "Климатическая цель недоступна до отправки команды."
-                        ),
-                        created_at=now,
-                        updated_at=self._safe_now(),
-                        snapshot=snapshot,
+                        message="Климатическая цель недоступна до отправки команды.",
+                        created_at=now, updated_at=self._safe_now(), snapshot=snapshot,
                         resulting_control_revision=self._control_revision,
+                    )
+                    receipt["action_snapshot"] = {
+                        **dict(receipt.get("action_snapshot", {})),
+                        "resolved_scope": dict(frozen_scope),
+                    }
+                    receipt = _reliable_receipt(
+                        receipt, request, snapshot, self._control_revision,
+                        reliability_metadata=self._last_reliability_metadata,
+                    )
+                    native_terminal_checkpoint_failed = bool(
+                        getattr(error, "home_target_terminal_persist_failed", False)
                     )
                     final_ledger = _reliable_dispatch_ledger(
                         receipt, "blocked_before_dispatch"
@@ -1593,6 +1604,11 @@ class ClimateTabletService:
                 final_ledger if request.reliability_profile == "climate_reliability_v1" and physical_started else pending_ledger,
             )
             await self._async_save()
+            if native_terminal_checkpoint_failed:
+                # The tablet receipt is durable, but the paired native record
+                # could not be closed. Do not issue another physical command
+                # from this process against that ambiguous native history.
+                self._persistence_failed = True
             return dict(receipt)
 
     async def async_execute_legacy_home_targets(
@@ -3484,6 +3500,27 @@ def _valid_reliable_dispatch_ledger(
             )
         )
     if state in {"pending_expired", "blocked_before_dispatch"}:
+        if (
+            state == "blocked_before_dispatch"
+            and dispatched_at is None
+            and sources == {}
+            and receipt.get("status") == "unavailable"
+            and receipt.get("accepted") is False
+            and receipt.get("confirmed") is False
+            and receipt.get("final") is True
+            and _reliable_intent_has_status(receipt, "unsaved_unavailable")
+            and receipt.get("reason") == "action_unsupported"
+            and receipt.get("message_code") == "unavailable"
+            and receipt.get("unfinished_device_count") == 0
+            and isinstance(leaves, list)
+            and all(
+                leaf.get("status") == "not_attempted"
+                and leaf.get("execution_state") == "blocked_before_dispatch"
+                and _strict_leaf_counts(leaf, 0, 0)
+                for leaf in leaves
+            )
+        ):
+            return True
         return (
             dispatched_at is None
             and sources == {}

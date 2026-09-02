@@ -213,6 +213,33 @@ class SharedAuthenticatedLedgerMemoryStore(AuthenticatedLedgerMemoryStore):
             return self._control_revision
 
 
+class FailingDirectControlCheckpointStore(SharedAuthenticatedLedgerMemoryStore):
+    """Inject one native checkpoint failure without hiding saved history."""
+
+    def __init__(
+        self,
+        *,
+        fail_on_direct_save: int | None = None,
+        fail_from_direct_save: int | None = None,
+    ) -> None:
+        super().__init__()
+        self.fail_on_direct_save = fail_on_direct_save
+        self.fail_from_direct_save = fail_from_direct_save
+        self.direct_save_count = 0
+
+    async def async_save_direct_control(self, records: object) -> None:
+        self.direct_save_count += 1
+        if (
+            self.direct_save_count == self.fail_on_direct_save
+            or (
+                self.fail_from_direct_save is not None
+                and self.direct_save_count >= self.fail_from_direct_save
+            )
+        ):
+            raise RuntimeError("injected direct control checkpoint failure")
+        await super().async_save_direct_control(records)
+
+
 def native_home_target_runtime(
     *,
     include_humidifier: bool,
@@ -1440,6 +1467,136 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("unavailable", receipt["status"])
         self.assertEqual(before, contour_store.registry)
         self.assertEqual([], contour_store.saved)
+        self.assertEqual([], executor.batches)
+
+    async def test_reserved_home_target_contour_save_failure_closes_native_checkpoint_without_dispatch(self) -> None:
+        """A failed contour save closes the already durable native reservation."""
+        runtime, store, contour_store, executor = native_home_target_runtime(
+            include_humidifier=False,
+        )
+        await runtime.async_start()
+        contour_before = contour_store.registry
+        contour_store.fail = True
+        service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await service.async_load()
+        request = {
+            "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+            "request_id": "tablet.climate.home-contour-save-failure",
+            "correlation_id": "corr.home-contour-save-failure",
+            "expected_state_revision": 0,
+            "expected_control_revision": 0,
+            "reliability_profile": "climate_reliability_v1",
+            "action": "set_home_targets",
+            "room_id": None,
+            "parameters": {"target_temperature": 25.5},
+        }
+
+        receipt = await service.async_execute(request)
+        duplicate = await service.async_execute(request)
+
+        self.assertEqual("unavailable", receipt["status"], receipt)
+        self.assertTrue(receipt["final"])
+        self.assertTrue(
+            climate_tablet_module._receipt_matches_request(
+                receipt, parse_climate_tablet_action(request)
+            ),
+            receipt,
+        )
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(receipt["operation_id"], duplicate["operation_id"])
+        self.assertEqual(contour_before, contour_store.registry)
+        self.assertEqual([], contour_store.saved)
+        self.assertEqual([], executor.batches)
+        leaf = receipt["outcomes"]["rooms"]["living"]["devices"]["living_air_conditioner"]
+        self.assertEqual("not_attempted", leaf["status"])
+        self.assertEqual("device_unavailable", leaf["reason"])
+        self.assertEqual("blocked_before_dispatch", leaf["execution_state"])
+        native_record = store._direct_control_records[0]
+        self.assertEqual("unavailable", native_record["receipt"]["status"])
+        native_leaf = native_record["receipt"]["outcomes"]["rooms"]["living"]["devices"]["living_air_conditioner"]
+        self.assertEqual(
+            "blocked_before_dispatch",
+            native_leaf["execution_state"],
+        )
+        self.assertEqual((0, 0), (native_leaf["command_count"], native_leaf["accepted_count"]))
+
+        restarted_runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateControlMode.MANAGED),
+            registry_store=runtime._registry_store,
+            contour_store=contour_store,
+            strict_ha_call_executor=executor,
+            ha_state_view=runtime._ha_state_view,
+            operation_id_factory=lambda: "b" * 32,
+            now_ms=lambda: 1784280005000,
+            direct_control_store=store,
+        )
+        await restarted_runtime.async_start()
+        restarted = ClimateTabletService(
+            restarted_runtime, store, now_ms=lambda: 1784280005000,
+        )
+        await restarted.async_load()
+        after_restart = await restarted.async_execute(request)
+
+        self.assertTrue(after_restart["duplicate"])
+        self.assertEqual(receipt["operation_id"], after_restart["operation_id"])
+        self.assertEqual([], executor.batches)
+
+    async def test_reserved_home_target_terminal_native_checkpoint_failure_fails_closed(self) -> None:
+        """A stale native pending record is never allowed to trigger a retry."""
+        runtime, _store, contour_store, executor = native_home_target_runtime(
+            include_humidifier=False,
+        )
+        await runtime.async_start()
+        store = FailingDirectControlCheckpointStore(fail_on_direct_save=2)
+        runtime._direct_control_store = store
+        contour_before = contour_store.registry
+        contour_store.fail = True
+        service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await service.async_load()
+        request = {
+            "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+            "request_id": "tablet.climate.home-terminal-checkpoint-failure",
+            "correlation_id": "corr.home-terminal-checkpoint-failure",
+            "expected_state_revision": 0,
+            "expected_control_revision": 0,
+            "reliability_profile": "climate_reliability_v1",
+            "action": "set_home_targets",
+            "room_id": None,
+            "parameters": {"target_temperature": 25.5},
+        }
+
+        receipt = await service.async_execute(request)
+
+        self.assertEqual("unavailable", receipt["status"], receipt)
+        self.assertFalse(service.reliability_ready)
+        self.assertEqual(contour_before, contour_store.registry)
+        self.assertEqual([], contour_store.saved)
+        self.assertEqual([], executor.batches)
+        self.assertEqual("pending", store._direct_control_records[0]["receipt"]["status"])
+        with self.assertRaises(ClimateTabletUnavailable):
+            await service.async_execute({**request, "request_id": "tablet.climate.home-blocked"})
+
+        restarted_runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateControlMode.MANAGED),
+            registry_store=runtime._registry_store,
+            contour_store=contour_store,
+            strict_ha_call_executor=executor,
+            ha_state_view=runtime._ha_state_view,
+            operation_id_factory=lambda: "c" * 32,
+            now_ms=lambda: 1784280005000,
+            direct_control_store=store,
+        )
+        await restarted_runtime.async_start()
+        restarted = ClimateTabletService(
+            restarted_runtime, store, now_ms=lambda: 1784280005000,
+        )
+        await restarted.async_load()
+        duplicate = await restarted.async_execute(request)
+
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(receipt["operation_id"], duplicate["operation_id"])
         self.assertEqual([], executor.batches)
 
     async def test_reserved_home_humidity_target_rejects_missing_actuator_before_durable_or_executor_work(self) -> None:
