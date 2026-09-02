@@ -107,7 +107,10 @@ from .application.energy_history import (
 )
 from .application.energy_meter import EnergyMeterService, EnergyMeterViolation
 from .application.energy_meters import EnergyMetersService, Projection
-from .application.home_climate_targets import HomeClimateTargetsViolation
+from .application.home_climate_targets import (
+    HomeClimateTargetsViolation,
+    parse_home_climate_targets_request,
+)
 from .application.legacy_settings_apply import LegacySettingsApplyViolation
 from .application.legacy_settings_import import (
     LegacySettingsImportViolation,
@@ -1890,6 +1893,7 @@ class HomeClimateTargetsView(_ClimateView):
             return self._unavailable()
         try:
             payload = await _request_json(request)
+            legacy = parse_home_climate_targets_request(payload)
             correlation_id = resolve_correlation_id(
                 payload,
                 field="correlation_id",
@@ -1897,15 +1901,18 @@ class HomeClimateTargetsView(_ClimateView):
             )
             snapshot = await tablet.async_snapshot()
             parameters = {
-                key: payload[key]
-                for key in ("target_temperature", "target_humidity")
-                if key in payload and payload[key] is not None
+                key: value
+                for key, value in (
+                    ("target_temperature", legacy.target_temperature),
+                    ("target_humidity", legacy.target_humidity),
+                )
+                if value is not None
             }
             receipt = await tablet.async_execute({
                 "contract": {
                     "name": "hausman-hub-climate-action-request", "version": 1,
                 },
-                "request_id": payload["request_id"],
+                "request_id": legacy.request_id,
                 "correlation_id": correlation_id,
                 "expected_state_revision": snapshot["state_revision"],
                 "expected_control_revision": snapshot["control_revision"],
@@ -1923,10 +1930,34 @@ class HomeClimateTargetsView(_ClimateView):
             return self._unavailable()
         except Exception:
             return self._unavailable()
-        response = dict(receipt)
-        response["correlation_id"] = correlation_id
+        response = _legacy_home_target_receipt(receipt, correlation_id)
         publish_command_receipt(self._hass, response, operation="home_climate_targets")
         return self.json(response, headers=NO_STORE_HEADERS)
+
+
+def _legacy_home_target_receipt(receipt: Mapping[str, object], correlation_id: str) -> dict[str, object]:
+    """Project the coordinator receipt onto the unchanged legacy response."""
+    if not isinstance(receipt.get("operation_id"), str):
+        return {**receipt, "correlation_id": correlation_id}
+    status = receipt.get("status")
+    confirmed = status == "confirmed"
+    accepted = status in {"pending", "confirmed", "partial"}
+    return {
+        "contract": {"name": "hausman-hub-climate-control-receipt", "version": 1},
+        "operation_id": receipt["operation_id"], "request_id": receipt["request_id"],
+        "correlation_id": correlation_id, "contour_id": "climate",
+        "action": {"code": "apply_saved_settings", "name": "Применить настройки климата", "room_id": None, "target_temperature": None, "profile": None},
+        "status": status, "status_name": "Выполнено" if confirmed else "Результат неизвестен",
+        "accepted": accepted, "confirmed": confirmed,
+        "message": receipt.get("message", "Климатический контур обрабатывает новые цели."),
+        "confirmation_window_ms": 8000,
+        "read_back": {"attempted": confirmed, "matched": confirmed, "observed_at": receipt.get("updated_at"), "confirmed_room_count": 0},
+        "room_count": 0, "command_count": 0, "accepted_count": 0,
+        "confirmed_room_count": 0,
+        "changes": {"temperature": 0, "strategy": 0, "automatic_mode": 0},
+        "reasons": [], "reason_names": [],
+        "created_at": receipt.get("created_at"), "updated_at": receipt.get("updated_at"),
+    }
 
 
 class ClimateAdminImportView(_ClimateView):
