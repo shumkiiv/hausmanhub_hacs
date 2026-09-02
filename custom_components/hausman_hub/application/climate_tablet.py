@@ -779,6 +779,7 @@ class ClimateTabletService:
             or len(legacy_execution_facts) > MAX_RELIABLE_OPERATION_RECORDS
             or any(
                 not isinstance(request_id, str)
+                or _REQUEST_ID.fullmatch(request_id) is None
                 or not _valid_legacy_home_execution_fact(fact)
                 for request_id, fact in legacy_execution_facts.items()
             )
@@ -893,11 +894,12 @@ class ClimateTabletService:
         }
         if isinstance(state_checkpoint, Mapping):
             self._reliable_scope_bindings["__tablet_state__"] = dict(state_checkpoint)
-        self._legacy_home_execution_facts = {
-            request_id: dict(fact)
-            for request_id, fact in legacy_execution_facts.items()
-            if request_id in records
-        }
+        self._legacy_home_execution_facts = {}
+        for correlation_id, fact in legacy_execution_facts.items():
+            record = records.get(fact["request_id"])
+            if not _legacy_home_execution_fact_matches_record(correlation_id, fact, record):
+                raise ClimateTabletUnavailable("legacy climate execution facts are invalid")
+            self._legacy_home_execution_facts[correlation_id] = dict(fact)
         stored_intents = payload.get("desired_intents", {})
         if not isinstance(stored_intents, Mapping) or len(stored_intents) > 4096:
             raise ClimateTabletUnavailable("stored climate desired intent is invalid")
@@ -1103,6 +1105,7 @@ class ClimateTabletService:
         *,
         _lock_held: bool = False,
         _legacy_fail_fast: bool = False,
+        _legacy_correlation_id: str | None = None,
     ) -> dict[str, object]:
         """Reserve, execute at most once, persist and return one operation receipt."""
 
@@ -1581,6 +1584,10 @@ class ClimateTabletService:
                         snapshot=snapshot,
                         resulting_control_revision=self._control_revision,
                     )
+            if _legacy_correlation_id is not None:
+                self._legacy_home_execution_facts[_legacy_correlation_id] = (
+                    _legacy_home_execution_fact(receipt, request)
+                )
             self._remember(
                 request, receipt,
                 final_ledger if request.reliability_profile == "climate_reliability_v1" and physical_started else pending_ledger,
@@ -1620,6 +1627,19 @@ class ClimateTabletService:
                         code="revision_conflict",
                     )
                 return {**prior.receipt, "duplicate": True}
+            fact = self._legacy_home_execution_facts.get(correlation_id)
+            if fact is not None:
+                record = self._records_by_request.get(fact["request_id"])
+                if not _legacy_home_execution_fact_matches_record(
+                    correlation_id, fact, record
+                ):
+                    raise ClimateTabletUnavailable("legacy climate execution facts are invalid")
+                if fact["parameters_fingerprint"] != _canonical_fingerprint(canonical_parameters):
+                    raise ClimateTabletViolation(
+                        "correlation id was already used for other climate targets",
+                        code="revision_conflict",
+                    )
+                return {**record.receipt, "duplicate": True}
             snapshot = await self._snapshot_unlocked()
             payload = {
                 "contract": {
@@ -1639,12 +1659,9 @@ class ClimateTabletService:
             # produced its revision.  This keeps duplicate identity, pending
             # detection and reservation one atomic service operation.
             receipt = await self.async_execute(
-                payload, _lock_held=True, _legacy_fail_fast=True
+                payload, _lock_held=True, _legacy_fail_fast=True,
+                _legacy_correlation_id=correlation_id,
             )
-            self._legacy_home_execution_facts[request_id] = _legacy_home_execution_fact(
-                receipt
-            )
-            await self._async_save()
             return receipt
 
     async def async_operation(self, operation_id: str) -> dict[str, object]:
@@ -2140,9 +2157,16 @@ class ClimateTabletService:
             prepared_bindings.get("__tablet_state__"), main_payload,
             self._reliable_scope_integrity_key,
         )
-        prepared_bindings["__legacy_home_execution_facts__"] = (
-            self._legacy_home_execution_facts
-        )
+        legacy_facts = {
+            correlation_id: fact
+            for correlation_id, fact in self._legacy_home_execution_facts.items()
+            if _legacy_home_execution_fact_matches_record(
+                correlation_id, fact,
+                self._records_by_request.get(fact.get("request_id")),
+            )
+        }
+        self._legacy_home_execution_facts = legacy_facts
+        prepared_bindings["__legacy_home_execution_facts__"] = legacy_facts
         try:
             await save_bindings(prepared_bindings)
         except Exception:
@@ -2167,9 +2191,7 @@ class ClimateTabletService:
             prepared_bindings["__tablet_state__"], main_payload,
             self._reliable_scope_integrity_key,
         )
-        final_bindings["__legacy_home_execution_facts__"] = (
-            self._legacy_home_execution_facts
-        )
+        final_bindings["__legacy_home_execution_facts__"] = legacy_facts
         try:
             await save_bindings(final_bindings)
         except Exception:
@@ -2457,6 +2479,7 @@ class ClimateTabletService:
         self._request_by_operation.pop(record.receipt["operation_id"], None)
         if record.request.reliability_profile == "climate_reliability_v1":
             self._reliable_scope_binding_cleanup.add(request_id)
+            self._legacy_home_execution_facts.pop(record.request.correlation_id, None)
 
     def _prune_oldest_final_recovery(self) -> None:
         completed = [
@@ -4199,7 +4222,9 @@ def _terminal_receipt(
     return receipt
 
 
-def _legacy_home_execution_fact(receipt: Mapping[str, object]) -> dict[str, object]:
+def _legacy_home_execution_fact(
+    receipt: Mapping[str, object], request: ClimateTabletActionRequest,
+) -> dict[str, object]:
     """Persist only the private execution facts required by legacy replay."""
 
     operation_id = receipt.get("operation_id")
@@ -4207,6 +4232,10 @@ def _legacy_home_execution_fact(receipt: Mapping[str, object]) -> dict[str, obje
         raise ClimateTabletUnavailable("legacy climate execution facts are invalid")
     return {
         "operation_id": operation_id,
+        "request_id": request.request_id,
+        "correlation_id": request.correlation_id,
+        "request_fingerprint": request.fingerprint,
+        "parameters_fingerprint": _canonical_fingerprint(request.parameters),
         "status": receipt.get("status"),
         "room_count": receipt.get("room_count", 0),
         "command_count": receipt.get("command_count", 0),
@@ -4221,13 +4250,23 @@ def _valid_legacy_home_execution_fact(value: object) -> bool:
     """Keep the compatibility sidecar bounded and non-dispatchable."""
 
     if not isinstance(value, Mapping) or set(value) != {
-        "operation_id", "status", "room_count", "command_count",
+        "operation_id", "request_id", "correlation_id", "request_fingerprint",
+        "parameters_fingerprint", "status", "room_count", "command_count",
         "accepted_count", "confirmed_room_count", "read_back", "reasons",
     }:
         return False
     return bool(
         isinstance(value.get("operation_id"), str)
         and _OPERATION_ID.fullmatch(value["operation_id"]) is not None
+        and isinstance(value.get("request_id"), str)
+        and _REQUEST_ID.fullmatch(value["request_id"]) is not None
+        and isinstance(value.get("correlation_id"), str)
+        and _REQUEST_ID.fullmatch(value["correlation_id"]) is not None
+        and all(
+            isinstance(value.get(key), str)
+            and re.fullmatch(r"[a-f0-9]{64}", value[key]) is not None
+            for key in ("request_fingerprint", "parameters_fingerprint")
+        )
         and value.get("status") in {
             "confirmed", "pending", "partial", "rejected", "unavailable", "timed_out",
         }
@@ -4241,6 +4280,30 @@ def _valid_legacy_home_execution_fact(value: object) -> bool:
         and isinstance(value.get("read_back"), Mapping)
         and isinstance(value.get("reasons"), list)
         and all(isinstance(reason, str) for reason in value["reasons"])
+    )
+
+
+def _legacy_home_execution_fact_matches_record(
+    correlation_id: object,
+    fact: object,
+    record: _StoredOperation | None,
+) -> bool:
+    """Bind the private legacy projection to exactly one durable command."""
+
+    return bool(
+        isinstance(correlation_id, str)
+        and _REQUEST_ID.fullmatch(correlation_id) is not None
+        and _valid_legacy_home_execution_fact(fact)
+        and isinstance(record, _StoredOperation)
+        and fact["correlation_id"] == correlation_id
+        and fact["request_id"] == record.request.request_id
+        and fact["request_fingerprint"] == record.fingerprint
+        and fact["operation_id"] == record.receipt.get("operation_id")
+        and record.request.action == "set_home_targets"
+        and record.request.correlation_id == correlation_id
+        and fact["parameters_fingerprint"] == _canonical_fingerprint(
+            record.request.parameters
+        )
     )
 
 

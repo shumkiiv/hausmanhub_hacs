@@ -1391,7 +1391,7 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             first["operation_id"],
             sidecar["__legacy_home_execution_facts__"][
-                "tablet.climate.legacy-duplicate"
+                "corr.legacy-duplicate"
             ]["operation_id"],
         )
 
@@ -1400,7 +1400,7 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             first["operation_id"],
             restarted._legacy_home_execution_facts[
-                "tablet.climate.legacy-duplicate"
+                "corr.legacy-duplicate"
             ]["operation_id"],
         )
 
@@ -1417,6 +1417,38 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(duplicate["duplicate"])
         self.assertEqual(first["operation_id"], duplicate["operation_id"])
         self.assertEqual(1, len(runtime.commands))
+
+    async def test_legacy_home_correlation_is_the_durable_duplicate_identity(self) -> None:
+        """A transport request id cannot cause a second legacy home dispatch."""
+        runtime = FakeRuntime(managed_home())
+        runtime._mark_observed()
+        store = AuthenticatedLedgerMemoryStore()
+        service = ClimateTabletService(runtime, store)
+        await service.async_load()
+
+        first = await service.async_execute_legacy_home_targets(
+            request_id="tablet.climate.legacy-correlation-a",
+            correlation_id="corr.legacy-canonical",
+            parameters={"target_temperature": 24.5},
+        )
+        restarted = ClimateTabletService(runtime, store)
+        await restarted.async_load()
+        duplicate = await restarted.async_execute_legacy_home_targets(
+            request_id="tablet.climate.legacy-correlation-b",
+            correlation_id="corr.legacy-canonical",
+            parameters={"target_temperature": 24.5},
+        )
+
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(first["operation_id"], duplicate["operation_id"])
+        self.assertEqual(1, len(runtime.commands))
+        with self.assertRaises(ClimateTabletViolation) as conflict:
+            await restarted.async_execute_legacy_home_targets(
+                request_id="tablet.climate.legacy-correlation-c",
+                correlation_id="corr.legacy-canonical",
+                parameters={"target_temperature": 25.0},
+            )
+        self.assertEqual("revision_conflict", conflict.exception.code)
 
     async def test_home_target_preflight_denial_never_reserves_or_dispatches(self) -> None:
         for name, mutate in (
