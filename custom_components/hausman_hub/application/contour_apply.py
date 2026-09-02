@@ -403,10 +403,16 @@ def _live_device_outcomes(
                 "accepted_count": 0,
             }
         elif state == "already_in_sync":
-            # Zero-call evidence is constructed at reservation time.  Keep
-            # the existing receipt map if one was already present instead of
-            # inventing fresh source evidence here.
-            return None
+            evidence = enhanced.get("already_in_sync_evidence")
+            proof = evidence.get(device_id) if isinstance(evidence, Mapping) else None
+            if not isinstance(proof, Mapping):
+                return None
+            outcomes[device_id] = {
+                "status": "confirmed", "reason": "none",
+                "execution_state": "already_in_sync", "message_code": "confirmed",
+                "command_count": 0, "accepted_count": 0,
+                "evidence": dict(proof),
+            }
         elif state == "applied":
             # The runtime reached this state only after a fresh native
             # read-back confirmed the frozen owner.  Surface that terminal

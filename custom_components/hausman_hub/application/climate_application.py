@@ -28,6 +28,7 @@ from .climate_application_models import (
     ClimateApplicationDenialReason,
     ClimateApplicationGateStatus,
     ClimateApplicationPlan,
+    ClimateApplicationDeviceGate,
     ClimateApplicationRoomGate,
     ClimateApplicationViolation,
     ClimateDesiredStateChanges,
@@ -99,6 +100,24 @@ def build_climate_application_plan(
         )
         for room_id in target_ids
     )
+    explicit = explicit_temperature_targets is not None or explicit_humidity_targets is not None
+    device_gates = (
+        tuple(
+            _gate_explicit_device(
+                room_id, device, registry, observation,
+                None if explicit_temperature_targets is None else explicit_temperature_targets.get(room_id),
+                None if explicit_humidity_targets is None else explicit_humidity_targets.get(room_id),
+            )
+            for room_id in target_ids
+            for device in _explicit_selected_devices(
+                contour, registry, room_id,
+                None if explicit_temperature_targets is None else explicit_temperature_targets.get(room_id),
+                None if explicit_humidity_targets is None else explicit_humidity_targets.get(room_id),
+            )
+        ) if explicit else ()
+    )
+    if explicit:
+        gates = _aggregate_explicit_room_gates(target_ids, device_gates)
     denials = ordered_application_denial_reasons(
         reason
         for gate in gates
@@ -114,19 +133,19 @@ def build_climate_application_plan(
         comparison=comparison,
         call_plan=call_plan,
         room_gates=gates,
+        device_gates=device_gates,
         strict_calls=(
             ()
             if denials
             else tuple(
                 call
-                for gate in gates
+                for gate in (device_gates or gates)
                 if gate.status is ClimateApplicationGateStatus.READY
                 for call in gate.strict_calls
             )
         ),
         initially_aligned_room_ids=tuple(
-            gate.room_id
-            for gate in gates
+            gate.room_id for gate in gates
             if gate.status is ClimateApplicationGateStatus.ALIGNED
         ),
         denial_reasons=denials,
@@ -143,6 +162,65 @@ def build_climate_application_plan(
             and (target := explicit_humidity_targets.get(room_id)) is not None
         ),
     )
+
+
+def _explicit_selected_devices(contour, registry, room_id, temperature, humidity):
+    assignment = next((room for room in contour.rooms if room.room_id == room_id), None)
+    if assignment is None:
+        return ()
+    kinds = set()
+    if temperature is not None:
+        kinds.update({ClimateDeviceKind.AIR_CONDITIONER, ClimateDeviceKind.RADIATOR_THERMOSTAT, ClimateDeviceKind.FLOOR_HEATING})
+    if humidity is not None:
+        kinds.add(ClimateDeviceKind.HUMIDIFIER)
+    return tuple(device for device_id in assignment.device_ids
+                 if (device := registry.device(device_id)) is not None and device.kind in kinds)
+
+
+def _gate_explicit_device(room_id, device, registry, observation, temperature, humidity):
+    reasons: list[ClimateApplicationDenialReason] = []
+    if device.control_scope is not ClimateControlScope.MANAGED or device.control_owner is not ClimateControlOwner.CLIMATE_CORE:
+        reasons.append(ClimateApplicationDenialReason.ACTUATOR_NOT_MANAGED)
+    if device.endpoint(ClimateEndpointRole.CONTROL) is None:
+        reasons.append(ClimateApplicationDenialReason.MISSING_CONTROL_ENDPOINT)
+    if _control_endpoint_is_shared(device, registry):
+        reasons.append(ClimateApplicationDenialReason.TRANSLATION_INCOMPLETE)
+    if not reasons:
+        calls = (
+            _explicit_humidity_calls_if_complete((device,), observation, humidity)
+            if device.kind is ClimateDeviceKind.HUMIDIFIER and humidity is not None
+            else _explicit_temperature_calls_if_complete((device,), observation, temperature)
+        )
+        if calls is None:
+            reasons.append(ClimateApplicationDenialReason.TRANSLATION_INCOMPLETE)
+    else:
+        calls = ()
+    if reasons:
+        return ClimateApplicationDeviceGate(room_id, device.device_id, ClimateApplicationGateStatus.DENIED,
+            ordered_application_denial_reasons(reasons), ())
+    if not calls:
+        return ClimateApplicationDeviceGate(room_id, device.device_id, ClimateApplicationGateStatus.ALIGNED,
+            (ClimateApplicationDenialReason.ALREADY_IN_SYNC,), ())
+    return ClimateApplicationDeviceGate(room_id, device.device_id, ClimateApplicationGateStatus.READY, (), calls)
+
+
+def _aggregate_explicit_room_gates(target_ids, device_gates):
+    result = []
+    for room_id in target_ids:
+        gates = tuple(gate for gate in device_gates if gate.room_id == room_id)
+        if not gates:
+            result.append(ClimateApplicationRoomGate(room_id, ClimateApplicationGateStatus.DENIED,
+                (ClimateApplicationDenialReason.NO_ACTIVE_ACTUATOR,), ()))
+            continue
+        denials = ordered_application_denial_reasons(reason for gate in gates if gate.status is ClimateApplicationGateStatus.DENIED for reason in gate.reasons)
+        if denials:
+            result.append(ClimateApplicationRoomGate(room_id, ClimateApplicationGateStatus.DENIED, denials, ()))
+            continue
+        calls = tuple(call for gate in gates if gate.status is ClimateApplicationGateStatus.READY for call in gate.strict_calls)
+        result.append(ClimateApplicationRoomGate(room_id,
+            ClimateApplicationGateStatus.READY if calls else ClimateApplicationGateStatus.ALIGNED,
+            () if calls else (ClimateApplicationDenialReason.ALREADY_IN_SYNC,), calls))
+    return tuple(result)
 
 
 def _gate_room(

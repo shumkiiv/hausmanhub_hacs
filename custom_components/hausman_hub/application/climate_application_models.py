@@ -112,6 +112,38 @@ class ClimateApplicationRoomGate:
 
 
 @dataclass(frozen=True, slots=True)
+class ClimateApplicationDeviceGate:
+    """Immutable decision for one physical owner in an explicit target request."""
+
+    room_id: str
+    device_id: str
+    status: ClimateApplicationGateStatus
+    reasons: tuple[ClimateApplicationDenialReason, ...]
+    strict_calls: tuple[ClimateHaServiceCall, ...]
+
+    def __post_init__(self) -> None:
+        _require_stable_id(self.room_id, "application room id")
+        _require_stable_id(self.device_id, "application device id")
+        _require_reasons(self.reasons)
+        if not isinstance(self.status, ClimateApplicationGateStatus):
+            raise ClimateApplicationViolation("application device gate status is invalid")
+        if type(self.strict_calls) is not tuple or any(
+            not isinstance(call, ClimateHaServiceCall)
+            or call.owner_device_id != self.device_id
+            for call in self.strict_calls
+        ):
+            raise ClimateApplicationViolation("application device gate calls are invalid")
+        if self.status is ClimateApplicationGateStatus.READY:
+            valid = not self.reasons and bool(self.strict_calls)
+        elif self.status is ClimateApplicationGateStatus.ALIGNED:
+            valid = self.reasons == (ClimateApplicationDenialReason.ALREADY_IN_SYNC,) and not self.strict_calls
+        else:
+            valid = bool(self.reasons) and not self.strict_calls
+        if not valid:
+            raise ClimateApplicationViolation("application device gate shape is invalid")
+
+
+@dataclass(frozen=True, slots=True)
 class ClimateApplicationPlan:
     contour_id: str
     fingerprint: str
@@ -121,6 +153,7 @@ class ClimateApplicationPlan:
     comparison: ClimateComparisonSnapshot
     call_plan: ClimateHaCallPlanSnapshot
     room_gates: tuple[ClimateApplicationRoomGate, ...]
+    device_gates: tuple[ClimateApplicationDeviceGate, ...]
     strict_calls: tuple[ClimateHaServiceCall, ...]
     initially_aligned_room_ids: tuple[str, ...]
     denial_reasons: tuple[ClimateApplicationDenialReason, ...]
@@ -177,6 +210,10 @@ class ClimateApplicationPlan:
             not isinstance(gate, ClimateApplicationRoomGate) for gate in self.room_gates
         ):
             raise ClimateApplicationViolation("application room gates are invalid")
+        if type(self.device_gates) is not tuple or any(
+            not isinstance(gate, ClimateApplicationDeviceGate) for gate in self.device_gates
+        ) or len({gate.device_id for gate in self.device_gates}) != len(self.device_gates):
+            raise ClimateApplicationViolation("application device gates are invalid")
         if tuple(gate.room_id for gate in self.room_gates) != self.target_room_ids:
             raise ClimateApplicationViolation("application gates must match target scope")
         if type(self.strict_calls) is not tuple or any(
@@ -200,6 +237,25 @@ class ClimateApplicationPlan:
             if gate.status is ClimateApplicationGateStatus.READY
             for call in gate.strict_calls
         )
+        device_denied = _ordered_reasons(
+            reason for gate in self.device_gates
+            if gate.status is ClimateApplicationGateStatus.DENIED
+            for reason in gate.reasons
+        )
+        device_calls = tuple(
+            call for gate in self.device_gates
+            if gate.status is ClimateApplicationGateStatus.READY
+            for call in gate.strict_calls
+        )
+        if self.device_gates:
+            executable = device_calls
+            denied = device_denied
+            expected_aligned = tuple(
+                gate.room_id for gate in self.room_gates
+                if gate.status is ClimateApplicationGateStatus.ALIGNED
+            )
+            if expected_aligned != self.initially_aligned_room_ids:
+                raise ClimateApplicationViolation("application device alignment is inconsistent")
         if (
             self.denial_reasons != denied
             or self.initially_aligned_room_ids != aligned

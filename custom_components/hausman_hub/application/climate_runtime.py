@@ -2323,7 +2323,14 @@ class ClimateRuntime:
                 for owners in call_owners
             )
         ):
+            if contour_to_save is None:
+                return self._contour_applications.update(
+                    request_id, status=ContourApplyStatus.UNAVAILABLE,
+                    accepted_count=0, confirmed_room_count=0,
+                    reasons=("engine_rejected",),
+                ).receipt
             error = ClimateRuntimeUnavailable("frozen climate call ownership is invalid")
+            await self._async_block_native_before_dispatch_unlocked(request_id)
             error.home_target_pre_dispatch = True  # type: ignore[attr-defined]
             raise error
         if contour_to_save is not None:
@@ -2334,11 +2341,14 @@ class ClimateRuntime:
             except Exception as error:
                 # The native checkpoint existed, but no physical operation is
                 # dispatchable when the user-visible contour was not saved.
-                self._contour_applications.discard_unpersisted(request_id)
                 try:
-                    await self._async_persist_direct_control_unlocked()
-                except Exception:
-                    pass
+                    await self._async_block_native_before_dispatch_unlocked(request_id)
+                except Exception as persist_error:
+                    # Keep the in-memory checkpoint sticky.  It is safer to
+                    # make this runtime unavailable than let a retry cross a
+                    # boundary after terminal persistence failed.
+                    error.home_target_terminal_persist_failed = True  # type: ignore[attr-defined]
+                    self.last_error = type(persist_error).__name__
                 error.home_target_pre_dispatch = True  # type: ignore[attr-defined]
                 raise
             self._contours = contour_to_save
@@ -2383,13 +2393,7 @@ class ClimateRuntime:
                 for owners in call_owners
             )
         ):
-            return self._contour_applications.update(
-                request_id,
-                status=ContourApplyStatus.UNAVAILABLE,
-                accepted_count=0,
-                confirmed_room_count=0,
-                reasons=("command_result_unavailable",),
-            ).receipt
+            return await self._async_block_native_before_dispatch_unlocked(request_id)
 
         # A device may need several HA calls.  They are a strict sequence for
         # that one owner: after its first error no later sub-call can run.
@@ -2500,6 +2504,30 @@ class ClimateRuntime:
         if not callable(saver):
             raise ClimateRuntimeUnavailable("direct control store is invalid")
         await saver(self._contour_applications.serialized())
+
+    async def _async_block_native_before_dispatch_unlocked(
+        self, request_id: str,
+    ) -> ContourApplyReceipt:
+        """Durably close an already-reserved operation before any HA call."""
+        record = self._contour_applications.by_request(request_id)
+        if record is None:
+            raise ClimateRuntimeUnavailable("climate operation checkpoint is unavailable")
+        enhanced = record.enhanced if isinstance(record.enhanced, dict) else None
+        if enhanced is not None:
+            ledger = enhanced.get("leaf_ledger")
+            if isinstance(ledger, dict):
+                for device_id in ledger:
+                    ledger[device_id] = "blocked_before_dispatch"
+            enhanced["already_in_sync_evidence"] = {}
+        receipt = self._contour_applications.update(
+            request_id,
+            status=ContourApplyStatus.UNAVAILABLE,
+            accepted_count=0,
+            confirmed_room_count=0,
+            reasons=("command_result_unavailable",),
+        ).receipt
+        await self._async_persist_direct_control_unlocked()
+        return receipt
 
     def _device_ids_for_climate_call(
         self, call, *, required_scope: ClimateControlScope = ClimateControlScope.MANAGED
@@ -2708,6 +2736,18 @@ class ClimateRuntime:
         if not isinstance(prior.plan, ContourApplyPlan):
             return prior.receipt
         if (
+            isinstance(prior.enhanced, Mapping)
+            and isinstance(prior.enhanced.get("leaf_ledger"), Mapping)
+            and any(
+                state == "blocked_before_dispatch"
+                for state in prior.enhanced["leaf_ledger"].values()
+            )
+        ):
+            # A contour-save or final validation failure is terminal.  A
+            # duplicate may retrieve its durable receipt, never reopen it
+            # into an observation-driven retry or confirmation.
+            return prior.receipt
+        if (
             not prior.plan.strict_calls
             and prior.plan.explicit_target_alignment
             and isinstance(prior.enhanced, Mapping)
@@ -2744,8 +2784,8 @@ class ClimateRuntime:
             room_ids=room_ids,
             desired_state_changes=prior.plan.desired_state_changes,
             explicit_temperature_alignment=prior.plan.explicit_temperature_alignment,
-            explicit_temperature_targets=prior.plan.explicit_temperature_targets,
-            explicit_humidity_targets=prior.plan.explicit_humidity_targets,
+            explicit_temperature_targets=dict(prior.plan.explicit_temperature_targets) or None,
+            explicit_humidity_targets=dict(prior.plan.explicit_humidity_targets) or None,
         )
         confirmed = len(verified.native_plan.initially_aligned_room_ids)
         if confirmed == len(verified.target_room_ids):
@@ -2805,8 +2845,8 @@ class ClimateRuntime:
                 room_ids=plan.target_room_ids,
                 desired_state_changes=plan.desired_state_changes,
                 explicit_temperature_alignment=plan.explicit_temperature_alignment,
-                explicit_temperature_targets=plan.explicit_temperature_targets,
-                explicit_humidity_targets=plan.explicit_humidity_targets,
+                explicit_temperature_targets=dict(plan.explicit_temperature_targets) or None,
+                explicit_humidity_targets=dict(plan.explicit_humidity_targets) or None,
             )
             confirmed = len(verified.native_plan.initially_aligned_room_ids)
             if confirmed == len(plan.target_room_ids):
@@ -4540,10 +4580,7 @@ def _contour_reliability_metadata(
     explicit_ids: set[str] = set()
     if plan.explicit_target_alignment:
         explicit_ids = {
-            device.device_id
-            for room in plan.native_plan.call_plan.rooms
-            if room.room_id in set(plan.target_room_ids)
-            for device in room.devices
+            gate.device_id for gate in plan.native_plan.device_gates
         }
     # Explicit target alignment must retain already-matching owners beside
     # owners that still need a strict call.  Using only `called_ids` made a
@@ -4580,7 +4617,7 @@ def _contour_reliability_metadata(
                 "resulting_target_temperature": settings.target_temperature,
             }
     already_in_sync_evidence: dict[str, dict[str, object]] = {}
-    if plan.explicit_target_alignment and not plan.strict_calls:
+    if plan.explicit_target_alignment:
         observed_devices = {
             device.device_id: device
             for device in getattr(observation, "devices", ())
@@ -4636,7 +4673,16 @@ def _contour_reliability_metadata(
                 "target_temperature": reported_temperature,
                 "target_humidity": reported_humidity,
             }
-            if actual["target_temperature"] != expected["target_temperature"]:
+            # Device gates are the frozen authority.  A humidifier does not
+            # need a temperature readback and a thermostat does not need a
+            # humidity readback merely because both values exist in a room.
+            gate = next((gate for gate in plan.native_plan.device_gates if gate.device_id == device_id), None)
+            if gate is None or gate.status.value != "aligned":
+                continue
+            owns_temperature = getattr(observed, "current_target_temperature", None) is not None
+            if (owns_temperature and actual["target_temperature"] != expected["target_temperature"]) or (
+                not owns_temperature and actual["target_humidity"] != expected["target_humidity"]
+            ):
                 continue
             if external_reliability_identity is not None:
                 tablet_parameters = external_reliability_identity["parameters"]
@@ -4732,8 +4778,13 @@ def _contour_reliability_metadata(
     scope_fingerprint = hashlib.sha256(json.dumps(scope, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")).hexdigest()
     target = context.target_temperature
     leaf_ledger = {device_id: "pending_dispatch" for device_id in device_ids}
+    aligned_ids = {
+        gate.device_id for gate in plan.native_plan.device_gates
+        if gate.status.value == "aligned"
+    }
     if (
         device_ids
+        and aligned_ids == set(device_ids)
         and len(already_in_sync_evidence) == len(device_ids)
         and all(
             evidence.get("fresh") is True
@@ -4746,6 +4797,11 @@ def _contour_reliability_metadata(
         # is terminally blocked before dispatch, not pending for a command
         # that cannot exist.
         leaf_ledger = {device_id: "blocked_before_dispatch" for device_id in device_ids}
+    elif plan.explicit_target_alignment:
+        leaf_ledger = {
+            device_id: ("already_in_sync" if device_id in already_in_sync_evidence else "pending_dispatch")
+            for device_id in device_ids
+        }
     return {"kind": kind, "request_fingerprint": fingerprint, "action": action_code, "parameters": parameters,
             "resolved_scope": scope, "desired_snapshot": desired,
             "desired_snapshot_fingerprint": desired_fingerprint, "scope_fingerprint": scope_fingerprint,
