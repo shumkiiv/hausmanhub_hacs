@@ -2308,9 +2308,9 @@ class ClimateRuntime:
         ledger = enhanced.get("leaf_ledger") if enhanced is not None else None
         scoped_ids = set(ledger) if isinstance(ledger, dict) else set()
         call_owners = [self._device_ids_for_climate_call(call) for call in plan.strict_calls]
-        if not self._calls_match_strict_registry(
+        if (plan.strict_calls and not self._calls_match_strict_registry(
             plan.strict_calls, room_ids=plan.target_room_ids
-        ) or (
+        )) or (
             plan.explicit_target_alignment
             and any(
                 len(owners) != 1 or not self._is_explicit_target_call(call, plan)
@@ -2378,9 +2378,9 @@ class ClimateRuntime:
         ledger = enhanced.get("leaf_ledger") if enhanced is not None else None
         scoped_ids = set(ledger) if isinstance(ledger, dict) else set()
         call_owners = [self._device_ids_for_climate_call(call) for call in plan.strict_calls]
-        if not self._calls_match_strict_registry(
+        if (plan.strict_calls and not self._calls_match_strict_registry(
             plan.strict_calls, room_ids=plan.target_room_ids
-        ) or (
+        )) or (
             plan.explicit_target_alignment
             and any(
                 len(owners) != 1 or not self._is_explicit_target_call(call, plan)
