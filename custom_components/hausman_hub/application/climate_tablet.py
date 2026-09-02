@@ -3760,6 +3760,18 @@ def _valid_reliable_dispatch_ledger(
             evidence = leaf.get("evidence") if isinstance(leaf, Mapping) else None
             observed_at = evidence.get("observed_at") if isinstance(evidence, Mapping) else None
             if (
+                isinstance(leaf, Mapping)
+                and leaf.get("execution_state") == "already_in_sync"
+            ):
+                if not (
+                    leaf.get("status") == "confirmed"
+                    and _strict_leaf_counts(leaf, 0, 0)
+                    and type(observed_at) is int
+                    and observed_at == sources[room_id][device_id]
+                ):
+                    return False
+                continue
+            if (
                 not isinstance(leaf, Mapping)
                 or leaf.get("status") != "confirmed"
                 or not _strict_leaf_counts(leaf, 1, 1)
@@ -4079,7 +4091,9 @@ def _terminal_reliable_device_leaves(
         for device_id, leaf in devices.items():
             if not isinstance(device_id, str) or not isinstance(leaf, Mapping):
                 continue
-            if leaf.get("execution_state") in {"applied", "dispatched_not_accepted"}:
+            if leaf.get("execution_state") in {
+                "applied", "already_in_sync", "dispatched_not_accepted",
+            }:
                 frozen[device_id] = dict(leaf)
     return frozen
 
@@ -5303,26 +5317,32 @@ def _reliable_evidence_matches_request(
             )
         )
 
-    if request.action in {"set_room_target", "set_home_targets"}:
+    if request.action == "set_home_targets":
+        # A home request spans separate physical owners. A thermostat's
+        # incidental room humidity is not proof of a humidity command, and a
+        # humidifier's incidental room temperature is not proof of a
+        # thermostat command. Native gates have already bound this leaf to
+        # exactly one requested axis, so require that owner's read-back only.
+        return any(
+            key in parameters
+            and actual.get(f"reported_{key}") is not None
+            and matches(key)
+            for key in ("target_temperature", "target_humidity")
+        )
+    if request.action == "set_room_target":
         if (
             "target_temperature" in parameters
             and actual.get("reported_target_temperature") is not None
             and not matches("target_temperature")
         ):
             return False
-    if request.action in {"set_room_humidity_target", "set_home_targets"}:
+    if request.action == "set_room_humidity_target":
         if (
             "target_humidity" in parameters
             and actual.get("reported_target_humidity") is not None
             and not matches("target_humidity")
         ):
             return False
-    if request.action == "set_home_targets":
-        return any(
-            actual.get(f"reported_{axis}") is not None
-            for axis in ("target_temperature", "target_humidity")
-            if axis in parameters
-        )
     if request.action == "set_room_min_target":
         return matches("minimum_temperature")
     if request.action == "set_room_target_strategy":

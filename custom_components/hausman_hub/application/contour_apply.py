@@ -411,7 +411,14 @@ def _live_device_outcomes(
                 "status": "confirmed", "reason": "none",
                 "execution_state": "already_in_sync", "message_code": "confirmed",
                 "command_count": 0, "accepted_count": 0,
-                "evidence": dict(proof),
+                "evidence": {
+                    **dict(proof),
+                    "action": {
+                        "request_fingerprint": enhanced["request_fingerprint"],
+                        "action": enhanced["action"],
+                        "parameters": enhanced["parameters"],
+                    },
+                },
             }
         elif state == "applied":
             # The runtime reached this state only after a fresh native

@@ -2481,7 +2481,14 @@ class ClimateRuntime:
             ledger = enhanced.get("leaf_ledger") if enhanced is not None else None
             if isinstance(ledger, dict):
                 for device_id in ledger:
-                    ledger[device_id] = "applied"
+                    # A zero-call owner was proved fresh before dispatch and
+                    # remains `already_in_sync`.  Do not turn it into an
+                    # invented 1/1 physical call just because another owner
+                    # in this same home operation was applied.
+                    if ledger[device_id] in {
+                        "started", "accepted_unverified", "dispatched_not_accepted",
+                    }:
+                        ledger[device_id] = "applied"
                 # Re-render the receipt after the durable per-leaf checkpoint.
                 # Returning the pre-checkpoint object would describe a fully
                 # confirmed operation as four unverified leaves.
@@ -4659,15 +4666,20 @@ def _contour_reliability_metadata(
             reported_temperature = getattr(
                 observed, "current_target_temperature", None
             )
-            if reported_temperature is None:
-                reported_temperature = getattr(
-                    room_observation, "observed_target_temperature", None
-                )
             reported_humidity = getattr(observed, "current_target_humidity", None)
-            if reported_humidity is None:
-                reported_humidity = getattr(
-                    room_observation, "observed_target_humidity", None
-                )
+            # Direct legacy receipts retain their established room fallback.
+            # A tablet home-target receipt instead proves an individual owner:
+            # a thermostat's room humidity and a humidifier's room temperature
+            # can never stand in for its unowned axis.
+            if external_reliability_identity is None:
+                if reported_temperature is None:
+                    reported_temperature = getattr(
+                        room_observation, "observed_target_temperature", None
+                    )
+                if reported_humidity is None:
+                    reported_humidity = getattr(
+                        room_observation, "observed_target_humidity", None
+                    )
             actual = {
                 **expected,
                 "target_temperature": reported_temperature,

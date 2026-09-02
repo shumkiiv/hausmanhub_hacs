@@ -1312,6 +1312,111 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, len(contour_store.saved))
         self.assertEqual(1, store._control_revision)
 
+    async def test_reserved_home_temperature_mixed_alignment_confirms_exact_leaf_map_once(self) -> None:
+        """Already-aligned owners remain terminal beside one dispatched owner."""
+        runtime, store, _contour_store, executor = native_home_target_runtime(
+            include_humidifier=False,
+        )
+        # AC and floor already report the requested target. Only the radiator
+        # needs one strict call, while all three owners remain in the receipt.
+        for entity_id in (
+            "climate.living_air_conditioner",
+            "climate.living_floor",
+        ):
+            current = executor._state_view.states[entity_id]
+            executor._state_view.states[entity_id] = replace(
+                current, attributes={**current.attributes, "temperature": 25.5},
+            )
+        await runtime.async_start()
+        service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await service.async_load()
+        request = {
+            "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+            "request_id": "tablet.climate.home-mixed-temperature",
+            "correlation_id": "corr.home-mixed-temperature",
+            "expected_state_revision": 0,
+            "expected_control_revision": 0,
+            "reliability_profile": "climate_reliability_v1",
+            "action": "set_home_targets",
+            "room_id": None,
+            "parameters": {"target_temperature": 25.5},
+        }
+
+        receipt = await service.async_execute(request)
+        duplicate = await service.async_execute(request)
+        restarted = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await restarted.async_load()
+        after_restart = await restarted.async_execute(request)
+
+        self.assertEqual("confirmed", receipt["status"], receipt)
+        self.assertTrue(duplicate["duplicate"])
+        self.assertTrue(after_restart["duplicate"])
+        self.assertEqual(receipt["operation_id"], after_restart["operation_id"])
+        self.assertEqual(1, len(executor.batches))
+        calls = executor.batches[0]
+        self.assertEqual(1, len(calls))
+        self.assertEqual("climate.living_radiator", calls[0].entity_id)
+        leaves = receipt["outcomes"]["rooms"]["living"]["devices"]
+        self.assertEqual(
+            {"living_air_conditioner", "living_radiator", "living_floor"},
+            set(leaves),
+        )
+        self.assertEqual("already_in_sync", leaves["living_air_conditioner"]["execution_state"])
+        self.assertEqual("applied", leaves["living_radiator"]["execution_state"])
+        self.assertEqual(1, receipt["read_back"]["evidence"]["accepted_count"])
+
+    async def test_reserved_home_combined_mixed_axis_alignment_confirms_once(self) -> None:
+        """The mixed proof works in both temperature and humidity directions."""
+        for aligned_temperature, suffix in ((True, "temperature"), (False, "humidity")):
+            with self.subTest(aligned_temperature=aligned_temperature):
+                runtime, store, _contour_store, executor = native_home_target_runtime(
+                    include_humidifier=True,
+                )
+                if aligned_temperature:
+                    for entity_id in (
+                        "climate.living_air_conditioner",
+                        "climate.living_radiator",
+                        "climate.living_floor",
+                    ):
+                        current = executor._state_view.states[entity_id]
+                        executor._state_view.states[entity_id] = replace(
+                            current, attributes={**current.attributes, "temperature": 25.5},
+                        )
+                else:
+                    current = executor._state_view.states["humidifier.living"]
+                    executor._state_view.states["humidifier.living"] = replace(
+                        current, attributes={**current.attributes, "humidity": 55},
+                    )
+                await runtime.async_start()
+                service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+                await service.async_load()
+                request = {
+                    "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+                    "request_id": f"tablet.climate.home-mixed-{suffix}",
+                    "correlation_id": f"corr.home-mixed-{suffix}",
+                    "expected_state_revision": 0,
+                    "expected_control_revision": 0,
+                    "reliability_profile": "climate_reliability_v1",
+                    "action": "set_home_targets", "room_id": None,
+                    "parameters": {"target_temperature": 25.5, "target_humidity": 55},
+                }
+                receipt = await service.async_execute(request)
+                duplicate = await service.async_execute(request)
+                restarted = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+                await restarted.async_load()
+                after_restart = await restarted.async_execute(request)
+
+                self.assertEqual("confirmed", receipt["status"], receipt)
+                self.assertTrue(duplicate["duplicate"])
+                self.assertTrue(after_restart["duplicate"])
+                self.assertEqual(receipt["operation_id"], after_restart["operation_id"])
+                calls = tuple(call for batch in executor.batches for call in batch)
+                self.assertEqual(1 if aligned_temperature else 3, len(calls))
+                self.assertEqual(
+                    1 if aligned_temperature else 3,
+                    receipt["read_back"]["evidence"]["accepted_count"],
+                )
+
     async def test_reserved_home_target_invalid_final_call_never_saves_or_dispatches(self) -> None:
         """Final owner validation happens before the mutable contour boundary."""
         runtime, store, contour_store, executor = native_home_target_runtime(
