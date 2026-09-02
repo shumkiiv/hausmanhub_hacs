@@ -653,10 +653,12 @@ class ReflectingStrictExecutor:
         *,
         reflect: bool = True,
         fail: bool = False,
+        advance_timestamp: bool = False,
     ) -> None:
         self._state_view = state_view
         self._reflect = reflect
         self._fail = fail
+        self._advance_timestamp = advance_timestamp
         self.batches: list[tuple[object, ...]] = []
 
     async def async_execute(self, calls) -> int:
@@ -693,6 +695,15 @@ class ReflectingStrictExecutor:
                 current,
                 state=state,
                 attributes=attributes,
+                # A real HA service call produces a newer source observation.
+                # Most legacy tests use a fixed clock and deliberately retain
+                # their fixture timestamp; reliability tests opt in to the
+                # realistic post-dispatch source advance.
+                last_updated_ms=(
+                    current.last_updated_ms + 1
+                    if self._advance_timestamp
+                    else current.last_updated_ms
+                ),
             )
 
 

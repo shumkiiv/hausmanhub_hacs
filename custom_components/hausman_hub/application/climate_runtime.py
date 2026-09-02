@@ -1727,6 +1727,12 @@ class ClimateRuntime:
             except ContourRegistryViolation as error:
                 raise HomeClimateTargetsViolation(str(error)) from error
             updated_contour = self._require_climate_contour(updated)
+            # Preflight and execution must see the identical ownership-filtered
+            # scope.  A manually owned device is never allowed to enter a
+            # frozen plan only to disappear after the contour has been saved.
+            execution_contour = contour_without_manual_devices(
+                updated_contour, self._manual_memory
+            )
             desired_state_changes = local_desired_state_changes(
                 contour,
                 updated_contour,
@@ -1746,7 +1752,7 @@ class ClimateRuntime:
             try:
                 observation = await self._async_native_climate_observation_unlocked()
                 preflight = build_contour_apply_plan(
-                    updated_contour, self._registry,
+                    execution_contour, self._registry,
                     self.configuration.climate_bridge_mode, observation,
                     desired_state_changes=desired_state_changes,
                 )
@@ -1760,13 +1766,6 @@ class ClimateRuntime:
                 # unavailable, never as a physical partial outcome.
                 error.home_target_pre_dispatch = True  # type: ignore[attr-defined]
                 raise
-            try:
-                await self._contour_store.async_save(updated)
-            except Exception as error:
-                # The frozen plan has not reached the executor.
-                error.home_target_pre_dispatch = True  # type: ignore[attr-defined]
-                raise
-            self._contours = updated
             return await self._async_apply_native_contour_unlocked(
                 request.request_id,
                 CLIMATE_CONTOUR_ID,
@@ -1780,7 +1779,47 @@ class ClimateRuntime:
                 external_reliability_identity=external_reliability_identity,
                 preflight_plan=preflight,
                 preflight_observation=observation,
+                contour_to_save=updated,
             )
+
+    async def async_preflight_home_climate_targets(self, payload: object) -> None:
+        """Prove the exact native home-target scope without mutating state."""
+
+        request = parse_home_climate_targets_request(payload)
+        async with self._lock:
+            self._require_native_contour_apply_mode()
+            if self._contour_store is None:
+                raise ClimateRuntimeUnavailable("contour storage is unavailable")
+            contour = self._climate_contour()
+            updated = with_home_climate_targets(
+                self._contours,
+                target_temperature=request.target_temperature,
+                target_humidity=request.target_humidity,
+            )
+            updated_contour = self._require_climate_contour(updated)
+            execution_contour = contour_without_manual_devices(
+                updated_contour, self._manual_memory
+            )
+            axes = frozenset(
+                axis for axis, value in (
+                    (ClimateTargetAxis.TEMPERATURE, request.target_temperature),
+                    (ClimateTargetAxis.HUMIDITY, request.target_humidity),
+                ) if value is not None
+            )
+            changes = replace(
+                local_desired_state_changes(contour, updated_contour),
+                requested_axes=axes,
+            )
+            observation = await self._async_native_climate_observation_unlocked()
+            plan = build_contour_apply_plan(
+                execution_contour, self._registry,
+                self.configuration.climate_bridge_mode, observation,
+                desired_state_changes=changes,
+            )
+            if not plan.native_plan.preflight_permitted:
+                raise ClimateRuntimeUnavailable("home climate target scope is unavailable")
+            if plan.strict_calls and self._strict_ha_call_executor is None:
+                raise ClimateRuntimeUnavailable("climate executor is unavailable")
 
     async def async_room_humidity_target(
         self, *, request_id: str, room_id: str, target_humidity: int
@@ -2152,10 +2191,16 @@ class ClimateRuntime:
         external_reliability_identity: Mapping[str, object] | None = None,
         preflight_plan: ContourApplyPlan | None = None,
         preflight_observation: ClimateObservationSnapshot | None = None,
+        contour_to_save: ContourRegistry | None = None,
     ) -> ContourApplyReceipt:
         self._require_native_contour_apply_mode()
         contour = contour_without_manual_devices(
-            self._climate_contour(), self._manual_memory
+            (
+                self._require_climate_contour(contour_to_save)
+                if contour_to_save is not None
+                else self._climate_contour()
+            ),
+            self._manual_memory,
         )
         if contour.contour_id != contour_id:
             raise ContourApplyViolation("climate contour is not configured")
@@ -2253,6 +2298,22 @@ class ClimateRuntime:
             self._contour_applications.discard_unpersisted(request_id)
             error.home_target_pre_dispatch = True  # type: ignore[attr-defined]
             raise
+        if contour_to_save is not None:
+            try:
+                if self._contour_store is None:
+                    raise ClimateRuntimeUnavailable("contour storage is unavailable")
+                await self._contour_store.async_save(contour_to_save)
+            except Exception as error:
+                # The native checkpoint existed, but no physical operation is
+                # dispatchable when the user-visible contour was not saved.
+                self._contour_applications.discard_unpersisted(request_id)
+                try:
+                    await self._async_persist_direct_control_unlocked()
+                except Exception:
+                    pass
+                error.home_target_pre_dispatch = True  # type: ignore[attr-defined]
+                raise
+            self._contours = contour_to_save
         if not plan.native_plan.preflight_permitted or not plan.strict_calls:
             if not plan.native_plan.preflight_permitted:
                 _LOGGER.warning(
@@ -2282,7 +2343,7 @@ class ClimateRuntime:
         if not self._calls_match_strict_registry(
             plan.strict_calls, room_ids=plan.target_room_ids
         ) or (
-            plan.explicit_temperature_alignment
+            plan.explicit_target_alignment
             and any(
                 len(owners) != 1 or not self._is_explicit_target_call(call, plan)
                 for call, owners in zip(plan.strict_calls, call_owners, strict=True)
@@ -2434,27 +2495,49 @@ class ClimateRuntime:
         device_id = getattr(call, "owner_device_id", None)
         device = None if not isinstance(device_id, str) else self._registry.device(device_id)
         room_id = None if device is None else device.room_id
-        targets = dict(plan.explicit_temperature_targets)
-        expected = None if room_id is None else targets.get(room_id)
-        actual = getattr(call, "temperature", None)
         endpoint = None if device is None else device.endpoint(ClimateEndpointRole.CONTROL)
-        return (
+        common = (
             device is not None
             and room_id in plan.target_room_ids
-            and type(expected) in {int, float}
-            and type(actual) in {int, float}
-            and math.isfinite(actual)
-            and actual == expected
+            and endpoint is not None
+        )
+        temperature_targets = dict(plan.explicit_temperature_targets)
+        temperature_expected = (
+            None if room_id is None else temperature_targets.get(room_id)
+        )
+        temperature_actual = getattr(call, "temperature", None)
+        if (
+            common
+            and type(temperature_expected) in {int, float}
+            and type(temperature_actual) in {int, float}
+            and math.isfinite(temperature_actual)
+            and temperature_actual == temperature_expected
             and device.kind in {
                 ClimateDeviceKind.AIR_CONDITIONER,
                 ClimateDeviceKind.RADIATOR_THERMOSTAT,
                 ClimateDeviceKind.FLOOR_HEATING,
             }
             and ClimateCapability.TARGET_TEMPERATURE in device.capabilities
-            and endpoint is not None
             and endpoint.entity_id.startswith("climate.")
             and getattr(call, "service", None)
             is ClimateHaService.CLIMATE_SET_TEMPERATURE
+            and getattr(call, "hvac_mode", None) is None
+        ):
+            return True
+        humidity_targets = dict(plan.explicit_humidity_targets)
+        humidity_expected = None if room_id is None else humidity_targets.get(room_id)
+        humidity_actual = getattr(call, "humidity", None)
+        return bool(
+            common
+            and type(humidity_expected) is int
+            and type(humidity_actual) is int
+            and humidity_actual == humidity_expected
+            and device.kind is ClimateDeviceKind.HUMIDIFIER
+            and ClimateCapability.TARGET_HUMIDITY in device.capabilities
+            and endpoint.entity_id.startswith("humidifier.")
+            and getattr(call, "service", None)
+            is ClimateHaService.HUMIDIFIER_SET_HUMIDITY
+            and getattr(call, "temperature", None) is None
             and getattr(call, "hvac_mode", None) is None
         )
 
@@ -2588,7 +2671,7 @@ class ClimateRuntime:
             return prior.receipt
         if (
             not prior.plan.strict_calls
-            and prior.plan.explicit_temperature_alignment
+            and prior.plan.explicit_target_alignment
             and isinstance(prior.enhanced, Mapping)
             and isinstance(prior.enhanced.get("leaf_ledger"), Mapping)
             and any(
@@ -2624,6 +2707,7 @@ class ClimateRuntime:
             desired_state_changes=prior.plan.desired_state_changes,
             explicit_temperature_alignment=prior.plan.explicit_temperature_alignment,
             explicit_temperature_targets=prior.plan.explicit_temperature_targets,
+            explicit_humidity_targets=prior.plan.explicit_humidity_targets,
         )
         confirmed = len(verified.native_plan.initially_aligned_room_ids)
         if confirmed == len(verified.target_room_ids):
@@ -2684,6 +2768,7 @@ class ClimateRuntime:
                 desired_state_changes=plan.desired_state_changes,
                 explicit_temperature_alignment=plan.explicit_temperature_alignment,
                 explicit_temperature_targets=plan.explicit_temperature_targets,
+                explicit_humidity_targets=plan.explicit_humidity_targets,
             )
             confirmed = len(verified.native_plan.initially_aligned_room_ids)
             if confirmed == len(plan.target_room_ids):
@@ -4415,7 +4500,7 @@ def _contour_reliability_metadata(
         if isinstance(call.owner_device_id, str)
     }
     explicit_ids: set[str] = set()
-    if plan.explicit_temperature_alignment:
+    if plan.explicit_target_alignment:
         explicit_ids = {
             device.device_id
             for room in plan.native_plan.call_plan.rooms
@@ -4454,7 +4539,7 @@ def _contour_reliability_metadata(
                 "resulting_target_temperature": settings.target_temperature,
             }
     already_in_sync_evidence: dict[str, dict[str, object]] = {}
-    if plan.explicit_temperature_alignment and not plan.strict_calls:
+    if plan.explicit_target_alignment and not plan.strict_calls:
         observed_devices = {
             device.device_id: device
             for device in getattr(observation, "devices", ())
@@ -4615,7 +4700,7 @@ def _contour_reliability_metadata(
         )
     ):
         leaf_ledger = {device_id: "already_in_sync" for device_id in device_ids}
-    elif plan.explicit_temperature_alignment and not plan.strict_calls:
+    elif plan.explicit_target_alignment and not plan.strict_calls:
         # The frozen plan has no physical call.  Without device-level proof it
         # is terminally blocked before dispatch, not pending for a command
         # that cannot exist.

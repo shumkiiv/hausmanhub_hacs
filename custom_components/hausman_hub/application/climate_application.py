@@ -136,6 +136,12 @@ def build_climate_application_plan(
             if explicit_temperature_targets is not None
             and (target := explicit_temperature_targets.get(room_id)) is not None
         ),
+        explicit_humidity_targets=tuple(
+            (room_id, target)
+            for room_id in target_ids
+            if explicit_humidity_targets is not None
+            and (target := explicit_humidity_targets.get(room_id)) is not None
+        ),
     )
 
 
@@ -167,6 +173,23 @@ def _gate_room(
         registry,
         reasons,
     )
+    # An explicit home target owns only the selected physical axis.  Do not
+    # let a missing humidifier endpoint block temperature, or an unrelated
+    # thermostat block humidity.  A combined request deliberately validates
+    # the union, so either incomplete axis rejects the whole frozen plan.
+    if explicit_temperature_target is not None or explicit_humidity_target is not None:
+        selected_kinds: set[ClimateDeviceKind] = set()
+        if explicit_temperature_target is not None:
+            selected_kinds.update({
+                ClimateDeviceKind.AIR_CONDITIONER,
+                ClimateDeviceKind.RADIATOR_THERMOSTAT,
+                ClimateDeviceKind.FLOOR_HEATING,
+            })
+        if explicit_humidity_target is not None:
+            selected_kinds.add(ClimateDeviceKind.HUMIDIFIER)
+        actuators = tuple(
+            device for device in actuators if device.kind in selected_kinds
+        )
     if assignment is not None and not actuators:
         reasons.append(ClimateApplicationDenialReason.NO_ACTIVE_ACTUATOR)
     if any(
@@ -189,16 +212,27 @@ def _gate_room(
         reasons.append(ClimateApplicationDenialReason.COMPARISON_ROOM_MISSING)
     elif compared.status is ClimateComparisonStatus.NOT_COMPARABLE:
         reasons.append(ClimateApplicationDenialReason.ROOM_NOT_COMPARABLE)
-    strict_calls = _strict_calls_if_complete(
-        room_id,
-        actuators,
-        compared,
-        call_plan,
-        reasons,
+    strict_calls = (
+        ()
+        if explicit_temperature_target is not None or explicit_humidity_target is not None
+        else _strict_calls_if_complete(
+            room_id,
+            actuators,
+            compared,
+            call_plan,
+            reasons,
+        )
     )
     if explicit_temperature_target is not None and not reasons:
         explicit_calls = _explicit_temperature_calls_if_complete(
-            actuators,
+            tuple(
+                device for device in actuators
+                if device.kind in {
+                    ClimateDeviceKind.AIR_CONDITIONER,
+                    ClimateDeviceKind.RADIATOR_THERMOSTAT,
+                    ClimateDeviceKind.FLOOR_HEATING,
+                }
+            ),
             observation,
             explicit_temperature_target,
         )
@@ -210,7 +244,12 @@ def _gate_room(
         if explicit_temperature_target is None:
             strict_calls = ()
         explicit_calls = _explicit_humidity_calls_if_complete(
-            actuators, observation, explicit_humidity_target,
+            tuple(
+                device for device in actuators
+                if device.kind is ClimateDeviceKind.HUMIDIFIER
+            ),
+            observation,
+            explicit_humidity_target,
         )
         if explicit_calls is None:
             reasons.append(ClimateApplicationDenialReason.TRANSLATION_INCOMPLETE)

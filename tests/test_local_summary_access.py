@@ -2507,6 +2507,10 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual(3, receipt["command_count"])
         self.assertEqual(1, receipt["accepted_count"])
         self.assertTrue(receipt["read_back"]["attempted"])
+        self.assertEqual(
+            ["Не удалось надёжно узнать результат команды."],
+            receipt["reason_names"],
+        )
 
     def test_shadow_climate_route_returns_public_state_and_never_posts(self) -> None:
         """Exercise the native Android facade with an actual runtime."""

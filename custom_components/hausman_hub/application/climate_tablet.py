@@ -729,6 +729,9 @@ class ClimateTabletService:
         self._control_revision = 0
         self._desired_intents: dict[str, dict[str, object]] = {}
         self._reliable_scope_bindings: dict[str, dict[str, object]] = {}
+        # Legacy HTTP replies keep their execution facts outside the typed
+        # receipt.  The sidecar is private and never changes that contract.
+        self._legacy_home_execution_facts: dict[str, dict[str, object]] = {}
         # Bindings must outlive a failed main-ledger write.  They are removed
         # only after the corresponding main record is durably gone.
         self._reliable_scope_binding_cleanup: set[str] = set()
@@ -766,10 +769,21 @@ class ClimateTabletService:
             stored_bindings = await load_bindings()
         except Exception as error:
             raise ClimateTabletUnavailable("reliable climate scope storage is unavailable") from error
-        if not isinstance(stored_bindings, Mapping) or len(stored_bindings) > MAX_RELIABLE_OPERATION_RECORDS + 2:
+        if not isinstance(stored_bindings, Mapping) or len(stored_bindings) > MAX_RELIABLE_OPERATION_RECORDS + 3:
             raise ClimateTabletUnavailable("reliable climate scope storage is invalid")
         stored_bindings = dict(stored_bindings)
         state_checkpoint = stored_bindings.pop("__tablet_state__", None)
+        legacy_execution_facts = stored_bindings.pop("__legacy_home_execution_facts__", {})
+        if (
+            not isinstance(legacy_execution_facts, Mapping)
+            or len(legacy_execution_facts) > MAX_RELIABLE_OPERATION_RECORDS
+            or any(
+                not isinstance(request_id, str)
+                or not _valid_legacy_home_execution_fact(fact)
+                for request_id, fact in legacy_execution_facts.items()
+            )
+        ):
+            raise ClimateTabletUnavailable("legacy climate execution facts are invalid")
         if payload.get("version") == 6 and not _valid_tablet_state_checkpoint(
             state_checkpoint, payload, self._reliable_scope_integrity_key
         ):
@@ -879,6 +893,11 @@ class ClimateTabletService:
         }
         if isinstance(state_checkpoint, Mapping):
             self._reliable_scope_bindings["__tablet_state__"] = dict(state_checkpoint)
+        self._legacy_home_execution_facts = {
+            request_id: dict(fact)
+            for request_id, fact in legacy_execution_facts.items()
+            if request_id in records
+        }
         stored_intents = payload.get("desired_intents", {})
         if not isinstance(stored_intents, Mapping) or len(stored_intents) > 4096:
             raise ClimateTabletUnavailable("stored climate desired intent is invalid")
@@ -1137,6 +1156,27 @@ class ClimateTabletService:
             # revision reservation for both legacy and negotiated actions.
             if snapshot.get("phase") == "disabled":
                 _require_action_allowed(snapshot, request)
+            if (
+                request.reliability_profile == "climate_reliability_v1"
+                and request.action == "set_home_targets"
+            ):
+                preflight = getattr(
+                    self._runtime, "async_preflight_home_climate_targets", None
+                )
+                if callable(preflight):
+                    try:
+                        await preflight({
+                            "request_id": request.request_id,
+                            "correlation_id": request.correlation_id,
+                            "contour_id": "climate",
+                            "target_temperature": request.parameters.get("target_temperature"),
+                            "target_humidity": request.parameters.get("target_humidity"),
+                            "confirm": True,
+                        })
+                    except Exception as error:
+                        raise ClimateTabletUnavailable(
+                            "home climate target scope is unavailable"
+                        ) from error
             # A desired intent may survive a temporary authority gate, but it
             # must never be created for an invented room or device.  This is
             # immutable scope validation, not a physical-permission check.
@@ -1583,9 +1623,14 @@ class ClimateTabletService:
             # `async_execute` consumes this typed command under the lock that
             # produced its revision.  This keeps duplicate identity, pending
             # detection and reservation one atomic service operation.
-            return await self.async_execute(
+            receipt = await self.async_execute(
                 payload, _lock_held=True, _legacy_fail_fast=True
             )
+            self._legacy_home_execution_facts[request_id] = _legacy_home_execution_fact(
+                receipt
+            )
+            await self._async_save()
+            return receipt
 
     async def async_operation(self, operation_id: str) -> dict[str, object]:
         """Return one persisted receipt without repeating its physical command."""
@@ -2080,6 +2125,9 @@ class ClimateTabletService:
             prepared_bindings.get("__tablet_state__"), main_payload,
             self._reliable_scope_integrity_key,
         )
+        prepared_bindings["__legacy_home_execution_facts__"] = (
+            self._legacy_home_execution_facts
+        )
         try:
             await save_bindings(prepared_bindings)
         except Exception:
@@ -2103,6 +2151,9 @@ class ClimateTabletService:
         final_bindings["__tablet_state__"] = _tablet_state_with_only_current_checkpoint(
             prepared_bindings["__tablet_state__"], main_payload,
             self._reliable_scope_integrity_key,
+        )
+        final_bindings["__legacy_home_execution_facts__"] = (
+            self._legacy_home_execution_facts
         )
         try:
             await save_bindings(final_bindings)
@@ -4133,6 +4184,51 @@ def _terminal_receipt(
     return receipt
 
 
+def _legacy_home_execution_fact(receipt: Mapping[str, object]) -> dict[str, object]:
+    """Persist only the private execution facts required by legacy replay."""
+
+    operation_id = receipt.get("operation_id")
+    if not isinstance(operation_id, str) or _OPERATION_ID.fullmatch(operation_id) is None:
+        raise ClimateTabletUnavailable("legacy climate execution facts are invalid")
+    return {
+        "operation_id": operation_id,
+        "status": receipt.get("status"),
+        "room_count": receipt.get("room_count", 0),
+        "command_count": receipt.get("command_count", 0),
+        "accepted_count": receipt.get("accepted_count", 0),
+        "confirmed_room_count": receipt.get("confirmed_room_count", 0),
+        "read_back": receipt.get("read_back", {}),
+        "reasons": receipt.get("reasons", []),
+    }
+
+
+def _valid_legacy_home_execution_fact(value: object) -> bool:
+    """Keep the compatibility sidecar bounded and non-dispatchable."""
+
+    if not isinstance(value, Mapping) or set(value) != {
+        "operation_id", "status", "room_count", "command_count",
+        "accepted_count", "confirmed_room_count", "read_back", "reasons",
+    }:
+        return False
+    return bool(
+        isinstance(value.get("operation_id"), str)
+        and _OPERATION_ID.fullmatch(value["operation_id"]) is not None
+        and value.get("status") in {
+            "confirmed", "pending", "partial", "rejected", "unavailable", "timed_out",
+        }
+        and all(
+            type(value.get(key)) is int and value[key] >= 0
+            for key in (
+                "room_count", "command_count", "accepted_count",
+                "confirmed_room_count",
+            )
+        )
+        and isinstance(value.get("read_back"), Mapping)
+        and isinstance(value.get("reasons"), list)
+        and all(isinstance(reason, str) for reason in value["reasons"])
+    )
+
+
 def _pending_predecessor(
     records: object,
     request: ClimateTabletActionRequest,
@@ -4951,7 +5047,11 @@ def _reliable_outcomes(
                 continue
             if isinstance(execution_leaf, Mapping) and execution_leaf.get("execution_state") == "dispatched_not_accepted":
                 leaf_status, reason, execution, code, message = ("failed", "command_failed", "dispatched_not_accepted", "command_failed", "Команда не подтверждена, требуется проверка устройства.")
-            elif isinstance(execution_leaf, Mapping) and execution_leaf.get("execution_state") == "accepted_unverified":
+            elif (
+                isinstance(execution_leaf, Mapping)
+                and execution_leaf.get("execution_state") == "accepted_unverified"
+                and status != "confirmed"
+            ):
                 leaf_status, reason, execution, code, message = ("pending", "none", "accepted_unverified", "pending", "Команда принята и ожидает отправки.")
                 unfinished += 1
             elif status == "confirmed" and (

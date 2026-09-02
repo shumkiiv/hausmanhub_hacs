@@ -1929,6 +1929,8 @@ class HomeClimateTargetsView(_ClimateView):
 
 def _legacy_home_target_receipt(receipt: Mapping[str, object], correlation_id: str) -> dict[str, object]:
     """Project the coordinator receipt onto the unchanged legacy response."""
+    from .application.contour_apply import _REASON_NAMES
+
     if not isinstance(receipt.get("operation_id"), str):
         return {**receipt, "correlation_id": correlation_id}
     status = receipt.get("status")
@@ -1958,7 +1960,12 @@ def _legacy_home_target_receipt(receipt: Mapping[str, object], correlation_id: s
         "room_count": receipt.get("room_count", 0), "command_count": receipt.get("command_count", 0), "accepted_count": receipt.get("accepted_count", 0),
         "confirmed_room_count": receipt.get("confirmed_room_count", 0),
         "changes": {"temperature": changes.get("temperature", 0), "strategy": changes.get("strategy", 0), "automatic_mode": changes.get("automatic_mode", 0)},
-        "reasons": reasons, "reason_names": [],
+        "reasons": reasons,
+        "reason_names": [
+            _REASON_NAMES[reason]
+            for reason in reasons
+            if reason in _REASON_NAMES
+        ],
         "created_at": receipt.get("created_at"), "updated_at": receipt.get("updated_at"),
     }
 

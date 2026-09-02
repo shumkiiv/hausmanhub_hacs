@@ -125,6 +125,7 @@ class ClimateApplicationPlan:
     initially_aligned_room_ids: tuple[str, ...]
     denial_reasons: tuple[ClimateApplicationDenialReason, ...]
     explicit_temperature_targets: tuple[tuple[str, float], ...]
+    explicit_humidity_targets: tuple[tuple[str, int], ...]
 
     def __post_init__(self) -> None:
         _require_stable_id(self.contour_id, "application contour id")
@@ -142,6 +143,16 @@ class ClimateApplicationPlan:
             != len(self.explicit_temperature_targets)
         ):
             raise ClimateApplicationViolation("explicit target facts are invalid")
+        if (
+            type(self.explicit_humidity_targets) is not tuple
+            or any(
+                not isinstance(room_id, str) or type(target) is not int
+                for room_id, target in self.explicit_humidity_targets
+            )
+            or len({room_id for room_id, _ in self.explicit_humidity_targets})
+            != len(self.explicit_humidity_targets)
+        ):
+            raise ClimateApplicationViolation("explicit humidity target facts are invalid")
         if not isinstance(self.fingerprint, str) or _FINGERPRINT.fullmatch(self.fingerprint) is None:
             raise ClimateApplicationViolation("application fingerprint is invalid")
         if not isinstance(self.desired_state_changes, ClimateDesiredStateChanges):

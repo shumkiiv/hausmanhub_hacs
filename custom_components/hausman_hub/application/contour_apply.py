@@ -207,10 +207,25 @@ class ContourApplyPlan:
         return bool(self.native_plan.explicit_temperature_targets)
 
     @property
+    def explicit_target_alignment(self) -> bool:
+        """Whether this frozen plan carries an explicit physical target axis."""
+
+        return bool(
+            self.native_plan.explicit_temperature_targets
+            or self.native_plan.explicit_humidity_targets
+        )
+
+    @property
     def explicit_temperature_targets(self) -> dict[str, float]:
         """Return the immutable operation's target facts for read-back only."""
 
         return dict(self.native_plan.explicit_temperature_targets)
+
+    @property
+    def explicit_humidity_targets(self) -> dict[str, int]:
+        """Return immutable humidity target facts for read-back only."""
+
+        return dict(self.native_plan.explicit_humidity_targets)
 
     def preview_payload(self) -> dict[str, object]:
         return {
@@ -344,6 +359,59 @@ class ContourApplyReceipt:
         return payload
 
 
+def _live_device_outcomes(
+    enhanced: Mapping[str, object] | None,
+) -> Mapping[str, Mapping[str, object]] | None:
+    """Expose the frozen per-leaf executor boundary to the tablet adapter.
+
+    Aggregate counts cannot prove a multi-device home command.  The ledger is
+    checkpointed before and after every owner batch, so it is the only source
+    for an exact live outcome map.  Confirmation remains the tablet's own
+    fresh read-back proof; these leaves describe dispatch only.
+    """
+
+    if not isinstance(enhanced, Mapping):
+        return None
+    ledger = enhanced.get("leaf_ledger")
+    if not isinstance(ledger, Mapping) or not ledger:
+        return None
+    outcomes: dict[str, dict[str, object]] = {}
+    for device_id, state in ledger.items():
+        if not isinstance(device_id, str):
+            return None
+        if state == "accepted_unverified":
+            outcomes[device_id] = {
+                "execution_state": state,
+                "command_count": 1,
+                "accepted_count": 1,
+                "retry_policy": "forbidden_after_dispatch",
+            }
+        elif state in {"started", "dispatched_not_accepted"}:
+            outcomes[device_id] = {
+                "execution_state": "dispatched_not_accepted",
+                "command_count": 1,
+                "accepted_count": 0,
+                "retry_policy": "forbidden_after_dispatch",
+            }
+        elif state == "blocked_before_dispatch":
+            outcomes[device_id] = {
+                "status": "not_attempted",
+                "reason": "configuration_error",
+                "execution_state": state,
+                "message_code": "configuration_error",
+                "command_count": 0,
+                "accepted_count": 0,
+            }
+        elif state == "already_in_sync":
+            # Zero-call evidence is constructed at reservation time.  Keep
+            # the existing receipt map if one was already present instead of
+            # inventing fresh source evidence here.
+            return None
+        else:
+            return None
+    return outcomes
+
+
 @dataclass(frozen=True, slots=True)
 class _ContourApplyRecord:
     plan: ContourApplyPlan | "_RestoredContourApplyPlan"
@@ -423,7 +491,7 @@ class _ContourApplyLedger:
         now = self._safe_now()
         zero_call_proof_blocked = (
             not plan.strict_calls
-            and plan.explicit_temperature_alignment
+            and plan.explicit_target_alignment
             and isinstance(enhanced, Mapping)
             and isinstance(enhanced.get("leaf_ledger"), Mapping)
             and any(
@@ -546,6 +614,10 @@ class _ContourApplyLedger:
             confirmed_room_count=confirmed_room_count,
             reasons=tuple(dict.fromkeys(reasons)),
             updated_at=self._safe_now(),
+            device_outcomes=(
+                _live_device_outcomes(record.enhanced)
+                or record.receipt.device_outcomes
+            ),
         )
         updated = replace(record, receipt=receipt)
         self._records[request_id] = updated
@@ -733,6 +805,7 @@ def build_contour_apply_plan(
     desired_state_changes: ClimateDesiredStateChanges,
     explicit_temperature_alignment: bool = False,
     explicit_temperature_targets: Mapping[str, float] | None = None,
+    explicit_humidity_targets: Mapping[str, int] | None = None,
 ) -> ContourApplyPlan:
     requested_temperature = (
         ClimateTargetAxis.TEMPERATURE in desired_state_changes.requested_axes
@@ -768,7 +841,9 @@ def build_contour_apply_plan(
                 )
             ),
             explicit_humidity_targets=(
-                {
+                explicit_humidity_targets
+                if explicit_humidity_targets is not None
+                else {
                     assignment.room_id: assignment.target_humidity
                     for assignment in assignments
                 }

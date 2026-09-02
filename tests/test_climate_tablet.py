@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+from dataclasses import replace
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -26,7 +27,14 @@ from custom_components.hausman_hub.application.climate_tablet import (
 from custom_components.hausman_hub.application.contour_apply import ContourApplyStatus
 from custom_components.hausman_hub.application.climate_runtime import ClimateRuntime
 from custom_components.hausman_hub.climate_ledger_keyring import ClimateLedgerKeyring
+from custom_components.hausman_hub.domain.climate import (
+    ClimateCapability,
+    ClimateDeviceKind,
+    ClimateEndpoint,
+    ClimateEndpointRole,
+)
 from custom_components.hausman_hub.domain.climate_bridge import ClimateControlMode
+from custom_components.hausman_hub.domain.climate_ha_calls import ClimateHaService
 from tests.test_climate_runtime import (
     MemoryBridge,
     MemoryContourStore,
@@ -202,6 +210,105 @@ class SharedAuthenticatedLedgerMemoryStore(AuthenticatedLedgerMemoryStore):
                 raise ValueError("stale climate control revision")
             self._control_revision += 1
             return self._control_revision
+
+
+def native_home_target_runtime(
+    *,
+    include_humidifier: bool,
+) -> tuple[ClimateRuntime, SharedAuthenticatedLedgerMemoryStore, MemoryContourStore, ReflectingStrictExecutor]:
+    """Build the real reserved-action path with complete native actuator scope."""
+
+    store = SharedAuthenticatedLedgerMemoryStore()
+    registry, contours = build_climate_contour_setup(
+        MemoryBridge().snapshot,
+        room_ids=["living"],
+        source_ids=["synthetic-ac-source-living"],
+        name="Климат",
+        mode="automatic",
+        target_temperature=25.0,
+        target_humidity=45,
+        strategy="normal",
+    )
+    registry, state_view = native_application_inputs(registry)
+    air_conditioner = next(
+        device
+        for device in registry.devices
+        if device.kind is ClimateDeviceKind.AIR_CONDITIONER
+    )
+    extras = (
+        replace(
+            air_conditioner,
+            device_id="living_radiator",
+            name="Living radiator",
+            kind=ClimateDeviceKind.RADIATOR_THERMOSTAT,
+            source_id="synthetic-radiator-source-living",
+            endpoints=(ClimateEndpoint(ClimateEndpointRole.CONTROL, "climate.living_radiator"),),
+        ),
+        replace(
+            air_conditioner,
+            device_id="living_floor",
+            name="Living floor",
+            kind=ClimateDeviceKind.FLOOR_HEATING,
+            source_id="synthetic-floor-source-living",
+            endpoints=(ClimateEndpoint(ClimateEndpointRole.CONTROL, "climate.living_floor"),),
+        ),
+    )
+    if include_humidifier:
+        extras += (
+            replace(
+                air_conditioner,
+                device_id="living_humidifier",
+                name="Living humidifier",
+                kind=ClimateDeviceKind.HUMIDIFIER,
+                source_id="synthetic-humidifier-source-living",
+                capabilities=(
+                    ClimateCapability.POWER,
+                    ClimateCapability.TARGET_HUMIDITY,
+                ),
+                endpoints=(ClimateEndpoint(ClimateEndpointRole.CONTROL, "humidifier.living"),),
+            ),
+        )
+    registry = replace(registry, devices=(*registry.devices, *extras))
+    contour = contours.contour("climate")
+    if contour is None:
+        raise AssertionError("test contour is unavailable")
+    contours = replace(
+        contours,
+        contours=(
+            replace(
+                contour,
+                rooms=(replace(contour.rooms[0], device_ids=(*contour.rooms[0].device_ids, *(device.device_id for device in extras))),),
+            ),
+        ),
+    )
+    template_state = state_view.states[air_conditioner.endpoint(ClimateEndpointRole.CONTROL).entity_id]  # type: ignore[union-attr]
+    for device in extras:
+        endpoint = device.endpoint(ClimateEndpointRole.CONTROL)
+        if endpoint is not None:
+            state_view.states[endpoint.entity_id] = replace(
+                template_state,
+                entity_id=endpoint.entity_id,
+                state="on" if device.kind is ClimateDeviceKind.HUMIDIFIER else "cool",
+                attributes=(
+                    {"humidity": 45}
+                    if device.kind is ClimateDeviceKind.HUMIDIFIER
+                    else dict(template_state.attributes)
+                ),
+            )
+    contour_store = MemoryContourStore(contours)
+    executor = ReflectingStrictExecutor(state_view, advance_timestamp=True)
+    runtime = ClimateRuntime(
+        entry_id="entry",
+        configuration=configuration(ClimateControlMode.MANAGED),
+        registry_store=MemoryStore(registry),
+        contour_store=contour_store,
+        strict_ha_call_executor=executor,
+        ha_state_view=state_view,
+        operation_id_factory=lambda: "a" * 32,
+        now_ms=lambda: 1784280005000,
+        direct_control_store=store,
+    )
+    return runtime, store, contour_store, executor
 
 
 class FailingAuthenticatedLedgerMemoryStore(AuthenticatedLedgerMemoryStore):
@@ -776,7 +883,7 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
 
         receipt = await self.service.async_execute(request)
 
-        self.assertEqual("confirmed", receipt["status"])
+        self.assertEqual("confirmed", receipt["status"], receipt)
         self.assertEqual(1, len(self.runtime.commands))
 
     async def test_enhanced_action_rejects_stale_control_revision_before_dispatch(self) -> None:
@@ -1129,6 +1236,107 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first["operation_id"], duplicate["operation_id"])
         self.assertEqual(1, len(executor.batches))
 
+    async def test_reserved_home_humidity_target_dispatches_only_one_humidifier_batch(self) -> None:
+        runtime, store, contour_store, executor = native_home_target_runtime(
+            include_humidifier=True,
+        )
+        await runtime.async_start()
+        service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await service.async_load()
+        request = {
+            "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+            "request_id": "tablet.climate.home-humidity",
+            "correlation_id": "corr.home-humidity",
+            "expected_state_revision": 0,
+            "expected_control_revision": 0,
+            "reliability_profile": "climate_reliability_v1",
+            "action": "set_home_targets",
+            "room_id": None,
+            "parameters": {"target_humidity": 55},
+        }
+
+        receipt = await service.async_execute(request)
+        duplicate = await service.async_execute(request)
+
+        self.assertEqual("confirmed", receipt["status"], receipt)
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(receipt["operation_id"], duplicate["operation_id"])
+        self.assertEqual(1, len(executor.batches))
+        calls = executor.batches[0]
+        self.assertEqual(1, len(calls))
+        self.assertEqual(ClimateHaService.HUMIDIFIER_SET_HUMIDITY, calls[0].service)
+        self.assertEqual("humidifier.living", calls[0].entity_id)
+        self.assertEqual(55, calls[0].humidity)
+        self.assertEqual(1, len(contour_store.saved))
+        self.assertEqual(1, store._control_revision)
+        self.assertEqual(
+            "climate_reliability_v1",
+            store.payload["records"][0]["request"]["reliability_profile"],
+        )
+
+    async def test_reserved_home_targets_dispatch_complete_temperature_and_humidity_scope_once(self) -> None:
+        runtime, store, contour_store, executor = native_home_target_runtime(
+            include_humidifier=True,
+        )
+        await runtime.async_start()
+        service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await service.async_load()
+        receipt = await service.async_execute({
+            "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+            "request_id": "tablet.climate.home-combined",
+            "correlation_id": "corr.home-combined",
+            "expected_state_revision": 0,
+            "expected_control_revision": 0,
+            "reliability_profile": "climate_reliability_v1",
+            "action": "set_home_targets",
+            "room_id": None,
+            "parameters": {"target_temperature": 25.5, "target_humidity": 55},
+        })
+
+        self.assertIn(receipt["status"], {"confirmed", "partial"}, receipt)
+        # Execution is checkpointed per physical owner, so the complete
+        # four-device scope is four one-call batches, never one ambiguous
+        # aggregate batch or a duplicate retry.
+        self.assertEqual(4, len(executor.batches))
+        calls = tuple(call for batch in executor.batches for call in batch)
+        self.assertEqual(
+            {
+                (ClimateHaService.CLIMATE_SET_TEMPERATURE, "climate.living_air_conditioner", 25.5),
+                (ClimateHaService.CLIMATE_SET_TEMPERATURE, "climate.living_radiator", 25.5),
+                (ClimateHaService.CLIMATE_SET_TEMPERATURE, "climate.living_floor", 25.5),
+                (ClimateHaService.HUMIDIFIER_SET_HUMIDITY, "humidifier.living", 55),
+            },
+            {(call.service, call.entity_id, call.temperature if call.temperature is not None else call.humidity) for call in calls},
+        )
+        self.assertEqual(1, len(contour_store.saved))
+        self.assertEqual(1, store._control_revision)
+
+    async def test_reserved_home_humidity_target_rejects_missing_actuator_before_durable_or_executor_work(self) -> None:
+        runtime, store, contour_store, executor = native_home_target_runtime(
+            include_humidifier=False,
+        )
+        await runtime.async_start()
+        service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await service.async_load()
+
+        with self.assertRaises(ClimateTabletUnavailable):
+            await service.async_execute({
+            "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+            "request_id": "tablet.climate.home-humidity-missing",
+            "correlation_id": "corr.home-humidity-missing",
+            "expected_state_revision": 0,
+            "expected_control_revision": 0,
+            "reliability_profile": "climate_reliability_v1",
+            "action": "set_home_targets",
+            "room_id": None,
+            "parameters": {"target_humidity": 55},
+            })
+
+        self.assertEqual([], contour_store.saved)
+        self.assertEqual([], executor.batches)
+        self.assertEqual(0, store._control_revision)
+        self.assertIsNone(store.payload)
+
     async def test_legacy_home_duplicate_returns_before_a_fresh_snapshot(self) -> None:
         """A legacy retry reuses its operation identity without re-entering readiness."""
         runtime = FakeRuntime(managed_home())
@@ -1143,12 +1351,28 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
             correlation_id="corr.legacy-duplicate",
             parameters={"target_temperature": 24.5},
         )
+        sidecar = await store.async_load_reliable_scope_bindings()
+        self.assertEqual(
+            first["operation_id"],
+            sidecar["__legacy_home_execution_facts__"][
+                "tablet.climate.legacy-duplicate"
+            ]["operation_id"],
+        )
+
+        restarted = ClimateTabletService(runtime, store)
+        await restarted.async_load()
+        self.assertEqual(
+            first["operation_id"],
+            restarted._legacy_home_execution_facts[
+                "tablet.climate.legacy-duplicate"
+            ]["operation_id"],
+        )
 
         async def no_new_snapshot() -> dict[str, object]:
             raise AssertionError("duplicate must not read a new climate revision")
 
         runtime.async_public_snapshot = no_new_snapshot
-        duplicate = await service.async_execute_legacy_home_targets(
+        duplicate = await restarted.async_execute_legacy_home_targets(
             request_id="tablet.climate.legacy-duplicate",
             correlation_id="corr.legacy-duplicate",
             parameters={"target_temperature": 24.5},
