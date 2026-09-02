@@ -1899,7 +1899,6 @@ class HomeClimateTargetsView(_ClimateView):
                 field="correlation_id",
                 fallback=payload.get("request_id"),
             )
-            snapshot = await tablet.async_snapshot()
             parameters = {
                 key: value
                 for key, value in (
@@ -1908,18 +1907,11 @@ class HomeClimateTargetsView(_ClimateView):
                 )
                 if value is not None
             }
-            receipt = await tablet.async_execute({
-                "contract": {
-                    "name": "hausman-hub-climate-action-request", "version": 1,
-                },
-                "request_id": legacy.request_id,
-                "correlation_id": correlation_id,
-                "expected_state_revision": snapshot["state_revision"],
-                "expected_control_revision": snapshot["control_revision"],
-                "reliability_profile": "climate_reliability_v1",
-                "action": "set_home_targets", "room_id": None,
-                "parameters": parameters,
-            })
+            receipt = await tablet.async_execute_legacy_home_targets(
+                request_id=legacy.request_id,
+                correlation_id=correlation_id,
+                parameters=parameters,
+            )
         except (HomeClimateTargetsViolation, CorrelationIdError):
             return self.json_message(
                 "The home climate target request is invalid.",
@@ -1942,20 +1934,31 @@ def _legacy_home_target_receipt(receipt: Mapping[str, object], correlation_id: s
     status = receipt.get("status")
     confirmed = status == "confirmed"
     accepted = status in {"pending", "confirmed", "partial"}
+    changes = receipt.get("changes")
+    changes = changes if isinstance(changes, Mapping) else {}
+    read_back = receipt.get("read_back")
+    read_back = read_back if isinstance(read_back, Mapping) else {}
+    reasons = receipt.get("reasons")
+    reasons = list(reasons) if isinstance(reasons, list) and all(isinstance(item, str) for item in reasons) else []
     return {
         "contract": {"name": "hausman-hub-climate-control-receipt", "version": 1},
         "operation_id": receipt["operation_id"], "request_id": receipt["request_id"],
         "correlation_id": correlation_id, "contour_id": "climate",
         "action": {"code": "apply_saved_settings", "name": "Применить настройки климата", "room_id": None, "target_temperature": None, "profile": None},
-        "status": status, "status_name": "Выполнено" if confirmed else "Результат неизвестен",
+        "status": status,
+        "status_name": "Выполнено" if confirmed else (
+            "Выполнено частично" if status == "partial" else (
+                "Проверяется" if status == "pending" else "Результат неизвестен"
+            )
+        ),
         "accepted": accepted, "confirmed": confirmed,
         "message": receipt.get("message", "Климатический контур обрабатывает новые цели."),
         "confirmation_window_ms": 8000,
-        "read_back": {"attempted": confirmed, "matched": confirmed, "observed_at": receipt.get("updated_at"), "confirmed_room_count": 0},
-        "room_count": 0, "command_count": 0, "accepted_count": 0,
-        "confirmed_room_count": 0,
-        "changes": {"temperature": 0, "strategy": 0, "automatic_mode": 0},
-        "reasons": [], "reason_names": [],
+        "read_back": {"attempted": bool(read_back.get("attempted", confirmed)), "matched": bool(read_back.get("matched", confirmed)), "observed_at": read_back.get("observed_at", receipt.get("updated_at")), "confirmed_room_count": read_back.get("confirmed_room_count", receipt.get("confirmed_room_count", 0))},
+        "room_count": receipt.get("room_count", 0), "command_count": receipt.get("command_count", 0), "accepted_count": receipt.get("accepted_count", 0),
+        "confirmed_room_count": receipt.get("confirmed_room_count", 0),
+        "changes": {"temperature": changes.get("temperature", 0), "strategy": changes.get("strategy", 0), "automatic_mode": changes.get("automatic_mode", 0)},
+        "reasons": reasons, "reason_names": [],
         "created_at": receipt.get("created_at"), "updated_at": receipt.get("updated_at"),
     }
 

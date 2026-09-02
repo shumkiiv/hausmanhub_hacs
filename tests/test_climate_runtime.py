@@ -1501,6 +1501,56 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, len(contour_store.saved))
         self.assertEqual(1, len(executor.batches))
 
+    async def test_home_target_executes_the_preflight_plan_without_a_second_read(self) -> None:
+        """A saved home target must dispatch the exact plan that passed preflight."""
+        bridge = MemoryBridge()
+        registry, contours = build_climate_contour_setup(
+            bridge.snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        registry, state_view = native_application_inputs(registry)
+        executor = ReflectingStrictExecutor(state_view)
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateControlMode.MANAGED),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            strict_ha_call_executor=executor,
+            ha_state_view=state_view,
+            operation_id_factory=lambda: "f" * 32,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+        observations = 0
+        original = runtime._async_native_climate_observation_unlocked
+
+        async def observed_once():
+            nonlocal observations
+            observations += 1
+            return await original()
+
+        runtime._async_native_climate_observation_unlocked = observed_once
+
+        receipt = await runtime.async_home_climate_targets({
+            "request_id": "home-target-frozen-plan",
+            "contour_id": "climate",
+            "target_temperature": 24.5,
+            "target_humidity": None,
+            "confirm": True,
+        })
+
+        self.assertEqual("confirmed", receipt.status.value)
+        # One preflight observation and one post-dispatch read-back are valid.
+        # A third read would rebuild a different plan after persistence.
+        self.assertEqual(2, observations)
+        self.assertEqual(1, len(executor.batches))
+
     async def test_next_schedule_period_clears_temporary_temperature(self) -> None:
         bridge = ReflectingContourBridge()
         registry, contours = build_climate_contour_setup(

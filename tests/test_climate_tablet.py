@@ -1129,6 +1129,35 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first["operation_id"], duplicate["operation_id"])
         self.assertEqual(1, len(executor.batches))
 
+    async def test_legacy_home_duplicate_returns_before_a_fresh_snapshot(self) -> None:
+        """A legacy retry reuses its operation identity without re-entering readiness."""
+        runtime = FakeRuntime(managed_home())
+        # Reliable dispatch requires a real pre-dispatch observation proof.
+        runtime._mark_observed()
+        store = AuthenticatedLedgerMemoryStore()
+        service = ClimateTabletService(runtime, store)
+        await service.async_load()
+
+        first = await service.async_execute_legacy_home_targets(
+            request_id="tablet.climate.legacy-duplicate",
+            correlation_id="corr.legacy-duplicate",
+            parameters={"target_temperature": 24.5},
+        )
+
+        async def no_new_snapshot() -> dict[str, object]:
+            raise AssertionError("duplicate must not read a new climate revision")
+
+        runtime.async_public_snapshot = no_new_snapshot
+        duplicate = await service.async_execute_legacy_home_targets(
+            request_id="tablet.climate.legacy-duplicate",
+            correlation_id="corr.legacy-duplicate",
+            parameters={"target_temperature": 24.5},
+        )
+
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(first["operation_id"], duplicate["operation_id"])
+        self.assertEqual(1, len(runtime.commands))
+
     async def test_home_target_preflight_denial_never_reserves_or_dispatches(self) -> None:
         for name, mutate in (
             ("storage", lambda home: home["rooms"][0]["control"].update(allowed_actions=[])),

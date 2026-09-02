@@ -816,7 +816,11 @@ def _temperature_only_application_contour(
                     if (
                         (device := registry.device(device_id)) is not None
                         and (
-                            device.kind is ClimateDeviceKind.AIR_CONDITIONER
+                            device.kind in {
+                                ClimateDeviceKind.AIR_CONDITIONER,
+                                ClimateDeviceKind.RADIATOR_THERMOSTAT,
+                                ClimateDeviceKind.FLOOR_HEATING,
+                            }
                             and (
                                 not requested_axes
                                 or ClimateTargetAxis.TEMPERATURE in requested_axes

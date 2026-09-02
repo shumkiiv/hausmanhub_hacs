@@ -1743,17 +1743,29 @@ class ClimateRuntime:
             # Build the exact selected-axis plan before mutating the contour.
             # A missing humidifier, stale observation or executor must not
             # leave a durable target which cannot cross the physical boundary.
-            observation = await self._async_native_climate_observation_unlocked()
-            preflight = build_contour_apply_plan(
-                updated_contour, self._registry,
-                self.configuration.climate_bridge_mode, observation,
-                desired_state_changes=desired_state_changes,
-            )
-            if not preflight.native_plan.preflight_permitted:
-                raise ClimateRuntimeUnavailable("home climate target scope is unavailable")
-            if preflight.strict_calls and self._strict_ha_call_executor is None:
-                raise ClimateRuntimeUnavailable("climate executor is unavailable")
-            await self._contour_store.async_save(updated)
+            try:
+                observation = await self._async_native_climate_observation_unlocked()
+                preflight = build_contour_apply_plan(
+                    updated_contour, self._registry,
+                    self.configuration.climate_bridge_mode, observation,
+                    desired_state_changes=desired_state_changes,
+                )
+                if not preflight.native_plan.preflight_permitted:
+                    raise ClimateRuntimeUnavailable("home climate target scope is unavailable")
+                if preflight.strict_calls and self._strict_ha_call_executor is None:
+                    raise ClimateRuntimeUnavailable("climate executor is unavailable")
+            except Exception as error:
+                # No executor boundary has been crossed while the immutable
+                # plan is assembled.  The coordinator must close this as
+                # unavailable, never as a physical partial outcome.
+                error.home_target_pre_dispatch = True  # type: ignore[attr-defined]
+                raise
+            try:
+                await self._contour_store.async_save(updated)
+            except Exception as error:
+                # The frozen plan has not reached the executor.
+                error.home_target_pre_dispatch = True  # type: ignore[attr-defined]
+                raise
             self._contours = updated
             return await self._async_apply_native_contour_unlocked(
                 request.request_id,
@@ -1766,6 +1778,8 @@ class ClimateRuntime:
                 reliability_request=reliability_request,
                 resulting_control_revision=pre_reserved_resulting_control_revision,
                 external_reliability_identity=external_reliability_identity,
+                preflight_plan=preflight,
+                preflight_observation=observation,
             )
 
     async def async_room_humidity_target(
@@ -2136,6 +2150,8 @@ class ClimateRuntime:
         reliability_request: object | None = None,
         resulting_control_revision: int | None = None,
         external_reliability_identity: Mapping[str, object] | None = None,
+        preflight_plan: ContourApplyPlan | None = None,
+        preflight_observation: ClimateObservationSnapshot | None = None,
     ) -> ContourApplyReceipt:
         self._require_native_contour_apply_mode()
         contour = contour_without_manual_devices(
@@ -2189,22 +2205,28 @@ class ClimateRuntime:
 
         self._last_contour_apply_was_duplicate = False
 
-        observation = await self._async_native_climate_observation_unlocked()
-        plan = build_contour_apply_plan(
-            contour,
-            self._registry,
-            self.configuration.climate_bridge_mode,
-            observation,
-            room_ids=room_ids,
-            desired_state_changes=desired_state_changes,
-            explicit_temperature_alignment=(
-                context.action
-                in {
-                    ClimateControlAction.SET_TEMPORARY_TEMPERATURE,
-                    ClimateControlAction.RETURN_TO_SCHEDULE,
-                }
-            ),
-        )
+        if preflight_plan is None:
+            observation = await self._async_native_climate_observation_unlocked()
+            plan = build_contour_apply_plan(
+                contour,
+                self._registry,
+                self.configuration.climate_bridge_mode,
+                observation,
+                room_ids=room_ids,
+                desired_state_changes=desired_state_changes,
+                explicit_temperature_alignment=(
+                    context.action
+                    in {
+                        ClimateControlAction.SET_TEMPORARY_TEMPERATURE,
+                        ClimateControlAction.RETURN_TO_SCHEDULE,
+                    }
+                ),
+            )
+        else:
+            if not isinstance(preflight_observation, ClimateObservationSnapshot):
+                raise ContourApplyViolation("climate preflight observation is unavailable")
+            plan = preflight_plan
+            observation = preflight_observation
         record = self._contour_applications.begin(
             request_id,
             plan,
@@ -2225,10 +2247,11 @@ class ClimateRuntime:
         )
         try:
             await self._async_persist_direct_control_unlocked()
-        except Exception:
+        except Exception as error:
             # Saving failed before a physical boundary.  Retaining this entry
             # would create a phantom dispatchable operation on a later retry.
             self._contour_applications.discard_unpersisted(request_id)
+            error.home_target_pre_dispatch = True  # type: ignore[attr-defined]
             raise
         if not plan.native_plan.preflight_permitted or not plan.strict_calls:
             if not plan.native_plan.preflight_permitted:

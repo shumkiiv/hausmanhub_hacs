@@ -233,6 +233,28 @@ class RequestedHomeTargetAxisTest(unittest.TestCase):
             frozenset({ClimateTargetAxis.TEMPERATURE}), changes.requested_axes
         )
 
+    def test_temperature_scope_keeps_all_temperature_actuators_only(self) -> None:
+        """An explicit temperature target includes AC, TRV and floor heat."""
+
+        from custom_components.hausman_hub.application.contour_apply import (
+            _temperature_only_application_contour,
+        )
+
+        registry, contours, _ = _setup()
+        contour = contours.contour("climate")
+        selected = _temperature_only_application_contour(
+            contour,
+            registry,
+            target_room_ids=("living",),
+            desired_state_changes=ClimateDesiredStateChanges(
+                temperature=1, humidity=0, strategy=0, automatic_mode=0,
+                requested_axes=frozenset({ClimateTargetAxis.TEMPERATURE}),
+            ),
+            requested_axes=frozenset({ClimateTargetAxis.TEMPERATURE}),
+        )
+
+        self.assertNotIn("living_humidity_observation", selected.rooms[0].device_ids)
+
 
 class NativeContourParityTest(unittest.TestCase):
     """Golden contract: the native contour projection keeps its v7 shape."""

@@ -128,6 +128,16 @@ class ClimateTabletUnavailable(RuntimeError):
     """The canonical tablet climate projection cannot be read safely."""
 
 
+class _HeldAsyncLock:
+    """No-op context used only while the service already owns its lock."""
+
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *_: object) -> None:
+        return None
+
+
 class ClimateTabletOperationNotFound(LookupError):
     """The requested bounded operation does not exist."""
 
@@ -1068,11 +1078,20 @@ class ClimateTabletService:
                 self._last_reliability_metadata,
             ))
 
-    async def async_execute(self, payload: object) -> dict[str, object]:
+    async def async_execute(
+        self,
+        payload: object,
+        *,
+        _lock_held: bool = False,
+        _legacy_fail_fast: bool = False,
+    ) -> dict[str, object]:
         """Reserve, execute at most once, persist and return one operation receipt."""
 
         request = parse_climate_tablet_action(payload)
-        async with self._lock:
+        # The legacy adapter has already acquired this same service lock.  Do
+        # not release and re-enter it between its duplicate/readiness checks
+        # and the shared reservation path.
+        async with (self._lock if not _lock_held else _HeldAsyncLock()):
             if request.reliability_profile is not None:
                 self._require_reliability_health()
             if self._persistence_failed:
@@ -1108,6 +1127,11 @@ class ClimateTabletService:
             if len(self._records_by_request) >= MAX_RELIABLE_OPERATION_RECORDS:
                 raise ClimateTabletUnavailable("climate operation history is full")
             snapshot = await self._snapshot_unlocked()
+            if _legacy_fail_fast:
+                # A compatibility call has no desired-intent retry semantics:
+                # readiness and pending gates must reject it before it can
+                # reserve a revision, supersede another request or persist.
+                _require_action_allowed(snapshot, request)
             # A disabled runtime has no authoritative inventory and cannot
             # safely retain a desired physical command.  Fail before any
             # revision reservation for both legacy and negotiated actions.
@@ -1401,7 +1425,26 @@ class ClimateTabletService:
                         resulting_control_revision=self._control_revision,
                     )
             except (ContourApplyViolation, TemporaryTemperatureViolation, HomeClimateTargetsViolation) as error:
-                if request.reliability_profile == "climate_reliability_v1" and physical_started:
+                if (
+                    request.reliability_profile == "climate_reliability_v1"
+                    and getattr(error, "home_target_pre_dispatch", False)
+                ):
+                    self._desired_intents.pop(_intent_key(request), None)
+                    receipt = _terminal_receipt(
+                        request,
+                        operation_id,
+                        status="unavailable",
+                        reason="action_unsupported",
+                        message="Климатическая цель недоступна до отправки команды.",
+                        created_at=now,
+                        updated_at=self._safe_now(),
+                        snapshot=snapshot,
+                        resulting_control_revision=self._control_revision,
+                    )
+                    final_ledger = _reliable_dispatch_ledger(
+                        receipt, "blocked_before_dispatch"
+                    )
+                elif request.reliability_profile == "climate_reliability_v1" and physical_started:
                     receipt = _ambiguous_started_reliable_receipt(
                         receipt, request, self._safe_now()
                     )
@@ -1425,7 +1468,10 @@ class ClimateTabletService:
             except Exception as error:
                 if (
                     request.reliability_profile == "climate_reliability_v1"
-                    and getattr(error, "reserved_tablet_pre_dispatch_conflict", False)
+                    and (
+                        getattr(error, "reserved_tablet_pre_dispatch_conflict", False)
+                        or getattr(error, "home_target_pre_dispatch", False)
+                    )
                 ):
                     # The runtime rechecked the shared revision after this
                     # coordinator released its lock and before it saved a
@@ -1441,7 +1487,11 @@ class ClimateTabletService:
                         # Keep its compatible unavailable code and preserve the
                         # precise conflict only in the human message.
                         reason="action_unsupported",
-                        message="Климатическая цель изменилась другой командой.",
+                        message=(
+                            "Климатическая цель изменилась другой командой."
+                            if getattr(error, "reserved_tablet_pre_dispatch_conflict", False)
+                            else "Климатическая цель недоступна до отправки команды."
+                        ),
                         created_at=now,
                         updated_at=self._safe_now(),
                         snapshot=snapshot,
@@ -1482,6 +1532,60 @@ class ClimateTabletService:
             )
             await self._async_save()
             return dict(receipt)
+
+    async def async_execute_legacy_home_targets(
+        self,
+        *,
+        request_id: str,
+        correlation_id: str,
+        parameters: Mapping[str, object],
+    ) -> dict[str, object]:
+        """Adapt the legacy route without making a duplicate read a new revision."""
+
+        if not isinstance(parameters, Mapping):
+            raise ClimateTabletViolation("legacy home climate parameters are invalid")
+        canonical_parameters = dict(parameters)
+        async with self._lock:
+            self._require_reliability_health()
+            if self._persistence_failed:
+                raise ClimateTabletUnavailable("climate persistence requires restart")
+            # Resolve the compatibility identity before a fresh runtime read.
+            # A retry must be a pure receipt lookup even if the runtime has
+            # become unavailable after the first physical operation.
+            prior = self._records_by_request.get(request_id)
+            if prior is not None:
+                previous = prior.request
+                if (
+                    previous.action != "set_home_targets"
+                    or previous.correlation_id != correlation_id
+                    or previous.parameters != canonical_parameters
+                ):
+                    raise ClimateTabletViolation(
+                        "request id was already used for another climate action",
+                        code="revision_conflict",
+                    )
+                return {**prior.receipt, "duplicate": True}
+            snapshot = await self._snapshot_unlocked()
+            payload = {
+                "contract": {
+                    "name": CLIMATE_ACTION_CONTRACT_NAME,
+                    "version": CLIMATE_TABLET_CONTRACT_VERSION,
+                },
+                "request_id": request_id,
+                "correlation_id": correlation_id,
+                "expected_state_revision": snapshot["state_revision"],
+                "expected_control_revision": snapshot["control_revision"],
+                "reliability_profile": "climate_reliability_v1",
+                "action": "set_home_targets",
+                "room_id": None,
+                "parameters": canonical_parameters,
+            }
+            # `async_execute` consumes this typed command under the lock that
+            # produced its revision.  This keeps duplicate identity, pending
+            # detection and reservation one atomic service operation.
+            return await self.async_execute(
+                payload, _lock_held=True, _legacy_fail_fast=True
+            )
 
     async def async_operation(self, operation_id: str) -> dict[str, object]:
         """Return one persisted receipt without repeating its physical command."""
