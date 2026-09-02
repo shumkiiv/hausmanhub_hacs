@@ -1732,6 +1732,19 @@ class ClimateRuntime:
             desired_state_changes = replace(
                 desired_state_changes, requested_axes=axes,
             )
+            # Build the exact selected-axis plan before mutating the contour.
+            # A missing humidifier, stale observation or executor must not
+            # leave a durable target which cannot cross the physical boundary.
+            observation = await self._async_native_climate_observation_unlocked()
+            preflight = build_contour_apply_plan(
+                updated_contour, self._registry,
+                self.configuration.climate_bridge_mode, observation,
+                desired_state_changes=desired_state_changes,
+            )
+            if not preflight.native_plan.preflight_permitted:
+                raise ClimateRuntimeUnavailable("home climate target scope is unavailable")
+            if preflight.strict_calls and self._strict_ha_call_executor is None:
+                raise ClimateRuntimeUnavailable("climate executor is unavailable")
             await self._contour_store.async_save(updated)
             self._contours = updated
             return await self._async_apply_native_contour_unlocked(
