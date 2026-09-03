@@ -692,9 +692,8 @@ class ClimateRuntime:
                     (device.room_id, device.device_id): {
                         "manual_reason": manual_reasons.get(device.device_id),
                         "source_observed_at": (
-                            observed.observed_at
+                            (observed.observed_at or observation.observed_at)
                             if observed is not None
-                            and observed.availability is ClimateDeviceAvailability.AVAILABLE
                             else None
                         ),
                         "reported_target_temperature": (
@@ -723,6 +722,26 @@ class ClimateRuntime:
                     manual_reasons=manual_reasons,
                     local_now=self._local_now(),
                 )
+                # Private projection proof: the public room controls remain
+                # conservative for an offline leaf, while a whole-home target
+                # can safely save that leaf as deferred after structural plan
+                # validation.  This flag is consumed and stripped by the
+                # tablet adapter, never exposed in its contract.
+                try:
+                    current = self._climate_contour()
+                    probe_changes = ClimateDesiredStateChanges(
+                        0, 0, 0,
+                        requested_axes=frozenset({ClimateTargetAxis.TEMPERATURE}),
+                    )
+                    probe = build_contour_apply_plan(
+                        current, self._registry,
+                        self.configuration.climate_bridge_mode, observation,
+                        desired_state_changes=probe_changes,
+                        manual_device_ids=frozenset(self._manual_memory.manual_device_ids),
+                    )
+                    snapshot["_home_target_available"] = probe.native_plan.preflight_permitted
+                except Exception:
+                    snapshot["_home_target_available"] = False
                 return self._with_deviation_guard_status(snapshot)
             raise ClimateSnapshotUnavailable("climate bridge is disabled")
 
@@ -1737,9 +1756,7 @@ class ClimateRuntime:
             # Preflight and execution must see the identical ownership-filtered
             # scope.  A manually owned device is never allowed to enter a
             # frozen plan only to disappear after the contour has been saved.
-            execution_contour = contour_without_manual_devices(
-                updated_contour, self._manual_memory
-            )
+            execution_contour = updated_contour
             desired_state_changes = local_desired_state_changes(
                 contour,
                 updated_contour,
@@ -1762,6 +1779,7 @@ class ClimateRuntime:
                     execution_contour, self._registry,
                     self.configuration.climate_bridge_mode, observation,
                     desired_state_changes=desired_state_changes,
+                    manual_device_ids=frozenset(self._manual_memory.manual_device_ids),
                 )
                 if not preflight.native_plan.preflight_permitted:
                     raise ClimateRuntimeUnavailable("home climate target scope is unavailable")
@@ -1815,6 +1833,7 @@ class ClimateRuntime:
                 preflight_plan=preflight,
                 preflight_observation=observation,
                 contour_to_save=updated,
+                preserve_manual_scope=True,
             )
 
     async def async_preflight_home_climate_targets(
@@ -1834,9 +1853,7 @@ class ClimateRuntime:
                 target_humidity=request.target_humidity,
             )
             updated_contour = self._require_climate_contour(updated)
-            execution_contour = contour_without_manual_devices(
-                updated_contour, self._manual_memory
-            )
+            execution_contour = updated_contour
             axes = frozenset(
                 axis for axis, value in (
                     (ClimateTargetAxis.TEMPERATURE, request.target_temperature),
@@ -1852,6 +1869,7 @@ class ClimateRuntime:
                 execution_contour, self._registry,
                 self.configuration.climate_bridge_mode, observation,
                 desired_state_changes=changes,
+                manual_device_ids=frozenset(self._manual_memory.manual_device_ids),
             )
             if not plan.native_plan.preflight_permitted:
                 raise ClimateRuntimeUnavailable("home climate target scope is unavailable")
@@ -2230,15 +2248,17 @@ class ClimateRuntime:
         preflight_plan: ContourApplyPlan | None = None,
         preflight_observation: ClimateObservationSnapshot | None = None,
         contour_to_save: ContourRegistry | None = None,
+        preserve_manual_scope: bool = False,
     ) -> ContourApplyReceipt:
         self._require_native_contour_apply_mode()
-        contour = contour_without_manual_devices(
-            (
-                self._require_climate_contour(contour_to_save)
-                if contour_to_save is not None
-                else self._climate_contour()
-            ),
-            self._manual_memory,
+        source_contour = (
+            self._require_climate_contour(contour_to_save)
+            if contour_to_save is not None
+            else self._climate_contour()
+        )
+        contour = (
+            source_contour if preserve_manual_scope
+            else contour_without_manual_devices(source_contour, self._manual_memory)
         )
         if contour.contour_id != contour_id:
             raise ContourApplyViolation("climate contour is not configured")
@@ -4833,7 +4853,19 @@ def _contour_reliability_metadata(
         ):
             target = external_parameters.get("target_temperature")
             target_humidity = external_parameters.get("target_humidity")
-    leaf_ledger = {device_id: "pending_dispatch" for device_id in device_ids}
+    dispositions = {
+        gate.device_id: gate.status.value
+        for gate in plan.native_plan.device_gates
+        if gate.status.value in {"deferred", "manual"}
+    }
+    leaf_ledger = {
+        device_id: (
+            "deferred_offline" if dispositions.get(device_id) == "deferred"
+            else "manual_user_excluded" if dispositions.get(device_id) == "manual"
+            else "pending_dispatch"
+        )
+        for device_id in device_ids
+    }
     aligned_ids = {
         gate.device_id for gate in plan.native_plan.device_gates
         if gate.status.value == "aligned"
@@ -4848,7 +4880,7 @@ def _contour_reliability_metadata(
         )
     ):
         leaf_ledger = {device_id: "already_in_sync" for device_id in device_ids}
-    elif plan.explicit_target_alignment and not plan.strict_calls:
+    elif plan.explicit_target_alignment and not plan.strict_calls and not dispositions:
         # The frozen plan has no physical call.  Without device-level proof it
         # is terminally blocked before dispatch, not pending for a command
         # that cannot exist.

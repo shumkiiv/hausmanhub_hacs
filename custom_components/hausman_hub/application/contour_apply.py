@@ -842,6 +842,7 @@ def build_contour_apply_plan(
     explicit_temperature_alignment: bool = False,
     explicit_temperature_targets: Mapping[str, float] | None = None,
     explicit_humidity_targets: Mapping[str, int] | None = None,
+    manual_device_ids: frozenset[str] = frozenset(),
 ) -> ContourApplyPlan:
     requested_temperature = (
         ClimateTargetAxis.TEMPERATURE in desired_state_changes.requested_axes
@@ -886,6 +887,7 @@ def build_contour_apply_plan(
                 if ClimateTargetAxis.HUMIDITY in desired_state_changes.requested_axes
                 else None
             ),
+            manual_device_ids=manual_device_ids,
         )
     except ClimateApplicationViolation as error:
         raise ContourApplyViolation(str(error)) from error
@@ -1118,6 +1120,20 @@ def _enhanced_payload(
                     "message": "Конфигурация устройства требует проверки.",
                     "command_count": 0, "accepted_count": 0,
                 }
+            elif leaf_state == "deferred_offline":
+                leaf = {
+                    "status": "deferred", "reason": "device_unavailable",
+                    "message_code": "deferred_offline",
+                    "message": "Цель сохранена, устройство недоступно.",
+                    "command_count": 0, "accepted_count": 0,
+                }
+            elif leaf_state == "manual_user_excluded":
+                leaf = {
+                    "status": "manual", "reason": "manual_user_excluded",
+                    "message_code": "manual_user_excluded",
+                    "message": "Цель сохранена без изменения ручного устройства.",
+                    "command_count": 0, "accepted_count": 0,
+                }
             elif leaf_state == "pending_dispatch":
                 leaf = {"status": "pending", "reason": "none", "execution_state": "pending_dispatch",
                         "message_code": "pending",
@@ -1163,6 +1179,10 @@ def _enhanced_payload(
             for device in room_devices.values()
         ):
             room_status = {"status": "not_attempted", "reason": "configuration_error", "execution_state": "blocked_before_dispatch", "message_code": "configuration_error", "message": "Конфигурация устройства требует проверки.", "devices": room_devices}
+        elif all(device.get("status") == "deferred" for device in room_devices.values()):
+            room_status = {"status": "deferred", "reason": "device_unavailable", "message_code": "deferred_offline", "message": "Часть устройств недоступна.", "devices": room_devices}
+        elif all(device.get("status") == "manual" for device in room_devices.values()):
+            room_status = {"status": "manual", "reason": "manual_user_excluded", "message_code": "manual_user_excluded", "message": "Устройства оставлены в ручном управлении.", "devices": room_devices}
         elif confirmed:
             room_status = {"status": "confirmed", "reason": "none", "execution_state": "applied", "message_code": "confirmed", "message": "Результат подтверждён чтением состояния.", "devices": room_devices}
         elif pending:
@@ -1180,18 +1200,26 @@ def _enhanced_payload(
         rooms[room_id] = room_status
     message_code = {"confirmed": "confirmed", "partial": "partial", "pending": "pending", "rejected": "rejected", "unavailable": "unavailable"}[status]  # type: ignore[index]
     message = {"confirmed": "Результат подтверждён чтением состояния.", "partial": "Цель сохранена, часть устройств ожидает применения.", "pending": "Команда принята и ожидает подтверждения.", "rejected": "Команда отклонена.", "unavailable": "Результат команды пока недоступен."}[status]  # type: ignore[index]
+    terminal_deferred = bool(leaves) and all(
+        leaf.get("status") in {"deferred", "manual", "confirmed"}
+        for leaf in leaves.values()
+    ) and any(leaf.get("status") in {"deferred", "manual"} for leaf in leaves.values())
+    if terminal_deferred:
+        status = "partial"
+        message_code = "partial"
+        message = "Цель сохранена, часть устройств отложена или оставлена вручную."
     return {
         "duplicate": False, "action_snapshot": {"kind": metadata["kind"], "request_fingerprint": fingerprint,
             "action": action_code, "parameters": action_parameters, "resolved_scope": scope, "control_revision": expected},
         "desired_snapshot": desired, "desired_snapshot_fingerprint": metadata["desired_snapshot_fingerprint"],
         "expected_control_revision": expected, "resulting_control_revision": resulting,
         "message_code": message_code, "message": message, "request_fingerprint": fingerprint,
-        "confirmation_window_ms": 8000, "final": not pending,
-        "unfinished_device_count": 0 if confirmed or status == "rejected" else len(leaves),
+        "confirmation_window_ms": 8000, "final": terminal_deferred or not pending,
+        "unfinished_device_count": 0 if confirmed or status == "rejected" or terminal_deferred else len(leaves),
         "read_back": {"attempted": payload["accepted"], "matched": confirmed, "observed_at": payload["updated_at"] if payload["accepted"] else None,
            "room_count": payload["room_count"], "confirmed_room_count": payload["confirmed_room_count"],
            "evidence": _enhanced_evidence(action, payload)},
-        "intent": {"status": "saved_and_applied" if confirmed else ("saved_pending_confirmation" if pending else ("saved_blocked_before_dispatch" if status == "rejected" else "unsaved_unavailable")),
+        "intent": {"status": ("saved_deferred_offline" if any(leaf.get("status") == "deferred" for leaf in leaves.values()) else "saved_for_manual_device" if any(leaf.get("status") == "manual" for leaf in leaves.values()) else "saved_and_applied" if confirmed else ("saved_pending_confirmation" if pending else ("saved_blocked_before_dispatch" if status == "rejected" else "unsaved_unavailable"))),
             "request_fingerprint": fingerprint, "control_revision": resulting, "scope_revision": resulting,
             "scope_fingerprint": metadata["scope_fingerprint"], "resolved_scope": scope,
             "desired_target_temperature": metadata["desired_target_temperature"], "desired_target_humidity": metadata["desired_target_humidity"]},

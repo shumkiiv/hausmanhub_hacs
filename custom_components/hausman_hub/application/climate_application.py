@@ -69,6 +69,7 @@ def build_climate_application_plan(
     ir_code_service: object | None = None,
     explicit_temperature_targets: Mapping[str, float] | None = None,
     explicit_humidity_targets: Mapping[str, int] | None = None,
+    manual_device_ids: frozenset[str] = frozenset(),
 ) -> ClimateApplicationPlan:
     if not isinstance(contour, ContourDefinition) or contour.contour_id != "climate":
         raise ClimateApplicationViolation("climate contour is unavailable")
@@ -110,6 +111,16 @@ def build_climate_application_plan(
             _gate_explicit_device(
                 room_id, device, registry, observation,
                 next(gate for gate in base_gates if gate.room_id == room_id),
+                device.device_id in manual_device_ids,
+                any(
+                    (observed := observation.device(candidate.device_id)) is not None
+                    and observed.availability is ClimateDeviceAvailability.UNAVAILABLE
+                    for candidate in _explicit_selected_devices(
+                        contour, registry, room_id,
+                        None if explicit_temperature_targets is None else explicit_temperature_targets.get(room_id),
+                        None if explicit_humidity_targets is None else explicit_humidity_targets.get(room_id),
+                    )
+                ),
                 (
                     None if explicit_temperature_targets is None
                     or device.kind not in {
@@ -194,7 +205,7 @@ def _explicit_selected_devices(contour, registry, room_id, temperature, humidity
                  if (device := registry.device(device_id)) is not None and device.kind in kinds)
 
 
-def _gate_explicit_device(room_id, device, registry, observation, room_gate, temperature, humidity):
+def _gate_explicit_device(room_id, device, registry, observation, room_gate, manual, room_has_known_offline, temperature, humidity):
     # Per-device ownership must not bypass the room-level safety gate.  The
     # latter owns contour mode, managed runtime, membership, fresh observation,
     # isolation and comparison checks.  Only a denied gate contributes reasons:
@@ -215,8 +226,7 @@ def _gate_explicit_device(room_id, device, registry, observation, room_gate, tem
                 ClimateApplicationDenialReason.ROOM_NOT_READY,
                 ClimateApplicationDenialReason.ROOM_NOT_COMPARABLE,
             }
-            and observed is not None
-            and observed.availability is ClimateDeviceAvailability.UNAVAILABLE
+            and room_has_known_offline
         )
     )
     if device.control_scope is not ClimateControlScope.MANAGED or device.control_owner is not ClimateControlOwner.CLIMATE_CORE:
@@ -248,6 +258,10 @@ def _gate_explicit_device(room_id, device, registry, observation, room_gate, tem
         humidity_owner and not valid_humidity_owner
     ):
         reasons.append(ClimateApplicationDenialReason.TRANSLATION_INCOMPLETE)
+    if not reasons and manual:
+        return ClimateApplicationDeviceGate(
+            room_id, device.device_id, ClimateApplicationGateStatus.MANUAL, (), ()
+        )
     if not reasons and observed is not None and observed.availability is ClimateDeviceAvailability.UNAVAILABLE:
         return ClimateApplicationDeviceGate(
             room_id, device.device_id, ClimateApplicationGateStatus.DEFERRED, (), ()

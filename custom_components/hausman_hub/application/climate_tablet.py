@@ -635,10 +635,13 @@ def climate_tablet_snapshot(
     home_targets_allowed = bool(
         home_base_allowed
         and projected_rooms
-        and all(
-            room["mode"] == "automatic"
-            and "set_room_target" in room["control"]["allowed_actions"]
-            for room in projected_rooms
+        and (
+            home.get("_home_target_available") is True
+            or all(
+                room["mode"] == "automatic"
+                and "set_room_target" in room["control"]["allowed_actions"]
+                for room in projected_rooms
+            )
         )
     )
     home_actions = [
@@ -5208,6 +5211,20 @@ def _has_exact_reliable_device_outcomes(
             )
         ):
             return False
+        if leaf.get("status") == "deferred" and (
+            execution is not None
+            or leaf.get("reason") != "device_unavailable"
+            or leaf.get("message_code") != "deferred_offline"
+            or (commands, accepted) != (0, 0)
+        ):
+            return False
+        if leaf.get("status") == "manual" and (
+            execution is not None
+            or leaf.get("reason") not in {"manual_user_excluded", "manual_external_off"}
+            or leaf.get("message_code") not in {"manual_user_excluded", "manual_external_off"}
+            or (commands, accepted) != (0, 0)
+        ):
+            return False
         if (
             execution in {"accepted_unverified", "dispatched_not_accepted"}
             and leaf.get("retry_policy") != "forbidden_after_dispatch"
@@ -5219,7 +5236,9 @@ def _has_exact_reliable_device_outcomes(
             "applied",
             "already_in_sync",
             "blocked_before_dispatch",
-        }:
+        } and not (
+            execution is None and leaf.get("status") in {"deferred", "manual"}
+        ):
             return False
         command_count += commands
         accepted_count += accepted
