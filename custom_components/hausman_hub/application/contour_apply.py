@@ -999,37 +999,34 @@ def _temperature_only_application_contour(
     ):
         return contour
     targeted = frozenset(target_room_ids)
-    return replace(
-        contour,
-        rooms=tuple(
-            replace(
-                room,
-                device_ids=tuple(
-                    device_id
-                    for device_id in room.device_ids
-                    if (
-                        (device := registry.device(device_id)) is not None
-                        and (
-                            device.kind in {
-                                ClimateDeviceKind.AIR_CONDITIONER,
-                                ClimateDeviceKind.RADIATOR_THERMOSTAT,
-                                ClimateDeviceKind.FLOOR_HEATING,
-                            }
-                            and (
-                                not requested_axes
-                                or ClimateTargetAxis.TEMPERATURE in requested_axes
-                            )
-                            or device.kind is ClimateDeviceKind.HUMIDIFIER
-                            and ClimateTargetAxis.HUMIDITY in requested_axes
-                        )
+    rooms = []
+    for room in contour.rooms:
+        if room.room_id not in targeted:
+            rooms.append(room)
+            continue
+        device_ids = tuple(
+            device_id
+            for device_id in room.device_ids
+            if (
+                (device := registry.device(device_id)) is not None
+                and (
+                    device.kind in {
+                        ClimateDeviceKind.AIR_CONDITIONER,
+                        ClimateDeviceKind.RADIATOR_THERMOSTAT,
+                        ClimateDeviceKind.FLOOR_HEATING,
+                    }
+                    and (
+                        not requested_axes
+                        or ClimateTargetAxis.TEMPERATURE in requested_axes
                     )
-                ),
+                    or device.kind is ClimateDeviceKind.HUMIDIFIER
+                    and ClimateTargetAxis.HUMIDITY in requested_axes
+                )
             )
-            if room.room_id in targeted
-            else room
-            for room in contour.rooms
-        ),
-    )
+        )
+        if device_ids:
+            rooms.append(replace(room, device_ids=device_ids))
+    return replace(contour, rooms=tuple(rooms))
 
 
 def local_desired_state_changes(

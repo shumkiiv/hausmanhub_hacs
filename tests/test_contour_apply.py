@@ -15,6 +15,9 @@ from custom_components.hausman_hub.application.climate_application import (
     ClimateDesiredStateChanges,
     build_climate_application_plan,
 )
+from custom_components.hausman_hub.application.climate_application_models import (
+    ClimateTargetAxis,
+)
 from custom_components.hausman_hub.application.climate_observations import (
     build_climate_observation_snapshot,
 )
@@ -660,6 +663,29 @@ class NativeClimateApplicationPlannerTest(unittest.TestCase):
         )
 
         self.assertEqual(living.device_ids, scoped.rooms[0].device_ids)
+
+    def test_temperature_recheck_drops_room_without_temperature_actuator(self) -> None:
+        """Filtering a requested axis must not create an invalid empty room."""
+        registry, contour, _ = _native_inputs()
+
+        scoped = _temperature_only_application_contour(
+            contour,
+            registry,
+            target_room_ids=("living", "kids"),
+            desired_state_changes=ClimateDesiredStateChanges(
+                0,
+                0,
+                0,
+                requested_axes=frozenset({ClimateTargetAxis.TEMPERATURE}),
+            ),
+            requested_axes=frozenset({ClimateTargetAxis.TEMPERATURE}),
+        )
+
+        self.assertEqual(["living"], [room.room_id for room in scoped.rooms])
+        self.assertEqual(
+            ["living_air_conditioner"],
+            list(scoped.rooms[0].device_ids),
+        )
 
     def test_explicit_temperature_target_covers_all_temperature_actuators_in_a_mixed_room(self) -> None:
         """An explicit temperature target covers AC, floor heat and radiator."""

@@ -1593,10 +1593,11 @@ class ClimateTabletService:
                         resulting_control_revision=self._control_revision,
                     )
             except Exception as error:
-                _LOGGER.exception(
-                    "climate tablet post-dispatch processing failed: %s",
-                    type(error).__name__,
-                )
+                if physical_started:
+                    _LOGGER.exception(
+                        "climate tablet post-dispatch processing failed: %s",
+                        type(error).__name__,
+                    )
                 if (
                     request.reliability_profile == "climate_reliability_v1"
                     and (
