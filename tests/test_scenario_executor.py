@@ -431,7 +431,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             trigger_context={"source": "device_state", "target_id": "sensor_1"},
         )
 
-        self.assertEqual(["protection"], order)
+        self.assertEqual(["protection", "protection"], order)
         self.assertEqual("completed", result["status"])
         self.assertEqual("manual_off_protection_active", result["receipts"][0]["reason"])
         self.assertFalse(result["receipts"][0]["physicalAttempted"])
@@ -514,6 +514,57 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             )),
             "substitution-guard.1", scenario_id="source_substitution",
         )
+
+        self.assertEqual(["manual_off_protection_active"] * 2, [item["reason"] for item in result["receipts"]])
+        self.hass.services.async_call.assert_not_awaited()
+
+    async def test_substitution_rechecks_protection_under_one_authority_lock(self) -> None:
+        """A manual off after discovery blocks the whole source substitution."""
+
+        class PausedDiscoveryProtection:
+            def __init__(self) -> None:
+                self.discovery_complete = asyncio.Event()
+                self.manual_off_arrived = asyncio.Event()
+
+            async def async_decide(self, action, catalog, *, dry_run, **_kwargs):
+                if dry_run:
+                    self.discovery_complete.set()
+                    await self.manual_off_arrived.wait()
+                    return LightProtectionDecision(True)
+                device = catalog.device(action.target_id)
+                return LightProtectionDecision(
+                    device.entity_id != "light.alt",
+                    "manual_off_protection_active",
+                    "protection-1",
+                    {"lightIds": ["light.living_room", "light.alt"]},
+                )
+
+        self.catalog._devices["device_alt"] = ScenarioDeviceEntry(
+            target_id="device_alt",
+            name="Alternate light",
+            entity_id="light.alt",
+            actions=(ScenarioDeviceAction("turn_on", "On", "light", "turn_on", frozenset()),),
+        )
+        self.hass.state_values["light.alt"] = SimpleNamespace(state="off", attributes={})
+        priority = LightAutomationPriority()
+        priority._owned_revisions["light.living_room"] = None  # noqa: SLF001
+        priority._owned_records["light.living_room"] = {"expiresAt": 9_999_999_999_999}  # noqa: SLF001
+        protection = PausedDiscoveryProtection()
+        executor = ScenarioExecutor(
+            self.hass, self.catalog, self.executor._run_callback,
+            light_priority=priority, manual_light_off_protection=protection,
+            readback_window_seconds=0.02, readback_interval_seconds=0.01,
+        )
+        run = asyncio.create_task(executor.async_execute(
+            _definition((
+                ScenarioAction(id="old_off", type=ScenarioActionType.DEVICE_ACTION, target_id="device_1", action_id="turn_off"),
+                ScenarioAction(id="new_on", type=ScenarioActionType.DEVICE_ACTION, target_id="device_alt", action_id="turn_on"),
+            )),
+            "substitution-race.1", scenario_id="source_substitution",
+        ))
+        await protection.discovery_complete.wait()
+        protection.manual_off_arrived.set()
+        result = await run
 
         self.assertEqual(["manual_off_protection_active"] * 2, [item["reason"] for item in result["receipts"]])
         self.hass.services.async_call.assert_not_awaited()
@@ -3821,7 +3872,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("completed", result["status"])
         self.assertTrue(result["receipts"][0]["planned"])
-        self.assertEqual([], self.nested_runs)
+        self.assertEqual(["other"], self.nested_runs)
 
     async def test_notification_action_targets_configured_entity(self) -> None:
         definition = _definition(

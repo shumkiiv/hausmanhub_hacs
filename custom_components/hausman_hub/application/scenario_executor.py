@@ -9,6 +9,7 @@ import math
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from datetime import time as datetime_time
 from typing import TYPE_CHECKING, Any
@@ -113,6 +114,17 @@ _VENDOR_SERVICE_DOMAINS = frozenset({"media_player", "remote"})
 
 class ReassertEvidenceChanged(RuntimeError):
     """The stale-light authority changed before physical dispatch."""
+
+
+@asynccontextmanager
+async def _authority_lock_scope(lock: asyncio.Lock, *, already_held: bool):
+    """Use the shared light lock without recursively acquiring it."""
+
+    if already_held:
+        yield
+        return
+    async with lock:
+        yield
 
 
 def _trigger_asserts_presence(
@@ -1097,6 +1109,32 @@ class ScenarioExecutor:
         )
         protection_decisions: dict[str, Any] = {}
         protected_light_action_ids: frozenset[str] = frozenset()
+
+        def protected_actions_for(
+            decisions: Mapping[str, Any],
+        ) -> frozenset[str]:
+            blocked = tuple(decision for decision in decisions.values() if not decision.allowed)
+            if not blocked:
+                return frozenset()
+            protected_entity_ids = {
+                entity_id
+                for decision in blocked
+                for entity_id in decision.as_payload().get("lightIds", [])
+                if isinstance(entity_id, str)
+            }
+            if not protected_entity_ids:
+                # A broken scope cannot prove which earlier source-off is safe.
+                return light_priority.light_action_ids
+            return frozenset(
+                action.id
+                for action in actions
+                if action.id in light_priority.light_action_ids
+                and (
+                    (device := self._catalog.device(action.target_id or "")) is not None
+                    and device.entity_id in protected_entity_ids
+                )
+            )
+
         if automatic_source and self._manual_light_off_protection is not None:
             for action in actions:
                 if not self._is_light_activation(action, scenario_text):
@@ -1112,27 +1150,7 @@ class ScenarioExecutor:
                     trigger_context=trigger_context,
                 )
                 protection_decisions[action.id] = decision
-            if any(not decision.allowed for decision in protection_decisions.values()):
-                protected_entity_ids = {
-                    entity_id
-                    for decision in protection_decisions.values()
-                    if not decision.allowed
-                    for entity_id in decision.as_payload().get("lightIds", [])
-                    if isinstance(entity_id, str)
-                }
-                protected_light_action_ids = frozenset(
-                    action.id
-                    for action in actions
-                    if action.id in light_priority.light_action_ids
-                    and (
-                        (device := self._catalog.device(action.target_id or "")) is not None
-                        and device.entity_id in protected_entity_ids
-                    )
-                )
-                if not protected_entity_ids:
-                    # Corrupt or unavailable protection scope must not let an
-                    # earlier source-off race a later protected activation.
-                    protected_light_action_ids = light_priority.light_action_ids
+            protected_light_action_ids = protected_actions_for(protection_decisions)
         if (
             not dry_run
             and automatic_source
@@ -1226,6 +1244,35 @@ class ScenarioExecutor:
             }
 
         absence_generations: dict[str, str] = {}
+        scenario_authority_lock_held = bool(
+            not dry_run
+            and automatic_source
+            and light_priority.light_action_ids
+            and self._manual_light_off_protection is not None
+        )
+        if scenario_authority_lock_held:
+            # The discovery above is deliberately dry-run. Recheck every
+            # descriptor-backed activation while holding the same authority
+            # lock that receives manual transitions, then retain that lock
+            # through every contiguous light mutation and ownership record.
+            await self._light_priority.authority_lock().acquire()
+            protection_decisions = {}
+            for action in actions:
+                if not self._is_light_activation(action, scenario_text):
+                    continue
+                # Resolving this descriptor immediately before the live
+                # decision prevents catalog replacement from reusing a stale
+                # discovery result. _device_action_receipt repeats the check
+                # before its own dispatch.
+                device = self._catalog.device(action.target_id or "")
+                allowed = device.action(action.action_id or "") if device is not None else None
+                if device is None or allowed is None:
+                    continue
+                protection_decisions[action.id] = await self._manual_light_off_protection.async_decide(
+                    action, self._catalog, automatic=True, dry_run=False,
+                    trigger_context=trigger_context,
+                )
+            protected_light_action_ids = protected_actions_for(protection_decisions)
         for action_index, action in enumerate(actions):
             if not dry_run and action.type is ScenarioActionType.DELAY:
                 await self._confirm_deferred_device_receipts(receipts)
@@ -1245,6 +1292,7 @@ class ScenarioExecutor:
                     dry_run=False,
                     scenario_id=scenario_id,
                     run_id=run_id,
+                    authority_lock_held=scenario_authority_lock_held,
                 )
                 armed = await self._async_arm_future_light_offs(
                     actions,
@@ -1326,7 +1374,10 @@ class ScenarioExecutor:
                 and automatic_source
                 and action.id in light_priority.light_action_ids
             ):
-                async with self._light_priority.authority_lock():
+                async with _authority_lock_scope(
+                    self._light_priority.authority_lock(),
+                    already_held=scenario_authority_lock_held,
+                ):
                     device = (
                         self._catalog.device(action.target_id)
                         if action.target_id is not None
@@ -1472,6 +1523,7 @@ class ScenarioExecutor:
                         dry_run=False,
                         scenario_id=scenario_id,
                         run_id=run_id,
+                        authority_lock_held=scenario_authority_lock_held,
                     )
                     cleanup_receipts = await self._async_safety_cleanup_actions(
                         actions[action_index + 1 :],
@@ -1525,7 +1577,10 @@ class ScenarioExecutor:
             dry_run=dry_run,
             scenario_id=scenario_id,
             run_id=run_id,
+            authority_lock_held=scenario_authority_lock_held,
         )
+        if scenario_authority_lock_held:
+            self._light_priority.authority_lock().release()
 
         completed = all(r.get("status") == "completed" for r in receipts)
         failed_after_progress = any(
@@ -3175,11 +3230,29 @@ class ScenarioExecutor:
                 "error": "run_scenario action needs scenarioId",
             }
         if dry_run:
+            result = await self._run_callback(
+                action.scenario_id,
+                visited=visited,
+                dry_run=True,
+                trigger_context={
+                    "source": "nested",
+                    "target_id": (
+                        trigger_context.get("target_id")
+                        if isinstance(trigger_context, Mapping)
+                        else None
+                    ),
+                    "trigger_id": None,
+                    "recovery": False,
+                },
+            )
             return {
                 **base,
                 "status": "completed",
                 "planned": True,
                 "scenario_id": action.scenario_id,
+                "nested_run_id": result.get("run_id"),
+                "nested_outcome": result.get("status", "failed"),
+                "reason": result.get("reason"),
             }
         origin_target_id = (
             trigger_context.get("target_id")

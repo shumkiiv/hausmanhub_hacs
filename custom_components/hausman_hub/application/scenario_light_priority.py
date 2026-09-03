@@ -438,7 +438,14 @@ class LightAutomationPriority:
         dry_run: bool,
         scenario_id: str = "",
         run_id: str = "",
+        authority_lock_held: bool = False,
     ) -> None:
+        if authority_lock_held:
+            await self._note_results_unlocked(
+                actions, receipts, plan, catalog, hass, automatic=automatic,
+                dry_run=dry_run, scenario_id=scenario_id, run_id=run_id,
+            )
+            return
         async with self._authority_lock:
             await self._note_results_unlocked(
                 actions,
