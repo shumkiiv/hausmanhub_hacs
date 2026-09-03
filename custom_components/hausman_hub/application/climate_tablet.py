@@ -1642,7 +1642,15 @@ class ClimateTabletService:
                         "request id was already used for another climate action",
                         code="revision_conflict",
                     )
-                return {**prior.receipt, "duplicate": True}
+                fact = self._legacy_home_execution_facts.get(correlation_id)
+                if not _legacy_home_execution_fact_matches_record(
+                    correlation_id, fact, prior
+                ):
+                    raise ClimateTabletUnavailable("legacy climate execution facts are invalid")
+                return {
+                    **prior.receipt, "duplicate": True,
+                    "__legacy_execution_fact__": dict(fact),
+                }
             fact = self._legacy_home_execution_facts.get(correlation_id)
             if fact is not None:
                 record = self._records_by_request.get(fact["request_id"])
@@ -1655,7 +1663,7 @@ class ClimateTabletService:
                         "correlation id was already used for other climate targets",
                         code="revision_conflict",
                     )
-                return {**record.receipt, "duplicate": True}
+                return {**record.receipt, "duplicate": True, "__legacy_execution_fact__": dict(fact)}
             snapshot = await self._snapshot_unlocked()
             payload = {
                 "contract": {
@@ -1678,7 +1686,11 @@ class ClimateTabletService:
                 payload, _lock_held=True, _legacy_fail_fast=True,
                 _legacy_correlation_id=correlation_id,
             )
-            return receipt
+            fact = self._legacy_home_execution_facts.get(correlation_id)
+            record = self._records_by_request.get(request_id)
+            if not _legacy_home_execution_fact_matches_record(correlation_id, fact, record):
+                raise ClimateTabletUnavailable("legacy climate execution facts are invalid")
+            return {**receipt, "__legacy_execution_fact__": dict(fact)}
 
     async def async_operation(self, operation_id: str) -> dict[str, object]:
         """Return one persisted receipt without repeating its physical command."""
@@ -4281,20 +4293,107 @@ def _legacy_home_execution_fact(
     operation_id = receipt.get("operation_id")
     if not isinstance(operation_id, str) or _OPERATION_ID.fullmatch(operation_id) is None:
         raise ClimateTabletUnavailable("legacy climate execution facts are invalid")
+    facts = _legacy_home_typed_execution_facts(receipt)
     return {
         "operation_id": operation_id,
         "request_id": request.request_id,
         "correlation_id": request.correlation_id,
         "request_fingerprint": request.fingerprint,
         "parameters_fingerprint": _canonical_fingerprint(request.parameters),
-        "status": receipt.get("status"),
-        "room_count": receipt.get("room_count", 0),
-        "command_count": receipt.get("command_count", 0),
-        "accepted_count": receipt.get("accepted_count", 0),
-        "confirmed_room_count": receipt.get("confirmed_room_count", 0),
+        **facts,
+        "changes": _legacy_home_changes(receipt, request, facts["room_count"]),
         "read_back": receipt.get("read_back", {}),
-        "reasons": receipt.get("reasons", []),
+        "reasons": facts["reasons"],
     }
+
+
+def _legacy_home_typed_execution_facts(receipt: Mapping[str, object]) -> dict[str, object]:
+    """Reduce immutable typed leaves to the legacy aggregate exactly once."""
+
+    outcomes = receipt.get("outcomes")
+    rooms = outcomes.get("rooms") if isinstance(outcomes, Mapping) else None
+    if not isinstance(rooms, Mapping) or not rooms:
+        raise ClimateTabletUnavailable("legacy climate execution facts are invalid")
+    command_count = accepted_count = confirmed_room_count = 0
+    reasons: list[str] = []
+    for room in rooms.values():
+        devices = room.get("devices") if isinstance(room, Mapping) else None
+        if not isinstance(devices, Mapping) or not devices:
+            raise ClimateTabletUnavailable("legacy climate execution facts are invalid")
+        leaves = tuple(devices.values())
+        if not all(isinstance(leaf, Mapping) for leaf in leaves):
+            raise ClimateTabletUnavailable("legacy climate execution facts are invalid")
+        if all(leaf.get("status") == "confirmed" for leaf in leaves):
+            confirmed_room_count += 1
+        for leaf in leaves:
+            command = leaf.get("command_count")
+            accepted = leaf.get("accepted_count")
+            if type(command) is not int or command < 0 or type(accepted) is not int or accepted < 0 or accepted > command:
+                raise ClimateTabletUnavailable("legacy climate execution facts are invalid")
+            command_count += command
+            accepted_count += accepted
+            reason = leaf.get("reason")
+            if isinstance(reason, str):
+                reasons.append(reason)
+    status = receipt.get("status")
+    if status == "timed_out":
+        status = "unavailable"
+    if status not in {"confirmed", "pending", "partial", "rejected", "unavailable"}:
+        raise ClimateTabletUnavailable("legacy climate execution facts are invalid")
+    return {
+        "status": status, "room_count": len(rooms), "command_count": command_count,
+        "accepted_count": accepted_count, "confirmed_room_count": confirmed_room_count,
+        "reasons": _legacy_home_reason_codes(reasons),
+    }
+
+
+def _legacy_home_changes(
+    receipt: Mapping[str, object], request: ClimateTabletActionRequest, room_count: object,
+) -> dict[str, int]:
+    changes = receipt.get("changes")
+    if type(room_count) is not int:
+        raise ClimateTabletUnavailable("legacy climate execution facts are invalid")
+    if not isinstance(changes, Mapping):
+        # Older in-process adapters expose typed leaves but not the optional
+        # aggregate delta. A confirmed requested temperature is nonetheless a
+        # durable target change for each selected room; humidity is private to
+        # this legacy schema and remains zero here.
+        return {
+            "temperature": room_count if (
+                receipt.get("status") == "confirmed"
+                and "target_temperature" in request.parameters
+            ) else 0,
+            "strategy": 0,
+            "automatic_mode": 0,
+        }
+    values = {
+        key: changes.get(key)
+        for key in ("temperature", "strategy", "automatic_mode")
+    }
+    if any(type(value) is not int or value < 0 for value in values.values()):
+        raise ClimateTabletUnavailable("legacy climate execution facts are invalid")
+    # The public legacy schema has no humidity field.  Temperature remains the
+    # durable native delta, including zero for a humidity-only target.
+    if "target_temperature" not in request.parameters and values["temperature"] != 0:
+        raise ClimateTabletUnavailable("legacy climate execution facts are invalid")
+    return values  # type: ignore[return-value]
+
+
+def _legacy_home_reason_codes(reasons: list[str]) -> list[str]:
+    """Use only the public legacy reason vocabulary in persisted facts."""
+
+    mapping = {
+        "already_in_sync": "already_in_sync",
+        "engine_rejected": "engine_rejected",
+        "command_result_unavailable": "command_result_unavailable",
+        "command_failed": "command_result_unavailable",
+        "configuration_error": "command_result_unavailable",
+        "device_unavailable": "command_result_unavailable",
+        "verification_unavailable": "verification_unavailable",
+        "state_not_confirmed": "state_not_confirmed",
+        "state_stale": "verification_unavailable",
+    }
+    return list(dict.fromkeys(mapping[reason] for reason in reasons if reason in mapping))
 
 
 def _valid_legacy_home_execution_fact(value: object) -> bool:
@@ -4303,7 +4402,7 @@ def _valid_legacy_home_execution_fact(value: object) -> bool:
     if not isinstance(value, Mapping) or set(value) != {
         "operation_id", "request_id", "correlation_id", "request_fingerprint",
         "parameters_fingerprint", "status", "room_count", "command_count",
-        "accepted_count", "confirmed_room_count", "read_back", "reasons",
+        "accepted_count", "confirmed_room_count", "changes", "read_back", "reasons",
     }:
         return False
     return bool(
@@ -4329,6 +4428,9 @@ def _valid_legacy_home_execution_fact(value: object) -> bool:
             )
         )
         and isinstance(value.get("read_back"), Mapping)
+        and isinstance(value.get("changes"), Mapping)
+        and set(value["changes"]) == {"temperature", "strategy", "automatic_mode"}
+        and all(type(item) is int and item >= 0 for item in value["changes"].values())
         and isinstance(value.get("reasons"), list)
         and all(isinstance(reason, str) for reason in value["reasons"])
     )

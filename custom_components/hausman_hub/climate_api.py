@@ -1931,6 +1931,25 @@ def _legacy_home_target_receipt(receipt: Mapping[str, object], correlation_id: s
     """Project the coordinator receipt onto the unchanged legacy response."""
     from .application.contour_apply import _REASON_NAMES
 
+    # The coordinator supplies a validated durable sidecar for this legacy
+    # route.  Prefer it over recomputing aggregates from a receipt that may
+    # have been reconstructed after restart.
+    fact = receipt.get("__legacy_execution_fact__")
+    if isinstance(fact, Mapping):
+        receipt = {
+            **receipt,
+            "status": fact.get("status"),
+            "room_count": fact.get("room_count"),
+            "command_count": fact.get("command_count"),
+            "accepted_count": fact.get("accepted_count"),
+            "confirmed_room_count": fact.get("confirmed_room_count"),
+            "changes": fact.get("changes"),
+            "read_back": fact.get("read_back"),
+            "reasons": fact.get("reasons"),
+            # Execution totals are now sidecar-authoritative.
+            "outcomes": {},
+        }
+
     if not isinstance(receipt.get("operation_id"), str):
         return {**receipt, "correlation_id": correlation_id}
     status = receipt.get("status")
@@ -1957,7 +1976,9 @@ def _legacy_home_target_receipt(receipt: Mapping[str, object], correlation_id: s
         "status": status,
         "status_name": "Выполнено" if confirmed else (
             "Выполнено частично" if status == "partial" else (
-                "Проверяется" if status == "pending" else "Результат неизвестен"
+                "Проверяется" if status == "pending" else (
+                    "Отклонено" if status == "rejected" else "Результат неизвестен"
+                )
             )
         ),
         "accepted": accepted, "confirmed": confirmed,

@@ -2541,6 +2541,16 @@ class LocalSummaryAccessTest(unittest.TestCase):
         from custom_components.hausman_hub.application.climate_tablet import _receipt_matches_request
         stored = coordinator._records_by_request["tablet.climate.route-real-a"]
         self.assertTrue(_receipt_matches_request(stored.receipt, stored.request), stored.receipt)
+        sidecar = coordinator._legacy_home_execution_facts["corr.route-real"]
+        self.assertEqual("confirmed", sidecar["status"])
+        self.assertEqual(1, sidecar["room_count"])
+        self.assertEqual(4, sidecar["command_count"])
+        self.assertEqual(4, sidecar["accepted_count"])
+        self.assertEqual(1, sidecar["confirmed_room_count"])
+        self.assertEqual(
+            {"temperature": 1, "strategy": 0, "automatic_mode": 0},
+            sidecar["changes"],
+        )
         restarted = ClimateTabletService(runtime, store, now_ms=lambda: 1784280004000)
         asyncio.run(restarted.async_load())
         self.hass.data["hausman_hub"]["climate_tablet"] = restarted
@@ -2558,6 +2568,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual(first.payload["command_count"], first.payload["accepted_count"])
         self.assertTrue(first.payload["read_back"]["matched"])
         self.assertEqual(first.payload["operation_id"], duplicate.payload["operation_id"])
+        self.assertEqual(first.payload["command_count"], duplicate.payload["command_count"])
         self.assertEqual(4, len(executor.batches))
         schema = json.loads((ROOT / "custom_components" / "hausman_hub" / "contracts" / "v1" / "climate-control-receipt.schema.json").read_text(encoding="utf-8"))
         self.assertEqual([], list(Draft202012Validator(schema).iter_errors(first.payload)))
