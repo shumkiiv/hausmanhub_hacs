@@ -15,6 +15,7 @@ from custom_components.hausman_hub.application.scenario_command_context import (
 )
 from custom_components.hausman_hub.application.manual_light_off_protection import (
     ManualLightOffProtectionCoordinator,
+    ManualLightOffProtectionPersistenceError,
 )
 from custom_components.hausman_hub.application.scenario_light_priority import (
     LightAutomationPriority,
@@ -481,17 +482,19 @@ def test_external_off_protection_store_failure_fails_closed() -> None:
         await coordinator.async_load()
         await coordinator.async_replace_settings("settings.1", 0, _settings())
         store.fail = True
+        hass = SimpleNamespace(services=SimpleNamespace(async_call=AsyncMock()))
         listener = ManualLightOffProtectionEventListener(
-            coordinator, None, {"light.tambur"}
+            coordinator, None, {"light.tambur"}, hass=hass
         )
 
-        with pytest.raises(OSError, match="store"):
+        with pytest.raises(ManualLightOffProtectionPersistenceError):
             await listener.async_handle(_event("light.tambur", "on", "off"))
 
         assert coordinator.unhealthy
         assert not (await coordinator.async_decide_entity(
             "light.tambur", automatic=True, dry_run=False
         )).allowed
+        hass.services.async_call.assert_not_awaited()
 
     asyncio.run(exercise())
 

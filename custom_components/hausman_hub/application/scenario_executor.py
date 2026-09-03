@@ -2293,7 +2293,11 @@ class ScenarioExecutor:
                 "domain": allowed.domain,
                 "service": allowed.service,
                 "entity_id": device.entity_id,
-                "reason": "manual_off_protection_active",
+                "reason": (
+                    "manual_off_protection_unhealthy"
+                    if decision.reason == "manual_off_protection_unhealthy"
+                    else "manual_off_protection_active"
+                ),
                 "physicalAttempted": False,
                 "protection": protection,
                 "skipped": True,

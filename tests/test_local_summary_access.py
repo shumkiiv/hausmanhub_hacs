@@ -668,6 +668,24 @@ class LocalSummaryAccessTest(unittest.TestCase):
             "settings": {"globalPolicy": {"enabled": True, "minimumIntervalSeconds": interval, "releaseMode": "timer_only", "stableAbsenceSeconds": 5, "extendOnRepeatedManualOff": True, "noSensorFallback": "timer_only", "protectedScope": "profile", "allowManualRelease": True}, "roomOverrides": {}, "profileOverrides": {}, "profiles": []},
         }
 
+    @staticmethod
+    def _manual_release_request(
+        request_id: str,
+        room_id: str = "room",
+        profile_id: str = "profile",
+        expected_protection_revision: int = 0,
+    ) -> dict[str, object]:
+        return {
+            "contract": {
+                "name": "hausman-hub-manual-light-off-protection-release-request",
+                "version": 1,
+            },
+            "requestId": request_id,
+            "roomId": room_id,
+            "profileId": profile_id,
+            "expectedProtectionRevision": expected_protection_revision,
+        }
+
     def test_manual_protection_http_replay_conflicts_and_no_store(self) -> None:
         # The synthetic read-only catalog has no first-wave devices. This API
         # boundary test replaces its intentionally fail-closed setup state.
@@ -679,7 +697,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         same = asyncio.run(self.hass.http.dispatch("PUT", FakeJsonRequest("127.0.0.1", admin, view.url, request)))
         changed = self._manual_settings_request("replay.1", 31)
         conflict = asyncio.run(self.hass.http.dispatch("PUT", FakeJsonRequest("127.0.0.1", admin, view.url, changed)))
-        cross = asyncio.run(self.hass.http.dispatch("POST", FakeJsonRequest("127.0.0.1", admin, release.url, {"contract": {"name": "hausman-hub-manual-light-off-protection-release-request", "version": 1}, "requestId": "replay.1", "roomId": "room", "profileId": "profile", "expectedProtectionRevision": 0})))
+        cross = asyncio.run(self.hass.http.dispatch("POST", FakeJsonRequest("127.0.0.1", admin, release.url, self._manual_release_request("replay.1"))))
         self.assertEqual(200, first.status)
         self.assertEqual(first.payload, same.payload)
         for response in (conflict, cross):
@@ -699,37 +717,134 @@ class LocalSummaryAccessTest(unittest.TestCase):
             self.assertEqual("no-store", response.headers["Cache-Control"])
 
     def test_manual_protection_release_replays_through_dispatcher(self) -> None:
-        self.hass.data["hausman_hub"]["manual_light_off_protection"].unhealthy = False
+        from custom_components.hausman_hub.application.manual_light_off_protection import ManualLightOffProtectionCoordinator
+
+        class Store:
+            payload = None
+            saves = 0
+
+            async def async_load(self): return copy.deepcopy(self.payload)
+            async def async_save(self, payload):
+                self.saves += 1
+                self.payload = copy.deepcopy(payload)
+
+        store = Store()
+        coordinator = ManualLightOffProtectionCoordinator(store)
+        asyncio.run(coordinator.async_load())
+        self.hass.data["hausman_hub"]["manual_light_off_protection"] = coordinator
         view, release = self._manual_protection_views()
         admin = reader_user("system-admin", admin=True)
         request = self._manual_settings_request("seed.release")
         request["settings"]["profiles"] = [{"roomId": "room", "profileId": "profile", "lightIds": ["light.one"], "presenceSensorIds": []}]
         asyncio.run(self.hass.http.dispatch("PUT", FakeJsonRequest("127.0.0.1", admin, view.url, request)))
-        coordinator = self.hass.data["hausman_hub"]["manual_light_off_protection"]
         asyncio.run(coordinator.async_note_state_transition("light.one", SimpleNamespace(state="on"), SimpleNamespace(state="off"), None))
-        payload = {"contract": {"name": "hausman-hub-manual-light-off-protection-release-request", "version": 1}, "requestId": "release.replay", "roomId": "room", "profileId": "profile", "expectedProtectionRevision": 0}
+        payload = self._manual_release_request("release.replay")
         first = asyncio.run(self.hass.http.dispatch("POST", FakeJsonRequest("127.0.0.1", admin, release.url, payload)))
+        saves_after_first_release = store.saves
         again = asyncio.run(self.hass.http.dispatch("POST", FakeJsonRequest("127.0.0.1", admin, release.url, payload)))
         self.assertEqual(200, first.status)
         self.assertEqual(first.payload, again.payload)
+        self.assertEqual(saves_after_first_release, store.saves)
 
-    def test_manual_protection_unload_and_reload_keep_exactly_two_routes(self) -> None:
+    def test_manual_protection_release_request_id_conflicts_for_every_payload_change(self) -> None:
+        self.hass.data["hausman_hub"]["manual_light_off_protection"].unhealthy = False
+        view, release = self._manual_protection_views()
+        admin = reader_user("system-admin", admin=True)
+        settings = self._manual_settings_request("seed.release.conflicts")
+        settings["settings"]["profiles"] = [{"roomId": "room", "profileId": "profile", "lightIds": ["light.one"], "presenceSensorIds": []}]
+        asyncio.run(self.hass.http.dispatch("PUT", FakeJsonRequest("127.0.0.1", admin, view.url, settings)))
+        coordinator = self.hass.data["hausman_hub"]["manual_light_off_protection"]
+        asyncio.run(coordinator.async_note_state_transition("light.one", SimpleNamespace(state="on"), SimpleNamespace(state="off"), None))
+        original = self._manual_release_request("release.conflict")
+        first = asyncio.run(self.hass.http.dispatch("POST", FakeJsonRequest("127.0.0.1", admin, release.url, original)))
+        self.assertEqual(200, first.status)
+        for changed in (
+            self._manual_release_request("release.conflict", room_id="other-room"),
+            self._manual_release_request("release.conflict", profile_id="other-profile"),
+            self._manual_release_request("release.conflict", expected_protection_revision=1),
+        ):
+            response = asyncio.run(self.hass.http.dispatch("POST", FakeJsonRequest("127.0.0.1", admin, release.url, changed)))
+            self.assertEqual(409, response.status)
+            self.assertEqual("no-store", response.headers["Cache-Control"])
+
+    def test_manual_protection_unload_and_healthy_reload_retain_two_route_objects(self) -> None:
         admin = reader_user("system-admin", admin=True)
         view, _ = self._manual_protection_views()
         before = tuple(item for item in self.hass.http.views if "manual_light_off_protection" in getattr(item, "name", ""))
+        old_coordinator = self.hass.data["hausman_hub"]["manual_light_off_protection"]
         self.assertTrue(asyncio.run(self.integration.async_unload_entry(self.hass, self.entry)))
         unavailable = asyncio.run(self.hass.http.dispatch("PUT", FakeJsonRequest("127.0.0.1", admin, view.url, self._manual_settings_request("unload.1"))))
         self.assertEqual(503, unavailable.status)
-        self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
+        from custom_components.hausman_hub.application.scenario_catalog import ScenarioCatalog, ScenarioDeviceAction, ScenarioDeviceEntry
+        from custom_components.hausman_hub.application.system_light_profiles import FIRST_WAVE_AUTO_ON_TARGETS
+        import custom_components.hausman_hub.application.scenario_catalog as scenario_catalog
+
+        devices = {
+            target.target_id: ScenarioDeviceEntry(
+                target.target_id,
+                target.target_id,
+                target.entity_id or "light.unpinned_catalog_target",
+                (ScenarioDeviceAction("turn_on", "On", (target.entity_id or "light.unpinned_catalog_target").partition(".")[0], "turn_on", frozenset()),),
+            )
+            for target in FIRST_WAVE_AUTO_ON_TARGETS
+        }
+        # This is the actual small-corridor controller composition. Only its
+        # chandelier belongs to the first-wave auto-on registry; the local
+        # bright/dark input, motion trigger and relay stay observable inputs.
+        devices.update({
+            "entity_c9d6bc67f172f30d": ScenarioDeviceEntry("entity_c9d6bc67f172f30d", "Local light", "sensor.small_corridor_local_light", ()),
+            "entity_90417aada6a33491": ScenarioDeviceEntry("entity_90417aada6a33491", "Motion", "binary_sensor.small_corridor_motion", ()),
+            "entity_ff0244d6b760be7e": ScenarioDeviceEntry("entity_ff0244d6b760be7e", "Relay", "switch.small_corridor_relay", (ScenarioDeviceAction("turn_on", "On", "switch", "turn_on", frozenset()),)),
+        })
+        catalog = ScenarioCatalog(devices, {})
+        async def healthy_catalog(_hass): return catalog
+        with patch.object(scenario_catalog, "async_build_scenario_catalog", healthy_catalog):
+            self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
         after = tuple(item for item in self.hass.http.views if "manual_light_off_protection" in getattr(item, "name", ""))
         self.assertEqual(before, after)
         self.assertEqual(2, len(after))
+        self.assertIsNot(old_coordinator, self.hass.data["hausman_hub"]["manual_light_off_protection"])
+        self.assertFalse(self.hass.data["hausman_hub"]["manual_light_off_protection"].unhealthy)
+        restored = asyncio.run(self.hass.http.dispatch("PUT", FakeJsonRequest("127.0.0.1", admin, view.url, self._manual_settings_request("reload.healthy"))))
+        self.assertEqual(200, restored.status)
 
     def test_manual_protection_failed_unload_keeps_old_coordinator(self) -> None:
         self.hass.config_entries.unload_succeeds = False
         old = self.hass.data["hausman_hub"]["manual_light_off_protection"]
+        old.unhealthy = False
+        view, _ = self._manual_protection_views()
         self.assertFalse(asyncio.run(self.integration.async_unload_entry(self.hass, self.entry)))
         self.assertIs(old, self.hass.data["hausman_hub"]["manual_light_off_protection"])
+        response = asyncio.run(self.hass.http.dispatch("PUT", FakeJsonRequest("127.0.0.1", reader_user("system-admin", admin=True), view.url, self._manual_settings_request("failed-unload.1"))))
+        self.assertEqual(200, response.status)
+
+    def test_setup_marks_the_coordinator_unhealthy_when_the_real_auto_on_is_missing(self) -> None:
+        from custom_components.hausman_hub.application.scenario_catalog import ScenarioCatalog, ScenarioDeviceAction, ScenarioDeviceEntry
+        from custom_components.hausman_hub.application.system_light_profiles import FIRST_WAVE_AUTO_ON_TARGETS
+        import custom_components.hausman_hub.application.scenario_catalog as scenario_catalog
+
+        hass = FakeHomeAssistant()
+        entry = FakeEntry({"mode": "read-only", "direct_execution_status": "direct_execution_blocked"}, {})
+        hass.config_entries.entries = [entry]
+        catalog = ScenarioCatalog(
+            {
+                target.target_id: ScenarioDeviceEntry(
+                    target.target_id,
+                    target.target_id,
+                    target.entity_id or "light.unpinned_catalog_target",
+                    () if target.target_id == "entity_9ed909332fdaa8fd" else (ScenarioDeviceAction("turn_on", "On", (target.entity_id or "light.unpinned_catalog_target").partition(".")[0], "turn_on", frozenset()),),
+                )
+                for target in FIRST_WAVE_AUTO_ON_TARGETS
+            },
+            {},
+        )
+
+        async def missing_chandelier_auto_on(_hass): return catalog
+
+        with patch.object(scenario_catalog, "async_build_scenario_catalog", missing_chandelier_auto_on):
+            self.assertTrue(asyncio.run(self.integration.async_setup_entry(hass, entry)))
+
+        self.assertTrue(hass.data["hausman_hub"]["manual_light_off_protection"].unhealthy)
 
     def test_manual_protection_http_failed_save_cannot_replay_success(self) -> None:
         from custom_components.hausman_hub.application.manual_light_off_protection import ManualLightOffProtectionCoordinator
@@ -752,7 +867,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         view, _ = self._manual_protection_views()
         admin = reader_user("system-admin", admin=True)
         request = self._manual_settings_request("failure.1")
-        response = asyncio.run(view.put(FakeJsonRequest("127.0.0.1", admin, view.url, request)))
+        response = asyncio.run(self.hass.http.dispatch("PUT", FakeJsonRequest("127.0.0.1", admin, view.url, request)))
         self.assertIn(response.status, {500, 503})
         self.assertEqual("hausman-hub-error", response.payload["contract"]["name"])
         self.assertEqual("no-store", response.headers["Cache-Control"])
@@ -760,7 +875,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         restarted = ManualLightOffProtectionCoordinator(store)
         asyncio.run(restarted.async_load())
         self.hass.data["hausman_hub"]["manual_light_off_protection"] = restarted
-        retried = asyncio.run(view.put(FakeJsonRequest("127.0.0.1", admin, view.url, request)))
+        retried = asyncio.run(self.hass.http.dispatch("PUT", FakeJsonRequest("127.0.0.1", admin, view.url, request)))
         self.assertEqual(200, retried.status)
         self.assertEqual(2, store.saves)
 
@@ -781,12 +896,12 @@ class LocalSummaryAccessTest(unittest.TestCase):
         view, _ = self._manual_protection_views()
         admin = reader_user("system-admin", admin=True)
         request = self._manual_settings_request("restart.1")
-        original = asyncio.run(view.put(FakeJsonRequest("127.0.0.1", admin, view.url, request)))
+        original = asyncio.run(self.hass.http.dispatch("PUT", FakeJsonRequest("127.0.0.1", admin, view.url, request)))
         restarted = ManualLightOffProtectionCoordinator(store)
         asyncio.run(restarted.async_load())
         self.hass.data["hausman_hub"]["manual_light_off_protection"] = restarted
-        replay = asyncio.run(view.put(FakeJsonRequest("127.0.0.1", admin, view.url, request)))
-        changed = asyncio.run(view.put(FakeJsonRequest("127.0.0.1", admin, view.url, self._manual_settings_request("restart.1", 31))))
+        replay = asyncio.run(self.hass.http.dispatch("PUT", FakeJsonRequest("127.0.0.1", admin, view.url, request)))
+        changed = asyncio.run(self.hass.http.dispatch("PUT", FakeJsonRequest("127.0.0.1", admin, view.url, self._manual_settings_request("restart.1", 31))))
         self.assertEqual(original.payload, replay.payload)
         self.assertEqual(1, store.saves)
         self.assertEqual(409, changed.status)

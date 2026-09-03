@@ -22,12 +22,26 @@ def test_first_wave_profiles_use_the_catalog_target_ids_and_exclude_non_lights()
     assert profiles["tambur-chandelier"].light_ids == ("entity_71859313239a14e4",)
     assert profiles["tambur-points"].light_ids == ("entity_cd0098e5ff95da46",)
     assert profiles["tambur-mirror"].light_ids == ("entity_fbdf27871edb89bf",)
+    assert profiles["small-corridor-lights"].light_ids == (
+        "entity_9ed909332fdaa8fd",
+    )
     assert profiles["storage-line-1"].light_ids == ("entity_0ec37ef18b4b39a6",)
     all_lights = {light for profile in profiles.values() for light in profile.light_ids}
     assert "entity_ff0244d6b760be7e" not in all_lights
     assert "entity_afef5df0e0cae309" not in all_lights
     assert "entity_9bbb3b0e8cd98627" not in all_lights
     assert "entity_c15f5df5382ee180" not in all_lights
+
+
+def test_small_corridor_registry_only_contains_approved_action_target() -> None:
+    """Inputs, triggers and relay power must not become protected lights."""
+
+    registered = {item.target_id for item in FIRST_WAVE_AUTO_ON_TARGETS}
+
+    assert "entity_9ed909332fdaa8fd" in registered
+    assert "entity_c9d6bc67f172f30d" not in registered  # local bright/dark input
+    assert "entity_90417aada6a33491" not in registered  # motion trigger
+    assert "entity_ff0244d6b760be7e" not in registered  # power relay
 
 
 def test_coverage_audit_is_unhealthy_for_missing_or_duplicate_profile_ownership() -> None:

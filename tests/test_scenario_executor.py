@@ -606,6 +606,38 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("manual_off_protection_active", result["receipts"][0]["reason"])
         self.hass.services.async_call.assert_not_awaited()
 
+    async def test_unhealthy_protection_blocks_before_power_or_service(self) -> None:
+        """A catalog audit failure is reported precisely and never dispatches."""
+
+        class UnhealthyProtection:
+            async def async_decide(self, *_args: object, **_kwargs: object):
+                return LightProtectionDecision(
+                    False, "manual_off_protection_unhealthy"
+                )
+
+        async def unexpected_power(*_args: object, **_kwargs: object):
+            raise AssertionError("power preparation must not run")
+
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            power_dependency_resolver=lambda: _power_link(policy="auto_turn_on"),
+            manual_light_off_protection=UnhealthyProtection(),
+        )
+        executor._prepare_power_dependency = unexpected_power  # type: ignore[method-assign]
+
+        result = await executor.async_execute(
+            _definition((ScenarioAction(id="blocked", type=ScenarioActionType.DEVICE_ACTION, target_id="device_1", action_id="turn_on"),)),
+            "unhealthy-protection.1",
+            scenario_id="presence_light",
+        )
+
+        self.assertEqual(
+            "manual_off_protection_unhealthy", result["receipts"][0]["reason"]
+        )
+        self.hass.services.async_call.assert_not_awaited()
+
     async def test_scope_unavailable_substitution_skips_group_but_safe_off_survives(
         self,
     ) -> None:
