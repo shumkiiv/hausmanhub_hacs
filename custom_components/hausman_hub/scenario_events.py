@@ -179,11 +179,11 @@ class _StateTriggerCoordinator:
         if (
             (scenario_id, trigger_id) in _MANUAL_STATE_TRIGGERS
             and self._command_contexts is not None
-            and self._command_contexts.consume(
+            and self._command_contexts.match(
                 event_context,
                 entity_id,
                 _state_value(new_state, property_name),
-            )
+            ) is not None
         ):
             return
         if existing is not None:

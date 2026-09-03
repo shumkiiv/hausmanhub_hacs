@@ -380,6 +380,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         issue_reporter=HomeAssistantLightSafetyIssueReporter(hass),
     )
     await light_safety_obligations.async_load()
+    from .application.manual_light_off_protection import (
+        ManualLightOffProtectionCoordinator,
+    )
+    from .manual_light_off_protection_storage import (
+        HomeAssistantManualLightOffProtectionStore,
+    )
+
+    manual_light_off_protection = ManualLightOffProtectionCoordinator(
+        HomeAssistantManualLightOffProtectionStore(hass, entry.entry_id)
+    )
+    await manual_light_off_protection.async_load()
+    domain_data["manual_light_off_protection"] = manual_light_off_protection
     from .application.scenario_command_context import (
         ScenarioCommandContextRegistry,
     )
@@ -420,6 +432,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass,
         entry,
         scenario_service,
+        scenario_command_contexts,
+    )
+    from .manual_light_off_protection_events import (
+        async_start_manual_light_off_protection_events,
+    )
+
+    await async_start_manual_light_off_protection_events(
+        hass,
+        entry,
+        manual_light_off_protection,
         scenario_command_contexts,
     )
 

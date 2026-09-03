@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import time
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 
 _CONTEXT_TTL_SECONDS = 30.0
@@ -16,6 +16,16 @@ class _AutomaticContext:
     entity_id: str
     expected_state: str
     expires_at: float
+
+
+@dataclass(frozen=True, slots=True)
+class ScenarioCommandAttribution:
+    """Read-only provenance for a transition expected from a Hausman command."""
+
+    origin: Literal["automatic", "manual"]
+    entity_id: str
+    expected_state: str
+    request_id: str | None
 
 
 class ScenarioCommandContextRegistry:
@@ -57,13 +67,24 @@ class ScenarioCommandContextRegistry:
     def consume(self, context: object | None, entity_id: str, state: object) -> bool:
         """Return true once for the matching automatic state transition."""
 
+        attribution = self.match(context, entity_id, state)
+        if attribution is None:
+            return False
+        if attribution.request_id is not None:
+            self._records.pop(attribution.request_id, None)
+        return True
+
+    def match(
+        self, context: object | None, entity_id: str, state: object
+    ) -> ScenarioCommandAttribution | None:
+        """Look up automatic provenance without consuming it."""
+
         self._prune()
-        candidates = (
+        expected_state = str(state)
+        for candidate in (
             getattr(context, "id", None),
             getattr(context, "parent_id", None),
-        )
-        expected_state = str(state)
-        for candidate in candidates:
+        ):
             if not isinstance(candidate, str):
                 continue
             record = self._records.get(candidate)
@@ -73,9 +94,13 @@ class ScenarioCommandContextRegistry:
                 record.entity_id == entity_id
                 and record.expected_state == expected_state
             ):
-                self._records.pop(candidate, None)
-                return True
-        return False
+                return ScenarioCommandAttribution(
+                    origin="automatic",
+                    entity_id=record.entity_id,
+                    expected_state=record.expected_state,
+                    request_id=candidate,
+                )
+        return None
 
     def discard(self, context: object | None) -> None:
         """Forget a context when its service call failed synchronously."""

@@ -15,6 +15,12 @@ from custom_components.hausman_hub.scenario_events import (
     state_level_matches,
     state_trigger_matches,
 )
+from custom_components.hausman_hub.application.scenario_command_context import (
+    ScenarioCommandContextRegistry,
+)
+from custom_components.hausman_hub.manual_light_off_protection_events import (
+    ManualLightOffProtectionEventListener,
+)
 
 
 def _state(value: object, **attributes: object) -> SimpleNamespace:
@@ -119,6 +125,49 @@ class StateTriggerMatchesTest(unittest.TestCase):
 
 
 class StateTriggerCoordinatorTest(unittest.IsolatedAsyncioTestCase):
+    async def test_manual_trigger_and_protection_listener_read_automatic_context_independently(self) -> None:
+        """Changing lookup back to consuming would make listener order unsafe."""
+
+        service = SimpleNamespace(async_run_scenario=AsyncMock())
+        contexts = ScenarioCommandContextRegistry(
+            context_factory=lambda: SimpleNamespace(id="automatic.shared", parent_id=None)
+        )
+        context = contexts.create("switch.wall", "on")
+        coordinator = _StateTriggerCoordinator(
+            SimpleNamespace(states=SimpleNamespace(get=lambda _: _state("on"))),
+            service,
+            contexts,
+        )
+        protection = SimpleNamespace(async_note_state_transition=AsyncMock())
+        listener = ManualLightOffProtectionEventListener(
+            protection, contexts, {"switch.wall"}
+        )
+        item = (
+            "system-tambur-adaptive-controller",
+            "manual_chandelier_on",
+            "switch.wall",
+            "wall_target",
+            "state",
+            ScenarioComparison.EQUALS,
+            "on",
+            0,
+            0,
+            0,
+            True,
+        )
+        event = SimpleNamespace(
+            data={"entity_id": "switch.wall", "old_state": _state("off"), "new_state": _state("on")},
+            context=context,
+        )
+
+        await coordinator.async_handle(
+            item, event.data["old_state"], event.data["new_state"], event.context
+        )
+        await listener.async_handle(event)
+
+        service.async_run_scenario.assert_not_awaited()
+        attribution = protection.async_note_state_transition.await_args.args[3]
+        self.assertEqual("automatic", attribution.source)
     async def test_physical_tambur_switch_is_classified_as_manual(self) -> None:
         service = SimpleNamespace(async_run_scenario=AsyncMock())
         hass = SimpleNamespace(states=SimpleNamespace(get=lambda _: _state("on")))
@@ -145,7 +194,7 @@ class StateTriggerCoordinatorTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_automatic_power_context_suppresses_manual_trigger(self) -> None:
         service = SimpleNamespace(async_run_scenario=AsyncMock())
-        command_contexts = SimpleNamespace(consume=lambda *_: True)
+        command_contexts = SimpleNamespace(match=lambda *_: object())
         hass = SimpleNamespace(states=SimpleNamespace(get=lambda _: _state("on")))
         coordinator = _StateTriggerCoordinator(hass, service, command_contexts)
         item = (
