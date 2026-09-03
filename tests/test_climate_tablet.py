@@ -1862,6 +1862,65 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([], contour_store.saved)
         self.assertEqual([], executor.batches)
 
+    async def test_legacy_home_started_reservation_survives_crash_without_redispatch(self) -> None:
+        """A binding crash after the real call leaves one non-replayable operation."""
+
+        class CrashAfterStartedStore(SharedAuthenticatedLedgerMemoryStore):
+            def __init__(self) -> None:
+                super().__init__()
+                self.binding_saves = 0
+
+            async def async_save_reliable_scope_bindings(self, bindings: dict[str, object]) -> None:
+                self.binding_saves += 1
+                if self.binding_saves == 5:
+                    raise RuntimeError("injected post-dispatch binding crash")
+                await super().async_save_reliable_scope_bindings(bindings)
+
+        runtime, _old_store, contour_store, executor = native_home_target_runtime(
+            include_humidifier=False,
+        )
+        store = CrashAfterStartedStore()
+        runtime._direct_control_store = store
+        await runtime.async_start()
+        service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await service.async_load()
+        first_request = {
+            "request_id": "tablet.climate.legacy-crash-a",
+            "correlation_id": "corr.legacy-crash",
+            "parameters": {"target_temperature": 25.5},
+        }
+        with self.assertRaises(RuntimeError):
+            await service.async_execute_legacy_home_targets(**first_request)
+        dispatched_batches = len(executor.batches)
+        self.assertGreater(dispatched_batches, 0)
+        self.assertEqual(1, store._control_revision)
+        self.assertEqual(1, len(contour_store.saved))
+
+        restarted_runtime = ClimateRuntime(
+            entry_id="entry", configuration=configuration(ClimateControlMode.MANAGED),
+            registry_store=runtime._registry_store, contour_store=contour_store,
+            strict_ha_call_executor=executor, ha_state_view=runtime._ha_state_view,
+            operation_id_factory=lambda: "c" * 32,
+            now_ms=lambda: 1784280005000, direct_control_store=store,
+        )
+        await restarted_runtime.async_start()
+        restarted = ClimateTabletService(restarted_runtime, store, now_ms=lambda: 1784280005000)
+        await restarted.async_load()
+        replay = await restarted.async_execute_legacy_home_targets(
+            request_id="tablet.climate.legacy-crash-b",
+            correlation_id="corr.legacy-crash",
+            parameters={"target_temperature": 25.5},
+        )
+        self.assertTrue(replay["duplicate"])
+        self.assertEqual(dispatched_batches, len(executor.batches))
+        self.assertEqual(1, store._control_revision)
+        with self.assertRaises(ClimateTabletViolation):
+            await restarted.async_execute_legacy_home_targets(
+                request_id="tablet.climate.legacy-crash-c",
+                correlation_id="corr.legacy-crash",
+                parameters={"target_temperature": 25.0},
+            )
+
     async def test_set_room_mode_dispatches_existing_contract_action(self) -> None:
         self.runtime.home["rooms"][0]["control"]["allowed_actions"].append(
             "set_room_mode"
