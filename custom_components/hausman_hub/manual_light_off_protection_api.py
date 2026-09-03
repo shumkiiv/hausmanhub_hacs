@@ -91,7 +91,7 @@ class ManualLightOffProtectionView(_BaseView):
         except ValueError as error:
             return _api_error(
                 self,
-                "revision_conflict" if "revision conflict" in str(error) else "invalid_request",
+                "revision_conflict" if "conflict" in str(error) else "invalid_request",
             )
         except RuntimeError:
             return self._unavailable()
@@ -136,7 +136,9 @@ class ManualLightOffProtectionReleaseView(_BaseView):
         except ValueError as error:
             return _api_error(
                 self,
-                "revision_conflict" if "conflict" in str(error) else "invalid_request",
+                "revision_conflict"
+                if "conflict" in str(error) or "protection is not active" in str(error)
+                else "invalid_request",
             )
         except RuntimeError:
             return self._unavailable()

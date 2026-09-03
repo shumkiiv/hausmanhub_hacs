@@ -638,6 +638,41 @@ class LocalSummaryAccessTest(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, serialized)
 
+    def _manual_protection_views(self) -> tuple[object, object]:
+        settings = next(
+            view for view in self.hass.http.views
+            if getattr(view, "name", "") == "api:hausman_hub:manual_light_off_protection"
+        )
+        release = next(
+            view for view in self.hass.http.views
+            if getattr(view, "name", "") == "api:hausman_hub:manual_light_off_protection_release"
+        )
+        return settings, release
+
+    @staticmethod
+    def _manual_settings_request(request_id: str, interval: int = 30) -> dict[str, object]:
+        return {
+            "contract": {"name": "hausman-hub-manual-light-off-protection-settings-request", "version": 1},
+            "requestId": request_id, "expectedRevision": 0,
+            "settings": {"globalPolicy": {"enabled": True, "minimumIntervalSeconds": interval, "releaseMode": "timer_only", "stableAbsenceSeconds": 5, "extendOnRepeatedManualOff": True, "noSensorFallback": "timer_only", "protectedScope": "profile", "allowManualRelease": True}, "roomOverrides": {}, "profileOverrides": {}, "profiles": []},
+        }
+
+    def test_manual_protection_http_replay_conflicts_and_no_store(self) -> None:
+        view, release = self._manual_protection_views()
+        admin = reader_user("system-admin", admin=True)
+        request = self._manual_settings_request("replay.1")
+        first = asyncio.run(view.put(FakeJsonRequest("127.0.0.1", admin, view.url, request)))
+        same = asyncio.run(view.put(FakeJsonRequest("127.0.0.1", admin, view.url, request)))
+        changed = self._manual_settings_request("replay.1", 31)
+        conflict = asyncio.run(view.put(FakeJsonRequest("127.0.0.1", admin, view.url, changed)))
+        cross = asyncio.run(release.post(FakeJsonRequest("127.0.0.1", admin, release.url, {"contract": {"name": "hausman-hub-manual-light-off-protection-release-request", "version": 1}, "requestId": "replay.1", "roomId": "room", "profileId": "profile", "expectedProtectionRevision": 0})))
+        self.assertEqual(200, first.status)
+        self.assertEqual(first.payload, same.payload)
+        for response in (conflict, cross):
+            self.assertEqual(409, response.status)
+            self.assertEqual("hausman-hub-error", response.payload["contract"]["name"])
+            self.assertEqual("no-store", response.headers["Cache-Control"])
+
     def test_setup_resets_stale_history_when_keyring_is_replaced_after_marker(self) -> None:
         """The ConfigEntry marker cannot authorize records under a new keyring."""
 
