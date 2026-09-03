@@ -1667,18 +1667,26 @@ class ScenarioExecutor:
                 expected_generations=absence_generations,
             )
 
-        await self._light_priority.note_results(
-            actions,
-            receipts,
-            light_priority,
-            self._catalog,
-            self._hass,
-            automatic=automatic_source,
-            dry_run=dry_run,
-            scenario_id=scenario_id,
-            run_id=run_id,
-            authority_lock_held=scenario_authority_lock_held,
-        )
+        # Live automatic light groups persist their ownership before releasing
+        # the group lock. Do not replay that persistence after the last group.
+        if not (
+            automatic_source
+            and not dry_run
+            and light_priority.light_action_ids
+            and self._manual_light_off_protection is not None
+        ):
+            await self._light_priority.note_results(
+                actions,
+                receipts,
+                light_priority,
+                self._catalog,
+                self._hass,
+                automatic=automatic_source,
+                dry_run=dry_run,
+                scenario_id=scenario_id,
+                run_id=run_id,
+                authority_lock_held=scenario_authority_lock_held,
+            )
         completed = all(r.get("status") == "completed" for r in receipts)
         failed_after_progress = any(
             receipt.get("status") == "failed" for receipt in receipts

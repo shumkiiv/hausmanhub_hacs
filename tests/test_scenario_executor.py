@@ -20,6 +20,7 @@ from custom_components.hausman_hub.application.scenario_executor import (
     _solar_curve_brightness,
     _value_parameter_name,
 )
+from custom_components.hausman_hub.application.scenario_service import ScenarioService
 from custom_components.hausman_hub.application.operation_journal import (
     scenario_operation_receipt,
 )
@@ -68,6 +69,8 @@ from custom_components.hausman_hub.domain.scenarios import (
     ScenarioExecutionMode,
     ScenarioNodeRedMetadata,
     ScenarioSafetyPolicy,
+    Scenario,
+    ScenarioRegistry,
     ScenarioTrigger,
     ScenarioTriggerType,
 )
@@ -288,6 +291,10 @@ class _FakeCatalog:
                 ),
             ),
         }
+
+    @property
+    def devices(self) -> dict[str, ScenarioDeviceEntry]:
+        return self._devices
 
     def device(self, target_id: str) -> Any | None:
         return self._devices.get(target_id)
@@ -706,6 +713,139 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             await run
 
         self.assertFalse(priority.authority_lock().locked())
+
+    async def test_releasable_group_keeps_exact_guard_order(self) -> None:
+        """The durable release happens before power, service and ownership."""
+
+        events: list[str] = []
+
+        now = datetime.now(timezone.utc)
+
+        class Store:
+            armed = False
+
+            async def async_load(self) -> object | None:
+                return None
+
+            async def async_save(self, _payload: dict[str, object]) -> None:
+                if self.armed:
+                    events.append("durable_release_save")
+
+        class InstrumentedProtection(ManualLightOffProtectionCoordinator):
+            async def async_decide(self, *args: object, **kwargs: object):
+                events.extend(("descriptor", "decision"))
+                return await super().async_decide(*args, **kwargs)
+
+        store = Store()
+        protection = InstrumentedProtection(store, now=lambda: now)
+        await protection.async_load()
+        await protection.async_replace_settings("settings", 0, {
+            "globalPolicy": {"enabled": True, "minimumIntervalSeconds": 30, "releaseMode": "timer_only", "stableAbsenceSeconds": 30, "extendOnRepeatedManualOff": True, "noSensorFallback": "timer_only", "protectedScope": "profile", "allowManualRelease": True},
+            "roomOverrides": {}, "profileOverrides": {},
+            "profiles": [{"roomId": "living_room", "profileId": "living_room_light", "lightIds": ["light.living_room"], "presenceSensorIds": []}],
+        })
+        await protection.async_note_state_transition("light.living_room", SimpleNamespace(state="on"), SimpleNamespace(state="off"), None)
+        store.armed = True
+        now += timedelta(seconds=31)
+
+        priority = LightAutomationPriority()
+        executor = ScenarioExecutor(
+            self.hass, self.catalog, self.executor._run_callback,
+            light_priority=priority, manual_light_off_protection=protection,
+            power_dependency_resolver=lambda: _power_link(policy="auto_turn_on"),
+        )
+        original_readback = executor._read_back_device
+        original_note = priority.note_results
+
+        async def prepared(entity_id: str, *args: object, **kwargs: object):
+            if entity_id == "light.living_room":
+                events.append("power")
+            return None, None, frozenset()
+
+        async def readback(*args: object, **kwargs: object):
+            events.append("readback")
+            return await original_readback(*args, **kwargs)
+
+        async def note(*args: object, **kwargs: object):
+            events.append("ownership")
+            return await original_note(*args, **kwargs)
+
+        executor._prepare_power_dependency = prepared  # type: ignore[method-assign]
+        executor._read_back_device = readback  # type: ignore[method-assign]
+        priority.note_results = note  # type: ignore[method-assign]
+        self.hass.state_values["light.living_room"] = SimpleNamespace(state="off", attributes={})
+        self.hass.state_values["switch.wall"] = SimpleNamespace(state="on", attributes={})
+
+        async def service(*_args: object, **_kwargs: object) -> None:
+            events.append("service")
+            self.hass.state_values["light.living_room"] = SimpleNamespace(state="on", attributes={})
+
+        self.hass.services.async_call.side_effect = service
+        result = await executor.async_execute(
+            _definition((ScenarioAction(id="on", type=ScenarioActionType.DEVICE_ACTION, target_id="device_1", action_id="turn_on"),)),
+            "ordered-release.1", scenario_id="presence_light",
+        )
+
+        self.assertEqual("completed", result["status"])
+        self.assertEqual(
+            ["descriptor", "decision", "durable_release_save", "power", "service", "readback", "ownership"],
+            events,
+        )
+
+    async def test_nested_dry_run_uses_service_and_child_executor_without_writes(self) -> None:
+        """A real nested dry-run preserves the child protection reason safely."""
+
+        class ProtectionStore:
+            def __init__(self) -> None:
+                self.payload: object | None = None
+                self.saves = 0
+
+            async def async_load(self) -> object | None:
+                return self.payload
+
+            async def async_save(self, payload: dict[str, object]) -> None:
+                self.saves += 1
+                self.payload = payload
+
+        class RegistryStore:
+            def __init__(self, registry: ScenarioRegistry) -> None:
+                self.registry = registry
+
+            async def async_load(self) -> ScenarioRegistry:
+                return self.registry
+
+            async def async_save(self, registry: ScenarioRegistry) -> None:
+                self.registry = registry
+
+        protection_store = ProtectionStore()
+        protection = ManualLightOffProtectionCoordinator(protection_store)
+        await protection.async_load()
+        await protection.async_replace_settings("settings", 0, {
+            "globalPolicy": {"enabled": True, "minimumIntervalSeconds": 600, "releaseMode": "timer_only", "stableAbsenceSeconds": 30, "extendOnRepeatedManualOff": True, "noSensorFallback": "timer_only", "protectedScope": "profile", "allowManualRelease": True},
+            "roomOverrides": {}, "profileOverrides": {},
+            "profiles": [{"roomId": "living_room", "profileId": "living_room_light", "lightIds": ["light.living_room"], "presenceSensorIds": []}],
+        })
+        await protection.async_note_state_transition("light.living_room", SimpleNamespace(state="on"), SimpleNamespace(state="off"), None)
+        baseline_saves = protection_store.saves
+        child = _definition((ScenarioAction(id="child_on", type=ScenarioActionType.DEVICE_ACTION, target_id="device_1", action_id="turn_on"),))
+        parent = _definition((ScenarioAction(id="nested", type=ScenarioActionType.RUN_SCENARIO, scenario_id="child"),))
+        registry = ScenarioRegistry(scenarios=(
+            Scenario.from_definition("parent", "Parent", parent),
+            Scenario.from_definition("child", "Child", child),
+        ))
+        service: ScenarioService
+
+        async def callback(*args: object, **kwargs: object) -> dict[str, Any]:
+            return await service.async_run_scenario(*args, **kwargs)
+
+        executor = ScenarioExecutor(self.hass, self.catalog, callback, manual_light_off_protection=protection)
+        service = ScenarioService(self.hass, RegistryStore(registry), self.catalog, executor)
+        await service.async_load()
+        result = await service.async_run_scenario("parent", dry_run=True)
+
+        self.assertEqual("manual_off_protection_active", result["receipts"][0]["reason"])
+        self.assertEqual(baseline_saves, protection_store.saves)
+        self.hass.services.async_call.assert_not_awaited()
 
     async def test_device_action_calls_service(self) -> None:
         definition = _definition(
