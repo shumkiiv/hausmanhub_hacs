@@ -51,6 +51,7 @@ class ManualLightOffProtectionCoordinator:
         self._settings_revision = 0
         self._state_revision = 0
         self._protections: dict[str, dict[str, object]] = {}
+        self._frozen_sensor_ids: dict[str, tuple[str, ...]] = {}
         self._completed: list[dict[str, object]] = []
         self._receipts: dict[str, dict[str, object]] = {}
         self._sensor_states: dict[str, tuple[str, datetime]] = {}
@@ -72,6 +73,10 @@ class ManualLightOffProtectionCoordinator:
             self._protections = {
                 _protection_key(item): copy.deepcopy(item)
                 for item in payload["protections"]
+            }
+            self._frozen_sensor_ids = {
+                str(item["protectionId"]): tuple(item["presenceSensorIds"])
+                for item in payload["frozenSensors"]
             }
             self._completed = copy.deepcopy(payload["completed"])
             self._receipts = {
@@ -114,32 +119,26 @@ class ManualLightOffProtectionCoordinator:
             old = _state(old_state)
             new = _state(new_state)
             now = _utc(self._now())
-            for profile in self._settings.profiles:
-                if entity_id in profile.presence_sensor_ids:
-                    observed = _state_timestamp(new_state, now)
-                    if new == "off" and (now - observed).total_seconds() <= _FRESH_SENSOR_SECONDS:
-                        self._sensor_states[entity_id] = ("off", observed)
-                    else:
-                        self._sensor_states[entity_id] = (new, observed)
-                    if new == "off":
-                        record = next((item for item in self._protections.values() if item["roomId"] == profile.room_id and item["profileId"] == profile.profile_id), None)
-                        if record is not None:
-                            updated = copy.deepcopy(record)
-                            updated["absenceSince"] = _wire_time(observed)
-                            updated["revision"] = int(record["revision"]) + 1
-                            record_key = next(key for key, item in self._protections.items() if item is record)
-                            self._protections[record_key] = updated
-                            self._state_revision += 1
-                            await self._save()
-                    else:
-                        for record_key, record in tuple(self._protections.items()):
-                            if record["roomId"] == profile.room_id and record["profileId"] == profile.profile_id and record["absenceSince"] is not None:
-                                updated = copy.deepcopy(record)
-                                updated["absenceSince"] = None
-                                updated["revision"] = int(record["revision"]) + 1
-                                self._protections[record_key] = updated
-                                self._state_revision += 1
-                                await self._save()
+            affected = [
+                key for key, sensor_ids in self._frozen_sensor_ids.items()
+                if entity_id in sensor_ids
+            ]
+            if affected:
+                observed = _state_timestamp(new_state, now)
+                if new == "off" and (now - observed).total_seconds() <= _FRESH_SENSOR_SECONDS:
+                    self._sensor_states[entity_id] = ("off", observed)
+                else:
+                    self._sensor_states[entity_id] = (new, observed)
+                for record_key in affected:
+                    record = self._protections[record_key]
+                    absence_since = _wire_time(observed) if new == "off" else None
+                    if record["absenceSince"] != absence_since:
+                        updated = copy.deepcopy(record)
+                        updated["absenceSince"] = absence_since
+                        updated["revision"] = int(record["revision"]) + 1
+                        self._protections[record_key] = updated
+                        self._state_revision += 1
+                        await self._save()
             if old == "on" and new == "off" and not _automatic(attribution):
                 profile = _profile_for_light(self._settings, entity_id)
                 if profile is not None:
@@ -167,14 +166,11 @@ class ManualLightOffProtectionCoordinator:
             if found is None:
                 return LightProtectionDecision(True)
             key, record = found
-            profile = next(
-                (item for item in self._settings.profiles if item.room_id == record["roomId"] and item.profile_id == record["profileId"] and (tuple(item.light_ids) == tuple(record["lightIds"]) or (record["effectivePolicy"]["protectedScope"] == "source" and entity_id in item.light_ids))),
-                None,
-            )
-            if profile is None:
+            sensor_ids = self._frozen_sensor_ids.get(key)
+            if sensor_ids is None:
                 return LightProtectionDecision(False, "manual_off_protection_scope_unavailable", key)
             now = _utc(self._now())
-            if _may_release(record, profile, self._sensor_states, now):
+            if _may_release(record, sensor_ids, self._sensor_states, now):
                 if not dry_run:
                     updated = copy.deepcopy(record)
                     updated["state"] = ProtectionState.RELEASED.value
@@ -238,13 +234,23 @@ class ManualLightOffProtectionCoordinator:
         }
 
     async def _activate(self, profile, entity_id: str, now: datetime, attribution) -> None:
-        key = _profile_key(profile.room_id, profile.profile_id, entity_id)
-        current = self._protections.get(key)
-        if current is None:
+        current_item = next(
+            ((key, record) for key, record in self._protections.items()
+             if record["roomId"] == profile.room_id and record["profileId"] == profile.profile_id
+             and entity_id in record["lightIds"]),
+            None,
+        )
+        if current_item is None:
             policy, source = resolve_manual_off_policy_with_source(
                 self._settings.as_wire(), profile.room_id, profile.profile_id
             )
+            key = _profile_key(
+                profile.room_id, profile.profile_id,
+                entity_id if policy.protected_scope.value == "source" else None,
+            )
+            current = None
         else:
+            key, current = current_item
             policy = parse_settings({"globalPolicy": current["effectivePolicy"], "roomOverrides": {}, "profileOverrides": {}, "profiles": []}).global_policy
             source = EffectivePolicySource(current["effectivePolicySource"])
         if not policy.enabled:
@@ -257,7 +263,11 @@ class ManualLightOffProtectionCoordinator:
         revision = int(current["revision"]) + 1 if current is not None else 0
         record = {
             "roomId": profile.room_id, "profileId": profile.profile_id,
-            "lightIds": [entity_id] if policy.protected_scope.value == "source" else list(profile.light_ids), "startedAt": _wire_time(now),
+            "lightIds": (
+                list(current["lightIds"])
+                if current is not None
+                else ([entity_id] if policy.protected_scope.value == "source" else list(profile.light_ids))
+            ), "startedAt": _wire_time(now),
             "notBefore": _wire_time(now.timestamp() + policy.minimum_interval_seconds),
             "absenceSince": None, "effectivePolicy": policy.as_wire(),
             "effectivePolicySource": source.value, "policyFingerprint": policy.fingerprint,
@@ -266,11 +276,14 @@ class ManualLightOffProtectionCoordinator:
             "revision": revision, "state": ProtectionState.ACTIVE.value,
         }
         self._protections[key] = record
+        if current is None:
+            self._frozen_sensor_ids[key] = tuple(profile.presence_sensor_ids)
         self._state_revision += 1
         await self._save()
 
     async def _complete(self, key: str, record: dict[str, object], *, request_id: str | None = None) -> None:
         self._protections.pop(key, None)
+        self._frozen_sensor_ids.pop(key, None)
         self._completed.append(record)
         self._completed = self._completed[-MAX_COMPLETED_PROTECTIONS:]
         self._state_revision += 1
@@ -296,6 +309,10 @@ class ManualLightOffProtectionCoordinator:
             "stateRevision": self._state_revision, "settings": self._settings.as_wire(),
             "protections": list(self._protections.values()), "completed": self._completed,
             "receipts": [{"requestId": key, "receipt": value} for key, value in self._receipts.items()],
+            "frozenSensors": [
+                {"protectionId": key, "presenceSensorIds": list(sensor_ids)}
+                for key, sensor_ids in self._frozen_sensor_ids.items()
+            ],
         }
 
     def _receipt(self, request_id: str) -> dict[str, object] | None:
@@ -310,7 +327,7 @@ class ManualLightOffProtectionCoordinator:
 
 def valid_manual_light_off_protection_payload(value: object) -> bool:
     try:
-        if not isinstance(value, Mapping) or set(value) != {"version", "settingsRevision", "stateRevision", "settings", "protections", "completed", "receipts"}:
+        if not isinstance(value, Mapping) or set(value) != {"version", "settingsRevision", "stateRevision", "settings", "protections", "completed", "receipts", "frozenSensors"}:
             return False
         if value["version"] != 1 or type(value["settingsRevision"]) is not int or type(value["stateRevision"]) is not int:
             return False
@@ -323,6 +340,8 @@ def valid_manual_light_off_protection_payload(value: object) -> bool:
             return False
         if not isinstance(value["receipts"], list) or len(value["receipts"]) > MAX_IDEMPOTENCY_RECEIPTS:
             return False
+        if not isinstance(value["frozenSensors"], list) or len(value["frozenSensors"]) > MAX_ACTIVE_PROTECTIONS:
+            return False
         active = [_valid_protection(item) for item in value["protections"]]
         completed = [_valid_protection(item) for item in value["completed"]]
         if not all(active) or not all(completed):
@@ -331,7 +350,14 @@ def valid_manual_light_off_protection_payload(value: object) -> bool:
             return False
         if not all(_valid_receipt(item) for item in value["receipts"]):
             return False
-        return len({_protection_key(item) for item in value["protections"]}) == len(value["protections"])
+        active_keys = {_protection_key(item) for item in value["protections"]}
+        frozen = value["frozenSensors"]
+        return (
+            len(active_keys) == len(value["protections"])
+            and len({item["protectionId"] for item in frozen}) == len(frozen)
+            and all(_valid_frozen_sensors(item) for item in frozen)
+            and {item["protectionId"] for item in frozen} == active_keys
+        )
     except (KeyError, TypeError, ValueError, ManualLightOffProtectionViolation):
         return False
 
@@ -349,7 +375,11 @@ def _profile_key(room_id: str, profile_id: str, entity_id: str | None = None) ->
 
 
 def _protection_key(value: Mapping[str, object]) -> str:
-    return _profile_key(str(value["roomId"]), str(value["profileId"]))
+    source = value["effectivePolicy"]["protectedScope"] == "source"
+    return _profile_key(
+        str(value["roomId"]), str(value["profileId"]),
+        str(value["lightIds"][0]) if source else None,
+    )
 
 
 def _state(value: object) -> str:
@@ -381,18 +411,18 @@ def _parse_time(value: object) -> datetime:
     return _utc(datetime.fromisoformat(value.replace("Z", "+00:00")))
 
 
-def _may_release(record, profile, sensors, now: datetime) -> bool:
+def _may_release(record, sensor_ids, sensors, now: datetime) -> bool:
     policy = record["effectivePolicy"]
     timer = now >= _parse_time(record["notBefore"])
     if policy["releaseMode"] == "timer_only":
         return timer
-    if not profile.presence_sensor_ids:
+    if not sensor_ids:
         if policy["noSensorFallback"] == "manual_release":
             return False
         absence = timer
     else:
         absence_times = []
-        for sensor_id in profile.presence_sensor_ids:
+        for sensor_id in sensor_ids:
             state = sensors.get(sensor_id)
             if state is None or state[0] != "off" or (now - state[1]).total_seconds() > _FRESH_SENSOR_SECONDS:
                 return False
@@ -429,6 +459,24 @@ def _valid_receipt(value: object) -> bool:
     if receipt.get("operation") == "manual_release":
         return "settings" not in receipt and _valid_protection(receipt.get("protection"))
     return False
+
+
+def _valid_frozen_sensors(value: object) -> bool:
+    if not isinstance(value, Mapping) or set(value) != {"protectionId", "presenceSensorIds"}:
+        return False
+    protection_id, sensor_ids = value["protectionId"], value["presenceSensorIds"]
+    return (
+        isinstance(protection_id, str)
+        and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", protection_id) is not None
+        and isinstance(sensor_ids, list)
+        and len(sensor_ids) <= 8
+        and len(set(sensor_ids)) == len(sensor_ids)
+        and all(
+            isinstance(sensor_id, str)
+            and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", sensor_id) is not None
+            for sensor_id in sensor_ids
+        )
+    )
 
 
 def _receipt(request_id: str, operation: str, revision: int, *, settings=None, protection=None) -> dict[str, object]:

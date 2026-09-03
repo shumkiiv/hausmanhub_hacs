@@ -251,3 +251,184 @@ def test_snapshot_is_exact_get_contract_and_presence_clears_absence() -> None:
         assert snapshot["revision"] > 0 and len(snapshot["protections"]) <= 64
 
     asyncio.run(exercise())
+
+
+def test_frozen_sensor_ids_survive_profile_change_removal_and_restart() -> None:
+    async def exercise() -> None:
+        now = datetime(2026, 9, 3, 12, tzinfo=timezone.utc)
+        store = MemoryStore()
+        initial = _settings(release_mode="absence_only")
+        coordinator = ManualLightOffProtectionCoordinator(store, now=lambda: now)
+        await coordinator.async_load()
+        await coordinator.async_replace_settings("one", 0, initial)
+        await coordinator.async_note_state_transition(
+            "light.tambur_points", SimpleNamespace(state="on"), SimpleNamespace(state="off"), None
+        )
+
+        changed = _settings(release_mode="absence_only")
+        changed["profiles"][0]["presenceSensorIds"] = ["binary_sensor.new_presence"]
+        await coordinator.async_replace_settings("two", 1, changed)
+        await coordinator.async_note_state_transition(
+            "light.tambur_points", SimpleNamespace(state="on"), SimpleNamespace(state="off"), None
+        )
+        now += timedelta(seconds=31)
+        await coordinator.async_note_state_transition(
+            "binary_sensor.new_presence", SimpleNamespace(state="on"), SimpleNamespace(state="off"), None
+        )
+        now += timedelta(seconds=31)
+        assert not (await coordinator.async_decide_entity(
+            "light.tambur_points", automatic=True, dry_run=False
+        )).allowed
+
+        restarted = ManualLightOffProtectionCoordinator(store, now=lambda: now)
+        await restarted.async_load()
+        assert not (await restarted.async_decide_entity(
+            "light.tambur_points", automatic=True, dry_run=False
+        )).allowed
+        removed = _settings(release_mode="absence_only")
+        removed["profiles"] = []
+        await restarted.async_replace_settings("three", 2, removed)
+        assert not (await restarted.async_decide_entity(
+            "light.tambur_points", automatic=True, dry_run=False
+        )).allowed
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    ("release_mode", "fallback", "has_sensor", "allowed"),
+    [
+        ("timer_only", "manual_release", True, True),
+        ("absence_only", "timer_only", False, True),
+        ("timer_and_absence", "timer_only", False, True),
+        ("absence_only", "manual_release", False, False),
+    ],
+)
+def test_release_modes_and_no_sensor_fallbacks_are_frozen(
+    release_mode: str, fallback: str, has_sensor: bool, allowed: bool
+) -> None:
+    async def exercise() -> None:
+        now = datetime(2026, 9, 3, 12, tzinfo=timezone.utc)
+        settings = _settings(release_mode=release_mode)
+        settings["globalPolicy"]["noSensorFallback"] = fallback
+        if not has_sensor:
+            settings["profiles"][0]["presenceSensorIds"] = []
+        coordinator = ManualLightOffProtectionCoordinator(MemoryStore(), now=lambda: now)
+        await coordinator.async_load()
+        await coordinator.async_replace_settings("one", 0, settings)
+        await coordinator.async_note_state_transition(
+            "light.tambur_points", SimpleNamespace(state="on"), SimpleNamespace(state="off"), None
+        )
+        now += timedelta(minutes=11)
+        assert (await coordinator.async_decide_entity(
+            "light.tambur_points", automatic=True, dry_run=False
+        )).allowed is allowed
+
+    asyncio.run(exercise())
+
+
+def test_manual_release_eviction_write_failure_and_repeated_lifecycle() -> None:
+    class FailingStore(MemoryStore):
+        async def async_save(self, payload: dict[str, object]) -> None:
+            raise OSError("disk full")
+
+    async def exercise() -> None:
+        now = datetime(2026, 9, 3, 12, tzinfo=timezone.utc)
+        store = MemoryStore()
+        settings = _settings(release_mode="timer_only")
+        coordinator = ManualLightOffProtectionCoordinator(store, now=lambda: now)
+        await coordinator.async_load()
+        for revision in range(129):
+            settings["globalPolicy"]["minimumIntervalSeconds"] = 600 + revision
+            await coordinator.async_replace_settings(f"settings.{revision}", revision, settings)
+        assert len(store.payload["receipts"]) == 128
+        await coordinator.async_note_state_transition(
+            "light.tambur_points", SimpleNamespace(state="on"), SimpleNamespace(state="off"), None
+        )
+        protection = coordinator.snapshot()["protections"][0]
+        decision = await coordinator.async_decide_entity(
+            "light.tambur_points", automatic=True, dry_run=True
+        )
+        await coordinator.async_release("release.1", decision.protection_id, protection["revision"])
+        await coordinator.async_note_state_transition(
+            "light.tambur_points", SimpleNamespace(state="on"), SimpleNamespace(state="off"), None
+        )
+        assert not coordinator.unhealthy
+
+        failed = ManualLightOffProtectionCoordinator(FailingStore(), now=lambda: now)
+        await failed.async_load()
+        with pytest.raises(OSError, match="disk full"):
+            await failed.async_replace_settings("failure.1", 0, _settings())
+        assert failed.unhealthy
+        assert not (await failed.async_decide_entity(
+            "light.tambur_points", automatic=True, dry_run=False
+        )).allowed
+
+    asyncio.run(exercise())
+
+
+def test_source_scoped_records_and_completed_history_survive_restart_at_capacity() -> None:
+    async def exercise() -> None:
+        now = datetime(2026, 9, 3, 12, tzinfo=timezone.utc)
+        store = MemoryStore()
+        source_settings = _settings(release_mode="timer_only")
+        source_settings["globalPolicy"]["protectedScope"] = "source"
+        coordinator = ManualLightOffProtectionCoordinator(store, now=lambda: now)
+        await coordinator.async_load()
+        await coordinator.async_replace_settings("source.settings", 0, source_settings)
+        on, off = SimpleNamespace(state="on"), SimpleNamespace(state="off")
+        await coordinator.async_note_state_transition("light.tambur_points", on, off, None)
+        await coordinator.async_note_state_transition("light.tambur_lamp", on, off, None)
+        restarted = ManualLightOffProtectionCoordinator(store, now=lambda: now)
+        await restarted.async_load()
+        assert not (await restarted.async_decide_entity(
+            "light.tambur_points", automatic=True, dry_run=True
+        )).allowed
+        assert not (await restarted.async_decide_entity(
+            "light.tambur_lamp", automatic=True, dry_run=True
+        )).allowed
+
+        history_store = MemoryStore()
+        history = ManualLightOffProtectionCoordinator(history_store, now=lambda: now)
+        await history.async_load()
+        await history.async_replace_settings("history.settings", 0, _settings(release_mode="timer_only"))
+        for _ in range(257):
+            await history.async_note_state_transition("light.tambur_points", on, off, None)
+            now += timedelta(minutes=11)
+            assert (await history.async_decide_entity(
+                "light.tambur_points", automatic=True, dry_run=False
+            )).allowed
+        assert len(history_store.payload["completed"]) == 256
+        assert not history.unhealthy
+
+    asyncio.run(exercise())
+
+
+def test_active_protection_capacity_never_evicts_an_active_record() -> None:
+    async def exercise() -> None:
+        now = datetime(2026, 9, 3, 12, tzinfo=timezone.utc)
+        settings = _settings(release_mode="timer_only")
+        settings["globalPolicy"]["protectedScope"] = "source"
+        settings["profiles"] = [
+            {
+                "roomId": f"room_{index}", "profileId": f"profile_{index}",
+                "lightIds": [f"light.room_{index}_one", f"light.room_{index}_two"],
+                "presenceSensorIds": [],
+            }
+            for index in range(64)
+        ]
+        coordinator = ManualLightOffProtectionCoordinator(MemoryStore(), now=lambda: now)
+        await coordinator.async_load()
+        await coordinator.async_replace_settings("settings", 0, settings)
+        on, off = SimpleNamespace(state="on"), SimpleNamespace(state="off")
+        for index in range(64):
+            await coordinator.async_note_state_transition(
+                f"light.room_{index}_one", on, off, None
+            )
+        assert len(coordinator.snapshot()["protections"]) == 64
+        with pytest.raises(RuntimeError, match="full"):
+            await coordinator.async_note_state_transition("light.room_0_two", on, off, None)
+        assert len(coordinator.snapshot()["protections"]) == 64
+        assert coordinator.unhealthy
+
+    asyncio.run(exercise())
