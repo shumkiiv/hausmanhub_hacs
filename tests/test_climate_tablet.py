@@ -1496,12 +1496,66 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(receipt["operation_id"], replay["operation_id"])
         self.assertEqual(0, len(executor.batches))
 
+    async def test_reserved_home_target_defers_known_stopped_owner_without_target(self) -> None:
+        """A fresh HA ``off`` owner saves intent without waking the device."""
+        runtime, store, contour_store, executor = native_home_target_runtime(
+            include_humidifier=False,
+        )
+        stopped = executor._state_view.states["climate.living_air_conditioner"]
+        executor._state_view.states["climate.living_air_conditioner"] = replace(
+            stopped, state="off", attributes={},
+        )
+        await runtime.async_start()
+        service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await service.async_load()
+        self.assertIn("set_home_targets", (
+            await service.async_snapshot()
+        )["home_control"]["allowed_actions"])
+        request = {
+            "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+            "request_id": "tablet.climate.home-stopped",
+            "correlation_id": "corr.home-stopped",
+            "expected_state_revision": 0,
+            "expected_control_revision": 0,
+            "reliability_profile": "climate_reliability_v1",
+            "action": "set_home_targets",
+            "room_id": None,
+            "parameters": {"target_temperature": 25.5},
+        }
+
+        receipt = await service.async_execute(request)
+        dispatch_count = len(executor.batches)
+        duplicate = await service.async_execute(request)
+        restarted = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await restarted.async_load()
+        replay = await restarted.async_execute(request)
+
+        self.assertEqual("partial", receipt["status"], receipt)
+        self.assertTrue(receipt["final"])
+        self.assertEqual(1, receipt["resulting_control_revision"])
+        self.assertEqual("saved_deferred_offline", receipt["intent"]["status"])
+        self.assertEqual(1, len(contour_store.saved))
+        self.assertGreater(dispatch_count, 0)
+        self.assertEqual(dispatch_count, len(executor.batches))
+        self.assertTrue(duplicate["duplicate"])
+        self.assertTrue(replay["duplicate"])
+        leaf = receipt["outcomes"]["rooms"]["living"]["devices"]["living_air_conditioner"]
+        self.assertEqual("deferred", leaf["status"])
+        self.assertEqual("device_unavailable", leaf["reason"])
+        self.assertEqual((0, 0), (leaf["command_count"], leaf["accepted_count"]))
+        self.assertNotIn("execution_state", leaf)
+        self.assertNotIn(
+            "climate.living_air_conditioner",
+            [call.entity_id for batch in executor.batches for call in batch],
+        )
+
     async def test_reserved_home_target_rejects_unknown_or_incomplete_available_owner_before_persistence(self) -> None:
         """Unknown HA state must never be treated as safely deferrable offline state."""
         cases = (
             ("unknown", None),
             ("unexpected_state", None),
             ("cool", {"hvac_action": "cooling"}),
+            ("idle", {}),
         )
         for index, (state, attributes) in enumerate(cases):
             with self.subTest(state=state, attributes=attributes):

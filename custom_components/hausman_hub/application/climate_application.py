@@ -219,6 +219,15 @@ def _gate_explicit_device(room_id, device, registry, observation, room_gate, man
     # ignore that projection's availability/comparison symptom.  Structural
     # and unknown-observation failures still deny the entire plan.
     observed_room = observation.room(room_id)
+    stopped_without_requested_target = (
+        observed is not None
+        and observed.availability is ClimateDeviceAvailability.AVAILABLE
+        and observed.activity is ClimateDeviceActivity.STOPPED
+        and (
+            temperature_owner and observed.current_target_temperature is None
+            or humidity_owner and observed.current_target_humidity is None
+        )
+    )
     leaf_can_defer = (
         observation.runtime_fresh
         and observed_room is not None
@@ -227,6 +236,7 @@ def _gate_explicit_device(room_id, device, registry, observation, room_gate, man
         and observed.room_id == room_id
         and (
             observed.availability is ClimateDeviceAvailability.UNAVAILABLE
+            or stopped_without_requested_target
             or (
                 observed.availability is ClimateDeviceAvailability.AVAILABLE
                 and observed.activity is not ClimateDeviceActivity.UNKNOWN
@@ -264,8 +274,13 @@ def _gate_explicit_device(room_id, device, registry, observation, room_gate, man
         and observed.availability is ClimateDeviceAvailability.AVAILABLE
         and (
             observed.activity is ClimateDeviceActivity.UNKNOWN
-            or temperature_owner and observed.current_target_temperature is None
-            or humidity_owner and observed.current_target_humidity is None
+            or (
+                not stopped_without_requested_target
+                and (
+                    temperature_owner and observed.current_target_temperature is None
+                    or humidity_owner and observed.current_target_humidity is None
+                )
+            )
         )
     ):
         reasons.append(ClimateApplicationDenialReason.TRANSLATION_INCOMPLETE)
@@ -301,6 +316,10 @@ def _gate_explicit_device(room_id, device, registry, observation, room_gate, man
             room_id, device.device_id, ClimateApplicationGateStatus.MANUAL, (), ()
         )
     if not reasons and observed is not None and observed.availability is ClimateDeviceAvailability.UNAVAILABLE:
+        return ClimateApplicationDeviceGate(
+            room_id, device.device_id, ClimateApplicationGateStatus.DEFERRED, (), ()
+        )
+    if not reasons and stopped_without_requested_target:
         return ClimateApplicationDeviceGate(
             room_id, device.device_id, ClimateApplicationGateStatus.DEFERRED, (), ()
         )
