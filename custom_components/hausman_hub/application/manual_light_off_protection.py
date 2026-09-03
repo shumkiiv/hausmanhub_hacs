@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
+import json
 import re
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
@@ -131,7 +133,11 @@ class ManualLightOffProtectionCoordinator:
                     self._sensor_states[entity_id] = (new, observed)
                 for record_key in affected:
                     record = self._protections[record_key]
-                    absence_since = _wire_time(observed) if new == "off" else None
+                    absence_since = (
+                        _wire_time(observed)
+                        if new == "off" and (now - observed).total_seconds() <= _FRESH_SENSOR_SECONDS
+                        else None
+                    )
                     if record["absenceSince"] != absence_since:
                         updated = copy.deepcopy(record)
                         updated["absenceSince"] = absence_since
@@ -159,30 +165,31 @@ class ManualLightOffProtectionCoordinator:
                 return LightProtectionDecision(True)
             if self.unhealthy or not self._loaded:
                 return LightProtectionDecision(False, "manual_off_protection_unhealthy")
-            found = next(
-                ((key, item) for key, item in self._protections.items() if entity_id in item["lightIds"]),
-                None,
-            )
-            if found is None:
+            matching = [
+                (key, item) for key, item in self._protections.items()
+                if entity_id in item["lightIds"]
+            ]
+            if not matching:
                 return LightProtectionDecision(True)
-            key, record = found
-            sensor_ids = self._frozen_sensor_ids.get(key)
-            if sensor_ids is None:
-                return LightProtectionDecision(False, "manual_off_protection_scope_unavailable", key)
             now = _utc(self._now())
-            if _may_release(record, sensor_ids, self._sensor_states, now):
-                if not dry_run:
-                    updated = copy.deepcopy(record)
-                    updated["state"] = ProtectionState.RELEASED.value
-                    updated["revision"] = int(record["revision"]) + 1
-                    await self._complete(key, updated)
-                return LightProtectionDecision(True, "manual_off_protection_released", key)
-            reason = (
-                "manual_off_protection_active"
-                if now < _parse_time(record["notBefore"])
-                else "manual_off_protection_absence_required"
+            releasable: list[tuple[str, dict[str, object]]] = []
+            for key, record in matching:
+                sensor_ids = self._frozen_sensor_ids.get(key)
+                if sensor_ids is None:
+                    return LightProtectionDecision(False, "manual_off_protection_scope_unavailable", key)
+                if not _may_release(record, sensor_ids, self._sensor_states, now):
+                    reason = (
+                        "manual_off_protection_active"
+                        if now < _parse_time(record["notBefore"])
+                        else "manual_off_protection_absence_required"
+                    )
+                    return LightProtectionDecision(False, reason, key)
+                releasable.append((key, record))
+            if not dry_run:
+                await self._complete_many(releasable)
+            return LightProtectionDecision(
+                True, "manual_off_protection_released", releasable[0][0]
             )
-            return LightProtectionDecision(False, reason, key)
 
     async def async_decide(
         self, action: ScenarioAction, catalog: ScenarioCatalog, *, automatic: bool,
@@ -227,7 +234,7 @@ class ManualLightOffProtectionCoordinator:
     def snapshot(self) -> dict[str, object]:
         return {
             "contract": {"name": "hausman-hub-manual-light-off-protection", "version": 1},
-            "revision": self._state_revision,
+            "revision": self._settings_revision,
             "updatedAt": _wire_time(self._now()),
             "settings": self._settings.as_wire(),
             "protections": copy.deepcopy(list(self._protections.values())),
@@ -289,6 +296,18 @@ class ManualLightOffProtectionCoordinator:
         self._state_revision += 1
         if request_id is None:
             await self._save()
+
+    async def _complete_many(self, items: list[tuple[str, dict[str, object]]]) -> None:
+        for key, record in items:
+            updated = copy.deepcopy(record)
+            updated["state"] = ProtectionState.RELEASED.value
+            updated["revision"] = int(record["revision"]) + 1
+            self._protections.pop(key, None)
+            self._frozen_sensor_ids.pop(key, None)
+            self._completed.append(updated)
+        self._completed = self._completed[-MAX_COMPLETED_PROTECTIONS:]
+        self._state_revision += len(items)
+        await self._save()
 
     async def _persist_with_receipt(self, request_id: str, receipt: dict[str, object]) -> None:
         self._receipts[request_id] = receipt
@@ -371,7 +390,10 @@ def _profile_for_light(settings, entity_id):
 
 
 def _profile_key(room_id: str, profile_id: str, entity_id: str | None = None) -> str:
-    return f"{room_id}:{profile_id}" if entity_id is None else f"{room_id}:{profile_id}:{entity_id}"
+    encoded = json.dumps(
+        [room_id, profile_id, entity_id], separators=(",", ":"), ensure_ascii=True
+    ).encode()
+    return f"p_{hashlib.sha256(encoded).hexdigest()}"
 
 
 def _protection_key(value: Mapping[str, object]) -> str:
@@ -414,6 +436,14 @@ def _parse_time(value: object) -> datetime:
 def _may_release(record, sensor_ids, sensors, now: datetime) -> bool:
     policy = record["effectivePolicy"]
     timer = now >= _parse_time(record["notBefore"])
+    if sensor_ids and any(
+        state is None
+        or state[0] not in {"on", "off"}
+        or (now - state[1]).total_seconds() > _FRESH_SENSOR_SECONDS
+        for sensor_id in sensor_ids
+        for state in (sensors.get(sensor_id),)
+    ):
+        return False
     if policy["releaseMode"] == "timer_only":
         return timer
     if not sensor_ids:

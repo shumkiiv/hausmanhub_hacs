@@ -9,6 +9,7 @@ import pytest
 
 from custom_components.hausman_hub.application.manual_light_off_protection import (
     ManualLightOffProtectionCoordinator,
+    valid_manual_light_off_protection_payload,
 )
 
 from custom_components.hausman_hub.domain.manual_light_off_protection import (
@@ -230,6 +231,9 @@ def test_source_scope_and_completed_history_allow_repeated_lifecycles() -> None:
         assert not (await coordinator.async_decide_entity("light.tambur_points", automatic=True, dry_run=False)).allowed
         assert (await coordinator.async_decide_entity("light.tambur_lamp", automatic=True, dry_run=False)).allowed
         now += timedelta(minutes=10)
+        await coordinator.async_note_state_transition(
+            "binary_sensor.tambur_presence", SimpleNamespace(state="on"), SimpleNamespace(state="off"), None
+        )
         assert (await coordinator.async_decide_entity("light.tambur_points", automatic=True, dry_run=False)).allowed
         await coordinator.async_note_state_transition("light.tambur_points", on, off, None)
         assert not (await coordinator.async_decide_entity("light.tambur_points", automatic=True, dry_run=False)).allowed
@@ -298,7 +302,7 @@ def test_frozen_sensor_ids_survive_profile_change_removal_and_restart() -> None:
 @pytest.mark.parametrize(
     ("release_mode", "fallback", "has_sensor", "allowed"),
     [
-        ("timer_only", "manual_release", True, True),
+        ("timer_only", "manual_release", True, False),
         ("absence_only", "timer_only", False, True),
         ("timer_and_absence", "timer_only", False, True),
         ("absence_only", "manual_release", False, False),
@@ -395,6 +399,9 @@ def test_source_scoped_records_and_completed_history_survive_restart_at_capacity
         for _ in range(257):
             await history.async_note_state_transition("light.tambur_points", on, off, None)
             now += timedelta(minutes=11)
+            await history.async_note_state_transition(
+                "binary_sensor.tambur_presence", on, off, None
+            )
             assert (await history.async_decide_entity(
                 "light.tambur_points", automatic=True, dry_run=False
             )).allowed
@@ -430,5 +437,110 @@ def test_active_protection_capacity_never_evicts_an_active_record() -> None:
             await coordinator.async_note_state_transition("light.room_0_two", on, off, None)
         assert len(coordinator.snapshot()["protections"]) == 64
         assert coordinator.unhealthy
+
+    asyncio.run(exercise())
+
+
+def test_timer_only_requires_fresh_known_evidence_for_configured_sensor() -> None:
+    async def exercise() -> None:
+        now = datetime(2026, 9, 3, 12, tzinfo=timezone.utc)
+        coordinator = ManualLightOffProtectionCoordinator(MemoryStore(), now=lambda: now)
+        await coordinator.async_load()
+        await coordinator.async_replace_settings("settings", 0, _settings(release_mode="timer_only"))
+        await coordinator.async_note_state_transition(
+            "light.tambur_points", SimpleNamespace(state="on"), SimpleNamespace(state="off"), None
+        )
+        now += timedelta(minutes=11)
+        for state in ("unknown", "unavailable"):
+            await coordinator.async_note_state_transition(
+                "binary_sensor.tambur_presence", SimpleNamespace(state="on"), SimpleNamespace(state=state), None
+            )
+            assert not (await coordinator.async_decide_entity(
+                "light.tambur_points", automatic=True, dry_run=False
+            )).allowed
+        await coordinator.async_note_state_transition(
+            "binary_sensor.tambur_presence", SimpleNamespace(
+                state="unknown"), SimpleNamespace(state="off", last_updated=now - timedelta(minutes=6)), None
+        )
+        assert coordinator.snapshot()["protections"][0]["absenceSince"] is None
+        assert not (await coordinator.async_decide_entity(
+            "light.tambur_points", automatic=True, dry_run=False
+        )).allowed
+        await coordinator.async_note_state_transition(
+            "binary_sensor.tambur_presence", SimpleNamespace(state="unknown"), SimpleNamespace(state="off"), None
+        )
+        assert (await coordinator.async_decide_entity(
+            "light.tambur_points", automatic=True, dry_run=False
+        )).allowed
+
+    asyncio.run(exercise())
+
+
+def test_snapshot_revision_is_the_settings_cas_revision() -> None:
+    async def exercise() -> None:
+        now = datetime(2026, 9, 3, 12, tzinfo=timezone.utc)
+        coordinator = ManualLightOffProtectionCoordinator(MemoryStore(), now=lambda: now)
+        await coordinator.async_load()
+        receipt = await coordinator.async_replace_settings("one", 0, _settings())
+        assert coordinator.snapshot()["revision"] == receipt["revision"] == 1
+        await coordinator.async_note_state_transition(
+            "light.tambur_points", SimpleNamespace(state="on"), SimpleNamespace(state="off"), None
+        )
+        assert coordinator.snapshot()["revision"] == 1
+        next_receipt = await coordinator.async_replace_settings(
+            "two", coordinator.snapshot()["revision"], _settings(release_mode="timer_only")
+        )
+        assert coordinator.snapshot()["revision"] == next_receipt["revision"] == 2
+
+    asyncio.run(exercise())
+
+
+def test_overlapping_protections_are_decided_atomically_without_partial_release() -> None:
+    async def exercise() -> None:
+        now = datetime(2026, 9, 3, 12, tzinfo=timezone.utc)
+        coordinator = ManualLightOffProtectionCoordinator(MemoryStore(), now=lambda: now)
+        initial = _settings(release_mode="timer_only")
+        initial["profiles"][0]["presenceSensorIds"] = []
+        await coordinator.async_load()
+        await coordinator.async_replace_settings("one", 0, initial)
+        on, off = SimpleNamespace(state="on"), SimpleNamespace(state="off")
+        await coordinator.async_note_state_transition("light.tambur_points", on, off, None)
+        now += timedelta(minutes=11)
+        moved = _settings(release_mode="timer_only")
+        moved["profiles"] = [{
+            "roomId": "other", "profileId": "other_points",
+            "lightIds": ["light.tambur_points"], "presenceSensorIds": [],
+        }]
+        await coordinator.async_replace_settings("two", 1, moved)
+        await coordinator.async_note_state_transition("light.tambur_points", on, off, None)
+        decision = await coordinator.async_decide_entity(
+            "light.tambur_points", automatic=True, dry_run=False
+        )
+        assert not decision.allowed
+        assert len(coordinator.snapshot()["protections"]) == 2
+
+    asyncio.run(exercise())
+
+
+def test_protection_id_is_bounded_for_maximum_contract_ids() -> None:
+    async def exercise() -> None:
+        now = datetime(2026, 9, 3, 12, tzinfo=timezone.utc)
+        room_id = "r" + "a" * 63
+        profile_id = "p" + "b" * 63
+        entity_id = "light." + "c" * 122
+        settings = _settings(release_mode="timer_only")
+        settings["globalPolicy"]["protectedScope"] = "source"
+        settings["profiles"] = [{
+            "roomId": room_id, "profileId": profile_id, "lightIds": [entity_id],
+            "presenceSensorIds": [],
+        }]
+        store = MemoryStore()
+        coordinator = ManualLightOffProtectionCoordinator(store, now=lambda: now)
+        await coordinator.async_load()
+        await coordinator.async_replace_settings("settings", 0, settings)
+        await coordinator.async_note_state_transition(entity_id, SimpleNamespace(state="on"), SimpleNamespace(state="off"), None)
+        decision = await coordinator.async_decide_entity(entity_id, automatic=True, dry_run=True)
+        assert decision.protection_id is not None and len(decision.protection_id) <= 128
+        assert valid_manual_light_off_protection_payload(store.payload)
 
     asyncio.run(exercise())

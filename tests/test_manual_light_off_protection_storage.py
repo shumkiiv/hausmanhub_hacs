@@ -1,6 +1,8 @@
 """Persistence bounds and corruption handling for manual-off protection."""
 
 import copy
+import hashlib
+import json
 
 from custom_components.hausman_hub.application.manual_light_off_protection import (
     valid_manual_light_off_protection_payload,
@@ -65,7 +67,7 @@ def test_payload_accepts_exact_capacity_and_rejects_overflow_and_strict_receipt_
         for index in range(64)
     ]
     payload["frozenSensors"] = [
-        {"protectionId": f"active_{index}:profile_{index}", "presenceSensorIds": []}
+        {"protectionId": _protection_id(f"active_{index}", f"profile_{index}"), "presenceSensorIds": []}
         for index in range(64)
     ]
     payload["completed"] = [
@@ -128,3 +130,8 @@ def _settings_receipt(request_id: str, revision: int) -> dict[str, object]:
         "confirmed": True, "status": "confirmed", "revision": revision,
         "settings": _payload()["settings"],
     }}
+
+
+def _protection_id(room_id: str, profile_id: str) -> str:
+    encoded = json.dumps([room_id, profile_id, None], separators=(",", ":")).encode()
+    return f"p_{hashlib.sha256(encoded).hexdigest()}"
