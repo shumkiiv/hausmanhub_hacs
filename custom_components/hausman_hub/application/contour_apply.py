@@ -530,7 +530,16 @@ class _ContourApplyLedger:
             and isinstance(enhanced, Mapping)
             and isinstance(enhanced.get("leaf_ledger"), Mapping)
             and any(
-                state != "already_in_sync"
+                state == "blocked_before_dispatch"
+                for state in enhanced["leaf_ledger"].values()
+            )
+        )
+        zero_call_terminal_partial = (
+            not plan.strict_calls
+            and isinstance(enhanced, Mapping)
+            and isinstance(enhanced.get("leaf_ledger"), Mapping)
+            and any(
+                state in {"deferred_offline", "manual_user_excluded", "manual_external_off"}
                 for state in enhanced["leaf_ledger"].values()
             )
         )
@@ -546,6 +555,8 @@ class _ContourApplyLedger:
                 else (
                     ContourApplyStatus.REJECTED
                     if zero_call_proof_blocked
+                    else ContourApplyStatus.PARTIAL
+                    if zero_call_terminal_partial
                     else (
                         ContourApplyStatus.PENDING
                         if plan.strict_calls
@@ -570,7 +581,7 @@ class _ContourApplyLedger:
                 if not plan.native_plan.preflight_permitted
                 else (
                     ()
-                    if plan.strict_calls
+                    if plan.strict_calls or zero_call_terminal_partial
                     else (
                         ("state_not_confirmed",)
                         if zero_call_proof_blocked
@@ -597,6 +608,32 @@ class _ContourApplyLedger:
                 if zero_call_proof_blocked
                 else (
                     {
+                        device_id: (
+                            {
+                                "status": "deferred", "reason": "device_unavailable",
+                                "message_code": "deferred_offline",
+                                "message": "Цель сохранена, устройство недоступно.",
+                                "command_count": 0, "accepted_count": 0,
+                            }
+                            if state == "deferred_offline" else {
+                                "status": "manual", "reason": "manual_user_excluded",
+                                "message_code": "manual_user_excluded",
+                                "message": "Цель сохранена без изменения ручного устройства.",
+                                "command_count": 0, "accepted_count": 0,
+                            }
+                            if state in {"manual_user_excluded", "manual_external_off"} else {
+                                "status": "confirmed", "reason": "none",
+                                "execution_state": "already_in_sync",
+                                "message_code": "confirmed",
+                                "message": "Результат подтверждён чтением состояния.",
+                                "command_count": 0, "accepted_count": 0,
+                            }
+                        )
+                        for device_id, state in enhanced["leaf_ledger"].items()
+                    }
+                    if zero_call_terminal_partial
+                    else (
+                    {
                         device_id: {
                             "status": "confirmed", "reason": "none",
                             "execution_state": "already_in_sync",
@@ -618,6 +655,7 @@ class _ContourApplyLedger:
                     and enhanced.get("leaf_ledger")
                     and all(state == "already_in_sync" for state in enhanced["leaf_ledger"].values())
                     else None
+                    )
                 )
             ),
         )
