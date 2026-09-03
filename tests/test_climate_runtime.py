@@ -1500,7 +1500,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 "request_id": "home-target-1",
                 "contour_id": "climate",
                 "target_temperature": 24.5,
-                "target_humidity": 50,
+                "target_humidity": None,
                 "confirm": True,
             }
         )
@@ -1508,9 +1508,10 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("confirmed", receipt.status.value)
         saved_room = contour_store.registry.contour("climate").rooms[0]  # type: ignore[union-attr]
         self.assertEqual(24.5, saved_room.target_temperature)
-        self.assertEqual(50, saved_room.target_humidity)
+        self.assertEqual(45, saved_room.target_humidity)
         self.assertEqual(1, len(contour_store.saved))
         self.assertEqual(1, len(executor.batches))
+        self.assertEqual(1, len(executor.batches[0]))
 
     async def test_home_target_executes_the_preflight_plan_without_a_second_read(self) -> None:
         """A saved home target must dispatch the exact plan that passed preflight."""
