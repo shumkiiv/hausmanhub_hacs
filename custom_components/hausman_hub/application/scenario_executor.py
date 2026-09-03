@@ -1105,7 +1105,10 @@ class ScenarioExecutor:
                     action,
                     self._catalog,
                     automatic=True,
-                    dry_run=dry_run,
+                    # Discovery is never authoritative. Only the decision
+                    # made at dispatch under the shared lock may release a
+                    # durable protection.
+                    dry_run=True,
                     trigger_context=trigger_context,
                 )
                 protection_decisions[action.id] = decision
@@ -1126,6 +1129,10 @@ class ScenarioExecutor:
                         and device.entity_id in protected_entity_ids
                     )
                 )
+                if not protected_entity_ids:
+                    # Corrupt or unavailable protection scope must not let an
+                    # earlier source-off race a later protected activation.
+                    protected_light_action_ids = light_priority.light_action_ids
         if (
             not dry_run
             and automatic_source
@@ -1293,10 +1300,13 @@ class ScenarioExecutor:
                     trigger_context=trigger_context,
                     forbid_toggle=forbid_toggle,
                     manual_off_protection_decision=next(
-                        decision for decision in protection_decisions.values()
-                        if not decision.allowed
-                        and (device := self._catalog.device(action.target_id or "")) is not None
-                        and device.entity_id in decision.as_payload().get("lightIds", [])
+                        (
+                            decision for decision in protection_decisions.values()
+                            if not decision.allowed
+                            and (device := self._catalog.device(action.target_id or "")) is not None
+                            and device.entity_id in decision.as_payload().get("lightIds", [])
+                        ),
+                        next(decision for decision in protection_decisions.values() if not decision.allowed),
                     ),
                     lighting_scenario_text=scenario_text,
                     power_dependencies=power_dependencies,
