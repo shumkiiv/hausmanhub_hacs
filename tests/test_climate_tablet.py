@@ -1825,7 +1825,41 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(ClimateTabletViolation):
                     await service.async_execute(request)
                 self.assertEqual([], store.saved)
-                self.assertEqual([], runtime.commands)
+        self.assertEqual([], runtime.commands)
+
+    async def test_legacy_home_contour_save_failure_persists_zero_pre_dispatch_fact(self) -> None:
+        """The compatibility route keeps a proven no-dispatch failure replayable."""
+
+        runtime, store, contour_store, executor = native_home_target_runtime(
+            include_humidifier=False,
+        )
+        await runtime.async_start()
+        contour_store.fail = True
+        service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await service.async_load()
+        kwargs = {
+            "request_id": "tablet.climate.legacy-save-failure",
+            "correlation_id": "corr.legacy-save-failure",
+            "parameters": {"target_temperature": 25.5},
+        }
+        first = await service.async_execute_legacy_home_targets(**kwargs)
+        duplicate = await service.async_execute_legacy_home_targets(**kwargs)
+        restarted = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await restarted.async_load()
+        after_restart = await restarted.async_execute_legacy_home_targets(**kwargs)
+
+        fact = service._legacy_home_execution_facts["corr.legacy-save-failure"]
+        self.assertEqual("unavailable", first["status"])
+        self.assertEqual(first["operation_id"], duplicate["operation_id"])
+        self.assertEqual(first["operation_id"], after_restart["operation_id"])
+        self.assertEqual((0, 0, 0), (
+            fact["command_count"], fact["accepted_count"], fact["confirmed_room_count"],
+        ))
+        self.assertEqual(
+            {"temperature": 0, "strategy": 0, "automatic_mode": 0}, fact["changes"],
+        )
+        self.assertEqual([], contour_store.saved)
+        self.assertEqual([], executor.batches)
 
     async def test_set_room_mode_dispatches_existing_contract_action(self) -> None:
         self.runtime.home["rooms"][0]["control"]["allowed_actions"].append(

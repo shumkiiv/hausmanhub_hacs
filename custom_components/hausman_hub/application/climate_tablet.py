@@ -1598,7 +1598,13 @@ class ClimateTabletService:
                     )
             if _legacy_correlation_id is not None:
                 self._legacy_home_execution_facts[_legacy_correlation_id] = (
-                    _legacy_home_execution_fact(receipt, request, result)
+                    _legacy_home_execution_fact(
+                        receipt, request, result,
+                        pre_dispatch_proven=(
+                            isinstance(final_ledger, Mapping)
+                            and final_ledger.get("state") == "blocked_before_dispatch"
+                        ),
+                    )
                 )
             self._remember(
                 request, receipt,
@@ -4288,14 +4294,22 @@ def _terminal_receipt(
 
 def _legacy_home_execution_fact(
     receipt: Mapping[str, object], request: ClimateTabletActionRequest,
-    native_result: object | None,
+    native_result: object | None, *, pre_dispatch_proven: bool = False,
 ) -> dict[str, object]:
     """Persist only the private execution facts required by legacy replay."""
 
     operation_id = receipt.get("operation_id")
     if not isinstance(operation_id, str) or _OPERATION_ID.fullmatch(operation_id) is None:
         raise ClimateTabletUnavailable("legacy climate execution facts are invalid")
-    facts = _legacy_home_typed_execution_facts(receipt)
+    facts = (
+        _legacy_pre_dispatch_execution_facts(receipt)
+        if pre_dispatch_proven else _legacy_home_typed_execution_facts(receipt)
+    )
+    pre_dispatch_blocked = pre_dispatch_proven or _legacy_pre_dispatch_blocked(receipt, facts)
+    if native_result is None and not pre_dispatch_blocked:
+        # After a possible physical boundary, a missing native result has no
+        # trustworthy aggregate. Refuse to persist invented zero counters.
+        raise ClimateTabletUnavailable("legacy climate execution facts are ambiguous")
     return {
         "operation_id": operation_id,
         "request_id": request.request_id,
@@ -4303,11 +4317,62 @@ def _legacy_home_execution_fact(
         "request_fingerprint": request.fingerprint,
         "parameters_fingerprint": _canonical_fingerprint(request.parameters),
         **facts,
-        "changes": _legacy_home_changes(native_result),
-        "humidity_changes": _native_change_count(native_result, "humidity_changes"),
+        "changes": (
+            {"temperature": 0, "strategy": 0, "automatic_mode": 0}
+            if pre_dispatch_blocked else _legacy_home_changes(native_result)
+        ),
+        "humidity_changes": (
+            0 if pre_dispatch_blocked
+            else _native_change_count(native_result, "humidity_changes")
+        ),
         "read_back": receipt.get("read_back", {}),
         "reasons": facts["reasons"],
     }
+
+
+def _legacy_pre_dispatch_execution_facts(receipt: Mapping[str, object]) -> dict[str, object]:
+    """Use the durable blocked ledger to represent a proved zero-call stop."""
+
+    outcomes = receipt.get("outcomes")
+    rooms = outcomes.get("rooms") if isinstance(outcomes, Mapping) else None
+    if not isinstance(rooms, Mapping) or not rooms:
+        raise ClimateTabletUnavailable("legacy climate execution facts are invalid")
+    return {
+        "status": "unavailable", "room_count": len(rooms),
+        "command_count": 0, "accepted_count": 0, "confirmed_room_count": 0,
+        "reasons": _legacy_home_reason_codes(
+            list(receipt.get("reasons", []))
+            if isinstance(receipt.get("reasons"), list) else []
+        ),
+    }
+
+
+def _legacy_pre_dispatch_blocked(
+    receipt: Mapping[str, object], facts: Mapping[str, object],
+) -> bool:
+    """Accept a zero delta only when every typed leaf proves no dispatch."""
+
+    if (
+        facts.get("command_count") != 0
+        or facts.get("accepted_count") != 0
+    ):
+        return False
+    outcomes = receipt.get("outcomes")
+    rooms = outcomes.get("rooms") if isinstance(outcomes, Mapping) else None
+    leaves = [
+        leaf
+        for room in rooms.values()
+        if isinstance(room, Mapping)
+        for leaf in (room.get("devices") or {}).values()
+        if isinstance(room.get("devices"), Mapping)
+    ] if isinstance(rooms, Mapping) else []
+    return bool(leaves) and all(
+        isinstance(leaf, Mapping)
+        and leaf.get("execution_state") == "blocked_before_dispatch"
+        and leaf.get("command_count") == 0
+        and leaf.get("accepted_count") == 0
+        for leaf in leaves
+    )
 
 
 def _legacy_home_typed_execution_facts(receipt: Mapping[str, object]) -> dict[str, object]:
@@ -4331,8 +4396,13 @@ def _legacy_home_typed_execution_facts(receipt: Mapping[str, object]) -> dict[st
         for leaf in leaves:
             command = leaf.get("command_count")
             accepted = leaf.get("accepted_count")
-            if type(command) is not int or command < 0 or type(accepted) is not int or accepted < 0 or accepted > command:
-                raise ClimateTabletUnavailable("legacy climate execution facts are invalid")
+            if (
+                type(command) is not int or command < 0
+                or type(accepted) is not int or accepted < 0 or accepted > command
+            ):
+                if leaf.get("execution_state") != "blocked_before_dispatch":
+                    raise ClimateTabletUnavailable("legacy climate execution facts are invalid")
+                command = accepted = 0
             command_count += command
             accepted_count += accepted
             reason = leaf.get("reason")
