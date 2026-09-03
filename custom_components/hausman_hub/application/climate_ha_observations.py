@@ -78,7 +78,10 @@ _SENSOR_ROLES = {
     ClimateDeviceKind.TEMPERATURE_SENSOR: ClimateEndpointRole.TEMPERATURE,
     ClimateDeviceKind.HUMIDITY_SENSOR: ClimateEndpointRole.HUMIDITY,
 }
-_UNAVAILABLE_STATES = frozenset({"unavailable", "unknown"})
+# Home Assistant's explicit ``unavailable`` state means the device may be
+# retained as an offline deferred owner.  ``unknown`` and every other raw
+# state are observations with unknown activity, not an offline assurance.
+_UNAVAILABLE_STATES = frozenset({"unavailable"})
 
 
 class ClimateHaObservationViolation(ValueError):

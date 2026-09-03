@@ -1481,6 +1481,43 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(receipt["operation_id"], replay["operation_id"])
         self.assertEqual(0, len(executor.batches))
 
+    async def test_reserved_home_target_rejects_unknown_or_incomplete_available_owner_before_persistence(self) -> None:
+        """Unknown HA state must never be treated as safely deferrable offline state."""
+        cases = (
+            ("unknown", None),
+            ("unexpected_state", None),
+            ("cool", {"hvac_action": "cooling"}),
+        )
+        for index, (state, attributes) in enumerate(cases):
+            with self.subTest(state=state, attributes=attributes):
+                runtime, store, contour_store, executor = native_home_target_runtime(
+                    include_humidifier=False,
+                )
+                current = runtime._ha_state_view.states["climate.living_air_conditioner"]
+                runtime._ha_state_view.states["climate.living_air_conditioner"] = replace(
+                    current, state=state,
+                    attributes=dict(current.attributes) if attributes is None else attributes,
+                )
+                await runtime.async_start()
+                service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+                await service.async_load()
+                request = {
+                    "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+                    "request_id": f"tablet.climate.unknown-{index}",
+                    "correlation_id": f"corr.unknown-{index}",
+                    "expected_state_revision": 0, "expected_control_revision": 0,
+                    "reliability_profile": "climate_reliability_v1", "action": "set_home_targets",
+                    "room_id": None, "parameters": {"target_temperature": 25.5},
+                }
+
+                with self.assertRaises(ClimateTabletUnavailable):
+                    await service.async_execute(request)
+
+                self.assertIsNone(store.payload)
+                self.assertEqual([], store.saved)
+                self.assertEqual([], contour_store.saved)
+                self.assertEqual([], executor.batches)
+
     async def test_reserved_home_targets_retain_mixed_offline_scope_across_restart(self) -> None:
         """An offline owner is saved as deferred and never replayed by a duplicate."""
         runtime, store, contour_store, executor = native_home_target_runtime(
@@ -1623,15 +1660,45 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         receipt = await service.async_execute(request)
         leaves = receipt["outcomes"]["rooms"]["living"]["devices"]
         manual = leaves["living_radiator"]
+        self.assertEqual("partial", receipt["status"])
+        self.assertTrue(receipt["accepted"])
+        self.assertTrue(receipt["final"])
+        self.assertEqual("saved_for_manual_device", receipt["intent"]["status"])
         self.assertEqual(1, len(contour_store.saved))
         self.assertEqual("manual", manual["status"])
         self.assertEqual("manual_user_excluded", manual["reason"])
+        self.assertEqual("manual_user_excluded", manual["message_code"])
         self.assertTrue(manual["message"])
         self.assertEqual((0, 0), (manual["command_count"], manual["accepted_count"]))
         self.assertNotIn("execution_state", manual)
+        automatic = leaves["living_air_conditioner"]
+        self.assertIn(automatic.get("execution_state"), {"applied", "already_in_sync"})
+        self.assertEqual(
+            (1, 1) if automatic["execution_state"] == "applied" else (0, 0),
+            (automatic["command_count"], automatic["accepted_count"]),
+        )
         self.assertNotIn("climate.living_radiator", [
             call.entity_id for batch in executor.batches for call in batch
         ])
+
+        restarted_runtime = ClimateRuntime(
+            entry_id="entry", configuration=runtime.configuration,
+            registry_store=runtime._registry_store, contour_store=contour_store,
+            strict_ha_call_executor=executor, ha_state_view=runtime._ha_state_view,
+            operation_id_factory=lambda: "c" * 32, now_ms=lambda: 1784280005000,
+            direct_control_store=store,
+        )
+        await restarted_runtime.async_start()
+        restarted = ClimateTabletService(
+            restarted_runtime, store, now_ms=lambda: 1784280005000,
+        )
+        await restarted.async_load()
+        batches_before_duplicate = len(executor.batches)
+        duplicate = await restarted.async_execute(request)
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(receipt["operation_id"], duplicate["operation_id"])
+        self.assertEqual(receipt, {**duplicate, "duplicate": False})
+        self.assertEqual(batches_before_duplicate, len(executor.batches))
 
         missing = next(device for device in runtime._registry.devices if device.device_id == "living_radiator")
         missing_registry = replace(

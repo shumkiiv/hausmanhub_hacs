@@ -690,16 +690,28 @@ class NativeClimateApplicationPlannerTest(unittest.TestCase):
         observation = replace(
             observation,
             devices=(
-                *observation.devices,
+                *(
+                    replace(
+                        item,
+                        activity=ClimateDeviceActivity.COOLING,
+                        current_target_temperature=24.0,
+                    )
+                    if item.device_id == air_conditioner.device_id else item
+                    for item in observation.devices
+                ),
                 replace(
                     air_conditioner_observation,
                     device_id=floor.device_id,
                     name=floor.name,
+                    activity=ClimateDeviceActivity.HEATING,
+                    current_target_temperature=24.0,
                 ),
                 replace(
                     air_conditioner_observation,
                     device_id=radiator.device_id,
                     name=radiator.name,
+                    activity=ClimateDeviceActivity.HEATING,
+                    current_target_temperature=24.0,
                 ),
             ),
         )

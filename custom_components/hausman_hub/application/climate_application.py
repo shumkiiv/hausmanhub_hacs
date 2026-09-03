@@ -23,6 +23,7 @@ from ..domain.climate_ha_calls import (
 )
 from ..domain.climate_isolation import ClimateIsolationSnapshot, ClimateRoomIsolationStatus
 from ..domain.climate_observation import (
+    ClimateDeviceActivity,
     ClimateDeviceAvailability,
     ClimateObservationSnapshot,
 )
@@ -202,6 +203,8 @@ def _gate_explicit_device(room_id, device, registry, observation, room_gate, man
     # isolation and comparison checks.  Only a denied gate contributes reasons:
     # an aligned room may still have another physical owner that needs a call.
     observed = observation.device(device.device_id)
+    temperature_owner = temperature is not None
+    humidity_owner = humidity is not None
     # A selected offline owner makes its room projection not ready.  An
     # explicit target retains this structurally valid owner for a durable,
     # terminal no-call disposition instead of treating it as an unsafe gap.
@@ -222,10 +225,21 @@ def _gate_explicit_device(room_id, device, registry, observation, room_gate, man
         and observed_room.data_status.value == "fresh"
         and observed is not None
         and observed.room_id == room_id
-        and observed.availability in {
-            ClimateDeviceAvailability.AVAILABLE,
-            ClimateDeviceAvailability.UNAVAILABLE,
-        }
+        and (
+            observed.availability is ClimateDeviceAvailability.UNAVAILABLE
+            or (
+                observed.availability is ClimateDeviceAvailability.AVAILABLE
+                and observed.activity is not ClimateDeviceActivity.UNKNOWN
+                and (
+                    not temperature_owner
+                    or observed.current_target_temperature is not None
+                )
+                and (
+                    not humidity_owner
+                    or observed.current_target_humidity is not None
+                )
+            )
+        )
     )
     reasons: list[ClimateApplicationDenialReason] = [
         reason for reason in inherited
@@ -243,6 +257,18 @@ def _gate_explicit_device(room_id, device, registry, observation, room_gate, man
         or observed.availability is ClimateDeviceAvailability.MISSING
     ):
         reasons.append(ClimateApplicationDenialReason.TRANSLATION_INCOMPLETE)
+    if (
+        not inherited
+        and
+        observed is not None
+        and observed.availability is ClimateDeviceAvailability.AVAILABLE
+        and (
+            observed.activity is ClimateDeviceActivity.UNKNOWN
+            or temperature_owner and observed.current_target_temperature is None
+            or humidity_owner and observed.current_target_humidity is None
+        )
+    ):
+        reasons.append(ClimateApplicationDenialReason.TRANSLATION_INCOMPLETE)
     if device.control_scope is not ClimateControlScope.MANAGED or device.control_owner is not ClimateControlOwner.CLIMATE_CORE:
         reasons.append(ClimateApplicationDenialReason.ACTUATOR_NOT_MANAGED)
     if device.endpoint(ClimateEndpointRole.CONTROL) is None:
@@ -250,8 +276,6 @@ def _gate_explicit_device(room_id, device, registry, observation, room_gate, man
     if _control_endpoint_is_shared(device, registry):
         reasons.append(ClimateApplicationDenialReason.TRANSLATION_INCOMPLETE)
     endpoint = device.endpoint(ClimateEndpointRole.CONTROL)
-    temperature_owner = temperature is not None
-    humidity_owner = humidity is not None
     valid_temperature_owner = (
         device.kind in {
             ClimateDeviceKind.AIR_CONDITIONER,

@@ -3857,11 +3857,13 @@ def _valid_reliable_dispatch_ledger(
             or not (
                 _reliable_intent_has_status(receipt, "saved_apply_failed")
                 or _reliable_intent_has_status(receipt, "saved_deferred_offline")
+                or _reliable_intent_has_status(receipt, "saved_for_manual_device")
             )
         ):
             return False
         failed = 0
         deferred = 0
+        manual = 0
         for room_id, device_ids in expected.items():
             room = room_outcomes.get(room_id)
             device_outcomes = room.get("devices") if isinstance(room, Mapping) else None
@@ -3886,18 +3888,36 @@ def _valid_reliable_dispatch_ledger(
                 ):
                     deferred += 1
                     continue
+                if (
+                    leaf.get("status") == "manual"
+                    and leaf.get("reason") in {
+                        "manual_user_excluded", "manual_external_off",
+                    }
+                    and leaf.get("execution_state") is None
+                    and _strict_leaf_counts(leaf, 0, 0)
+                ):
+                    manual += 1
+                    continue
                 evidence = leaf.get("evidence") if isinstance(leaf, Mapping) else None
                 observed_at = evidence.get("observed_at") if isinstance(evidence, Mapping) else None
+                execution = leaf.get("execution_state")
                 if not (
                     leaf.get("status") == "confirmed"
-                    and leaf.get("execution_state") == "applied"
-                    and _strict_leaf_counts(leaf, 1, 1)
+                    and execution in {"applied", "already_in_sync"}
+                    and (
+                        _strict_leaf_counts(leaf, 1, 1)
+                        if execution == "applied"
+                        else _strict_leaf_counts(leaf, 0, 0)
+                    )
                     and type(observed_at) is int
-                    and dispatched_at < observed_at <= dispatched_at + 30_000
-                    and observed_at > sources[room_id][device_id]
+                    and (
+                        execution == "already_in_sync"
+                        or dispatched_at < observed_at <= dispatched_at + 30_000
+                        and observed_at > sources[room_id][device_id]
+                    )
                 ):
                     return False
-        return failed > 0 or deferred > 0
+        return failed > 0 or deferred > 0 or manual > 0
     if (
         receipt.get("status") != "confirmed"
         or receipt.get("accepted") is not True
