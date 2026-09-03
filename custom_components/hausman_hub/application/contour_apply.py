@@ -281,6 +281,9 @@ class ContourApplyReceipt:
     # It is used by the reliability adapter to avoid claiming that a failed
     # first leaf says anything about an independently attempted neighbour.
     device_outcomes: Mapping[str, Mapping[str, object]] | None = None
+    # Private whole-home axis delta. The v1 public receipt deliberately has
+    # no humidity field, but durable compatibility facts must not invent it.
+    humidity_changes: int = 0
 
     def __post_init__(self) -> None:
         if not isinstance(self.context, ClimateControlContext):
@@ -289,6 +292,8 @@ class ContourApplyReceipt:
             raise ContourApplyViolation("climate control receipt status is invalid")
         if any(reason not in _REASON_NAMES for reason in self.reasons):
             raise ContourApplyViolation("climate control receipt reason is invalid")
+        if type(self.humidity_changes) is not int or self.humidity_changes < 0:
+            raise ContourApplyViolation("climate control receipt humidity changes are invalid")
 
     def as_payload(self) -> dict[str, object]:
         """Return the exact public receipt shape."""
@@ -559,6 +564,7 @@ class _ContourApplyLedger:
             temperature_changes=plan.desired_state_changes.temperature,
             strategy_changes=plan.desired_state_changes.strategy,
             automatic_mode_changes=plan.desired_state_changes.automatic_mode,
+            humidity_changes=plan.desired_state_changes.humidity,
             reasons=(
                 ("engine_rejected",)
                 if not plan.native_plan.preflight_permitted

@@ -2547,6 +2547,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual(4, sidecar["command_count"])
         self.assertEqual(4, sidecar["accepted_count"])
         self.assertEqual(1, sidecar["confirmed_room_count"])
+        self.assertEqual(1, sidecar["humidity_changes"])
         self.assertEqual(
             {"temperature": 1, "strategy": 0, "automatic_mode": 0},
             sidecar["changes"],

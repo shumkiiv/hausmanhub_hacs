@@ -416,10 +416,16 @@ class FakeRuntime:
 
     async def async_home_climate_targets(self, payload: object) -> object:
         self.commands.append(copy.deepcopy(payload))
+        temperature_changes = humidity_changes = 0
         if isinstance(payload, dict):
             for room in self.home["rooms"]:
                 for axis in ("target_temperature", "target_humidity"):
                     if axis in payload:
+                        if room.get(axis) != payload[axis]:
+                            if axis == "target_temperature":
+                                temperature_changes += 1
+                            else:
+                                humidity_changes += 1
                         room[axis] = payload[axis]
                         for device in room["devices"]:
                             device[f"reported_{axis}"] = payload[axis]
@@ -429,6 +435,10 @@ class FakeRuntime:
             command_count=1,
             confirmed_room_count=1,
             accepted_count=1,
+            temperature_changes=temperature_changes,
+            strategy_changes=0,
+            automatic_mode_changes=0,
+            humidity_changes=humidity_changes,
         )
 
     async def async_synchronize_climate(self) -> object:
