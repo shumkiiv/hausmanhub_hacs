@@ -1458,6 +1458,95 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("applied", leaves["living_radiator"]["execution_state"])
         self.assertEqual(1, receipt["read_back"]["evidence"]["accepted_count"])
 
+    async def test_reserved_home_target_keeps_native_acceptance_when_post_dispatch_snapshot_fails(self) -> None:
+        """A failed projection must not turn accepted HA calls into rejected calls."""
+        runtime, store, _contour_store, executor = native_home_target_runtime(
+            include_humidifier=False,
+        )
+        executor._reflect = False
+        await runtime.async_start()
+        service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await service.async_load()
+        original_snapshot = service._snapshot_unlocked
+        snapshot_count = 0
+
+        async def snapshot_with_one_post_dispatch_failure() -> dict[str, object]:
+            nonlocal snapshot_count
+            snapshot_count += 1
+            if snapshot_count == 2:
+                raise ClimateTabletUnavailable("injected post-dispatch projection failure")
+            return await original_snapshot()
+
+        service._snapshot_unlocked = snapshot_with_one_post_dispatch_failure  # type: ignore[method-assign]
+        request = {
+            "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+            "request_id": "tablet.climate.home-post-dispatch-snapshot",
+            "correlation_id": "corr.home-post-dispatch-snapshot",
+            "expected_state_revision": 0,
+            "expected_control_revision": 0,
+            "reliability_profile": "climate_reliability_v1",
+            "action": "set_home_targets",
+            "room_id": None,
+            "parameters": {"target_temperature": 25.5},
+        }
+
+        receipt = await service.async_execute(request)
+
+        self.assertEqual("pending", receipt["status"], receipt)
+        self.assertTrue(receipt["accepted"])
+        self.assertFalse(receipt["final"])
+        leaves = receipt["outcomes"]["rooms"]["living"]["devices"]
+        self.assertEqual(
+            {"accepted_unverified"},
+            {leaf["execution_state"] for leaf in leaves.values()},
+        )
+        self.assertEqual(
+            {(1, 1)},
+            {(leaf["command_count"], leaf["accepted_count"]) for leaf in leaves.values()},
+        )
+        self.assertEqual(3, len(executor.batches))
+
+    async def test_post_dispatch_snapshot_failure_never_confirms_from_stale_snapshot(self) -> None:
+        """Native confirmation still needs the tablet's fresh final projection."""
+        runtime, store, _contour_store, executor = native_home_target_runtime(
+            include_humidifier=False,
+        )
+        await runtime.async_start()
+        service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await service.async_load()
+        original_snapshot = service._snapshot_unlocked
+        snapshot_count = 0
+
+        async def snapshot_with_one_post_dispatch_failure() -> dict[str, object]:
+            nonlocal snapshot_count
+            snapshot_count += 1
+            if snapshot_count == 2:
+                raise ClimateTabletUnavailable("injected post-dispatch projection failure")
+            return await original_snapshot()
+
+        service._snapshot_unlocked = snapshot_with_one_post_dispatch_failure  # type: ignore[method-assign]
+        receipt = await service.async_execute({
+            "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+            "request_id": "tablet.climate.home-stale-confirmation",
+            "correlation_id": "corr.home-stale-confirmation",
+            "expected_state_revision": 0,
+            "expected_control_revision": 0,
+            "reliability_profile": "climate_reliability_v1",
+            "action": "set_home_targets",
+            "room_id": None,
+            "parameters": {"target_temperature": 25.5},
+        })
+
+        self.assertEqual("pending", receipt["status"], receipt)
+        self.assertFalse(receipt["confirmed"])
+        self.assertFalse(receipt["final"])
+        leaves = receipt["outcomes"]["rooms"]["living"]["devices"]
+        self.assertEqual(
+            {"accepted_unverified"},
+            {leaf["execution_state"] for leaf in leaves.values()},
+        )
+        self.assertEqual(3, len(executor.batches))
+
     async def test_reserved_home_target_defers_all_offline_owners(self) -> None:
         runtime, store, contour_store, executor = native_home_target_runtime(include_humidifier=False)
         for entity_id in ("climate.living_air_conditioner", "climate.living_radiator", "climate.living_floor"):

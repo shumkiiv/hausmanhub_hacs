@@ -1,6 +1,6 @@
 /* New-device discovery notifications: pending list, tab badge and actions. */
 
-import { dedupeCorrelationNotifications } from "./hausman-hub-correlation.js?v=1.52.205";
+import { dedupeCorrelationNotifications } from "./hausman-hub-correlation.js?v=1.52.206";
 
 export const DEVICE_DISCOVERY_API = "hausman_hub/v1/device-discovery";
 

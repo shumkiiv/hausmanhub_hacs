@@ -462,7 +462,7 @@
   "missing_evidence": [],
   "runtime_report_required": true,
   "provenance": {
-    "version": "1.52.205",
-    "content_digest": "788ae6649d131cbbf5a3f1337bdfc7e2751400cc3627a10febc4d9d55d8659ad"
+    "version": "1.52.206",
+    "content_digest": "a6327fa1ad58c474a812b360f65603e54445f5783990f8ed7f1330976916b9c1"
   }
 }
