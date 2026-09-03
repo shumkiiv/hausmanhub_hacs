@@ -190,7 +190,10 @@ class ManualLightOffProtectionCoordinator:
                         reason,
                         key,
                         {
+                            "roomId": record["roomId"],
                             "profileId": record["profileId"],
+                            "state": record["state"],
+                            "lightIds": list(record["lightIds"]),
                             "policyFingerprint": record["policyFingerprint"],
                             "protectionRevision": record["revision"],
                             "remainingSeconds": max(

@@ -103,7 +103,17 @@
           "type": ["string", "null"],
           "maxLength": 128
         },
-        "scenario": {"$ref": "#/$defs/scenario_run"}
+        "scenario": {"$ref": "#/$defs/scenario_run"},
+        "manualOffProtection": {
+          "type": "object", "additionalProperties": false,
+          "required": ["roomId", "profileId", "state", "reason"],
+          "properties": {
+            "roomId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+            "profileId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+            "state": {"enum": ["active", "ready_to_release", "released", "cancelled_by_manual_on"]},
+            "reason": {"enum": ["manual_off", "manual_off_protection_active"]}
+          }
+        }
       },
       "allOf": [
         {
@@ -230,18 +240,7 @@
         "target_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
         "outcome": {"enum": ["completed", "skipped", "failed"]},
         "confirmed": {"type": ["boolean", "null"]},
-        "reason": {"type": ["string", "null"], "maxLength": 256},
-        "manualOffProtection": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["decision", "reason"],
-          "properties": {
-            "decision": {"const": "blocked"},
-            "reason": {"const": "manual_off_protection_active"},
-            "remainingSeconds": {"type": "integer", "minimum": 0},
-            "effectiveState": {"type": "string", "maxLength": 64}
-          }
-        }
+        "reason": {"type": ["string", "null"], "maxLength": 256}
       }
     }
   }

@@ -657,6 +657,11 @@ class ScenarioExecutor:
                 force_contextually_dangerous=contextually_dangerous,
                 command_request_id=request_id,
                 protection_trigger_context=None,
+                power_dependencies=(
+                    self._power_dependency_resolver()
+                    if self._power_dependency_resolver is not None
+                    else {}
+                ),
             )
 
         try:
@@ -1105,7 +1110,22 @@ class ScenarioExecutor:
                 )
                 protection_decisions[action.id] = decision
             if any(not decision.allowed for decision in protection_decisions.values()):
-                protected_light_action_ids = light_priority.light_action_ids
+                protected_entity_ids = {
+                    entity_id
+                    for decision in protection_decisions.values()
+                    if not decision.allowed
+                    for entity_id in decision.as_payload().get("lightIds", [])
+                    if isinstance(entity_id, str)
+                }
+                protected_light_action_ids = frozenset(
+                    action.id
+                    for action in actions
+                    if action.id in light_priority.light_action_ids
+                    and (
+                        (device := self._catalog.device(action.target_id or "")) is not None
+                        and device.entity_id in protected_entity_ids
+                    )
+                )
         if (
             not dry_run
             and automatic_source
@@ -1273,9 +1293,10 @@ class ScenarioExecutor:
                     trigger_context=trigger_context,
                     forbid_toggle=forbid_toggle,
                     manual_off_protection_decision=next(
-                        decision
-                        for decision in protection_decisions.values()
+                        decision for decision in protection_decisions.values()
                         if not decision.allowed
+                        and (device := self._catalog.device(action.target_id or "")) is not None
+                        and device.entity_id in decision.as_payload().get("lightIds", [])
                     ),
                     lighting_scenario_text=scenario_text,
                     power_dependencies=power_dependencies,
@@ -1388,7 +1409,10 @@ class ScenarioExecutor:
                             authority_lock_held=True,
                             forbid_toggle=forbid_toggle,
                             before_dispatch=before_dispatch,
-                            manual_off_protection_decision=protection_decisions.get(action.id),
+                            # Re-decide while the Task 3 authority lock is held.
+                            # An allowed preflight result must never survive a
+                            # concurrent manual transition or catalog replacement.
+                            manual_off_protection_decision=None,
                             lighting_scenario_text=scenario_text,
                             power_dependencies=power_dependencies,
                         )
@@ -1414,7 +1438,7 @@ class ScenarioExecutor:
                     trigger_context=trigger_context,
                     forbid_toggle=forbid_toggle,
                     before_dispatch=before_dispatch,
-                    manual_off_protection_decision=protection_decisions.get(action.id),
+                    manual_off_protection_decision=None,
                     lighting_scenario_text=scenario_text,
                     power_dependencies=power_dependencies,
                 )

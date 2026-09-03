@@ -91,6 +91,11 @@ class OperationJournalService:
         reason = receipt.get("reason")
         error_code = receipt.get("error_code")
         scenario = _validated_scenario_trace(receipt.get("scenario"))
+        manual_off_protection = _validated_journal_manual_off_protection(
+            receipt.get("manualOffProtection")
+        )
+        if receipt.get("manualOffProtection") is not None and manual_off_protection is None:
+            raise ValueError("manual light-off protection trace is invalid")
         if receipt.get("scenario") is not None and scenario is None:
             raise ValueError("normalized scenario trace is invalid")
         if scenario is not None and (
@@ -115,6 +120,8 @@ class OperationJournalService:
             }
             if scenario is not None:
                 record["scenario"] = scenario
+            if manual_off_protection is not None:
+                record["manualOffProtection"] = manual_off_protection
             self._records.insert(0, record)
             del self._records[MAX_OPERATION_JOURNAL_RECORDS:]
             await self._store.async_save(self._storage_payload())
@@ -210,7 +217,7 @@ def _validated_record(value: object) -> dict[str, object] | None:
     if (
         not isinstance(value, Mapping)
         or not required_keys.issubset(value)
-        or not set(value).issubset(required_keys | {"scenario"})
+        or not set(value).issubset(required_keys | {"scenario", "manualOffProtection"})
     ):
         return None
     sequence = value.get("sequence")
@@ -221,6 +228,7 @@ def _validated_record(value: object) -> dict[str, object] | None:
     reason = value.get("reason")
     error_code = value.get("error_code")
     scenario_present = "scenario" in value
+    manual_off_protection = _validated_journal_manual_off_protection(value.get("manualOffProtection"))
     scenario = _validated_scenario_trace(value.get("scenario"))
     if (
         type(sequence) is not int
@@ -242,6 +250,7 @@ def _validated_record(value: object) -> dict[str, object] | None:
         or (value.get("confirmed") is True and value.get("accepted") is not True)
         or ((value.get("status") == "confirmed") != (value.get("confirmed") is True))
         or (scenario_present and scenario is None)
+        or ("manualOffProtection" in value and manual_off_protection is None)
         or (scenario_present and (source != "scenario" or operation != "scenario_run"))
         or (
             scenario is not None
@@ -253,6 +262,8 @@ def _validated_record(value: object) -> dict[str, object] | None:
     record = dict(value)
     if scenario is not None:
         record["scenario"] = scenario
+    if manual_off_protection is not None:
+        record["manualOffProtection"] = manual_off_protection
     return record
 
 
@@ -329,7 +340,7 @@ def scenario_operation_receipt(result: Mapping[str, object]) -> dict[str, object
             and item.get("reason") == "manual_off_protection_active"
         ):
             reason = "manual_off_protection_active"
-        manual_off_protection = _redacted_manual_off_protection(item.get("protection"))
+        manual_off_protection = _journal_manual_off_protection(item.get("protection"))
         if command_mode == "shadow":
             confirmed = None
             if action_outcome != "failed" and manual_off_protection is None:
@@ -343,8 +354,6 @@ def scenario_operation_receipt(result: Mapping[str, object]) -> dict[str, object
         target_id = item.get("target_id")
         if isinstance(target_id, str) and _CORRELATION_ID.fullmatch(target_id):
             action_trace["target_id"] = target_id
-        if manual_off_protection is not None:
-            action_trace["manualOffProtection"] = manual_off_protection
         actions.append(action_trace)
     completed = outcome == "completed"
     confirmed = command_mode == "live" and completed and result.get("confirmed") is True
@@ -373,7 +382,7 @@ def scenario_operation_receipt(result: Mapping[str, object]) -> dict[str, object
     trigger = _validated_scenario_trigger(result.get("trigger_context"))
     if trigger is not None:
         scenario_trace["trigger"] = trigger
-    return {
+    receipt = {
         "correlation_id": run_id,
         "operation": "scenario_run",
         "accepted": completed,
@@ -383,6 +392,13 @@ def scenario_operation_receipt(result: Mapping[str, object]) -> dict[str, object
         "error_code": reason,
         "scenario": scenario_trace,
     }
+    for item in receipts:
+        if isinstance(item, Mapping) and (
+            protection := _journal_manual_off_protection(item.get("protection"))
+        ) is not None:
+            receipt["manualOffProtection"] = protection
+            break
+    return receipt
 
 
 def _safe_trace_reason(value: object, fallback: str | None) -> str | None:
@@ -393,22 +409,29 @@ def _safe_trace_reason(value: object, fallback: str | None) -> str | None:
     return fallback
 
 
-def _redacted_manual_off_protection(value: object) -> dict[str, object] | None:
+def _journal_manual_off_protection(value: object) -> dict[str, object] | None:
     """Keep an operator-useful guard result without durable private IDs."""
 
     if not isinstance(value, Mapping) or value.get("allowed") is not False:
         return None
-    remaining = value.get("remainingSeconds")
-    effective_state = value.get("effectiveState")
-    payload: dict[str, object] = {
-        "decision": "blocked",
-        "reason": "manual_off_protection_active",
-    }
-    if type(remaining) is int and remaining >= 0:
-        payload["remainingSeconds"] = remaining
-    if isinstance(effective_state, str) and len(effective_state) <= 64:
-        payload["effectiveState"] = effective_state
-    return payload
+    room_id = value.get("roomId")
+    profile_id = value.get("profileId")
+    state = value.get("state")
+    if not all(isinstance(item, str) and item for item in (room_id, profile_id, state)):
+        return None
+    return {"roomId": room_id, "profileId": profile_id, "state": state, "reason": "manual_off_protection_active"}
+
+
+def _validated_journal_manual_off_protection(value: object) -> dict[str, object] | None:
+    if not isinstance(value, Mapping) or set(value) != {"roomId", "profileId", "state", "reason"}:
+        return None
+    if (
+        not all(isinstance(value.get(key), str) and value.get(key) for key in ("roomId", "profileId"))
+        or value.get("state") not in {"active", "ready_to_release", "released", "cancelled_by_manual_on"}
+        or value.get("reason") not in {"manual_off", "manual_off_protection_active"}
+    ):
+        return None
+    return dict(value)
 
 
 def _validated_scenario_trace(value: object) -> dict[str, object] | None:
@@ -482,14 +505,13 @@ def _validated_scenario_trace(value: object) -> dict[str, object] | None:
         if (
             not isinstance(item, Mapping)
             or not required_action.issubset(item)
-            or not set(item).issubset(required_action | {"target_id", "manualOffProtection"})
+            or not set(item).issubset(required_action | {"target_id"})
         ):
             return None
         action_id = item.get("action_id")
         confirmed = item.get("confirmed")
         reason = item.get("reason")
         target_id = item.get("target_id")
-        manual_off_protection = item.get("manualOffProtection")
         if (
             not isinstance(action_id, str)
             or _STABLE_ID.fullmatch(action_id) is None
@@ -506,10 +528,6 @@ def _validated_scenario_trace(value: object) -> dict[str, object] | None:
             or (
                 reason is not None
                 and (not isinstance(reason, str) or len(reason) > 256)
-            )
-            or (
-                manual_off_protection is not None
-                and _validated_manual_off_protection(manual_off_protection) is None
             )
         ):
             return None
@@ -528,25 +546,6 @@ def _validated_scenario_trace(value: object) -> dict[str, object] | None:
     if trigger is not None:
         normalized["trigger"] = trigger
     return normalized
-
-
-def _validated_manual_off_protection(value: object) -> dict[str, object] | None:
-    if not isinstance(value, Mapping) or not set(value).issubset(
-        {"decision", "reason", "remainingSeconds", "effectiveState"}
-    ):
-        return None
-    if value.get("decision") != "blocked" or value.get("reason") != "manual_off_protection_active":
-        return None
-    remaining = value.get("remainingSeconds")
-    effective_state = value.get("effectiveState")
-    if (
-        remaining is not None and (type(remaining) is not int or remaining < 0)
-    ) or (
-        effective_state is not None
-        and (not isinstance(effective_state, str) or len(effective_state) > 64)
-    ):
-        return None
-    return dict(value)
 
 
 def _validated_scenario_trigger(value: object) -> dict[str, object] | None:

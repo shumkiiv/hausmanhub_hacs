@@ -241,7 +241,9 @@ class OperationJournalTests(unittest.IsolatedAsyncioTestCase):
                     "protection": {
                         "allowed": False,
                         "protectionId": "private-id",
+                        "roomId": "room-one",
                         "profileId": "private-profile",
+                        "state": "active",
                         "attribution": {"id": "private-attribution"},
                         "remainingSeconds": 42,
                     },
@@ -251,9 +253,8 @@ class OperationJournalTests(unittest.IsolatedAsyncioTestCase):
 
         action = normalized["scenario"]["actions"][0]
         self.assertEqual("manual_off_protection_active", action["reason"])
-        self.assertEqual(42, action["manualOffProtection"]["remainingSeconds"])
+        self.assertEqual("active", normalized["manualOffProtection"]["state"])
         self.assertNotIn("private-id", str(normalized))
-        self.assertNotIn("private-profile", str(normalized))
         self.assertNotIn("private-attribution", str(normalized))
 
     async def test_shadow_trace_never_claims_physical_confirmation(self) -> None:

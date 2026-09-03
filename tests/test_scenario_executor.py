@@ -446,6 +446,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
                     device.entity_id != "switch.hall_light",
                     "manual_off_protection_active",
                     "protection-1",
+                    {"lightIds": ["switch.hall_light"]},
                 )
 
         self.catalog._devices["relay_light"] = ScenarioDeviceEntry(
@@ -486,7 +487,8 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             async def async_decide(self, action, catalog, **_kwargs):
                 device = catalog.device(action.target_id)
                 return LightProtectionDecision(
-                    device.entity_id != "light.alt", "manual_off_protection_active", "protection-1"
+                    device.entity_id != "light.alt", "manual_off_protection_active", "protection-1",
+                    {"lightIds": ["light.living_room", "light.alt"]},
                 )
 
         self.catalog._devices["device_alt"] = ScenarioDeviceEntry(
