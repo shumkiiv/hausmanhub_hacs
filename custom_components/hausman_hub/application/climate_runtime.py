@@ -1173,6 +1173,7 @@ class ClimateRuntime:
         tablet_action: object,
         tablet_parameters: object,
         reserved_scope: object = None,
+        reserved_plan_fingerprint: object = None,
     ) -> object:
         """Execute physical work for a tablet intent already reserved in store.
 
@@ -1245,7 +1246,8 @@ class ClimateRuntime:
             }, reliability_request=canonical,
             pre_reserved_resulting_control_revision=resulting_control_revision,
             external_reliability_identity=tablet_identity,
-            reserved_scope=reserved_scope)
+            reserved_scope=reserved_scope,
+            reserved_plan_fingerprint=reserved_plan_fingerprint)
         if canonical.action == "synchronize_home":
             return await self.async_synchronize_climate()
         if canonical.action == "set_room_mode":
@@ -1718,6 +1720,7 @@ class ClimateRuntime:
         pre_reserved_resulting_control_revision: int | None = None,
         external_reliability_identity: Mapping[str, object] | None = None,
         reserved_scope: object = None,
+        reserved_plan_fingerprint: object = None,
     ) -> ContourApplyReceipt:
         """Save and apply one common temperature and/or humidity target."""
 
@@ -1819,6 +1822,14 @@ class ClimateRuntime:
                 error.home_target_pre_dispatch = True  # type: ignore[attr-defined]
                 error.reserved_tablet_pre_dispatch_conflict = True  # type: ignore[attr-defined]
                 raise error
+            if (
+                external_reliability_identity is not None
+                and reserved_plan_fingerprint != _native_home_target_plan_fingerprint(preflight)
+            ):
+                error = ClimateRuntimeUnavailable("reserved tablet climate plan changed before dispatch")
+                error.home_target_pre_dispatch = True  # type: ignore[attr-defined]
+                error.reserved_tablet_pre_dispatch_conflict = True  # type: ignore[attr-defined]
+                raise error
             return await self._async_apply_native_contour_unlocked(
                 request.request_id,
                 CLIMATE_CONTOUR_ID,
@@ -1875,7 +1886,7 @@ class ClimateRuntime:
                 raise ClimateRuntimeUnavailable("home climate target scope is unavailable")
             if plan.strict_calls and self._strict_ha_call_executor is None:
                 raise ClimateRuntimeUnavailable("climate executor is unavailable")
-            return {"resolved_scope": _native_plan_resolved_scope(plan)}
+            return {"resolved_scope": _native_plan_resolved_scope(plan), "plan_fingerprint": _native_home_target_plan_fingerprint(plan)}
 
     async def async_room_humidity_target(
         self, *, request_id: str, room_id: str, target_humidity: int
@@ -4930,6 +4941,24 @@ def _native_plan_resolved_scope(plan: ContourApplyPlan) -> dict[str, object]:
         "device_ids": [device_id for row in rows for device_id in row["device_ids"]],
         "devices_by_room": rows,
     }
+
+
+def _native_home_target_plan_fingerprint(plan: ContourApplyPlan) -> str:
+    """Bind the private preflight to owners, dispositions and exact calls."""
+    value = {
+        "scope": _native_plan_resolved_scope(plan),
+        "gates": [
+            {"device_id": gate.device_id, "status": gate.status.value}
+            for gate in plan.native_plan.device_gates
+        ],
+        "calls": [
+            {"owner": call.owner_device_id, "service": call.service.value,
+             "entity_id": call.entity_id, "temperature": call.temperature,
+             "humidity": call.humidity}
+            for call in plan.strict_calls
+        ],
+    }
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")).hexdigest()
 
 
 def _valid_reserved_native_scope(scope: object) -> bool:

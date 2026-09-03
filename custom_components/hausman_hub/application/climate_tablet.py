@@ -732,6 +732,7 @@ class ClimateTabletService:
         self._control_revision = 0
         self._desired_intents: dict[str, dict[str, object]] = {}
         self._reliable_scope_bindings: dict[str, dict[str, object]] = {}
+        self._reserved_home_target_fingerprints: dict[str, str] = {}
         # Legacy HTTP replies keep their execution facts outside the typed
         # receipt.  The sidecar is private and never changes that contract.
         self._legacy_home_execution_facts: dict[str, dict[str, object]] = {}
@@ -1209,6 +1210,10 @@ class ClimateTabletService:
                                 "home climate target scope is unavailable"
                             )
                         preflight_scope = json.loads(json.dumps(candidate_scope))
+                        fingerprint = preflight_result.get("plan_fingerprint") if isinstance(preflight_result, Mapping) else None
+                        if not isinstance(fingerprint, str) or re.fullmatch(r"[a-f0-9]{64}", fingerprint) is None:
+                            raise ClimateTabletUnavailable("home climate target plan is unavailable")
+                        self._reserved_home_target_fingerprints[request.request_id] = fingerprint
                     except Exception as error:
                         raise ClimateTabletUnavailable(
                             "home climate target scope is unavailable"
@@ -2119,6 +2124,7 @@ class ClimateTabletService:
                 tablet_action=request.action,
                 tablet_parameters=dict(request.parameters),
                 reserved_scope=reserved_scope,
+                reserved_plan_fingerprint=self._reserved_home_target_fingerprints.pop(request.request_id, None),
             )
             return result
         if request.action == "set_home_targets":
