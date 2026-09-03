@@ -1272,7 +1272,46 @@ def _valid_restored_action_snapshot(
         )
     if context.action is ClimateControlAction.RETURN_TO_SCHEDULE:
         return action == "clear_room_override" and dict(parameters) == {}
+    if context.action is ClimateControlAction.APPLY_SAVED_SETTINGS:
+        # A whole-home tablet target uses the native saved-settings context
+        # while retaining its own public action identity across restart.
+        return (
+            action == "set_home_targets"
+            and set(parameters) in ({"target_temperature"}, {"target_humidity"},
+                                    {"target_temperature", "target_humidity"})
+            and all(
+                (key == "target_temperature" and _is_finite_snapshot_number(value))
+                or (key == "target_humidity" and type(value) is int)
+                for key, value in parameters.items()
+            )
+        )
     return False
+
+
+def _restored_intent_temperature(
+    context: ClimateControlContext, action_snapshot: Mapping[str, object],
+) -> object:
+    parameters = action_snapshot.get("parameters")
+    if (
+        context.action is ClimateControlAction.APPLY_SAVED_SETTINGS
+        and action_snapshot.get("action") == "set_home_targets"
+        and isinstance(parameters, Mapping)
+    ):
+        return parameters.get("target_temperature")
+    return context.target_temperature
+
+
+def _restored_intent_humidity(
+    context: ClimateControlContext, action_snapshot: Mapping[str, object],
+) -> object:
+    parameters = action_snapshot.get("parameters")
+    if (
+        context.action is ClimateControlAction.APPLY_SAVED_SETTINGS
+        and action_snapshot.get("action") == "set_home_targets"
+        and isinstance(parameters, Mapping)
+    ):
+        return parameters.get("target_humidity")
+    return None
 
 
 def _direct_receipt_request_fingerprint(
@@ -1489,8 +1528,12 @@ def _receipt_from_stored_payload(
             or intent.get("scope_revision") != resulting_revision
             or intent.get("resolved_scope") != scope
             or intent.get("scope_fingerprint") != _canonical_receipt_fingerprint(scope)
-            or intent.get("desired_target_temperature") != context.target_temperature
-            or intent.get("desired_target_humidity") is not None
+            or intent.get("desired_target_temperature") != _restored_intent_temperature(
+                context, action_snapshot
+            )
+            or intent.get("desired_target_humidity") != _restored_intent_humidity(
+                context, action_snapshot
+            )
             or payload.get("desired_snapshot_fingerprint")
             != _canonical_receipt_fingerprint(desired)
         ):

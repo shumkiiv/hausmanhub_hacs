@@ -311,6 +311,32 @@ class NativeClimateApplicationPlannerTest(unittest.TestCase):
             plan.denial_reasons,
         )
 
+    def test_explicit_target_keeps_stale_room_gate_and_never_becomes_aligned(self) -> None:
+        """Per-device target ownership cannot bypass stale room observation."""
+
+        registry, contour, observation = _native_inputs()
+        stale = replace(
+            observation,
+            rooms=tuple(
+                replace(room, data_status=ClimateDataStatus.STALE)
+                if room.room_id == "living" else room
+                for room in observation.rooms
+            ),
+        )
+        plan = build_climate_application_plan(
+            contour, registry, ClimateControlMode.MANAGED, stale,
+            fingerprint="9" * 64, target_room_ids=("living",),
+            desired_state_changes=ClimateDesiredStateChanges(1, 0, 0),
+            explicit_temperature_targets={"living": 25.0},
+        )
+
+        self.assertEqual((), plan.strict_calls)
+        self.assertEqual(
+            (ClimateApplicationDenialReason.ROOM_NOT_READY,),
+            plan.denial_reasons,
+        )
+        self.assertEqual((), plan.initially_aligned_room_ids)
+
     def test_unavailable_room_denies_the_native_gate_without_calls(self) -> None:
         registry, contour, observation = _native_inputs()
         unavailable = replace(

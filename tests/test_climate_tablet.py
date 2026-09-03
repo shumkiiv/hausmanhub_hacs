@@ -1209,6 +1209,62 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, len(contour_store.saved))
         self.assertEqual(1, len(executor.batches))
 
+    async def test_reserved_home_target_rechecks_revision_after_preflight_observation(self) -> None:
+        """A reservation lost while read-back waits cannot create native state."""
+
+        class PausingObservationRuntime(ClimateRuntime):
+            def __init__(self, **kwargs: object) -> None:
+                super().__init__(**kwargs)
+                self.observation_entered = asyncio.Event()
+                self.resume_observation = asyncio.Event()
+                self._pause_next_observation = False
+
+            async def _async_native_climate_observation_unlocked(self, **kwargs: object):
+                if self._pause_next_observation and self._control_revision == 1:
+                    self._pause_next_observation = False
+                    self.observation_entered.set()
+                    await self.resume_observation.wait()
+                return await super()._async_native_climate_observation_unlocked(**kwargs)
+
+        store = SharedAuthenticatedLedgerMemoryStore()
+        registry, contours = build_climate_contour_setup(
+            MemoryBridge().snapshot, room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"], name="Климат",
+            mode="automatic", target_temperature=25.0, target_humidity=45,
+            strategy="normal",
+        )
+        registry, state_view = native_application_inputs(registry)
+        executor = ReflectingStrictExecutor(state_view)
+        contour_store = MemoryContourStore(contours)
+        runtime = PausingObservationRuntime(
+            entry_id="entry", configuration=configuration(ClimateControlMode.MANAGED),
+            registry_store=MemoryStore(registry), contour_store=contour_store,
+            strict_ha_call_executor=executor, ha_state_view=state_view,
+            operation_id_factory=lambda: "a" * 32,
+            now_ms=lambda: 1784280005000, direct_control_store=store,
+        )
+        await runtime.async_start()
+        runtime._pause_next_observation = True
+        service = ClimateTabletService(runtime, store, operation_id_factory=lambda: "b" * 32,
+                                       now_ms=lambda: 1784280005000)
+        await service.async_load()
+        request = {
+            "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+            "request_id": "tablet.climate.observation-race", "correlation_id": "corr.observation-race",
+            "expected_state_revision": 0, "expected_control_revision": 0,
+            "reliability_profile": "climate_reliability_v1", "action": "set_home_targets",
+            "room_id": None, "parameters": {"target_temperature": 25.5},
+        }
+        task = asyncio.create_task(service.async_execute(request))
+        await asyncio.wait_for(runtime.observation_entered.wait(), timeout=1)
+        self.assertEqual(2, await store.async_reserve_control_revision(1))
+        runtime.resume_observation.set()
+        receipt = await asyncio.wait_for(task, timeout=1)
+
+        self.assertEqual("unavailable", receipt["status"])
+        self.assertEqual([], contour_store.saved)
+        self.assertEqual([], executor.batches)
+
     async def test_reserved_home_target_runs_once_and_duplicate_reuses_receipt(self) -> None:
         """Without an interleaving, the reserved handoff has one dispatch."""
 

@@ -85,7 +85,7 @@ def build_climate_application_plan(
         isolation,
         ir_code_service=ir_code_service,
     )
-    gates = tuple(
+    base_gates = tuple(
         _gate_room(
             room_id,
             contour,
@@ -100,11 +100,13 @@ def build_climate_application_plan(
         )
         for room_id in target_ids
     )
+    gates = base_gates
     explicit = explicit_temperature_targets is not None or explicit_humidity_targets is not None
     device_gates = (
         tuple(
             _gate_explicit_device(
                 room_id, device, registry, observation,
+                next(gate for gate in base_gates if gate.room_id == room_id),
                 None if explicit_temperature_targets is None else explicit_temperature_targets.get(room_id),
                 None if explicit_humidity_targets is None else explicit_humidity_targets.get(room_id),
             )
@@ -177,8 +179,16 @@ def _explicit_selected_devices(contour, registry, room_id, temperature, humidity
                  if (device := registry.device(device_id)) is not None and device.kind in kinds)
 
 
-def _gate_explicit_device(room_id, device, registry, observation, temperature, humidity):
-    reasons: list[ClimateApplicationDenialReason] = []
+def _gate_explicit_device(room_id, device, registry, observation, room_gate, temperature, humidity):
+    # Per-device ownership must not bypass the room-level safety gate.  The
+    # latter owns contour mode, managed runtime, membership, fresh observation,
+    # isolation and comparison checks.  Only a denied gate contributes reasons:
+    # an aligned room may still have another physical owner that needs a call.
+    reasons: list[ClimateApplicationDenialReason] = list(
+        room_gate.reasons
+        if room_gate.status is ClimateApplicationGateStatus.DENIED
+        else ()
+    )
     if device.control_scope is not ClimateControlScope.MANAGED or device.control_owner is not ClimateControlOwner.CLIMATE_CORE:
         reasons.append(ClimateApplicationDenialReason.ACTUATOR_NOT_MANAGED)
     if device.endpoint(ClimateEndpointRole.CONTROL) is None:

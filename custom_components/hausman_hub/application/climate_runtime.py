@@ -1766,6 +1766,24 @@ class ClimateRuntime:
                 # unavailable, never as a physical partial outcome.
                 error.home_target_pre_dispatch = True  # type: ignore[attr-defined]
                 raise
+            # Observation is asynchronous.  Another coordinator can reserve
+            # the shared revision while this runtime lock waits for it, so
+            # re-read the durable authority immediately before the native
+            # checkpoint is created.  The following call enters its synchronous
+            # reservation path before its first await.
+            if pre_reserved_resulting_control_revision is not None:
+                current = await self._async_sync_control_revision_unlocked()
+                expected = getattr(reliability_request, "expected_control_revision", None)
+                if (
+                    not is_control_revision(expected)
+                    or pre_reserved_resulting_control_revision != expected + 1
+                    or current != pre_reserved_resulting_control_revision
+                ):
+                    error = ClimateRuntimeUnavailable(
+                        "reserved climate control revision is stale"
+                    )
+                    error.reserved_tablet_pre_dispatch_conflict = True  # type: ignore[attr-defined]
+                    raise error
             return await self._async_apply_native_contour_unlocked(
                 request.request_id,
                 CLIMATE_CONTOUR_ID,
@@ -4789,6 +4807,15 @@ def _contour_reliability_metadata(
     desired_fingerprint = hashlib.sha256(json.dumps(desired, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")).hexdigest()
     scope_fingerprint = hashlib.sha256(json.dumps(scope, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")).hexdigest()
     target = context.target_temperature
+    target_humidity: int | None = None
+    if external_reliability_identity is not None:
+        external_parameters = external_reliability_identity.get("parameters")
+        if (
+            external_reliability_identity.get("action") == "set_home_targets"
+            and isinstance(external_parameters, Mapping)
+        ):
+            target = external_parameters.get("target_temperature")
+            target_humidity = external_parameters.get("target_humidity")
     leaf_ledger = {device_id: "pending_dispatch" for device_id in device_ids}
     aligned_ids = {
         gate.device_id for gate in plan.native_plan.device_gates
@@ -4823,7 +4850,7 @@ def _contour_reliability_metadata(
                 if resulting_control_revision is not None
                 else expected_control_revision + 1
             ),
-            "desired_target_temperature": target, "desired_target_humidity": None,
+            "desired_target_temperature": target, "desired_target_humidity": target_humidity,
             "already_in_sync_evidence": already_in_sync_evidence,
             "leaf_ledger": leaf_ledger}
 

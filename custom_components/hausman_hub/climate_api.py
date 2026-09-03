@@ -1934,17 +1934,21 @@ def _legacy_home_target_receipt(receipt: Mapping[str, object], correlation_id: s
     if not isinstance(receipt.get("operation_id"), str):
         return {**receipt, "correlation_id": correlation_id}
     status = receipt.get("status")
+    if status == "timed_out":
+        status = "unavailable"
+    if status not in {"pending", "confirmed", "partial", "rejected", "unavailable"}:
+        status = "unavailable"
     confirmed = status == "confirmed"
     accepted = status in {"pending", "confirmed", "partial"}
     changes = receipt.get("changes")
     changes = changes if isinstance(changes, Mapping) else {}
     read_back = receipt.get("read_back")
     read_back = read_back if isinstance(read_back, Mapping) else {}
-    reasons = receipt.get("reasons")
-    reasons = list(reasons) if isinstance(reasons, list) and all(isinstance(item, str) for item in reasons) else []
     execution = _legacy_home_execution_counts(receipt)
+    reasons = execution["reasons"]
     if not reasons:
-        reasons = execution["reasons"]
+        raw_reasons = receipt.get("reasons")
+        reasons = _legacy_home_reason_codes(raw_reasons)
     return {
         "contract": {"name": "hausman-hub-climate-control-receipt", "version": 1},
         "operation_id": receipt["operation_id"], "request_id": receipt["request_id"],
@@ -1960,8 +1964,8 @@ def _legacy_home_target_receipt(receipt: Mapping[str, object], correlation_id: s
         "message": receipt.get("message", "Климатический контур обрабатывает новые цели."),
         "confirmation_window_ms": 8000,
         "read_back": {"attempted": bool(read_back.get("attempted", confirmed)), "matched": bool(read_back.get("matched", confirmed)), "observed_at": read_back.get("observed_at", receipt.get("updated_at")), "confirmed_room_count": read_back.get("confirmed_room_count", execution["confirmed_room_count"])},
-        "room_count": receipt.get("room_count", execution["room_count"]), "command_count": receipt.get("command_count", execution["command_count"]), "accepted_count": receipt.get("accepted_count", execution["accepted_count"]),
-        "confirmed_room_count": receipt.get("confirmed_room_count", execution["confirmed_room_count"]),
+        "room_count": execution["room_count"], "command_count": execution["command_count"], "accepted_count": execution["accepted_count"],
+        "confirmed_room_count": execution["confirmed_room_count"],
         "changes": {"temperature": changes.get("temperature", 0), "strategy": changes.get("strategy", 0), "automatic_mode": changes.get("automatic_mode", 0)},
         "reasons": reasons,
         "reason_names": [
@@ -1977,9 +1981,14 @@ def _legacy_home_execution_counts(receipt: Mapping[str, object]) -> dict[str, ob
     """Project persisted native leaf facts without inventing aggregate counts."""
 
     rooms = receipt.get("outcomes", {}).get("rooms", {}) if isinstance(receipt.get("outcomes"), Mapping) else {}
-    if not isinstance(rooms, Mapping):
-        return {"room_count": 0, "command_count": 0, "accepted_count": 0,
-                "confirmed_room_count": 0, "reasons": []}
+    if not isinstance(rooms, Mapping) or not rooms:
+        return {
+            "room_count": receipt.get("room_count", 0) if type(receipt.get("room_count")) is int else 0,
+            "command_count": receipt.get("command_count", 0) if type(receipt.get("command_count")) is int else 0,
+            "accepted_count": receipt.get("accepted_count", 0) if type(receipt.get("accepted_count")) is int else 0,
+            "confirmed_room_count": receipt.get("confirmed_room_count", 0) if type(receipt.get("confirmed_room_count")) is int else 0,
+            "reasons": _legacy_home_reason_codes(receipt.get("reasons")),
+        }
     command_count = accepted_count = confirmed_room_count = 0
     reasons: list[str] = []
     for room in rooms.values():
@@ -1989,7 +1998,7 @@ def _legacy_home_execution_counts(receipt: Mapping[str, object]) -> dict[str, ob
             confirmed_room_count += 1
         reason = room.get("reason")
         if isinstance(reason, str) and reason != "none" and reason not in reasons:
-            reasons.append(reason)
+            reasons.extend(_legacy_home_reason_codes([reason]))
         devices = room.get("devices")
         if not isinstance(devices, Mapping):
             continue
@@ -2000,10 +2009,32 @@ def _legacy_home_execution_counts(receipt: Mapping[str, object]) -> dict[str, ob
             accepted_count += device.get("accepted_count", 0) if type(device.get("accepted_count")) is int else 0
             reason = device.get("reason")
             if isinstance(reason, str) and reason != "none" and reason not in reasons:
-                reasons.append(reason)
+                reasons.extend(_legacy_home_reason_codes([reason]))
     return {"room_count": len(rooms), "command_count": command_count,
             "accepted_count": accepted_count,
-            "confirmed_room_count": confirmed_room_count, "reasons": reasons}
+            "confirmed_room_count": confirmed_room_count,
+            "reasons": list(dict.fromkeys(reasons))}
+
+
+def _legacy_home_reason_codes(value: object) -> list[str]:
+    """Map typed per-device failures onto the fixed legacy reason vocabulary."""
+
+    raw = value if isinstance(value, list) else []
+    mapped = {
+        "already_in_sync": "already_in_sync",
+        "engine_rejected": "engine_rejected",
+        "command_result_unavailable": "command_result_unavailable",
+        "command_failed": "command_result_unavailable",
+        "configuration_error": "command_result_unavailable",
+        "device_unavailable": "command_result_unavailable",
+        "verification_unavailable": "verification_unavailable",
+        "state_not_confirmed": "state_not_confirmed",
+        "state_stale": "verification_unavailable",
+    }
+    return list(dict.fromkeys(
+        mapped[item] for item in raw
+        if isinstance(item, str) and item in mapped
+    ))
 
 
 class ClimateAdminImportView(_ClimateView):
