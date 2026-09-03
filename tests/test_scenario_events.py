@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import unittest
+from datetime import datetime, timezone
 from types import MappingProxyType
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -24,7 +25,11 @@ from custom_components.hausman_hub.manual_light_off_protection_events import (
 
 
 def _state(value: object, **attributes: object) -> SimpleNamespace:
-    return SimpleNamespace(state=value, attributes=attributes)
+    return SimpleNamespace(
+        state=value,
+        attributes=attributes,
+        last_updated=datetime.now(timezone.utc),
+    )
 
 
 class StateTriggerMatchesTest(unittest.TestCase):

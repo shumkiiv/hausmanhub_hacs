@@ -399,8 +399,16 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             SimpleNamespace(
                 data={
                     "entity_id": "light.living_room",
-                    "old_state": SimpleNamespace(state="on"),
-                    "new_state": SimpleNamespace(state="off"),
+                    "old_state": SimpleNamespace(
+                        state="on",
+                        last_updated=datetime.now(timezone.utc),
+                        attributes={},
+                    ),
+                    "new_state": SimpleNamespace(
+                        state="off",
+                        last_updated=datetime.now(timezone.utc),
+                        attributes={},
+                    ),
                 },
                 context=context,
             )

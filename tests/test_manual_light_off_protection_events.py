@@ -8,6 +8,8 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+import pytest
+
 from custom_components.hausman_hub.application.scenario_command_context import (
     ScenarioCommandContextRegistry,
 )
@@ -68,7 +70,11 @@ async def _coordinator() -> ManualLightOffProtectionCoordinator:
 
 
 def _state(value: str) -> SimpleNamespace:
-    return SimpleNamespace(state=value)
+    return SimpleNamespace(
+        state=value,
+        last_updated=datetime.now(timezone.utc),
+        attributes={},
+    )
 
 
 def _event(
@@ -158,6 +164,7 @@ def test_external_transitions_update_light_ownership_before_protection() -> None
             catalog=catalog,
             light_priority=priority,
             light_safety_obligations=obligations,
+            authority_lock=priority.authority_lock(),
         )
 
         await listener.async_handle(_event("light.tambur", "on", "off"))
@@ -316,6 +323,175 @@ def test_stale_or_restored_light_off_never_creates_protection() -> None:
             )
 
         assert coordinator.snapshot()["protections"] == []
+
+    asyncio.run(exercise())
+
+
+def test_missing_light_timestamp_never_creates_protection() -> None:
+    async def exercise() -> None:
+        coordinator = await _coordinator()
+        listener = ManualLightOffProtectionEventListener(
+            coordinator, None, {"light.tambur"}
+        )
+
+        await listener.async_handle(
+            SimpleNamespace(
+                data={
+                    "entity_id": "light.tambur",
+                    "old_state": SimpleNamespace(state="on", attributes={}),
+                    "new_state": SimpleNamespace(state="off", attributes={}),
+                },
+                context=None,
+            )
+        )
+
+        assert coordinator.snapshot()["protections"] == []
+
+    asyncio.run(exercise())
+
+
+def test_external_off_cleanup_failure_keeps_active_unhealthy_protection() -> None:
+    async def exercise() -> None:
+        coordinator = await _coordinator()
+        priority = SimpleNamespace(
+            _async_clear_ownership_unlocked=AsyncMock(side_effect=OSError("store"))
+        )
+        listener = ManualLightOffProtectionEventListener(
+            coordinator,
+            None,
+            {"light.tambur"},
+            light_priority=priority,
+            authority_lock=asyncio.Lock(),
+        )
+
+        with pytest.raises(OSError, match="store"):
+            await listener.async_handle(_event("light.tambur", "on", "off"))
+
+        assert len(coordinator.snapshot()["protections"]) == 1
+        assert coordinator.unhealthy
+
+    asyncio.run(exercise())
+
+
+def test_external_on_ownership_failure_keeps_existing_protection() -> None:
+    async def exercise() -> None:
+        coordinator = await _coordinator()
+        await coordinator.async_note_state_transition(
+            "light.tambur", _state("on"), _state("off"), None
+        )
+        priority = SimpleNamespace(
+            _async_begin_direct_action_unlocked=AsyncMock(side_effect=OSError("store"))
+        )
+        catalog = SimpleNamespace(
+            devices={"tambur": SimpleNamespace(entity_id="light.tambur")}
+        )
+        listener = ManualLightOffProtectionEventListener(
+            coordinator,
+            None,
+            {"light.tambur"},
+            hass=SimpleNamespace(),
+            catalog=catalog,
+            light_priority=priority,
+            authority_lock=asyncio.Lock(),
+        )
+
+        with pytest.raises(OSError, match="store"):
+            await listener.async_handle(_event("light.tambur", "off", "on"))
+
+        assert len(coordinator.snapshot()["protections"]) == 1
+
+    asyncio.run(exercise())
+
+
+def test_external_off_obligation_failure_keeps_active_unhealthy_protection() -> None:
+    async def exercise() -> None:
+        coordinator = await _coordinator()
+        priority = LightAutomationPriority()
+        obligations = SimpleNamespace(async_cancel=AsyncMock(side_effect=OSError("store")))
+        catalog = SimpleNamespace(
+            devices={"tambur": SimpleNamespace(entity_id="light.tambur")}
+        )
+        listener = ManualLightOffProtectionEventListener(
+            coordinator,
+            None,
+            {"light.tambur"},
+            catalog=catalog,
+            light_priority=priority,
+            light_safety_obligations=obligations,
+            authority_lock=priority.authority_lock(),
+        )
+
+        with pytest.raises(OSError, match="store"):
+            await listener.async_handle(_event("light.tambur", "on", "off"))
+
+        assert len(coordinator.snapshot()["protections"]) == 1
+        assert coordinator.unhealthy
+
+    asyncio.run(exercise())
+
+
+def test_external_on_obligation_failure_keeps_manual_ownership_and_protection() -> None:
+    async def exercise() -> None:
+        coordinator = await _coordinator()
+        await coordinator.async_note_state_transition(
+            "light.tambur", _state("on"), _state("off"), None
+        )
+        hass = SimpleNamespace(states=SimpleNamespace(get=lambda _: _state("on")))
+        device = SimpleNamespace(
+            entity_id="light.tambur",
+            action=lambda _: SimpleNamespace(domain="light", service="turn_on"),
+        )
+        catalog = SimpleNamespace(devices={"tambur": device}, device=lambda _: device)
+        priority = LightAutomationPriority()
+        obligations = SimpleNamespace(async_cancel=AsyncMock(side_effect=OSError("store")))
+        listener = ManualLightOffProtectionEventListener(
+            coordinator,
+            None,
+            {"light.tambur"},
+            hass=hass,
+            catalog=catalog,
+            light_priority=priority,
+            light_safety_obligations=obligations,
+            authority_lock=priority.authority_lock(),
+        )
+
+        with pytest.raises(OSError, match="store"):
+            await listener.async_handle(_event("light.tambur", "off", "on"))
+
+        assert len(coordinator.snapshot()["protections"]) == 1
+        assert "light.tambur" in priority._manual_records  # noqa: SLF001
+
+    asyncio.run(exercise())
+
+
+def test_external_off_protection_store_failure_fails_closed() -> None:
+    class FailingStore(_MemoryStore):
+        def __init__(self) -> None:
+            super().__init__()
+            self.fail = False
+
+        async def async_save(self, payload: dict[str, object]) -> None:
+            if self.fail:
+                raise OSError("store")
+            await super().async_save(payload)
+
+    async def exercise() -> None:
+        store = FailingStore()
+        coordinator = ManualLightOffProtectionCoordinator(store)
+        await coordinator.async_load()
+        await coordinator.async_replace_settings("settings.1", 0, _settings())
+        store.fail = True
+        listener = ManualLightOffProtectionEventListener(
+            coordinator, None, {"light.tambur"}
+        )
+
+        with pytest.raises(OSError, match="store"):
+            await listener.async_handle(_event("light.tambur", "on", "off"))
+
+        assert coordinator.unhealthy
+        assert not (await coordinator.async_decide_entity(
+            "light.tambur", automatic=True, dry_run=False
+        )).allowed
 
     asyncio.run(exercise())
 

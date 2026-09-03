@@ -942,6 +942,12 @@ class LightAutomationPriority:
         return self._owned_revisions.get(entity_id)
 
     async def async_clear_ownership(self, entity_id: str) -> None:
+        async with self._authority_lock:
+            await self._async_clear_ownership_unlocked(entity_id)
+
+    async def _async_clear_ownership_unlocked(self, entity_id: str) -> None:
+        """Clear automation ownership while the shared authority lock is held."""
+
         self._discard(entity_id)
         await self._async_save_if_dirty()
 

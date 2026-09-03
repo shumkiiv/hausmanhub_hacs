@@ -270,6 +270,11 @@ class ManualLightOffProtectionCoordinator:
 
         return _remove
 
+    def mark_unhealthy(self) -> None:
+        """Fail closed after a cross-store protection cleanup failure."""
+
+        self.unhealthy = True
+
     async def _activate(self, profile, entity_id: str, now: datetime, attribution) -> None:
         current_item = next(
             ((key, record) for key, record in self._protections.items()

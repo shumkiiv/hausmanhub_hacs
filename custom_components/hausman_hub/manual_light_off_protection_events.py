@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Collection, Mapping
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -46,6 +47,7 @@ class ManualLightOffProtectionEventListener:
         catalog: ScenarioCatalog | None = None,
         light_priority: LightAutomationPriority | None = None,
         light_safety_obligations: LightSafetyObligations | None = None,
+        authority_lock: asyncio.Lock | None = None,
     ) -> None:
         self._coordinator = coordinator
         self._command_contexts = command_contexts
@@ -54,6 +56,7 @@ class ManualLightOffProtectionEventListener:
         self._catalog = catalog
         self._light_priority = light_priority
         self._light_safety_obligations = light_safety_obligations
+        self._authority_lock = authority_lock
 
     async def async_handle(self, event: Any) -> None:
         """Persist a relevant transition without issuing physical commands."""
@@ -88,34 +91,72 @@ class ManualLightOffProtectionEventListener:
                     source=matched.origin,
                     attribution_id=matched.request_id or entity_id,
                 )
-        if is_light and attribution is None and getattr(new_state, "state", None) == "off":
-            await self._async_note_manual_off(entity_id)
+        is_manual = is_light and attribution is None
+        state = getattr(new_state, "state", None)
+        if is_manual and state == "off":
+            await self._coordinator.async_note_state_transition(
+                entity_id, old_state, new_state, None
+            )
+            try:
+                await self._async_note_manual_off(entity_id)
+            except Exception:
+                self._coordinator.mark_unhealthy()
+                raise
+            return
+        if is_manual and state == "on":
+            try:
+                await self._async_note_manual_on(entity_id)
+            except Exception:
+                self._coordinator.mark_unhealthy()
+                raise
+            await self._coordinator.async_note_state_transition(
+                entity_id, old_state, new_state, None
+            )
+            return
         await self._coordinator.async_note_state_transition(
             entity_id, old_state, new_state, attribution
         )
-        if is_light and attribution is None and getattr(new_state, "state", None) == "on":
-            await self._async_note_manual_on(entity_id)
 
     async def _async_note_manual_off(self, entity_id: str) -> None:
+        if self._light_priority is None and self._light_safety_obligations is None:
+            return
         target_id = self._target_id(entity_id)
-        if self._light_priority is not None:
-            await self._light_priority.async_clear_ownership(entity_id)
-        if target_id is not None and self._light_safety_obligations is not None:
-            await self._light_safety_obligations.async_cancel(target_id)
+        async with self._required_authority_lock():
+            if self._light_priority is not None:
+                await self._light_priority._async_clear_ownership_unlocked(entity_id)
+            if target_id is not None and self._light_safety_obligations is not None:
+                await self._light_safety_obligations.async_cancel(target_id)
 
     async def _async_note_manual_on(self, entity_id: str) -> None:
+        if self._light_priority is None and self._light_safety_obligations is None:
+            return
         target_id = self._target_id(entity_id)
-        if target_id is not None and self._light_safety_obligations is not None:
-            await self._light_safety_obligations.async_cancel(target_id)
-        if (
-            target_id is not None
-            and self._light_priority is not None
-            and self._catalog is not None
-            and self._hass is not None
-        ):
-            await self._light_priority.async_begin_direct_action(
-                target_id, "turn_on", self._catalog, self._hass
-            )
+        async with self._required_authority_lock():
+            if (
+                self._light_priority is not None
+                and (
+                    target_id is None
+                    or self._catalog is None
+                    or self._hass is None
+                )
+            ):
+                raise RuntimeError("manual light ownership target is unavailable")
+            if (
+                target_id is not None
+                and self._light_priority is not None
+                and self._catalog is not None
+                and self._hass is not None
+            ):
+                await self._light_priority._async_begin_direct_action_unlocked(
+                    target_id, "turn_on", self._catalog, self._hass
+                )
+            if target_id is not None and self._light_safety_obligations is not None:
+                await self._light_safety_obligations.async_cancel(target_id)
+
+    def _required_authority_lock(self) -> asyncio.Lock:
+        if self._authority_lock is None:
+            raise RuntimeError("light authority lock is unavailable")
+        return self._authority_lock
 
     def _target_id(self, entity_id: str) -> str | None:
         devices = getattr(self._catalog, "devices", {})
@@ -142,6 +183,7 @@ class _ManualLightOffProtectionSubscription:
         catalog: ScenarioCatalog | None,
         light_priority: LightAutomationPriority | None,
         light_safety_obligations: LightSafetyObligations | None,
+        authority_lock: asyncio.Lock | None,
     ) -> None:
         self._hass = hass
         self._coordinator = coordinator
@@ -149,6 +191,7 @@ class _ManualLightOffProtectionSubscription:
         self._catalog = catalog
         self._light_priority = light_priority
         self._light_safety_obligations = light_safety_obligations
+        self._authority_lock = authority_lock
         self._entity_ids = frozenset()
         self._unsubscribe: Any = None
 
@@ -172,6 +215,7 @@ class _ManualLightOffProtectionSubscription:
             catalog=self._catalog,
             light_priority=self._light_priority,
             light_safety_obligations=self._light_safety_obligations,
+            authority_lock=self._authority_lock,
         )
         self._unsubscribe = _async_track_state_change_event(
             self._hass, entity_ids, listener.async_handle
@@ -226,6 +270,7 @@ async def async_start_manual_light_off_protection_events(
     catalog: ScenarioCatalog | None = None,
     light_priority: LightAutomationPriority | None = None,
     light_safety_obligations: LightSafetyObligations | None = None,
+    authority_lock: asyncio.Lock | None = None,
 ) -> None:
     """Subscribe exactly configured entities to the state-event adapter."""
 
@@ -236,6 +281,7 @@ async def async_start_manual_light_off_protection_events(
         catalog,
         light_priority,
         light_safety_obligations,
+        authority_lock,
     )
     await subscription.async_refresh()
     add_listener = getattr(coordinator, "add_event_entity_listener", None)
@@ -270,7 +316,7 @@ def _is_fresh_light_transition(old_state: object, new_state: object) -> bool:
         new_state, "last_updated", None
     )
     if not isinstance(observed, datetime):
-        return True
+        return False
     if observed.tzinfo is None:
         observed = observed.replace(tzinfo=timezone.utc)
     age_seconds = (datetime.now(timezone.utc) - observed).total_seconds()
