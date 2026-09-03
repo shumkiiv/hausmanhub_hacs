@@ -1,4 +1,4 @@
-import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.208";
+import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.209";
 
 const API = "hausman_hub/v1/device-property-names";
 

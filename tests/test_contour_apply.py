@@ -666,18 +666,19 @@ class NativeClimateApplicationPlannerTest(unittest.TestCase):
 
     def test_temperature_recheck_drops_room_without_temperature_actuator(self) -> None:
         """Filtering a requested axis must not create an invalid empty room."""
-        registry, contour, _ = _native_inputs()
+        registry, contour, observation = _native_inputs()
+        changes = ClimateDesiredStateChanges(
+            0,
+            0,
+            0,
+            requested_axes=frozenset({ClimateTargetAxis.TEMPERATURE}),
+        )
 
         scoped = _temperature_only_application_contour(
             contour,
             registry,
             target_room_ids=("living", "kids"),
-            desired_state_changes=ClimateDesiredStateChanges(
-                0,
-                0,
-                0,
-                requested_axes=frozenset({ClimateTargetAxis.TEMPERATURE}),
-            ),
+            desired_state_changes=changes,
             requested_axes=frozenset({ClimateTargetAxis.TEMPERATURE}),
         )
 
@@ -686,6 +687,16 @@ class NativeClimateApplicationPlannerTest(unittest.TestCase):
             ["living_air_conditioner"],
             list(scoped.rooms[0].device_ids),
         )
+        plan = build_contour_apply_plan(
+            contour,
+            registry,
+            ClimateControlMode.MANAGED,
+            observation,
+            room_ids=("living", "kids"),
+            desired_state_changes=changes,
+            explicit_temperature_targets={"living": 25.5, "kids": 25.5},
+        )
+        self.assertEqual(("living",), plan.target_room_ids)
 
     def test_explicit_temperature_target_covers_all_temperature_actuators_in_a_mixed_room(self) -> None:
         """An explicit temperature target covers AC, floor heat and radiator."""
