@@ -20,6 +20,7 @@
         "invalid_request",
         "forbidden",
         "not_found",
+        "method_not_allowed",
         "conflict",
         "revision_conflict",
         "capability_unavailable",
@@ -59,7 +60,7 @@
       "description": "Optional taxonomy category. When present it must match the canonical error policy."
     },
     "status": {
-      "enum": [400, 403, 404, 406, 409, 429, 500, 503],
+      "enum": [400, 403, 404, 405, 406, 409, 429, 500, 503],
       "description": "Optional HTTP status echo. When present it must match the canonical error taxonomy."
     },
     "requestId": { "type": ["string", "null"], "maxLength": 128 },

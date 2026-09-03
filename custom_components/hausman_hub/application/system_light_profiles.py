@@ -62,8 +62,30 @@ SYSTEM_LIGHT_PROFILES: tuple[ProtectedLightProfile, ...] = (
 # This is the typed, first-wave source of truth. It is intentionally separate
 # from a Home Assistant domain: a generic switch is never promoted to a light
 # merely because it has a turn_on service.
-FIRST_WAVE_AUTO_ON_LIGHT_TARGET_IDS = frozenset(
-    target_id for profile in SYSTEM_LIGHT_PROFILES for target_id in profile.light_ids
+@dataclass(frozen=True, slots=True)
+class FirstWaveAutoOnTarget:
+    target_id: str
+    role: str
+    entity_id: str | None = None
+
+
+# Release-owned registry. Entity ids are pinned from system scenario seeds; the
+# one legacy target without a durable entity-id source is bound by its stable
+# catalog target id at setup, never classified from its HA domain or action.
+FIRST_WAVE_AUTO_ON_TARGETS = (
+    FirstWaveAutoOnTarget("entity_71859313239a14e4", "light", "light.0xa4c138784e5cbcd1"),
+    FirstWaveAutoOnTarget("entity_cd0098e5ff95da46", "light", "switch.0x603d61fffe761c63_1"),
+    FirstWaveAutoOnTarget("entity_fbdf27871edb89bf", "light", "switch.0xa4c138ffecbc07b5_l1"),
+    FirstWaveAutoOnTarget("entity_c9d6bc67f172f30d", "light"),
+    FirstWaveAutoOnTarget("entity_9ed909332fdaa8fd", "light", "light.0xa4c138d69d102803"),
+    FirstWaveAutoOnTarget("entity_4be32416634e6416", "light", "switch.0x603d61fffe759363_1"),
+    FirstWaveAutoOnTarget("entity_1fdcd8b244637246", "light", "switch.0xacbac0fffebbe3c4_1"),
+    FirstWaveAutoOnTarget("entity_e7a7c61eec7bdff8", "light", "switch.0xa4c1385af46163eb"),
+    FirstWaveAutoOnTarget("entity_0ec37ef18b4b39a6", "light", "switch.0x603d61fffe767806_1"),
+    FirstWaveAutoOnTarget("entity_6667b3400bce7970", "light", "switch.0xacbac0fffebde2d3_1"),
+    FirstWaveAutoOnTarget("entity_5d95de599d2b5cec", "light", "switch.0xacbac0fffebde2d3_2"),
+    FirstWaveAutoOnTarget("entity_a591e035e3e5b34f", "light", "switch.0xacbac0fffebe38d0_1"),
+    FirstWaveAutoOnTarget("entity_d82766182d69dd51", "light", "switch.0xacbac0fffebe38d0_2"),
 )
 
 
@@ -72,8 +94,8 @@ def scenario_targets_for_system_light_profiles(catalog: object) -> tuple[Scenari
 
     targets: list[ScenarioTarget] = []
     device_for = getattr(catalog, "device", None)
-    for target_id in sorted(FIRST_WAVE_AUTO_ON_LIGHT_TARGET_IDS):
-        device = device_for(target_id) if callable(device_for) else None
+    for declared in FIRST_WAVE_AUTO_ON_TARGETS:
+        device = device_for(declared.target_id) if callable(device_for) else None
         entity_id = getattr(device, "entity_id", None)
         actions = getattr(device, "actions", ())
         has_auto_on = any(
@@ -81,10 +103,12 @@ def scenario_targets_for_system_light_profiles(catalog: object) -> tuple[Scenari
             and getattr(action, "domain", None) in {"light", "switch"}
             for action in actions
         )
-        if not isinstance(entity_id, str) or not has_auto_on:
-            targets.append(ScenarioTarget(target_id, "invalid.invalid", "invalid"))
+        if not isinstance(entity_id, str) or not has_auto_on or (
+            declared.entity_id is not None and entity_id != declared.entity_id
+        ):
+            targets.append(ScenarioTarget(declared.target_id, "invalid.invalid", "invalid"))
         else:
-            targets.append(ScenarioTarget(target_id, entity_id, "light"))
+            targets.append(ScenarioTarget(declared.target_id, entity_id, declared.role))
     return tuple(targets)
 
 

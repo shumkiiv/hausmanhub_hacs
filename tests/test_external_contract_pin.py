@@ -72,15 +72,18 @@ VENDORED_CONTRACT_HASHES = {
     "custom_components/hausman_hub/contracts/v1/tablet-power-status-receipt.schema.json": "84f1a948d87cf30b5518bbebefcbbcce32ad90968366c9b0886bfb195f5bef70",
     "fixtures/hausmanhub_tablet_power_v1/request.json": "0713606c6a19a2598c9cf82d07d69fc67038840f38682bb69c7403ef0f9d6a95",
     "fixtures/hausmanhub_tablet_power_v1/receipt.json": "feb9293e5f39bbb7fdda199ccc208b77114b43655668ab67d032844c380fdd9e",
-    "custom_components/hausman_hub/contracts/v1/api-error.schema.json": "d326295adb441b0a175e515c37a6f3ec9a37a9e75d82b71da4a78dd4a432b949",
+    "custom_components/hausman_hub/contracts/v1/api-error.schema.json": "5f67860b5a3baedcabd70329e320f4a6d0b3d599c056a648d3b4d71c4fd474e8",
+    "custom_components/hausman_hub/contracts/v1/error-taxonomy.json": "a506b7a13a6c8c8ae7a69df629d657c2e7bbbdb73ccfb0a1802eeae675108866",
+    "custom_components/hausman_hub/contracts/v1/error-taxonomy.schema.json": "b6884ec927f83bb8907b856d1a4c438a75762342252b20a758b0e2d0b16d0ef4",
+    "custom_components/hausman_hub/contracts/v1/fixtures/api-error.json": "24c338d919e0119c38869ff7a54d2a84395b53ab0b731470414eb341123c2c78",
     "custom_components/hausman_hub/contracts/v1/api-error-idempotency-conflict.schema.json": "bcf1642ce7cc3428a1b39f9613df857fdd517d98d0e51cc0c1172541c1d8b0c1",
     "custom_components/hausman_hub/contracts/v1/api-error-not-acceptable.schema.json": "1f54dd304c0fa59e565a258f07d85bd1aea6fd02520abf2115de6223fa3e636a",
     "custom_components/hausman_hub/contracts/v1/device-action-value.schema.json": "bf7856e9584156b9aba1ca08f407d8159dbef1a94c70bf1e2f33b429befdb4cb",
     "custom_components/hausman_hub/contracts/v1/device-state-evidence-reason-code.schema.json": "7180b1d07ede8e77b4fdda23af421b82c3fdf3846e0f53b39b5f6dd140b3007b",
     "custom_components/hausman_hub/contracts/v1/device-state-evidence.schema.json": "4e658a34e9254b49473324ea90eab1c7accc769e746340367afd244269feea6c",
     "custom_components/hausman_hub/contracts/v1/device-state-evidence-reason-codes.json": "667409c7671a11f686dc4872dcebb456cfa1846ce16a5ee2caf170aea943bc90",
-    "custom_components/hausman_hub/contracts/v1/error-taxonomy.schema.json": "4d5295c81e33d1fbc9af2912668cd74fc42a1dc8e470ef9cbc9b560ec67f11e8",
-    "custom_components/hausman_hub/contracts/v1/error-taxonomy.json": "2041465d8f98e9c46c69fa129bc02f8466b60393965040c42d93952eb90ebb33",
+    "custom_components/hausman_hub/contracts/v1/error-taxonomy.schema.json": "b6884ec927f83bb8907b856d1a4c438a75762342252b20a758b0e2d0b16d0ef4",
+    "custom_components/hausman_hub/contracts/v1/error-taxonomy.json": "a506b7a13a6c8c8ae7a69df629d657c2e7bbbdb73ccfb0a1802eeae675108866",
     "custom_components/hausman_hub/contracts/v1/lighting-profile-snapshots.json": "ef8a54c3a83da87986335c5d41dcfaa489945e4117eecfdc7094770466319aec",
 }
 
@@ -91,7 +94,7 @@ def test_external_contract_pin_is_explicit_and_canonical() -> None:
     assert pin == {
         "repository": "shumkiiv/hausmanhub-contracts",
         "version": "0.65.0",
-        "commit": "28d21ed",
+        "commit": "b4ad2fe",
         "canonical": True,
         "role": "runtime-consumer",
     }

@@ -694,7 +694,24 @@ class LocalSummaryAccessTest(unittest.TestCase):
             response = asyncio.run(self.hass.http.dispatch(method, FakeJsonRequest("127.0.0.1", admin, path, {})))
             self.assertEqual(405, response.status)
             self.assertEqual("hausman-hub-error", response.payload["contract"]["name"])
+            self.assertEqual("method_not_allowed", response.payload["code"])
+            self.assertEqual("GET, PUT" if path == view.url else "POST", response.headers["Allow"])
             self.assertEqual("no-store", response.headers["Cache-Control"])
+
+    def test_manual_protection_release_replays_through_dispatcher(self) -> None:
+        self.hass.data["hausman_hub"]["manual_light_off_protection"].unhealthy = False
+        view, release = self._manual_protection_views()
+        admin = reader_user("system-admin", admin=True)
+        request = self._manual_settings_request("seed.release")
+        request["settings"]["profiles"] = [{"roomId": "room", "profileId": "profile", "lightIds": ["light.one"], "presenceSensorIds": []}]
+        asyncio.run(self.hass.http.dispatch("PUT", FakeJsonRequest("127.0.0.1", admin, view.url, request)))
+        coordinator = self.hass.data["hausman_hub"]["manual_light_off_protection"]
+        asyncio.run(coordinator.async_note_state_transition("light.one", SimpleNamespace(state="on"), SimpleNamespace(state="off"), None))
+        payload = {"contract": {"name": "hausman-hub-manual-light-off-protection-release-request", "version": 1}, "requestId": "release.replay", "roomId": "room", "profileId": "profile", "expectedProtectionRevision": 0}
+        first = asyncio.run(self.hass.http.dispatch("POST", FakeJsonRequest("127.0.0.1", admin, release.url, payload)))
+        again = asyncio.run(self.hass.http.dispatch("POST", FakeJsonRequest("127.0.0.1", admin, release.url, payload)))
+        self.assertEqual(200, first.status)
+        self.assertEqual(first.payload, again.payload)
 
     def test_manual_protection_unload_and_reload_keep_exactly_two_routes(self) -> None:
         admin = reader_user("system-admin", admin=True)

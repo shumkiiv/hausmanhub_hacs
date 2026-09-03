@@ -1,0 +1,9 @@
+{
+  "contract": { "name": "hausman-hub-error", "version": 1 },
+  "code": "method_not_allowed",
+  "category": "input",
+  "message": "Этот способ обращения к API не поддерживается.",
+  "retryable": false,
+  "status": 405,
+  "requestId": "request-method-not-allowed-405"
+}

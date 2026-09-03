@@ -38,7 +38,7 @@
       "properties": {
         "code": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$", "maxLength": 128},
         "category": {"enum": ["input", "access", "resource", "conflict", "capability", "confirmation", "policy", "freshness", "rate_limit", "availability", "internal"]},
-        "httpStatus": {"enum": [400, 403, 404, 406, 409, 429, 500, 503]},
+        "httpStatus": {"enum": [400, 403, 404, 405, 406, 409, 429, 500, 503]},
         "retryable": {"type": "boolean"},
         "clientState": {"enum": ["stale", "offline", "pending", "failed", "disabled"]},
         "recoveryAction": {"enum": ["none", "refresh", "reconnect", "retry", "reauthenticate", "update_client"]},

@@ -56,11 +56,11 @@ class _BaseView(HomeAssistantView):
     def _unavailable(self) -> Any:
         return _api_error(self, "unavailable")
 
-    def _method_not_allowed(self) -> Any:
+    def _method_not_allowed(self, allow: str) -> Any:
         return self.json(
-            api_error_payload("not_found"),
+            api_error_payload("method_not_allowed"),
             status_code=HTTPStatus.METHOD_NOT_ALLOWED,
-            headers=NO_STORE_HEADERS,
+            headers={**NO_STORE_HEADERS, "Allow": allow},
         )
 
 
@@ -123,19 +123,19 @@ class ManualLightOffProtectionView(_BaseView):
         return self.json(receipt, headers=NO_STORE_HEADERS)
 
     async def post(self, request: Any) -> Any:
-        return self._method_not_allowed()
+        return self._method_not_allowed("GET, PUT")
 
     async def delete(self, request: Any) -> Any:
-        return self._method_not_allowed()
+        return self._method_not_allowed("GET, PUT")
 
     async def patch(self, request: Any) -> Any:
-        return self._method_not_allowed()
+        return self._method_not_allowed("GET, PUT")
 
     async def head(self, request: Any) -> Any:
-        return self._method_not_allowed()
+        return self._method_not_allowed("GET, PUT")
 
     async def options(self, request: Any) -> Any:
-        return self._method_not_allowed()
+        return self._method_not_allowed("GET, PUT")
 
 
 class ManualLightOffProtectionReleaseView(_BaseView):
@@ -192,22 +192,22 @@ class ManualLightOffProtectionReleaseView(_BaseView):
         return self.json(receipt, headers=NO_STORE_HEADERS)
 
     async def get(self, request: Any) -> Any:
-        return self._method_not_allowed()
+        return self._method_not_allowed("POST")
 
     async def put(self, request: Any) -> Any:
-        return self._method_not_allowed()
+        return self._method_not_allowed("POST")
 
     async def delete(self, request: Any) -> Any:
-        return self._method_not_allowed()
+        return self._method_not_allowed("POST")
 
     async def patch(self, request: Any) -> Any:
-        return self._method_not_allowed()
+        return self._method_not_allowed("POST")
 
     async def head(self, request: Any) -> Any:
-        return self._method_not_allowed()
+        return self._method_not_allowed("POST")
 
     async def options(self, request: Any) -> Any:
-        return self._method_not_allowed()
+        return self._method_not_allowed("POST")
 
 
 def register_manual_light_off_protection_api(hass: Any) -> None:

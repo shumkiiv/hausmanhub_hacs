@@ -10,6 +10,7 @@ from custom_components.hausman_hub.application.scenario_catalog import (
 )
 from custom_components.hausman_hub.application.system_light_profiles import ProtectedLightProfile
 from custom_components.hausman_hub.application.system_light_profiles import (
+    FIRST_WAVE_AUTO_ON_TARGETS,
     scenario_targets_for_system_light_profiles,
 )
 from types import SimpleNamespace
@@ -76,12 +77,11 @@ def test_coverage_audit_rejects_non_light_switch_roles() -> None:
 def test_profiles_remain_disabled_and_live_catalog_requires_each_typed_auto_on_target() -> None:
     assert not any(profile.enabled for profile in SYSTEM_LIGHT_PROFILES)
     devices = {
-        target_id: SimpleNamespace(
-            entity_id=f"light.{target_id}",
+        target.target_id: SimpleNamespace(
+            entity_id=target.entity_id or "light.unpinned_catalog_target",
             actions=(SimpleNamespace(action_id="turn_on", domain="light"),),
         )
-        for profile in SYSTEM_LIGHT_PROFILES
-        for target_id in profile.light_ids
+        for target in FIRST_WAVE_AUTO_ON_TARGETS
     }
     catalog = SimpleNamespace(device=devices.get)
     targets = scenario_targets_for_system_light_profiles(catalog)
