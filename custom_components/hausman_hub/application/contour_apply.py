@@ -407,6 +407,24 @@ def _live_device_outcomes(
                 "command_count": 0,
                 "accepted_count": 0,
             }
+        elif state == "deferred_offline":
+            outcomes[device_id] = {
+                "status": "deferred",
+                "reason": "device_unavailable",
+                "message_code": "deferred_offline",
+                "message": "Цель сохранена, устройство недоступно.",
+                "command_count": 0,
+                "accepted_count": 0,
+            }
+        elif state in {"manual_user_excluded", "manual_external_off"}:
+            outcomes[device_id] = {
+                "status": "manual",
+                "reason": state,
+                "message_code": state,
+                "message": "Цель сохранена без изменения ручного устройства.",
+                "command_count": 0,
+                "accepted_count": 0,
+            }
         elif state == "already_in_sync":
             evidence = enhanced.get("already_in_sync_evidence")
             proof = evidence.get(device_id) if isinstance(evidence, Mapping) else None
@@ -593,6 +611,9 @@ class _ContourApplyLedger:
             updated_at=now,
             enhanced=enhanced,
             device_outcomes=(
+                _live_device_outcomes(enhanced)
+                if zero_call_terminal_partial
+                else
                 {
                     device_id: {
                         "status": "not_attempted",

@@ -1476,9 +1476,13 @@ class ClimateTabletService:
                                 "confirmed"
                                 if receipt.get("status") == "confirmed"
                                 else (
-                                    "terminal_mixed"
-                                    if receipt.get("final") is True
-                                    else "accepted_unverified"
+                                    "terminal_deferred"
+                                    if _reliable_receipt_is_terminal_deferred(receipt)
+                                    else (
+                                        "terminal_mixed"
+                                        if receipt.get("final") is True
+                                        else "accepted_unverified"
+                                    )
                                 )
                             )
                         )
@@ -3497,7 +3501,7 @@ def _reliable_dispatch_ledger(
     sources: dict[str, dict[str, int]] = {}
     if state not in {
         "pending_dispatch", "pending_expired", "superseded_pre_dispatch",
-        "already_in_sync", "blocked_before_dispatch",
+        "already_in_sync", "blocked_before_dispatch", "terminal_deferred",
     }:
         if type(dispatched_at) is not int:
             raise ClimateTabletUnavailable("climate dispatch boundary is invalid")
@@ -3519,7 +3523,7 @@ def _reliable_dispatch_ledger(
                     raise ClimateTabletUnavailable("climate dispatch proof is unavailable")
                 room_sources[device_id] = observed_at
             sources[room_id] = room_sources
-    if state == "already_in_sync":
+    if state in {"already_in_sync", "terminal_deferred"}:
         dispatched_at = None
     return {
         "state": state,
@@ -3564,6 +3568,28 @@ def _valid_reliable_dispatch_ledger(
             and all(
                 leaf.get("status") == "pending"
                 and leaf.get("execution_state") == "pending_dispatch"
+                and _strict_leaf_counts(leaf, 0, 0)
+                for leaf in leaves
+            )
+        )
+    if state == "terminal_deferred":
+        return (
+            dispatched_at is None
+            and sources == {}
+            and receipt.get("status") == "partial"
+            and receipt.get("accepted") is True
+            and receipt.get("confirmed") is False
+            and receipt.get("final") is True
+            and receipt.get("unfinished_device_count") == 0
+            and (
+                _reliable_intent_has_status(receipt, "saved_deferred_offline")
+                or _reliable_intent_has_status(receipt, "saved_for_manual_device")
+            )
+            and isinstance(leaves, list)
+            and bool(leaves)
+            and all(
+                leaf.get("status") in {"deferred", "manual"}
+                and leaf.get("execution_state") is None
                 and _strict_leaf_counts(leaf, 0, 0)
                 for leaf in leaves
             )
@@ -3915,6 +3941,21 @@ def _reliable_receipt_is_already_in_sync(receipt: Mapping[str, object]) -> bool:
         and leaf.get("execution_state") == "already_in_sync"
         and _strict_leaf_counts(leaf, 0, 0)
         for leaf in leaves
+    )
+
+
+def _reliable_receipt_is_terminal_deferred(receipt: Mapping[str, object]) -> bool:
+    leaves = _reliable_receipt_leaves(receipt)
+    return (
+        receipt.get("status") == "partial"
+        and receipt.get("final") is True
+        and bool(leaves)
+        and all(
+            leaf.get("status") in {"deferred", "manual"}
+            and leaf.get("execution_state") is None
+            and _strict_leaf_counts(leaf, 0, 0)
+            for leaf in leaves
+        )
     )
 
 
@@ -4959,10 +5000,27 @@ def _reliable_receipt(
         dispatched_at=dispatched_at,
         pre_dispatch_metadata=pre_dispatch_metadata,
     )
+    has_deferred = any(
+        leaf.get("status") == "deferred"
+        for room in outcomes.values() if isinstance(room, Mapping)
+        for leaf in (room.get("devices", {}) or {}).values() if isinstance(leaf, Mapping)
+    )
+    has_manual = any(
+        leaf.get("status") == "manual"
+        for room in outcomes.values() if isinstance(room, Mapping)
+        for leaf in (room.get("devices", {}) or {}).values() if isinstance(leaf, Mapping)
+    )
+    if (has_deferred or has_manual) and unfinished == 0:
+        status = "partial"
+        receipt.update(status="partial", accepted=True, confirmed=False, final=True)
     intent_status = {
         "confirmed": "saved_and_applied",
         "pending": "saved_pending_confirmation",
-        "partial": "saved_pending_confirmation",
+        "partial": (
+            "saved_deferred_offline" if has_deferred
+            else "saved_for_manual_device" if has_manual
+            else "saved_pending_confirmation"
+        ),
         "timed_out": "saved_apply_failed",
         "rejected": "unsaved_rejected",
         "unavailable": "unsaved_unavailable",
@@ -5087,6 +5145,10 @@ def _reliable_receipt(
     if isinstance(intent, Mapping):
         if result.get("final") is True and result.get("status") == "confirmed":
             intent_status = "saved_and_applied"
+        elif result.get("final") is True and has_deferred:
+            intent_status = "saved_deferred_offline"
+        elif result.get("final") is True and has_manual:
+            intent_status = "saved_for_manual_device"
         elif result.get("final") is True:
             intent_status = "saved_apply_failed"
         else:
@@ -5424,6 +5486,9 @@ def _reliable_outcomes(
         for device_id in row["device_ids"]:
             device = devices.get(device_id, {})
             execution_leaf = execution_outcomes.get(device_id) if isinstance(execution_outcomes, Mapping) else None
+            if isinstance(execution_leaf, Mapping) and execution_leaf.get("status") in {"deferred", "manual"}:
+                leaves[device_id] = dict(execution_leaf)
+                continue
             if (
                 isinstance(execution_leaf, Mapping)
                 and execution_leaf.get("status") == "not_attempted"
@@ -5530,6 +5595,10 @@ def _reliable_outcomes(
         statuses = {leaf["status"] for leaf in leaves.values()}
         if statuses == {"confirmed"}:
             room_status, reason, execution, code, message = ("confirmed", "none", "applied", "confirmed", "Результат подтверждён чтением состояния.")
+        elif "deferred" in statuses:
+            room_status, reason, execution, code, message = ("deferred", "device_unavailable", None, "deferred_offline", "Часть устройств недоступна.")
+        elif "manual" in statuses:
+            room_status, reason, execution, code, message = ("manual", "manual_user_excluded", None, "manual_user_excluded", "Устройства оставлены в ручном управлении.")
         elif len(statuses) > 1:
             room_status, reason, execution, code, message = ("partial", "none", None, "partial", "Результаты устройств различаются.")
         else:

@@ -1458,6 +1458,29 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("applied", leaves["living_radiator"]["execution_state"])
         self.assertEqual(1, receipt["read_back"]["evidence"]["accepted_count"])
 
+    async def test_reserved_home_target_defers_all_offline_owners(self) -> None:
+        runtime, store, contour_store, executor = native_home_target_runtime(include_humidifier=False)
+        for entity_id in ("climate.living_air_conditioner", "climate.living_radiator", "climate.living_floor"):
+            current = executor._state_view.states[entity_id]
+            executor._state_view.states[entity_id] = replace(current, state="unavailable", attributes={})
+        await runtime.async_start()
+        service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await service.async_load()
+        request = {"contract": {"name": "hausman-hub-climate-action-request", "version": 1}, "request_id": "tablet.climate.home-offline", "correlation_id": "corr.home-offline", "expected_state_revision": 0, "expected_control_revision": 0, "reliability_profile": "climate_reliability_v1", "action": "set_home_targets", "room_id": None, "parameters": {"target_temperature": 25.5}}
+        receipt = await service.async_execute(request)
+        self.assertEqual("partial", receipt["status"], receipt)
+        self.assertTrue(receipt["final"])
+        self.assertEqual("saved_deferred_offline", receipt["intent"]["status"])
+        self.assertEqual(0, len(executor.batches))
+        self.assertEqual(1, len(contour_store.saved))
+        self.assertTrue((await service.async_execute(request))["duplicate"])
+        restarted = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await restarted.async_load()
+        replay = await restarted.async_execute(request)
+        self.assertTrue(replay["duplicate"])
+        self.assertEqual(receipt["operation_id"], replay["operation_id"])
+        self.assertEqual(0, len(executor.batches))
+
     async def test_reserved_home_combined_mixed_axis_alignment_confirms_once(self) -> None:
         """The mixed proof works in both temperature and humidity directions."""
         for aligned_temperature, suffix in ((True, "temperature"), (False, "humidity")):

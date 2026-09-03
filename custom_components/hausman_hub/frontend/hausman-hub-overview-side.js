@@ -1,4 +1,4 @@
-import { activityTimeLabel } from "./hausman-hub-pagination.js?v=1.52.203";
+import { activityTimeLabel } from "./hausman-hub-pagination.js?v=1.52.204";
 
 const ACTIVITY_SYSTEM_LABELS = {
   accepted: "Принято к выполнению",

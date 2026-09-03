@@ -4887,7 +4887,15 @@ def _contour_reliability_metadata(
         leaf_ledger = {device_id: "blocked_before_dispatch" for device_id in device_ids}
     elif plan.explicit_target_alignment:
         leaf_ledger = {
-            device_id: ("already_in_sync" if device_id in already_in_sync_evidence else "pending_dispatch")
+            device_id: (
+                "deferred_offline"
+                if dispositions.get(device_id) == "deferred"
+                else "manual_user_excluded"
+                if dispositions.get(device_id) == "manual"
+                else "already_in_sync"
+                if device_id in already_in_sync_evidence
+                else "pending_dispatch"
+            )
             for device_id in device_ids
         }
     return {"kind": kind, "request_fingerprint": fingerprint, "action": action_code, "parameters": parameters,
