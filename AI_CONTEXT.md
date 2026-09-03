@@ -1,5 +1,19 @@
 # HausmanHub AI Context
 
+- 2026-09-03: владелец выбрал новый climate ledger. При остановленном Home
+  Assistant исходные main/sidecar и контрольные суммы сохранены в закрытом
+  архиве `/config/hausmanhub-backups/20260903T181500-climate-ledger-reset`, из
+  keyring удалён только якорь текущего climate ledger. На production установлен
+  `1.52.210`; новый main/sidecar и внешний якорь созданы автоматически. Runtime
+  отвечает 200, `phase=managed`, `fresh=true`, команды разрешены. Живой цикл
+  `25,0 -> 25,5 -> 25,0°C` завершён, `control_revision 0 -> 1 -> 2`, активных
+  операций нет. На возврате спальня и кухня подтвердили применение,
+  manual/deferred сохранились как 0/0. Кондиционер комнаты Игоря принял команду
+  1/1, но завершился `accepted_timeout`. Android `1.0.273` build `277`
+  показывает цель `25°C` без общей ошибки связи и без ошибки несовпадения
+  ожидаемого результата. Installed/latest равны `v1.52.210`; release commit
+  `6da0fde` прошёл GitHub Actions `33755815918`. Backup HA `491a65fd` сохранён.
+
 - 2026-09-03: финальная живая точка после release `1.52.210`: локальные gates
   зелёные (2041 tests, 4 skipped, 76% coverage, browser 20/20, exhaustive
   703/703), но restart с накопленным production climate ledger закрыл tablet
