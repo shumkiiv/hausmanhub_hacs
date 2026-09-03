@@ -575,6 +575,36 @@ class FakeRuntime:
 
 
 class ClimateTabletProjectionTest(unittest.TestCase):
+    def test_terminal_manual_and_deferred_leaves_survive_operation_polling(self) -> None:
+        receipt = {
+            "outcomes": {
+                "rooms": {
+                    "living": {
+                        "devices": {
+                            "manual_ac": {
+                                "status": "manual",
+                                "reason": "external_off",
+                                "command_count": 0,
+                                "accepted_count": 0,
+                            },
+                            "offline_ac": {
+                                "status": "deferred",
+                                "reason": "device_unavailable",
+                                "command_count": 0,
+                                "accepted_count": 0,
+                            },
+                        }
+                    }
+                }
+            }
+        }
+
+        frozen = climate_tablet_module._terminal_reliable_device_leaves(receipt)
+
+        self.assertEqual({"manual_ac", "offline_ac"}, set(frozen))
+        self.assertEqual("manual", frozen["manual_ac"]["status"])
+        self.assertEqual("deferred", frozen["offline_ac"]["status"])
+
     def test_managed_projection_exposes_only_currently_executable_actions(self) -> None:
         payload = climate_tablet_snapshot(managed_home(), climate_mode="managed")
 

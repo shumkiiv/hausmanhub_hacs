@@ -4313,9 +4313,12 @@ def _terminal_reliable_device_leaves(
         for device_id, leaf in devices.items():
             if not isinstance(device_id, str) or not isinstance(leaf, Mapping):
                 continue
-            if leaf.get("execution_state") in {
-                "applied", "already_in_sync", "dispatched_not_accepted",
-            }:
+            if (
+                leaf.get("execution_state") in {
+                    "applied", "already_in_sync", "dispatched_not_accepted",
+                }
+                or leaf.get("status") in {"manual", "deferred"}
+            ):
                 frozen[device_id] = dict(leaf)
     return frozen
 
