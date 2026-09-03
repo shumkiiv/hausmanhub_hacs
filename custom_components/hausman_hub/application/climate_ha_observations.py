@@ -78,10 +78,10 @@ _SENSOR_ROLES = {
     ClimateDeviceKind.TEMPERATURE_SENSOR: ClimateEndpointRole.TEMPERATURE,
     ClimateDeviceKind.HUMIDITY_SENSOR: ClimateEndpointRole.HUMIDITY,
 }
-# Home Assistant's explicit ``unavailable`` state means the device may be
-# retained as an offline deferred owner.  ``unknown`` and every other raw
-# state are observations with unknown activity, not an offline assurance.
-_UNAVAILABLE_STATES = frozenset({"unavailable"})
+# All sensor and home-state consumers fail closed for Home Assistant's two
+# non-observations.  Actuators retain the narrower deferred-offline exception
+# locally in ``_device_observation`` below.
+_UNAVAILABLE_STATES = frozenset({"unavailable", "unknown"})
 
 
 class ClimateHaObservationViolation(ValueError):
@@ -760,13 +760,24 @@ def _device_observation(
             kind=kind,
             availability=ClimateDeviceAvailability.MISSING,
         )
-    if state.state in _UNAVAILABLE_STATES:
+    # Only the exact raw ``unavailable`` actuator state has the explicit
+    # deferred-offline meaning.  ``unknown`` is denied as missing rather than
+    # being promoted to a retained owner by the shared sensor guard.
+    if state.state == "unavailable":
         return ClimateDeviceObservation(
             device_id=device.device_id,
             name=device.name,
             room_id=device.room_id,
             kind=kind,
             availability=ClimateDeviceAvailability.UNAVAILABLE,
+        )
+    if state.state == "unknown":
+        return ClimateDeviceObservation(
+            device_id=device.device_id,
+            name=device.name,
+            room_id=device.room_id,
+            kind=kind,
+            availability=ClimateDeviceAvailability.MISSING,
         )
     transitions = _protection_transitions(device, protection, observed_at)
     return ClimateDeviceObservation(

@@ -39,6 +39,7 @@ from custom_components.hausman_hub.domain.climate_observation import (
     ClimateDeviceObservation,
     ClimateFanMode,
     ClimateHomeObservation,
+    ClimateOccupancyMode,
     ClimateObservationDeviceKind,
     ClimatePhysicalFeedback,
     ClimateRoomObservation,
@@ -524,6 +525,19 @@ class ClimateStabilityTest(unittest.TestCase):
 
         with self.assertRaises(ClimateStabilityViolation):
             replace(result, humidity_on_threshold=43)
+
+    def test_unknown_occupancy_never_selects_auto_humidifying(self) -> None:
+        result = stable(
+            device(
+                ClimateObservationDeviceKind.HUMIDIFIER,
+                activity=ClimateDeviceActivity.STOPPED,
+            ),
+            room(humidity=30),
+            home=ClimateHomeObservation(occupancy=ClimateOccupancyMode.UNKNOWN),
+        )
+
+        self.assertIs(result.action, ClimateStabilityAction.OBSERVE)
+        self.assertIs(result.reason, ClimateStabilityReason.OCCUPANCY_NOT_HOME)
 
     def test_humidifier_heat_load_boundary_and_unconfirmed_windows_are_safe(self) -> None:
         stopped = device(

@@ -1473,6 +1473,21 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("saved_deferred_offline", receipt["intent"]["status"])
         self.assertEqual(0, len(executor.batches))
         self.assertEqual(1, len(contour_store.saved))
+        leaves = receipt["outcomes"]["rooms"]["living"]["devices"]
+        for device_id in (
+            "living_air_conditioner",
+            "living_radiator",
+            "living_floor",
+        ):
+            self.assertEqual("deferred", leaves[device_id]["status"])
+            self.assertEqual("device_unavailable", leaves[device_id]["reason"])
+            self.assertEqual(
+                (0, 0),
+                (
+                    leaves[device_id]["command_count"],
+                    leaves[device_id]["accepted_count"],
+                ),
+            )
         self.assertTrue((await service.async_execute(request))["duplicate"])
         restarted = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
         await restarted.async_load()
@@ -1515,6 +1530,8 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
 
                 self.assertIsNone(store.payload)
                 self.assertEqual([], store.saved)
+                self.assertEqual(0, store._control_revision)
+                self.assertIsNone(store._direct_control_records)
                 self.assertEqual([], contour_store.saved)
                 self.assertEqual([], executor.batches)
 
