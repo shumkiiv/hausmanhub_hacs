@@ -1969,6 +1969,7 @@ class ScenarioService:
         *,
         correlation_id: str | None = None,
         trigger_context: Mapping[str, object] | None = None,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
         """Execute a scenario via the configured executor."""
 
@@ -1984,6 +1985,7 @@ class ScenarioService:
                 visited,
                 correlation_id=correlation_id,
                 trigger_context=trigger_context,
+                dry_run=dry_run,
             )
         finally:
             if registered and caller is not None:
@@ -1996,6 +1998,7 @@ class ScenarioService:
         *,
         correlation_id: str | None = None,
         trigger_context: Mapping[str, object] | None = None,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
         """Execute one already registered run call."""
 
@@ -2021,7 +2024,8 @@ class ScenarioService:
                 scenario_id=scenario.id,
                 visited_scenarios=visited,
                 dry_run=(
-                    scenario.definition.command_mode is ScenarioCommandMode.SHADOW
+                    dry_run
+                    or scenario.definition.command_mode is ScenarioCommandMode.SHADOW
                 ),
                 trigger_context=resolved_trigger_context,
                 scenario_title=scenario.title,

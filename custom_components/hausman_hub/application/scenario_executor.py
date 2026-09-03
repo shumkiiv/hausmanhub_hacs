@@ -1256,24 +1256,41 @@ class ScenarioExecutor:
             # lock that receives manual transitions, then retain that lock
             # through every contiguous light mutation and ownership record.
             await self._light_priority.authority_lock().acquire()
-            protection_decisions = {}
-            for action in actions:
-                if not self._is_light_activation(action, scenario_text):
-                    continue
-                # Resolving this descriptor immediately before the live
-                # decision prevents catalog replacement from reusing a stale
-                # discovery result. _device_action_receipt repeats the check
-                # before its own dispatch.
-                device = self._catalog.device(action.target_id or "")
-                allowed = device.action(action.action_id or "") if device is not None else None
-                if device is None or allowed is None:
-                    continue
-                protection_decisions[action.id] = await self._manual_light_off_protection.async_decide(
-                    action, self._catalog, automatic=True, dry_run=False,
-                    trigger_context=trigger_context,
-                )
-            protected_light_action_ids = protected_actions_for(protection_decisions)
+            try:
+                protection_decisions = {}
+                for action in actions:
+                    if not self._is_light_activation(action, scenario_text):
+                        continue
+                    # Resolving this descriptor immediately before the live
+                    # decision prevents catalog replacement from reusing a stale
+                    # discovery result. _device_action_receipt repeats the check
+                    # before its own dispatch.
+                    device = self._catalog.device(action.target_id or "")
+                    allowed = device.action(action.action_id or "") if device is not None else None
+                    if device is None or allowed is None:
+                        continue
+                    protection_decisions[action.id] = await self._manual_light_off_protection.async_decide(
+                        action, self._catalog, automatic=True, dry_run=False,
+                        trigger_context=trigger_context,
+                    )
+                protected_light_action_ids = protected_actions_for(protection_decisions)
+            except BaseException:
+                self._light_priority.authority_lock().release()
+                raise
         for action_index, action in enumerate(actions):
+            if (
+                scenario_authority_lock_held
+                and action.type in {
+                    ScenarioActionType.DELAY,
+                    ScenarioActionType.NOTIFICATION,
+                    ScenarioActionType.RUN_SCENARIO,
+                }
+            ):
+                # A wait or child execution is a new authority boundary. Do
+                # not delay manual-off attribution or recursively acquire the
+                # non-reentrant light lock from a nested scenario.
+                self._light_priority.authority_lock().release()
+                scenario_authority_lock_held = False
             if not dry_run and action.type is ScenarioActionType.DELAY:
                 await self._confirm_deferred_device_receipts(receipts)
                 await self._async_resolve_light_off_obligations(
@@ -3245,6 +3262,17 @@ class ScenarioExecutor:
                     "recovery": False,
                 },
             )
+            blocked_reason = result.get("reason")
+            if not isinstance(blocked_reason, str):
+                blocked_reason = next(
+                    (
+                        receipt.get("reason")
+                        for receipt in result.get("receipts", [])
+                        if isinstance(receipt, Mapping)
+                        and receipt.get("reason") == "manual_off_protection_active"
+                    ),
+                    None,
+                )
             return {
                 **base,
                 "status": "completed",
@@ -3252,7 +3280,7 @@ class ScenarioExecutor:
                 "scenario_id": action.scenario_id,
                 "nested_run_id": result.get("run_id"),
                 "nested_outcome": result.get("status", "failed"),
-                "reason": result.get("reason"),
+                "reason": blocked_reason,
             }
         origin_target_id = (
             trigger_context.get("target_id")

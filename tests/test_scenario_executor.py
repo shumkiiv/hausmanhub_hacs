@@ -569,6 +569,35 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(["manual_off_protection_active"] * 2, [item["reason"] for item in result["receipts"]])
         self.hass.services.async_call.assert_not_awaited()
 
+    async def test_scope_unavailable_blocks_before_power_or_service(self) -> None:
+        """An unknown frozen scope cannot be bypassed by relay preparation."""
+
+        class ScopeUnavailable:
+            async def async_decide(self, *_args, **_kwargs):
+                return LightProtectionDecision(
+                    False, "manual_off_protection_scope_unavailable", "missing", {}
+                )
+
+        async def unexpected_power(*_args: object, **_kwargs: object):
+            raise AssertionError("power preparation must not run")
+
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            power_dependency_resolver=lambda: _power_link(policy="auto_turn_on"),
+            manual_light_off_protection=ScopeUnavailable(),
+        )
+        executor._prepare_power_dependency = unexpected_power  # type: ignore[method-assign]
+        result = await executor.async_execute(
+            _definition((ScenarioAction(id="blocked", type=ScenarioActionType.DEVICE_ACTION, target_id="device_1", action_id="turn_on"),)),
+            "scope-unavailable.1",
+            scenario_id="presence_light",
+        )
+
+        self.assertEqual("manual_off_protection_active", result["receipts"][0]["reason"])
+        self.hass.services.async_call.assert_not_awaited()
+
     async def test_device_action_calls_service(self) -> None:
         definition = _definition(
             (
@@ -3852,7 +3881,33 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["receipts"][0]["skipped"])
         self.hass.services.async_call.assert_not_awaited()
 
-    async def test_run_scenario_dry_run_is_a_successful_plan(self) -> None:
+    async def test_run_scenario_dry_run_forwards_protection_reason_from_child_receipt(
+        self,
+    ) -> None:
+        """A strict ScenarioService-shaped callback receives dry-run safely."""
+        callback_calls: list[tuple[str, bool]] = []
+
+        async def scenario_service_api(
+            scenario_id: str,
+            visited: frozenset[str] | None = None,
+            *,
+            correlation_id: str | None = None,
+            trigger_context: dict[str, object] | None = None,
+            dry_run: bool = False,
+        ) -> dict[str, Any]:
+            del visited, correlation_id, trigger_context
+            callback_calls.append((scenario_id, dry_run))
+            return {
+                "run_id": "nested-other",
+                "status": "completed",
+                "receipts": [{
+                    "status": "completed",
+                    "skipped": True,
+                    "reason": "manual_off_protection_active",
+                    "physicalAttempted": False,
+                }],
+            }
+        executor = ScenarioExecutor(self.hass, self.catalog, scenario_service_api)
         definition = _definition(
             (
                 ScenarioAction(
@@ -3863,7 +3918,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        result = await self.executor.async_execute(
+        result = await executor.async_execute(
             definition,
             "run-1",
             scenario_id="sc-1",
@@ -3872,7 +3927,10 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("completed", result["status"])
         self.assertTrue(result["receipts"][0]["planned"])
-        self.assertEqual(["other"], self.nested_runs)
+        self.assertEqual([("other", True)], callback_calls)
+        self.assertEqual(
+            "manual_off_protection_active", result["receipts"][0]["reason"]
+        )
 
     async def test_notification_action_targets_configured_entity(self) -> None:
         definition = _definition(
