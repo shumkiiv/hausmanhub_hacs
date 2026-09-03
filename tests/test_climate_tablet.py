@@ -1920,6 +1920,17 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
                 correlation_id="corr.legacy-crash",
                 parameters={"target_temperature": 25.0},
             )
+        # The crash receipt is terminal after restoration. Once its desired
+        # intent is no longer active, retention removes the record and its
+        # correlation reservation in one persisted transition.
+        restarted._desired_intents.clear()
+        original_request_id = "tablet.climate.legacy-crash-a"
+        restarted._prune_oldest_final()
+        await restarted._async_save()
+        self.assertNotIn(original_request_id, restarted._records_by_request)
+        self.assertNotIn("corr.legacy-crash", restarted._legacy_home_reservations)
+        clean_restart = ClimateTabletService(restarted_runtime, store, now_ms=lambda: 1784280005000)
+        await clean_restart.async_load()
 
     async def test_set_room_mode_dispatches_existing_contract_action(self) -> None:
         self.runtime.home["rooms"][0]["control"]["allowed_actions"].append(

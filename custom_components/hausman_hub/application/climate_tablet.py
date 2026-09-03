@@ -788,6 +788,7 @@ class ClimateTabletService:
             raise ClimateTabletUnavailable("legacy climate execution facts are invalid")
         if (
             not isinstance(legacy_reservations, Mapping)
+            or len(legacy_reservations) > MAX_RELIABLE_OPERATION_RECORDS
             or any(
                 not _valid_legacy_correlation_id(correlation_id)
                 or not _valid_legacy_home_reservation(reservation)
@@ -2560,6 +2561,7 @@ class ClimateTabletService:
         if record.request.reliability_profile == "climate_reliability_v1":
             self._reliable_scope_binding_cleanup.add(request_id)
             self._legacy_home_execution_facts.pop(record.request.correlation_id, None)
+            self._legacy_home_reservations.pop(record.request.correlation_id, None)
 
     def _prune_oldest_final_recovery(self) -> None:
         completed = [
