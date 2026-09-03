@@ -14,7 +14,7 @@ import secrets
 import time
 from typing import Protocol
 
-from ..correlation import resolve_correlation_id, validate_correlation_id
+from ..correlation import CorrelationIdError, resolve_correlation_id, validate_correlation_id
 from ..climate_revision import MAX_JS_SAFE_INTEGER, is_control_revision
 from ..climate_ledger_keyring import ClimateLedgerKeyring
 from ..climate_storage_errors import ClimateOperationRevisionConflict
@@ -778,8 +778,7 @@ class ClimateTabletService:
             not isinstance(legacy_execution_facts, Mapping)
             or len(legacy_execution_facts) > MAX_RELIABLE_OPERATION_RECORDS
             or any(
-                not isinstance(request_id, str)
-                or _REQUEST_ID.fullmatch(request_id) is None
+                not _valid_legacy_correlation_id(request_id)
                 or not _valid_legacy_home_execution_fact(fact)
                 for request_id, fact in legacy_execution_facts.items()
             )
@@ -4454,6 +4453,14 @@ def _legacy_home_reason_codes(reasons: list[str]) -> list[str]:
     return list(dict.fromkeys(mapping[reason] for reason in reasons if reason in mapping))
 
 
+def _valid_legacy_correlation_id(value: object) -> bool:
+    try:
+        validate_correlation_id(value)
+    except CorrelationIdError:
+        return False
+    return True
+
+
 def _valid_legacy_home_execution_fact(value: object) -> bool:
     """Keep the compatibility sidecar bounded and non-dispatchable."""
 
@@ -4468,8 +4475,7 @@ def _valid_legacy_home_execution_fact(value: object) -> bool:
         and _OPERATION_ID.fullmatch(value["operation_id"]) is not None
         and isinstance(value.get("request_id"), str)
         and _REQUEST_ID.fullmatch(value["request_id"]) is not None
-        and isinstance(value.get("correlation_id"), str)
-        and _REQUEST_ID.fullmatch(value["correlation_id"]) is not None
+        and _valid_legacy_correlation_id(value.get("correlation_id"))
         and all(
             isinstance(value.get(key), str)
             and re.fullmatch(r"[a-f0-9]{64}", value[key]) is not None
@@ -4504,7 +4510,7 @@ def _legacy_home_execution_fact_matches_record(
 
     return bool(
         isinstance(correlation_id, str)
-        and _REQUEST_ID.fullmatch(correlation_id) is not None
+        and _valid_legacy_correlation_id(correlation_id)
         and _valid_legacy_home_execution_fact(fact)
         and isinstance(record, _StoredOperation)
         and fact["correlation_id"] == correlation_id

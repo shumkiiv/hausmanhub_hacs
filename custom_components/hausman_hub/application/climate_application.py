@@ -107,8 +107,20 @@ def build_climate_application_plan(
             _gate_explicit_device(
                 room_id, device, registry, observation,
                 next(gate for gate in base_gates if gate.room_id == room_id),
-                None if explicit_temperature_targets is None else explicit_temperature_targets.get(room_id),
-                None if explicit_humidity_targets is None else explicit_humidity_targets.get(room_id),
+                (
+                    None if explicit_temperature_targets is None
+                    or device.kind not in {
+                        ClimateDeviceKind.AIR_CONDITIONER,
+                        ClimateDeviceKind.RADIATOR_THERMOSTAT,
+                        ClimateDeviceKind.FLOOR_HEATING,
+                    }
+                    else explicit_temperature_targets.get(room_id)
+                ),
+                (
+                    None if explicit_humidity_targets is None
+                    or device.kind is not ClimateDeviceKind.HUMIDIFIER
+                    else explicit_humidity_targets.get(room_id)
+                ),
             )
             for room_id in target_ids
             for device in _explicit_selected_devices(
@@ -194,6 +206,29 @@ def _gate_explicit_device(room_id, device, registry, observation, room_gate, tem
     if device.endpoint(ClimateEndpointRole.CONTROL) is None:
         reasons.append(ClimateApplicationDenialReason.MISSING_CONTROL_ENDPOINT)
     if _control_endpoint_is_shared(device, registry):
+        reasons.append(ClimateApplicationDenialReason.TRANSLATION_INCOMPLETE)
+    endpoint = device.endpoint(ClimateEndpointRole.CONTROL)
+    temperature_owner = temperature is not None
+    humidity_owner = humidity is not None
+    valid_temperature_owner = (
+        device.kind in {
+            ClimateDeviceKind.AIR_CONDITIONER,
+            ClimateDeviceKind.RADIATOR_THERMOSTAT,
+            ClimateDeviceKind.FLOOR_HEATING,
+        }
+        and ClimateCapability.TARGET_TEMPERATURE in device.capabilities
+        and endpoint is not None
+        and endpoint.entity_id.startswith("climate.")
+    )
+    valid_humidity_owner = (
+        device.kind is ClimateDeviceKind.HUMIDIFIER
+        and ClimateCapability.TARGET_HUMIDITY in device.capabilities
+        and endpoint is not None
+        and endpoint.entity_id.startswith("humidifier.")
+    )
+    if (temperature_owner and not valid_temperature_owner) or (
+        humidity_owner and not valid_humidity_owner
+    ):
         reasons.append(ClimateApplicationDenialReason.TRANSLATION_INCOMPLETE)
     if not reasons:
         calls = (

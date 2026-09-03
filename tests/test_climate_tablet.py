@@ -1778,17 +1778,18 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         store = AuthenticatedLedgerMemoryStore()
         service = ClimateTabletService(runtime, store)
         await service.async_load()
+        correlation_id = "c" + "x" * 127
 
         first = await service.async_execute_legacy_home_targets(
             request_id="tablet.climate.legacy-correlation-a",
-            correlation_id="corr.legacy-canonical",
+            correlation_id=correlation_id,
             parameters={"target_temperature": 24.5},
         )
         restarted = ClimateTabletService(runtime, store)
         await restarted.async_load()
         duplicate = await restarted.async_execute_legacy_home_targets(
             request_id="tablet.climate.legacy-correlation-b",
-            correlation_id="corr.legacy-canonical",
+            correlation_id=correlation_id,
             parameters={"target_temperature": 24.5},
         )
 
@@ -1798,7 +1799,7 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ClimateTabletViolation) as conflict:
             await restarted.async_execute_legacy_home_targets(
                 request_id="tablet.climate.legacy-correlation-c",
-                correlation_id="corr.legacy-canonical",
+                correlation_id=correlation_id,
                 parameters={"target_temperature": 25.0},
             )
         self.assertEqual("revision_conflict", conflict.exception.code)
