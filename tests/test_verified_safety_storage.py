@@ -11,6 +11,9 @@ import unittest
 from custom_components.hausman_hub.verified_safety_storage import (
     VerifiedSafetyStore,
 )
+from custom_components.hausman_hub.application.manual_light_off_protection import (
+    valid_manual_light_off_protection_payload,
+)
 
 
 class FakeBackend:
@@ -149,6 +152,26 @@ def test_invalid_previous_generation_does_not_bypass_payload_validator() -> None
             assert "unreadable" in str(error)
         else:
             raise AssertionError("invalid N-1 safety payload must fail closed")
+
+    with tempfile.TemporaryDirectory() as directory:
+        asyncio.run(exercise(Path(directory, "store.json")))
+
+
+def test_manual_light_protection_corruption_does_not_restore_an_invalid_payload() -> None:
+    async def exercise(path: Path) -> None:
+        backend = FakeBackend(path)
+        store = VerifiedSafetyStore(
+            backend,
+            _run_sync,
+            payload_validator=valid_manual_light_off_protection_payload,
+        )
+        backend.payload = {"version": 1}
+        try:
+            await store.async_load()
+        except RuntimeError as error:
+            assert "unreadable" in str(error)
+        else:
+            raise AssertionError("corrupt manual-light protection must fail closed")
 
     with tempfile.TemporaryDirectory() as directory:
         asyncio.run(exercise(Path(directory, "store.json")))
