@@ -1153,6 +1153,7 @@ class ClimateRuntime:
         tablet_request_fingerprint: object,
         tablet_action: object,
         tablet_parameters: object,
+        reserved_scope: object = None,
     ) -> object:
         """Execute physical work for a tablet intent already reserved in store.
 
@@ -1214,13 +1215,18 @@ class ClimateRuntime:
             "parameters": dict(tablet_parameters),
         }
         if canonical.action == "set_home_targets":
+            if not _valid_reserved_native_scope(reserved_scope):
+                error = ClimateRuntimeUnavailable("reserved tablet climate scope is invalid")
+                error.reserved_tablet_pre_dispatch_conflict = True  # type: ignore[attr-defined]
+                raise error
             return await self.async_home_climate_targets({
                 "correlation_id": canonical.correlation_id, "request_id": canonical.request_id,
                 "contour_id": "climate", "target_temperature": canonical.parameters.get("target_temperature"),
                 "target_humidity": canonical.parameters.get("target_humidity"), "confirm": True,
             }, reliability_request=canonical,
             pre_reserved_resulting_control_revision=resulting_control_revision,
-            external_reliability_identity=tablet_identity)
+            external_reliability_identity=tablet_identity,
+            reserved_scope=reserved_scope)
         if canonical.action == "synchronize_home":
             return await self.async_synchronize_climate()
         if canonical.action == "set_room_mode":
@@ -1692,6 +1698,7 @@ class ClimateRuntime:
         self, payload: object, *, reliability_request: object | None = None,
         pre_reserved_resulting_control_revision: int | None = None,
         external_reliability_identity: Mapping[str, object] | None = None,
+        reserved_scope: object = None,
     ) -> ContourApplyReceipt:
         """Save and apply one common temperature and/or humidity target."""
 
@@ -1784,6 +1791,16 @@ class ClimateRuntime:
                     )
                     error.reserved_tablet_pre_dispatch_conflict = True  # type: ignore[attr-defined]
                     raise error
+            if (
+                external_reliability_identity is not None
+                and reserved_scope != _native_plan_resolved_scope(preflight)
+            ):
+                error = ClimateRuntimeUnavailable(
+                    "reserved tablet climate scope changed before dispatch"
+                )
+                error.home_target_pre_dispatch = True  # type: ignore[attr-defined]
+                error.reserved_tablet_pre_dispatch_conflict = True  # type: ignore[attr-defined]
+                raise error
             return await self._async_apply_native_contour_unlocked(
                 request.request_id,
                 CLIMATE_CONTOUR_ID,
@@ -4873,6 +4890,38 @@ def _native_plan_resolved_scope(plan: ContourApplyPlan) -> dict[str, object]:
         "device_ids": [device_id for row in rows for device_id in row["device_ids"]],
         "devices_by_room": rows,
     }
+
+
+def _valid_reserved_native_scope(scope: object) -> bool:
+    """Reject malformed private scopes before any native mutable boundary."""
+
+    if not isinstance(scope, Mapping) or set(scope) != {
+        "room_ids", "device_ids", "devices_by_room",
+    }:
+        return False
+    room_ids = scope.get("room_ids")
+    device_ids = scope.get("device_ids")
+    rows = scope.get("devices_by_room")
+    if not (
+        isinstance(room_ids, list)
+        and isinstance(device_ids, list)
+        and isinstance(rows, list)
+        and room_ids == sorted(room_ids)
+        and len(room_ids) == len(rows)
+        and all(isinstance(value, str) for value in room_ids + device_ids)
+    ):
+        return False
+    flattened: list[str] = []
+    for row, room_id in zip(rows, room_ids, strict=True):
+        if not isinstance(row, Mapping) or set(row) != {"room_id", "device_ids"}:
+            return False
+        values = row.get("device_ids")
+        if row.get("room_id") != room_id or not isinstance(values, list):
+            return False
+        if values != sorted(values) or any(not isinstance(value, str) for value in values):
+            return False
+        flattened.extend(values)
+    return flattened == device_ids and len(set(flattened)) == len(flattened)
 
 
 def _direct_reliability_request_fingerprint(

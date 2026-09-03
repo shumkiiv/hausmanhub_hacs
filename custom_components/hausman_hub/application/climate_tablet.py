@@ -2055,6 +2055,12 @@ class ClimateTabletService:
             self._require_reliability_health()
         reserved = getattr(self._runtime, "async_execute_reserved_tablet_action", None)
         if request.reliability_profile is not None and callable(reserved):
+            record = self._records_by_request.get(request.request_id)
+            action_snapshot = record.receipt.get("action_snapshot") if record else None
+            reserved_scope = (
+                action_snapshot.get("resolved_scope")
+                if isinstance(action_snapshot, Mapping) else None
+            )
             result = await reserved(
                 action=request.action,
                 room_id=request.room_id,
@@ -2067,6 +2073,7 @@ class ClimateTabletService:
                 tablet_request_fingerprint=request.fingerprint,
                 tablet_action=request.action,
                 tablet_parameters=dict(request.parameters),
+                reserved_scope=reserved_scope,
             )
             return result
         if request.action == "set_home_targets":
