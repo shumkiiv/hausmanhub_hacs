@@ -123,7 +123,7 @@ def test_manual_off_lifecycle_keeps_profile_blocked_until_timer_and_absence() ->
             "light.tambur_lamp", automatic=True, dry_run=False
         )
         assert released.allowed
-        assert coordinator.snapshot()["protections"][0]["state"] == "released"
+        assert coordinator.snapshot()["protections"] == []
 
     asyncio.run(exercise())
 
@@ -172,7 +172,7 @@ def test_repeated_off_extends_frozen_policy_and_manual_on_cancels_protection() -
         assert repeated["notBefore"] > first["notBefore"]
         assert repeated["revision"] == first["revision"] + 1
         await coordinator.async_note_state_transition("light.tambur_points", off, on, None)
-        assert coordinator.snapshot()["protections"][0]["state"] == "cancelled_by_manual_on"
+        assert coordinator.snapshot()["protections"] == []
 
     asyncio.run(exercise())
 
@@ -198,5 +198,56 @@ def test_settings_cas_duplicate_request_and_frozen_active_policy() -> None:
         )
         active = coordinator.snapshot()["protections"][0]
         assert active["effectivePolicy"]["releaseMode"] == "timer_and_absence"
+
+    asyncio.run(exercise())
+
+
+def test_frozen_scope_blocks_after_profile_removal_and_sensor_change() -> None:
+    async def exercise() -> None:
+        now = datetime(2026, 9, 3, 12, tzinfo=timezone.utc)
+        coordinator = ManualLightOffProtectionCoordinator(MemoryStore(), now=lambda: now)
+        await coordinator.async_load()
+        await coordinator.async_replace_settings("one", 0, _settings())
+        await coordinator.async_note_state_transition("light.tambur_points", SimpleNamespace(state="on"), SimpleNamespace(state="off"), None)
+        removed = _settings(); removed["profiles"] = []
+        await coordinator.async_replace_settings("two", 1, removed)
+        now += timedelta(days=1)
+        assert not (await coordinator.async_decide_entity("light.tambur_points", automatic=True, dry_run=False)).allowed
+
+    asyncio.run(exercise())
+
+
+def test_source_scope_and_completed_history_allow_repeated_lifecycles() -> None:
+    async def exercise() -> None:
+        now = datetime(2026, 9, 3, 12, tzinfo=timezone.utc)
+        settings = _settings()
+        settings["globalPolicy"]["protectedScope"] = "source"
+        settings["globalPolicy"]["releaseMode"] = "timer_only"
+        coordinator = ManualLightOffProtectionCoordinator(MemoryStore(), now=lambda: now)
+        await coordinator.async_load(); await coordinator.async_replace_settings("one", 0, settings)
+        on, off = SimpleNamespace(state="on"), SimpleNamespace(state="off")
+        await coordinator.async_note_state_transition("light.tambur_points", on, off, None)
+        assert not (await coordinator.async_decide_entity("light.tambur_points", automatic=True, dry_run=False)).allowed
+        assert (await coordinator.async_decide_entity("light.tambur_lamp", automatic=True, dry_run=False)).allowed
+        now += timedelta(minutes=10)
+        assert (await coordinator.async_decide_entity("light.tambur_points", automatic=True, dry_run=False)).allowed
+        await coordinator.async_note_state_transition("light.tambur_points", on, off, None)
+        assert not (await coordinator.async_decide_entity("light.tambur_points", automatic=True, dry_run=False)).allowed
+
+    asyncio.run(exercise())
+
+
+def test_snapshot_is_exact_get_contract_and_presence_clears_absence() -> None:
+    async def exercise() -> None:
+        now = datetime(2026, 9, 3, 12, tzinfo=timezone.utc)
+        coordinator = ManualLightOffProtectionCoordinator(MemoryStore(), now=lambda: now)
+        await coordinator.async_load(); await coordinator.async_replace_settings("one", 0, _settings())
+        await coordinator.async_note_state_transition("light.tambur_points", SimpleNamespace(state="on"), SimpleNamespace(state="off"), None)
+        await coordinator.async_note_state_transition("binary_sensor.tambur_presence", SimpleNamespace(state="on"), SimpleNamespace(state="off"), None)
+        await coordinator.async_note_state_transition("binary_sensor.tambur_presence", SimpleNamespace(state="off"), SimpleNamespace(state="unknown"), None)
+        assert coordinator.snapshot()["protections"][0]["absenceSince"] is None
+        snapshot = coordinator.snapshot()
+        assert set(snapshot) == {"contract", "revision", "updatedAt", "settings", "protections"}
+        assert snapshot["revision"] > 0 and len(snapshot["protections"]) <= 64
 
     asyncio.run(exercise())

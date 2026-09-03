@@ -122,25 +122,31 @@ class ManualLightOffProtectionCoordinator:
                     else:
                         self._sensor_states[entity_id] = (new, observed)
                     if new == "off":
-                        key = _profile_key(profile.room_id, profile.profile_id)
-                        record = self._protections.get(key)
+                        record = next((item for item in self._protections.values() if item["roomId"] == profile.room_id and item["profileId"] == profile.profile_id), None)
                         if record is not None:
                             updated = copy.deepcopy(record)
                             updated["absenceSince"] = _wire_time(observed)
                             updated["revision"] = int(record["revision"]) + 1
-                            self._protections[key] = updated
+                            record_key = next(key for key, item in self._protections.items() if item is record)
+                            self._protections[record_key] = updated
                             self._state_revision += 1
                             await self._save()
+                    else:
+                        for record_key, record in tuple(self._protections.items()):
+                            if record["roomId"] == profile.room_id and record["profileId"] == profile.profile_id and record["absenceSince"] is not None:
+                                updated = copy.deepcopy(record)
+                                updated["absenceSince"] = None
+                                updated["revision"] = int(record["revision"]) + 1
+                                self._protections[record_key] = updated
+                                self._state_revision += 1
+                                await self._save()
             if old == "on" and new == "off" and not _automatic(attribution):
                 profile = _profile_for_light(self._settings, entity_id)
                 if profile is not None:
                     await self._activate(profile, entity_id, now, attribution)
             elif old == "off" and new == "on" and not _automatic(attribution):
-                profile = _profile_for_light(self._settings, entity_id)
-                if profile is not None:
-                    key = _profile_key(profile.room_id, profile.profile_id)
-                    record = self._protections.get(key)
-                    if record is not None:
+                for key, record in tuple(self._protections.items()):
+                    if entity_id in record["lightIds"]:
                         updated = copy.deepcopy(record)
                         updated["state"] = ProtectionState.CANCELLED_BY_MANUAL_ON.value
                         updated["revision"] = int(record["revision"]) + 1
@@ -154,13 +160,19 @@ class ManualLightOffProtectionCoordinator:
                 return LightProtectionDecision(True)
             if self.unhealthy or not self._loaded:
                 return LightProtectionDecision(False, "manual_off_protection_unhealthy")
-            profile = _profile_for_light(self._settings, entity_id)
+            found = next(
+                ((key, item) for key, item in self._protections.items() if entity_id in item["lightIds"]),
+                None,
+            )
+            if found is None:
+                return LightProtectionDecision(True)
+            key, record = found
+            profile = next(
+                (item for item in self._settings.profiles if item.room_id == record["roomId"] and item.profile_id == record["profileId"] and (tuple(item.light_ids) == tuple(record["lightIds"]) or (record["effectivePolicy"]["protectedScope"] == "source" and entity_id in item.light_ids))),
+                None,
+            )
             if profile is None:
-                return LightProtectionDecision(True)
-            key = _profile_key(profile.room_id, profile.profile_id)
-            record = self._protections.get(key)
-            if record is None:
-                return LightProtectionDecision(True)
+                return LightProtectionDecision(False, "manual_off_protection_scope_unavailable", key)
             now = _utc(self._now())
             if _may_release(record, profile, self._sensor_states, now):
                 if not dry_run:
@@ -211,19 +223,22 @@ class ManualLightOffProtectionCoordinator:
             await self._complete(protection_id, updated, request_id=request_id)
             receipt = _receipt(request_id, "manual_release", int(updated["revision"]), protection=updated)
             self._receipts[request_id] = receipt
+            if len(self._receipts) > MAX_IDEMPOTENCY_RECEIPTS:
+                self._receipts.pop(next(iter(self._receipts)))
             await self._save()
             return copy.deepcopy(receipt)
 
     def snapshot(self) -> dict[str, object]:
         return {
-            "revision": self._settings_revision,
+            "contract": {"name": "hausman-hub-manual-light-off-protection", "version": 1},
+            "revision": self._state_revision,
+            "updatedAt": _wire_time(self._now()),
             "settings": self._settings.as_wire(),
-            "protections": copy.deepcopy([*self._protections.values(), *self._completed]),
-            "unhealthy": self.unhealthy,
+            "protections": copy.deepcopy(list(self._protections.values())),
         }
 
     async def _activate(self, profile, entity_id: str, now: datetime, attribution) -> None:
-        key = _profile_key(profile.room_id, profile.profile_id)
+        key = _profile_key(profile.room_id, profile.profile_id, entity_id)
         current = self._protections.get(key)
         if current is None:
             policy, source = resolve_manual_off_policy_with_source(
@@ -242,7 +257,7 @@ class ManualLightOffProtectionCoordinator:
         revision = int(current["revision"]) + 1 if current is not None else 0
         record = {
             "roomId": profile.room_id, "profileId": profile.profile_id,
-            "lightIds": list(profile.light_ids), "startedAt": _wire_time(now),
+            "lightIds": [entity_id] if policy.protected_scope.value == "source" else list(profile.light_ids), "startedAt": _wire_time(now),
             "notBefore": _wire_time(now.timestamp() + policy.minimum_interval_seconds),
             "absenceSince": None, "effectivePolicy": policy.as_wire(),
             "effectivePolicySource": source.value, "policyFingerprint": policy.fingerprint,
@@ -316,7 +331,7 @@ def valid_manual_light_off_protection_payload(value: object) -> bool:
             return False
         if not all(_valid_receipt(item) for item in value["receipts"]):
             return False
-        return len({_protection_key(item) for item in [*value["protections"], *value["completed"]]}) == len(value["protections"]) + len(value["completed"])
+        return len({_protection_key(item) for item in value["protections"]}) == len(value["protections"])
     except (KeyError, TypeError, ValueError, ManualLightOffProtectionViolation):
         return False
 
@@ -329,8 +344,8 @@ def _profile_for_light(settings, entity_id):
     return next((item for item in settings.profiles if entity_id in item.light_ids), None)
 
 
-def _profile_key(room_id: str, profile_id: str) -> str:
-    return f"{room_id}:{profile_id}"
+def _profile_key(room_id: str, profile_id: str, entity_id: str | None = None) -> str:
+    return f"{room_id}:{profile_id}" if entity_id is None else f"{room_id}:{profile_id}:{entity_id}"
 
 
 def _protection_key(value: Mapping[str, object]) -> str:
@@ -369,6 +384,8 @@ def _parse_time(value: object) -> datetime:
 def _may_release(record, profile, sensors, now: datetime) -> bool:
     policy = record["effectivePolicy"]
     timer = now >= _parse_time(record["notBefore"])
+    if policy["releaseMode"] == "timer_only":
+        return timer
     if not profile.presence_sensor_ids:
         if policy["noSensorFallback"] == "manual_release":
             return False
@@ -381,8 +398,7 @@ def _may_release(record, profile, sensors, now: datetime) -> bool:
                 return False
             absence_times.append(state[1])
         absence = bool(absence_times) and (now - max(absence_times)).total_seconds() >= policy["stableAbsenceSeconds"]
-    mode = policy["releaseMode"]
-    return timer if mode == "timer_only" else absence if mode == "absence_only" else timer and absence
+    return absence if policy["releaseMode"] == "absence_only" else timer and absence
 
 
 def _valid_protection(value: object) -> bool:
@@ -404,7 +420,15 @@ def _valid_receipt(value: object) -> bool:
         return False
     if set(receipt) - {"contract", "requestId", "operation", "accepted", "confirmed", "status", "revision", "settings", "protection"}:
         return False
-    return receipt.get("requestId") == request_id and receipt.get("operation") in {"settings_updated", "manual_release"} and receipt.get("status") == "confirmed" and receipt.get("accepted") is True and receipt.get("confirmed") is True and type(receipt.get("revision")) is int
+    if receipt.get("contract") != {"name": "hausman-hub-manual-light-off-protection-command-receipt", "version": 1} or receipt.get("requestId") != request_id or receipt.get("status") != "confirmed" or receipt.get("accepted") is not True or receipt.get("confirmed") is not True or type(receipt.get("revision")) is not int or receipt["revision"] < 0:
+        return False
+    if receipt.get("operation") == "settings_updated":
+        try: parse_settings(receipt["settings"])
+        except (KeyError, TypeError, ValueError, ManualLightOffProtectionViolation): return False
+        return "protection" not in receipt
+    if receipt.get("operation") == "manual_release":
+        return "settings" not in receipt and _valid_protection(receipt.get("protection"))
+    return False
 
 
 def _receipt(request_id: str, operation: str, revision: int, *, settings=None, protection=None) -> dict[str, object]:
