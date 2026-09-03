@@ -742,8 +742,21 @@ class LocalSummaryAccessTest(unittest.TestCase):
         first = asyncio.run(self.hass.http.dispatch("POST", FakeJsonRequest("127.0.0.1", admin, release.url, payload)))
         saves_after_first_release = store.saves
         again = asyncio.run(self.hass.http.dispatch("POST", FakeJsonRequest("127.0.0.1", admin, release.url, payload)))
+        reverse = asyncio.run(self.hass.http.dispatch(
+            "PUT",
+            FakeJsonRequest(
+                "127.0.0.1",
+                admin,
+                view.url,
+                self._manual_settings_request("release.replay"),
+            ),
+        ))
         self.assertEqual(200, first.status)
         self.assertEqual(first.payload, again.payload)
+        self.assertEqual(saves_after_first_release, store.saves)
+        self.assertEqual(409, reverse.status)
+        self.assertEqual("conflict", reverse.payload["code"])
+        self.assertEqual("no-store", reverse.headers["Cache-Control"])
         self.assertEqual(saves_after_first_release, store.saves)
 
     def test_manual_protection_release_request_id_conflicts_for_every_payload_change(self) -> None:
