@@ -1,4 +1,4 @@
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.206";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.207";
 
 /** Tablet-style cyclic Hero navigation without a visible native scrollbar. */
 export function createHeroRoomNavigation(panel, rooms, deps) {

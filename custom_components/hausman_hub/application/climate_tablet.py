@@ -9,6 +9,7 @@ from datetime import datetime
 import hashlib
 import hmac
 import json
+import logging
 import re
 import secrets
 import time
@@ -21,6 +22,9 @@ from ..climate_storage_errors import ClimateOperationRevisionConflict
 from .contour_apply import ContourApplyReceipt, ContourApplyStatus, ContourApplyViolation
 from .contour_override import TemporaryTemperatureViolation
 from .home_climate_targets import HomeClimateTargetsViolation
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 CLIMATE_RUNTIME_CONTRACT_NAME = "hausman-hub-climate-runtime"
@@ -1589,6 +1593,10 @@ class ClimateTabletService:
                         resulting_control_revision=self._control_revision,
                     )
             except Exception as error:
+                _LOGGER.exception(
+                    "climate tablet post-dispatch processing failed: %s",
+                    type(error).__name__,
+                )
                 if (
                     request.reliability_profile == "climate_reliability_v1"
                     and (
