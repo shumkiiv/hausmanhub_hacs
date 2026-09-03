@@ -12,6 +12,11 @@
   `27°C`; это внешний read-back gap, а не отказ Hausman Hub. До публикации и
   установки нужны полный gate, commit, Release, backup, config check и restart.
 
+- 2026-09-03: GitHub Actions для HACS больше не падает до exhaustive browser
+  gate из-за отсутствующего каталога артефактов. Workflow передаёт закрытый
+  временный каталог runner через `QA_ARTIFACT_ROOT`; регрессионный тест прошёл
+  красную и зелёную стадии. Product files релиза `1.52.206` не изменены.
+
 - 2026-09-02: после живого воспроизведения планшетной цели подготовлен hotfix
   HACS `1.52.202`. Причина: локальный admin OAuth имел доступ к climate runtime
   и typed action, но `GET /capabilities` ошибочно принимал только tablet-группу.

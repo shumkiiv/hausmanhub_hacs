@@ -40,6 +40,8 @@ jobs:
       - name: Проверить branch coverage критического runtime
         run: python3 tools/check_critical_coverage.py
       - name: Проверить интерфейс в браузере
+        env:
+          QA_ARTIFACT_ROOT: ${{ runner.temp }}/hausman-browser-gate
         run: npm run test:browser
       - name: Сохранить отчёт browser-gate при ошибке
         if: failure()

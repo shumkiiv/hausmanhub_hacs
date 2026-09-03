@@ -45,6 +45,21 @@ class GitHubLocalQualityWorkflowTest(unittest.TestCase):
         self.assertNotIn("curl", workflow)
         self.assertNotIn("wget", workflow)
 
+    def test_browser_gate_writes_runtime_evidence_to_runner_temp(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "QA_ARTIFACT_ROOT: ${{ runner.temp }}/hausman-browser-gate",
+            workflow,
+        )
+        self.assertIn(
+            "- name: Проверить интерфейс в браузере\n"
+            "        env:\n"
+            "          QA_ARTIFACT_ROOT: ${{ runner.temp }}/hausman-browser-gate\n"
+            "        run: npm run test:browser",
+            workflow,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
