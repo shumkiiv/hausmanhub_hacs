@@ -1090,6 +1090,22 @@ class ScenarioExecutor:
         forbid_toggle = automatic_source or (
             definition.execution_backend is ScenarioExecutionBackend.NODE_RED
         )
+        protection_decisions: dict[str, Any] = {}
+        protected_light_action_ids: frozenset[str] = frozenset()
+        if automatic_source and self._manual_light_off_protection is not None:
+            for action in actions:
+                if not self._is_light_activation(action, scenario_text):
+                    continue
+                decision = await self._manual_light_off_protection.async_decide(
+                    action,
+                    self._catalog,
+                    automatic=True,
+                    dry_run=dry_run,
+                    trigger_context=trigger_context,
+                )
+                protection_decisions[action.id] = decision
+            if any(not decision.allowed for decision in protection_decisions.values()):
+                protected_light_action_ids = light_priority.light_action_ids
         if (
             not dry_run
             and automatic_source
@@ -1248,7 +1264,23 @@ class ScenarioExecutor:
                     obligations = self._light_safety_obligations
                     if obligations is None or not await obligations.async_is_current(target_id, expected):
                         raise ReassertEvidenceChanged("delayed off authority changed before dispatch")
-            if (
+            if action.id in protected_light_action_ids:
+                receipt = await self._execute_action(
+                    action,
+                    run_id,
+                    next_visited,
+                    dry_run=dry_run,
+                    trigger_context=trigger_context,
+                    forbid_toggle=forbid_toggle,
+                    manual_off_protection_decision=next(
+                        decision
+                        for decision in protection_decisions.values()
+                        if not decision.allowed
+                    ),
+                    lighting_scenario_text=scenario_text,
+                    power_dependencies=power_dependencies,
+                )
+            elif (
                 action.id in light_priority.light_action_ids
                 and action.target_id in light_priority.guarded_target_ids
             ):
@@ -1356,6 +1388,9 @@ class ScenarioExecutor:
                             authority_lock_held=True,
                             forbid_toggle=forbid_toggle,
                             before_dispatch=before_dispatch,
+                            manual_off_protection_decision=protection_decisions.get(action.id),
+                            lighting_scenario_text=scenario_text,
+                            power_dependencies=power_dependencies,
                         )
             else:
                 receipt = await self._execute_action(
@@ -1379,6 +1414,9 @@ class ScenarioExecutor:
                     trigger_context=trigger_context,
                     forbid_toggle=forbid_toggle,
                     before_dispatch=before_dispatch,
+                    manual_off_protection_decision=protection_decisions.get(action.id),
+                    lighting_scenario_text=scenario_text,
+                    power_dependencies=power_dependencies,
                 )
             receipts.append(receipt)
             if receipt.get("status") == "failed":
@@ -1877,6 +1915,9 @@ class ScenarioExecutor:
         authority_lock_held: bool = False,
         forbid_toggle: bool = False,
         before_dispatch: Callable[[], Awaitable[None]] | None = None,
+        manual_off_protection_decision: Any | None = None,
+        lighting_scenario_text: str = "",
+        power_dependencies: Mapping[str, DevicePowerDependency] | None = None,
     ) -> dict[str, Any]:
         base = {
             "action_id": action.id,
@@ -1909,6 +1950,9 @@ class ScenarioExecutor:
                     forbid_toggle=forbid_toggle,
                     before_dispatch=before_dispatch,
                     protection_trigger_context=trigger_context,
+                    manual_off_protection_decision=manual_off_protection_decision,
+                    lighting_scenario_text=lighting_scenario_text,
+                    power_dependencies=power_dependencies,
                 )
             if action.type == ScenarioActionType.DELAY:
                 if not dry_run:
@@ -1932,6 +1976,35 @@ class ScenarioExecutor:
             return {**base, "status": "failed", "error": str(exc)}
 
         return {**base, "status": "failed", "error": "unknown action type"}
+
+    def _is_light_activation(self, action: ScenarioAction, scenario_text: str) -> bool:
+        """Use the priority classifier for lights, including approved relays."""
+
+        if not self._light_priority.is_lighting_action(
+            action, self._catalog, scenario_text=scenario_text
+        ):
+            return False
+        device = self._catalog.device(action.target_id or "")
+        allowed = device.action(action.action_id or "") if device is not None else None
+        return allowed is not None and allowed.service == "turn_on"
+
+    def _effective_trace_state(
+        self,
+        entity_id: str,
+        dependencies: Mapping[str, DevicePowerDependency],
+    ) -> str:
+        power_source_ids = {
+            dependency.power_source_entity_id for dependency in dependencies.values()
+        }
+
+        def read_state(requested_entity_id: str) -> str | None:
+            state = self._entity_state_object(requested_entity_id)
+            if requested_entity_id in power_source_ids:
+                return _trusted_power_state(state)
+            return None if state is None else str(getattr(state, "state", "unknown"))
+
+        state, _status = effective_device_state(entity_id, dependencies, read_state)
+        return state
 
     async def _device_action_receipt(
         self,
@@ -1961,6 +2034,9 @@ class ScenarioExecutor:
         command_request_id: str | None = None,
         forbid_toggle: bool = False,
         protection_trigger_context: Mapping[str, object] | None = None,
+        manual_off_protection_decision: Any | None = None,
+        lighting_scenario_text: str = "",
+        power_dependencies: Mapping[str, DevicePowerDependency] | None = None,
     ) -> dict[str, Any]:
         if action.target_id is None or action.action_id is None:
             return {
@@ -1995,43 +2071,41 @@ class ScenarioExecutor:
                 "status": "failed",
                 "error": "dispatch_descriptor_changed",
             }
+        decision = manual_off_protection_decision
         if (
-            automatic
-            and allowed.domain == "light"
-            and allowed.service == "turn_on"
+            decision is None
+            and automatic
+            and self._is_light_activation(action, lighting_scenario_text)
             and self._manual_light_off_protection is not None
         ):
             decision = await self._manual_light_off_protection.async_decide(
-                action,
-                self._catalog,
-                automatic=True,
-                dry_run=dry_run,
+                action, self._catalog, automatic=True, dry_run=dry_run,
                 trigger_context=protection_trigger_context,
             )
-            if not decision.allowed:
-                protection = decision.as_payload()
-                protection["trigger"] = (
-                    dict(protection_trigger_context)
-                    if isinstance(protection_trigger_context, Mapping)
-                    else None
-                )
-                protection["effectiveState"] = str(
-                    getattr(self._hass.states.get(device.entity_id), "state", "unknown")
-                )
-                return {
-                    **base,
-                    "status": "completed",
-                    "target_id": action.target_id,
-                    "domain": allowed.domain,
-                    "service": allowed.service,
-                    "entity_id": device.entity_id,
-                    "reason": "manual_off_protection_active",
-                    "physicalAttempted": False,
-                    "protection": protection,
-                    "skipped": True,
-                    "confirmed": None if dry_run else True,
-                    **({"planned": True} if dry_run else {}),
-                }
+        if decision is not None and not decision.allowed:
+            protection = decision.as_payload()
+            protection["trigger"] = (
+                dict(protection_trigger_context)
+                if isinstance(protection_trigger_context, Mapping)
+                else None
+            )
+            protection["effectiveState"] = self._effective_trace_state(
+                device.entity_id, power_dependencies or {}
+            )
+            return {
+                **base,
+                "status": "completed",
+                "target_id": action.target_id,
+                "domain": allowed.domain,
+                "service": allowed.service,
+                "entity_id": device.entity_id,
+                "reason": "manual_off_protection_active",
+                "physicalAttempted": False,
+                "protection": protection,
+                "skipped": True,
+                "confirmed": None if dry_run else True,
+                **({"planned": True} if dry_run else {}),
+            }
         if forbid_toggle and action.action_id == "toggle":
             observed_state = str(
                 getattr(self._hass.states.get(device.entity_id), "state", "unknown")

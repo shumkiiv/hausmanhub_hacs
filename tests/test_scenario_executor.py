@@ -26,6 +26,9 @@ from custom_components.hausman_hub.application.operation_journal import (
 from custom_components.hausman_hub.application.manual_light_off_protection import (
     ManualLightOffProtectionCoordinator,
 )
+from custom_components.hausman_hub.domain.manual_light_off_protection import (
+    LightProtectionDecision,
+)
 from custom_components.hausman_hub.application.device_action_receipts import (
     evidence_snapshot,
 )
@@ -433,6 +436,84 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("manual_off_protection_active", result["receipts"][0]["reason"])
         self.assertFalse(result["receipts"][0]["physicalAttempted"])
         self.assertEqual("living_room_light", result["receipts"][0]["protection"]["profileId"])
+        self.hass.services.async_call.assert_not_awaited()
+
+    async def test_manual_off_protection_uses_light_role_for_switch_relay(self) -> None:
+        class BlockingProtection:
+            async def async_decide(self, action, catalog, **_kwargs):
+                device = catalog.device(action.target_id)
+                return LightProtectionDecision(
+                    device.entity_id != "switch.hall_light",
+                    "manual_off_protection_active",
+                    "protection-1",
+                )
+
+        self.catalog._devices["relay_light"] = ScenarioDeviceEntry(
+            target_id="relay_light",
+            name="Световой relay",
+            entity_id="switch.hall_light",
+            actions=(ScenarioDeviceAction("turn_on", "On", "switch", "turn_on", frozenset()),),
+        )
+        self.catalog._devices["outlet"] = ScenarioDeviceEntry(
+            target_id="outlet",
+            name="Розетка",
+            entity_id="switch.outlet",
+            actions=(ScenarioDeviceAction("turn_on", "On", "switch", "turn_on", frozenset()),),
+        )
+        self.hass.state_values["switch.hall_light"] = SimpleNamespace(state="off", attributes={})
+        self.hass.state_values["switch.outlet"] = SimpleNamespace(state="off", attributes={})
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            manual_light_off_protection=BlockingProtection(),
+            readback_window_seconds=0.02,
+            readback_interval_seconds=0.01,
+        )
+
+        protected = await executor.async_execute(
+            _definition((ScenarioAction(id="relay_on", type=ScenarioActionType.DEVICE_ACTION, target_id="relay_light", action_id="turn_on"),)),
+            "switch-guard.1",
+            scenario_id="hall_light",
+            scenario_title="Свет",
+        )
+
+        self.assertEqual("manual_off_protection_active", protected["receipts"][0]["reason"])
+        self.hass.services.async_call.assert_not_awaited()
+
+    async def test_protected_source_substitution_skips_earlier_automatic_off(self) -> None:
+        class BlockingProtection:
+            async def async_decide(self, action, catalog, **_kwargs):
+                device = catalog.device(action.target_id)
+                return LightProtectionDecision(
+                    device.entity_id != "light.alt", "manual_off_protection_active", "protection-1"
+                )
+
+        self.catalog._devices["device_alt"] = ScenarioDeviceEntry(
+            target_id="device_alt",
+            name="Alternate light",
+            entity_id="light.alt",
+            actions=(ScenarioDeviceAction("turn_on", "On", "light", "turn_on", frozenset()),),
+        )
+        self.hass.state_values["light.alt"] = SimpleNamespace(state="off", attributes={})
+        priority = LightAutomationPriority()
+        priority._owned_revisions["light.living_room"] = None  # noqa: SLF001
+        priority._owned_records["light.living_room"] = {"expiresAt": 9_999_999_999_999}  # noqa: SLF001
+        executor = ScenarioExecutor(
+            self.hass, self.catalog, self.executor._run_callback,
+            light_priority=priority, manual_light_off_protection=BlockingProtection(),
+            readback_window_seconds=0.02, readback_interval_seconds=0.01,
+        )
+
+        result = await executor.async_execute(
+            _definition((
+                ScenarioAction(id="old_off", type=ScenarioActionType.DEVICE_ACTION, target_id="device_1", action_id="turn_off"),
+                ScenarioAction(id="new_on", type=ScenarioActionType.DEVICE_ACTION, target_id="device_alt", action_id="turn_on"),
+            )),
+            "substitution-guard.1", scenario_id="source_substitution",
+        )
+
+        self.assertEqual(["manual_off_protection_active"] * 2, [item["reason"] for item in result["receipts"]])
         self.hass.services.async_call.assert_not_awaited()
 
     async def test_device_action_calls_service(self) -> None:

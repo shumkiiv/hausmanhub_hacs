@@ -230,7 +230,18 @@
         "target_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
         "outcome": {"enum": ["completed", "skipped", "failed"]},
         "confirmed": {"type": ["boolean", "null"]},
-        "reason": {"type": ["string", "null"], "maxLength": 256}
+        "reason": {"type": ["string", "null"], "maxLength": 256},
+        "manualOffProtection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["decision", "reason"],
+          "properties": {
+            "decision": {"const": "blocked"},
+            "reason": {"const": "manual_off_protection_active"},
+            "remainingSeconds": {"type": "integer", "minimum": 0},
+            "effectiveState": {"type": "string", "maxLength": 64}
+          }
+        }
       }
     }
   }
