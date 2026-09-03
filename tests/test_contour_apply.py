@@ -57,7 +57,9 @@ from custom_components.hausman_hub.domain.climate import (
 from custom_components.hausman_hub.domain.climate_bridge import ClimateControlMode
 from custom_components.hausman_hub.domain.climate_observation import (
     ClimateDataStatus,
+    ClimateDeviceAvailability,
     ClimateDeviceActivity,
+    ClimatePhysicalFeedback,
     ClimateObservationSnapshot,
     ClimateRoomMode,
     ClimateTemperatureQuality,
@@ -144,6 +146,39 @@ def _native_inputs() -> tuple[
 
 
 class NativeClimateApplicationPlannerTest(unittest.TestCase):
+    def test_explicit_target_defers_a_structurally_valid_offline_owner(self) -> None:
+        """An offline managed owner is retained, saved and never called."""
+        registry, contour, observation = _native_inputs()
+        observation = replace(
+            observation,
+            devices=tuple(
+                replace(
+                    device, availability=ClimateDeviceAvailability.UNAVAILABLE,
+                    activity=ClimateDeviceActivity.UNKNOWN,
+                    current_target_temperature=None,
+                    current_target_humidity=None,
+                    physical_feedback=ClimatePhysicalFeedback.UNKNOWN,
+                )
+                if device.device_id == "living_air_conditioner" else device
+                for device in observation.devices
+            ),
+        )
+
+        plan = build_climate_application_plan(
+            contour, registry, ClimateControlMode.MANAGED, observation,
+            fingerprint="f" * 64, target_room_ids=("living",),
+            desired_state_changes=ClimateDesiredStateChanges(1, 0, 0),
+            explicit_temperature_targets={"living": 25.5},
+        )
+
+        self.assertTrue(plan.preflight_permitted)
+        self.assertEqual((), plan.strict_calls)
+        self.assertEqual((), plan.denial_reasons)
+        self.assertEqual(
+            ClimateApplicationGateStatus.DEFERRED,
+            plan.device_gates[0].status,
+        )
+
     def test_plans_complete_whole_contour_after_every_room_passes_preflight(self) -> None:
         registry, contour, observation = _native_inputs()
 

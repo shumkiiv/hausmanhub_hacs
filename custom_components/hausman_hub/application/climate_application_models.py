@@ -21,6 +21,8 @@ class ClimateApplicationViolation(ValueError):
 class ClimateApplicationGateStatus(StrEnum):
     READY = "ready"
     ALIGNED = "aligned"
+    DEFERRED = "deferred"
+    MANUAL = "manual"
     DENIED = "denied"
 
 
@@ -101,6 +103,8 @@ class ClimateApplicationRoomGate:
                     == (ClimateApplicationDenialReason.ALREADY_IN_SYNC,)
                     and not self.strict_calls
                 )
+            case ClimateApplicationGateStatus.DEFERRED | ClimateApplicationGateStatus.MANUAL:
+                valid = not self.reasons and not self.strict_calls
             case ClimateApplicationGateStatus.DENIED:
                 valid = bool(self.reasons) and not self.strict_calls
             case unreachable:
@@ -137,6 +141,11 @@ class ClimateApplicationDeviceGate:
             valid = not self.reasons and bool(self.strict_calls)
         elif self.status is ClimateApplicationGateStatus.ALIGNED:
             valid = self.reasons == (ClimateApplicationDenialReason.ALREADY_IN_SYNC,) and not self.strict_calls
+        elif self.status in {
+            ClimateApplicationGateStatus.DEFERRED,
+            ClimateApplicationGateStatus.MANUAL,
+        }:
+            valid = not self.reasons and not self.strict_calls
         else:
             valid = bool(self.reasons) and not self.strict_calls
         if not valid:

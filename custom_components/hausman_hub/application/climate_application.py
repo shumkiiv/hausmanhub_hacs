@@ -22,7 +22,10 @@ from ..domain.climate_ha_calls import (
     ClimateHaServiceCall,
 )
 from ..domain.climate_isolation import ClimateIsolationSnapshot, ClimateRoomIsolationStatus
-from ..domain.climate_observation import ClimateObservationSnapshot
+from ..domain.climate_observation import (
+    ClimateDeviceAvailability,
+    ClimateObservationSnapshot,
+)
 from ..domain.contours import ContourDefinition, ContourMode
 from .climate_application_models import (
     ClimateApplicationDenialReason,
@@ -196,10 +199,25 @@ def _gate_explicit_device(room_id, device, registry, observation, room_gate, tem
     # latter owns contour mode, managed runtime, membership, fresh observation,
     # isolation and comparison checks.  Only a denied gate contributes reasons:
     # an aligned room may still have another physical owner that needs a call.
-    reasons: list[ClimateApplicationDenialReason] = list(
+    observed = observation.device(device.device_id)
+    # A selected offline owner makes its room projection not ready.  An
+    # explicit target retains this structurally valid owner for a durable,
+    # terminal no-call disposition instead of treating it as an unsafe gap.
+    inherited = (
         room_gate.reasons
         if room_gate.status is ClimateApplicationGateStatus.DENIED
         else ()
+    )
+    reasons: list[ClimateApplicationDenialReason] = list(
+        reason for reason in inherited
+        if not (
+            reason in {
+                ClimateApplicationDenialReason.ROOM_NOT_READY,
+                ClimateApplicationDenialReason.ROOM_NOT_COMPARABLE,
+            }
+            and observed is not None
+            and observed.availability is ClimateDeviceAvailability.UNAVAILABLE
+        )
     )
     if device.control_scope is not ClimateControlScope.MANAGED or device.control_owner is not ClimateControlOwner.CLIMATE_CORE:
         reasons.append(ClimateApplicationDenialReason.ACTUATOR_NOT_MANAGED)
@@ -230,6 +248,10 @@ def _gate_explicit_device(room_id, device, registry, observation, room_gate, tem
         humidity_owner and not valid_humidity_owner
     ):
         reasons.append(ClimateApplicationDenialReason.TRANSLATION_INCOMPLETE)
+    if not reasons and observed is not None and observed.availability is ClimateDeviceAvailability.UNAVAILABLE:
+        return ClimateApplicationDeviceGate(
+            room_id, device.device_id, ClimateApplicationGateStatus.DEFERRED, (), ()
+        )
     if not reasons:
         calls = (
             _explicit_humidity_calls_if_complete((device,), observation, humidity)
@@ -262,6 +284,13 @@ def _aggregate_explicit_room_gates(target_ids, device_gates):
             result.append(ClimateApplicationRoomGate(room_id, ClimateApplicationGateStatus.DENIED, denials, ()))
             continue
         calls = tuple(call for gate in gates if gate.status is ClimateApplicationGateStatus.READY for call in gate.strict_calls)
+        dispositions = {gate.status for gate in gates}
+        if not calls and ClimateApplicationGateStatus.DEFERRED in dispositions:
+            result.append(ClimateApplicationRoomGate(room_id, ClimateApplicationGateStatus.DEFERRED, (), ()))
+            continue
+        if not calls and ClimateApplicationGateStatus.MANUAL in dispositions:
+            result.append(ClimateApplicationRoomGate(room_id, ClimateApplicationGateStatus.MANUAL, (), ()))
+            continue
         result.append(ClimateApplicationRoomGate(room_id,
             ClimateApplicationGateStatus.READY if calls else ClimateApplicationGateStatus.ALIGNED,
             () if calls else (ClimateApplicationDenialReason.ALREADY_IN_SYNC,), calls))
