@@ -1666,8 +1666,8 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("saved_for_manual_device", receipt["intent"]["status"])
         self.assertEqual(1, len(contour_store.saved))
         self.assertEqual("manual", manual["status"])
-        self.assertEqual("manual_user_excluded", manual["reason"])
-        self.assertEqual("manual_user_excluded", manual["message_code"])
+        self.assertEqual("user_excluded", manual["reason"])
+        self.assertEqual("manual_excluded", manual["message_code"])
         self.assertTrue(manual["message"])
         self.assertEqual((0, 0), (manual["command_count"], manual["accepted_count"]))
         self.assertNotIn("execution_state", manual)
@@ -1719,6 +1719,78 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
                 "parameters": {"target_temperature": 25.0},
             })
         self.assertEqual(before_saves, len(contour_store.saved))
+
+    async def test_reserved_home_target_preserves_real_external_off_owner_across_restart(self) -> None:
+        """An external shutdown remains distinct from a user exclusion in a frozen receipt."""
+        runtime, store, contour_store, executor = native_home_target_runtime(
+            include_humidifier=False,
+        )
+        await runtime.async_start()
+        await runtime.async_set_device_mode("living", "living_radiator", "manual")
+        attribution = next(
+            item
+            for item in runtime._manual_memory.attributions
+            if item.device_id == "living_radiator"
+        )
+        runtime._manual_memory = replace(
+            runtime._manual_memory,
+            attributions=(replace(attribution, reason="external_off"),),
+        )
+        await runtime._async_save_manual(runtime._manual_memory)
+        service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await service.async_load()
+        request = {
+            "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+            "request_id": "tablet.climate.external-off-owner",
+            "correlation_id": "corr.external-off-owner",
+            "expected_state_revision": 0, "expected_control_revision": 0,
+            "reliability_profile": "climate_reliability_v1", "action": "set_home_targets",
+            "room_id": None, "parameters": {"target_temperature": 25.5},
+        }
+
+        receipt = await service.async_execute(request)
+        leaves = receipt["outcomes"]["rooms"]["living"]["devices"]
+        contract_validator("climate-operation-receipt.schema.json").validate(receipt)
+        external_off = leaves["living_radiator"]
+        self.assertEqual("partial", receipt["status"])
+        self.assertTrue(receipt["accepted"])
+        self.assertTrue(receipt["final"])
+        self.assertEqual("saved_for_manual_device", receipt["intent"]["status"])
+        self.assertEqual("manual", external_off["status"])
+        self.assertEqual("external_off", external_off["reason"])
+        self.assertEqual("external_off", external_off["message_code"])
+        self.assertEqual("Устройство выключено вручную и исключено из контура.", external_off["message"])
+        self.assertEqual((0, 0), (external_off["command_count"], external_off["accepted_count"]))
+        self.assertNotIn("execution_state", external_off)
+        automatic = leaves["living_air_conditioner"]
+        self.assertIn(automatic.get("execution_state"), {"applied", "already_in_sync"})
+        self.assertEqual(
+            (1, 1) if automatic["execution_state"] == "applied" else (0, 0),
+            (automatic["command_count"], automatic["accepted_count"]),
+        )
+        self.assertNotIn("climate.living_radiator", [
+            call.entity_id for batch in executor.batches for call in batch
+        ])
+
+        restarted_runtime = ClimateRuntime(
+            entry_id="entry", configuration=runtime.configuration,
+            registry_store=runtime._registry_store, contour_store=contour_store,
+            strict_ha_call_executor=executor, ha_state_view=runtime._ha_state_view,
+            operation_id_factory=lambda: "d" * 32, now_ms=lambda: 1784280005000,
+            direct_control_store=store,
+        )
+        await restarted_runtime.async_start()
+        restarted = ClimateTabletService(
+            restarted_runtime, store, now_ms=lambda: 1784280005000,
+        )
+        await restarted.async_load()
+        batches_before_duplicate = len(executor.batches)
+        duplicate = await restarted.async_execute(request)
+        contract_validator("climate-operation-receipt.schema.json").validate(duplicate)
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(receipt["operation_id"], duplicate["operation_id"])
+        self.assertEqual(receipt, {**duplicate, "duplicate": False})
+        self.assertEqual(batches_before_duplicate, len(executor.batches))
 
     async def test_reserved_home_target_marks_every_manual_room_leaf_terminal_without_dispatch(self) -> None:
         """A room-level manual choice owns every selected actuator, even offline ones."""

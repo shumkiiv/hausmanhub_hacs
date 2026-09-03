@@ -1620,6 +1620,19 @@ class ClimateRuntime:
         )
         return frozenset(manual)
 
+    def _manual_target_device_reasons(self, contour: object) -> dict[str, str]:
+        """Return bounded durable reasons for manually excluded target owners."""
+
+        manual_ids = self._effective_manual_target_device_ids(contour)
+        return {
+            attribution.device_id: attribution.reason
+            for attribution in self._manual_memory.attributions
+            if (
+                attribution.device_id in manual_ids
+                and attribution.reason in {"user_excluded", "external_off"}
+            )
+        }
+
     async def async_set_device_mode(
         self,
         room_id: object,
@@ -1801,6 +1814,9 @@ class ClimateRuntime:
                     desired_state_changes=desired_state_changes,
                     manual_device_ids=self._effective_manual_target_device_ids(execution_contour),
                 )
+                manual_device_reasons = self._manual_target_device_reasons(
+                    execution_contour,
+                )
                 if not preflight.native_plan.preflight_permitted:
                     raise ClimateRuntimeUnavailable("home climate target scope is unavailable")
                 if preflight.strict_calls and self._strict_ha_call_executor is None:
@@ -1841,7 +1857,9 @@ class ClimateRuntime:
                 raise error
             if (
                 external_reliability_identity is not None
-                and reserved_plan_fingerprint != _native_home_target_plan_fingerprint(preflight)
+                and reserved_plan_fingerprint != _native_home_target_plan_fingerprint(
+                    preflight, manual_device_reasons,
+                )
             ):
                 error = ClimateRuntimeUnavailable("reserved tablet climate plan changed before dispatch")
                 error.home_target_pre_dispatch = True  # type: ignore[attr-defined]
@@ -1862,6 +1880,7 @@ class ClimateRuntime:
                 preflight_observation=observation,
                 contour_to_save=updated,
                 preserve_manual_scope=True,
+                manual_device_reasons=manual_device_reasons,
             )
 
     async def async_preflight_home_climate_targets(
@@ -1899,11 +1918,19 @@ class ClimateRuntime:
                 desired_state_changes=changes,
                 manual_device_ids=self._effective_manual_target_device_ids(execution_contour),
             )
+            manual_device_reasons = self._manual_target_device_reasons(
+                execution_contour,
+            )
             if not plan.native_plan.preflight_permitted:
                 raise ClimateRuntimeUnavailable("home climate target scope is unavailable")
             if plan.strict_calls and self._strict_ha_call_executor is None:
                 raise ClimateRuntimeUnavailable("climate executor is unavailable")
-            return {"resolved_scope": _native_plan_resolved_scope(plan), "plan_fingerprint": _native_home_target_plan_fingerprint(plan)}
+            return {
+                "resolved_scope": _native_plan_resolved_scope(plan),
+                "plan_fingerprint": _native_home_target_plan_fingerprint(
+                    plan, manual_device_reasons,
+                ),
+            }
 
     async def async_room_humidity_target(
         self, *, request_id: str, room_id: str, target_humidity: int
@@ -2277,6 +2304,7 @@ class ClimateRuntime:
         preflight_observation: ClimateObservationSnapshot | None = None,
         contour_to_save: ContourRegistry | None = None,
         preserve_manual_scope: bool = False,
+        manual_device_reasons: Mapping[str, str] | None = None,
     ) -> ContourApplyReceipt:
         self._require_native_contour_apply_mode()
         source_contour = (
@@ -2371,6 +2399,7 @@ class ClimateRuntime:
                     ),
                     resulting_control_revision=resulting_control_revision,
                     external_reliability_identity=external_reliability_identity,
+                    manual_device_reasons=manual_device_reasons,
                 )
                 if getattr(reliability_request, "reliability_profile", None)
                 == "climate_reliability_v1" else None
@@ -4652,6 +4681,7 @@ def _contour_reliability_metadata(
     expected_control_revision: int,
     resulting_control_revision: int | None = None,
     external_reliability_identity: Mapping[str, object] | None = None,
+    manual_device_reasons: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     """Freeze the public scope and desired targets before first dispatch."""
 
@@ -4886,10 +4916,27 @@ def _contour_reliability_metadata(
         for gate in plan.native_plan.device_gates
         if gate.status.value in {"deferred", "manual"}
     }
+    bounded_manual_reasons = {
+        device_id: reason
+        for device_id, reason in (manual_device_reasons or {}).items()
+        if (
+            device_id in device_ids
+            and dispositions.get(device_id) == "manual"
+            and reason in {"user_excluded", "external_off"}
+        )
+    }
+
+    def manual_leaf_state(device_id: str) -> str:
+        return (
+            "manual_external_off"
+            if bounded_manual_reasons.get(device_id) == "external_off"
+            else "manual_user_excluded"
+        )
+
     leaf_ledger = {
         device_id: (
             "deferred_offline" if dispositions.get(device_id) == "deferred"
-            else "manual_user_excluded" if dispositions.get(device_id) == "manual"
+            else manual_leaf_state(device_id) if dispositions.get(device_id) == "manual"
             else "pending_dispatch"
         )
         for device_id in device_ids
@@ -4918,7 +4965,7 @@ def _contour_reliability_metadata(
             device_id: (
                 "deferred_offline"
                 if dispositions.get(device_id) == "deferred"
-                else "manual_user_excluded"
+                else manual_leaf_state(device_id)
                 if dispositions.get(device_id) == "manual"
                 else "already_in_sync"
                 if device_id in already_in_sync_evidence
@@ -4960,12 +5007,29 @@ def _native_plan_resolved_scope(plan: ContourApplyPlan) -> dict[str, object]:
     }
 
 
-def _native_home_target_plan_fingerprint(plan: ContourApplyPlan) -> str:
+def _native_home_target_plan_fingerprint(
+    plan: ContourApplyPlan,
+    manual_device_reasons: Mapping[str, str] | None = None,
+) -> str:
     """Bind the private preflight to owners, dispositions and exact calls."""
+    bounded_manual_reasons = {
+        device_id: reason
+        for device_id, reason in (manual_device_reasons or {}).items()
+        if reason in {"user_excluded", "external_off"}
+    }
     value = {
         "scope": _native_plan_resolved_scope(plan),
         "gates": [
-            {"device_id": gate.device_id, "status": gate.status.value}
+            {
+                "device_id": gate.device_id,
+                "status": gate.status.value,
+                **(
+                    {"manual_reason": bounded_manual_reasons.get(
+                        gate.device_id, "user_excluded",
+                    )}
+                    if gate.status.value == "manual" else {}
+                ),
+            }
             for gate in plan.native_plan.device_gates
         ],
         "calls": [

@@ -3113,6 +3113,7 @@ def _valid_reliable_receipt_proof(
                     execution is not None
                     or leaf.get("reason") not in {
                         "manual_user_excluded", "manual_external_off",
+                        "user_excluded", "external_off",
                     }
                     or not _strict_leaf_counts(leaf, 0, 0)
                 ):
@@ -3892,6 +3893,7 @@ def _valid_reliable_dispatch_ledger(
                     leaf.get("status") == "manual"
                     and leaf.get("reason") in {
                         "manual_user_excluded", "manual_external_off",
+                        "user_excluded", "external_off",
                     }
                     and leaf.get("execution_state") is None
                     and _strict_leaf_counts(leaf, 0, 0)
@@ -5330,8 +5332,14 @@ def _has_exact_reliable_device_outcomes(
             return False
         if leaf.get("status") == "manual" and (
             execution is not None
-            or leaf.get("reason") not in {"manual_user_excluded", "manual_external_off"}
-            or leaf.get("message_code") not in {"manual_user_excluded", "manual_external_off"}
+            or leaf.get("reason") not in {
+                "manual_user_excluded", "manual_external_off",
+                "user_excluded", "external_off",
+            }
+            or leaf.get("message_code") not in {
+                "manual_user_excluded", "manual_external_off",
+                "manual_excluded", "external_off",
+            }
             or (commands, accepted) != (0, 0)
         ):
             return False
@@ -5678,7 +5686,9 @@ def _reliable_outcomes(
         elif "deferred" in statuses:
             room_status, reason, execution, code, message = ("deferred", "device_unavailable", None, "deferred_offline", "Часть устройств недоступна.")
         elif "manual" in statuses:
-            room_status, reason, execution, code, message = ("manual", "manual_user_excluded", None, "manual_user_excluded", "Устройства оставлены в ручном управлении.")
+            manual_reasons = {leaf.get("reason") for leaf in leaves.values()}
+            reason = "external_off" if manual_reasons == {"external_off"} else "user_excluded"
+            room_status, execution, code, message = ("manual", None, "external_off" if reason == "external_off" else "manual_excluded", "Устройства оставлены в ручном управлении.")
         elif len(statuses) > 1:
             room_status, reason, execution, code, message = ("partial", "none", None, "partial", "Результаты устройств различаются.")
         else:

@@ -43,6 +43,26 @@ _OPERATION_ID = re.compile(r"^[a-f0-9]{32}$")
 _STABLE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 
 
+def _public_manual_reason(state: str) -> str:
+    """Translate private frozen-manual states to the stable receipt contract."""
+
+    return "external_off" if state == "manual_external_off" else "user_excluded"
+
+
+def _public_manual_message(state: str) -> str:
+    """Return the exact contract text for one manually retained owner."""
+
+    return (
+        "Устройство выключено вручную и исключено из контура."
+        if state == "manual_external_off"
+        else "Устройство исключено пользователем из автоматического контура."
+    )
+
+
+def _public_manual_message_code(state: str) -> str:
+    return "external_off" if state == "manual_external_off" else "manual_excluded"
+
+
 class ContourApplyViolation(ValueError):
     """The requested contour cannot be safely applied."""
 
@@ -419,9 +439,9 @@ def _live_device_outcomes(
         elif state in {"manual_user_excluded", "manual_external_off"}:
             outcomes[device_id] = {
                 "status": "manual",
-                "reason": state,
-                "message_code": state,
-                "message": "Цель сохранена без изменения ручного устройства.",
+                "reason": _public_manual_reason(state),
+                "message_code": _public_manual_message_code(state),
+                "message": _public_manual_message(state),
                 "command_count": 0,
                 "accepted_count": 0,
             }
@@ -433,6 +453,7 @@ def _live_device_outcomes(
             outcomes[device_id] = {
                 "status": "confirmed", "reason": "none",
                 "execution_state": "already_in_sync", "message_code": "confirmed",
+                "message": "Результат подтверждён чтением состояния.",
                 "command_count": 0, "accepted_count": 0,
                 "evidence": {
                     **dict(proof),
@@ -453,6 +474,7 @@ def _live_device_outcomes(
                 "reason": "none",
                 "execution_state": "applied",
                 "message_code": "confirmed",
+                "message": "Результат подтверждён чтением состояния.",
                 "command_count": 1,
                 "accepted_count": 1,
                 "evidence": {
@@ -637,9 +659,9 @@ class _ContourApplyLedger:
                                 "command_count": 0, "accepted_count": 0,
                             }
                             if state == "deferred_offline" else {
-                                "status": "manual", "reason": "manual_user_excluded",
-                                "message_code": "manual_user_excluded",
-                                "message": "Цель сохранена без изменения ручного устройства.",
+                                "status": "manual", "reason": _public_manual_reason(state),
+                                "message_code": _public_manual_message_code(state),
+                                "message": _public_manual_message(state),
                                 "command_count": 0, "accepted_count": 0,
                             }
                             if state in {"manual_user_excluded", "manual_external_off"} else {
@@ -1186,11 +1208,11 @@ def _enhanced_payload(
                     "message": "Цель сохранена, устройство недоступно.",
                     "command_count": 0, "accepted_count": 0,
                 }
-            elif leaf_state == "manual_user_excluded":
+            elif leaf_state in {"manual_user_excluded", "manual_external_off"}:
                 leaf = {
-                    "status": "manual", "reason": "manual_user_excluded",
-                    "message_code": "manual_user_excluded",
-                    "message": "Цель сохранена без изменения ручного устройства.",
+                    "status": "manual", "reason": _public_manual_reason(leaf_state),
+                    "message_code": _public_manual_message_code(leaf_state),
+                    "message": _public_manual_message(leaf_state),
                     "command_count": 0, "accepted_count": 0,
                 }
             elif leaf_state == "pending_dispatch":
@@ -1241,7 +1263,12 @@ def _enhanced_payload(
         elif all(device.get("status") == "deferred" for device in room_devices.values()):
             room_status = {"status": "deferred", "reason": "device_unavailable", "message_code": "deferred_offline", "message": "Часть устройств недоступна.", "devices": room_devices}
         elif all(device.get("status") == "manual" for device in room_devices.values()):
-            room_status = {"status": "manual", "reason": "manual_user_excluded", "message_code": "manual_user_excluded", "message": "Устройства оставлены в ручном управлении.", "devices": room_devices}
+            manual_reason = (
+                "external_off"
+                if all(device.get("reason") == "external_off" for device in room_devices.values())
+                else "user_excluded"
+            )
+            room_status = {"status": "manual", "reason": manual_reason, "message_code": "external_off" if manual_reason == "external_off" else "manual_excluded", "message": "Устройства оставлены в ручном управлении.", "devices": room_devices}
         elif confirmed:
             room_status = {"status": "confirmed", "reason": "none", "execution_state": "applied", "message_code": "confirmed", "message": "Результат подтверждён чтением состояния.", "devices": room_devices}
         elif pending:
@@ -1670,10 +1697,14 @@ def _receipt_from_stored_payload(
                         and isinstance(leaf, Mapping)
                         and leaf.get("status") == "manual"
                         and leaf.get("reason") in {
-                            "manual_user_excluded", "manual_external_off",
+                            "user_excluded", "external_off",
                         }
                     ):
-                        leaf_ledger[device_id] = leaf["reason"]
+                        leaf_ledger[device_id] = (
+                            "manual_external_off"
+                            if leaf["reason"] == "external_off"
+                            else "manual_user_excluded"
+                        )
                         continue
                     if (
                         isinstance(device_id, str)
