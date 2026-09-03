@@ -2,5 +2,6 @@
   "contract": {"name": "hausman-hub-manual-light-off-protection-release-request", "version": 1},
   "requestId": "lighting.protection.release.0001",
   "roomId": "shower",
-  "profileId": "shower-main"
+  "profileId": "shower-main",
+  "expectedProtectionRevision": 0
 }

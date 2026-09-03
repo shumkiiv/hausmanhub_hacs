@@ -4,6 +4,6 @@
   "title": "HausmanHub manual light off protection release request v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["contract", "requestId", "roomId", "profileId"],
-  "properties": {"contract": {"type": "object", "additionalProperties": false, "required": ["name", "version"], "properties": {"name": {"const": "hausman-hub-manual-light-off-protection-release-request"}, "version": {"const": 1}}}, "requestId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"}, "roomId": {"$ref": "manual-light-off-protection.schema.json#/$defs/roomId"}, "profileId": {"$ref": "manual-light-off-protection.schema.json#/$defs/profileId"}}
+  "required": ["contract", "requestId", "roomId", "profileId", "expectedProtectionRevision"],
+  "properties": {"contract": {"type": "object", "additionalProperties": false, "required": ["name", "version"], "properties": {"name": {"const": "hausman-hub-manual-light-off-protection-release-request"}, "version": {"const": 1}}}, "requestId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"}, "roomId": {"$ref": "manual-light-off-protection.schema.json#/$defs/roomId"}, "profileId": {"$ref": "manual-light-off-protection.schema.json#/$defs/profileId"}, "expectedProtectionRevision": {"type": "integer", "minimum": 0}}
 }

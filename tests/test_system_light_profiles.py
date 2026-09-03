@@ -5,6 +5,10 @@ from custom_components.hausman_hub.application.system_light_profiles import (
     SYSTEM_LIGHT_PROFILES,
     audit_system_light_protection_coverage,
 )
+from custom_components.hausman_hub.application.scenario_catalog import (
+    _stable_target_id_from_entity,
+)
+from custom_components.hausman_hub.application.system_light_profiles import ProtectedLightProfile
 
 
 def test_first_wave_profiles_use_the_catalog_target_ids_and_exclude_non_lights() -> None:
@@ -22,20 +26,27 @@ def test_first_wave_profiles_use_the_catalog_target_ids_and_exclude_non_lights()
 
 
 def test_coverage_audit_is_unhealthy_for_missing_or_duplicate_profile_ownership() -> None:
+    first = _stable_target_id_from_entity("light.first")
+    second = _stable_target_id_from_entity("light.second")
+    profiles = (ProtectedLightProfile("room", "profile", (first, second)),)
+    targets = (
+        ScenarioTarget(first, "light.first", "light"),
+        ScenarioTarget(second, "light.second", "light"),
+    )
     report = audit_system_light_protection_coverage(
-        SYSTEM_LIGHT_PROFILES[:-1],
-        tuple(light for profile in SYSTEM_LIGHT_PROFILES for light in profile.light_ids),
+        (ProtectedLightProfile("room", "profile", (first,)),),
+        targets,
     )
 
     assert not report.healthy
-    assert "entity_d82766182d69dd51" in report.unowned_target_ids
+    assert second in report.unowned_target_ids
 
     duplicate = audit_system_light_protection_coverage(
-        SYSTEM_LIGHT_PROFILES + (SYSTEM_LIGHT_PROFILES[0],),
-        ("entity_71859313239a14e4",),
+        profiles + profiles,
+        (ScenarioTarget(first, "light.first", "light"),),
     )
     assert not duplicate.healthy
-    assert duplicate.multiply_owned_target_ids == ("entity_71859313239a14e4",)
+    assert duplicate.multiply_owned_target_ids == (first,)
 
 
 def test_coverage_audit_rejects_non_light_switch_roles() -> None:

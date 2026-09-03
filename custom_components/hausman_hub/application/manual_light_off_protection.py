@@ -56,6 +56,7 @@ class ManualLightOffProtectionCoordinator:
         self._frozen_sensor_ids: dict[str, tuple[str, ...]] = {}
         self._completed: list[dict[str, object]] = []
         self._receipts: dict[str, dict[str, object]] = {}
+        self._receipt_requests: dict[str, tuple[str, str]] = {}
         self._sensor_states: dict[str, tuple[str, datetime]] = {}
         self._event_entity_listeners: set[Callable[[], None]] = set()
         self._loaded = False
@@ -86,6 +87,12 @@ class ManualLightOffProtectionCoordinator:
                 str(item["requestId"]): copy.deepcopy(item["receipt"])
                 for item in payload["receipts"]
             }
+            self._receipt_requests = {
+                str(item["requestId"]): (
+                    str(item.get("operation", "")), str(item.get("payloadFingerprint", ""))
+                )
+                for item in payload["receipts"]
+            }
         except Exception:  # persistence evidence must never open automatic control
             self.unhealthy = True
         finally:
@@ -95,10 +102,11 @@ class ManualLightOffProtectionCoordinator:
         self, request_id: str, expected_revision: int, settings: Mapping[str, object]
     ) -> dict[str, object]:
         async with self._lock:
-            existing = self._receipt(request_id)
+            self._require_healthy()
+            fingerprint = _request_fingerprint(settings)
+            existing = self._receipt(request_id, "settings_updated", fingerprint)
             if existing is not None:
                 return existing
-            self._require_healthy()
             if type(expected_revision) is not int or expected_revision != self._settings_revision:
                 raise ValueError("settings revision conflict")
             parsed = parse_settings(settings)
@@ -108,7 +116,7 @@ class ManualLightOffProtectionCoordinator:
                 request_id, "settings_updated", self._settings_revision,
                 settings=parsed.as_wire(),
             )
-            await self._persist_with_receipt(request_id, receipt)
+            await self._persist_with_receipt(request_id, receipt, "settings_updated", fingerprint)
             self._notify_event_entity_listeners()
             return copy.deepcopy(receipt)
 
@@ -231,10 +239,11 @@ class ManualLightOffProtectionCoordinator:
         self, request_id: str, protection_id: str, expected_protection_revision: int
     ) -> dict[str, object]:
         async with self._lock:
-            existing = self._receipt(request_id)
+            self._require_healthy()
+            fingerprint = _request_fingerprint({"protectionId": protection_id, "expectedProtectionRevision": expected_protection_revision})
+            existing = self._receipt(request_id, "manual_release", fingerprint)
             if existing is not None:
                 return existing
-            self._require_healthy()
             record = self._protections.get(protection_id)
             if record is None:
                 raise ValueError("protection is not active")
@@ -248,6 +257,7 @@ class ManualLightOffProtectionCoordinator:
             await self._complete(protection_id, updated, request_id=request_id)
             receipt = _receipt(request_id, "manual_release", int(updated["revision"]), protection=updated)
             self._receipts[request_id] = receipt
+            self._receipt_requests[request_id] = ("manual_release", fingerprint)
             if len(self._receipts) > MAX_IDEMPOTENCY_RECEIPTS:
                 self._receipts.pop(next(iter(self._receipts)))
             await self._save()
@@ -255,7 +265,8 @@ class ManualLightOffProtectionCoordinator:
             return copy.deepcopy(receipt)
 
     async def async_release_profile(
-        self, request_id: str, room_id: str, profile_id: str
+        self, request_id: str, room_id: str, profile_id: str,
+        expected_protection_revision: int,
     ) -> dict[str, object]:
         """Release one active record by the public profile identity.
 
@@ -266,10 +277,11 @@ class ManualLightOffProtectionCoordinator:
         """
 
         async with self._lock:
-            existing = self._receipt(request_id)
+            self._require_healthy()
+            fingerprint = _request_fingerprint({"roomId": room_id, "profileId": profile_id, "expectedProtectionRevision": expected_protection_revision})
+            existing = self._receipt(request_id, "manual_release", fingerprint)
             if existing is not None:
                 return existing
-            self._require_healthy()
             item = next(
                 ((key, value) for key, value in self._protections.items()
                  if value["roomId"] == room_id and value["profileId"] == profile_id),
@@ -278,6 +290,11 @@ class ManualLightOffProtectionCoordinator:
             if item is None:
                 raise ValueError("protection is not active")
             key, record = item
+            if (
+                type(expected_protection_revision) is not int
+                or expected_protection_revision != record["revision"]
+            ):
+                raise ValueError("protection revision conflict")
             if not record["effectivePolicy"]["allowManualRelease"]:
                 raise ValueError("manual release is disabled")
             updated = copy.deepcopy(record)
@@ -286,6 +303,7 @@ class ManualLightOffProtectionCoordinator:
             await self._complete(key, updated, request_id=request_id)
             receipt = _receipt(request_id, "manual_release", int(updated["revision"]), protection=updated)
             self._receipts[request_id] = receipt
+            self._receipt_requests[request_id] = ("manual_release", fingerprint)
             if len(self._receipts) > MAX_IDEMPOTENCY_RECEIPTS:
                 self._receipts.pop(next(iter(self._receipts)))
             await self._save()
@@ -405,8 +423,9 @@ class ManualLightOffProtectionCoordinator:
         await self._save()
         self._notify_event_entity_listeners()
 
-    async def _persist_with_receipt(self, request_id: str, receipt: dict[str, object]) -> None:
+    async def _persist_with_receipt(self, request_id: str, receipt: dict[str, object], operation: str, fingerprint: str) -> None:
         self._receipts[request_id] = receipt
+        self._receipt_requests[request_id] = (operation, fingerprint)
         if len(self._receipts) > MAX_IDEMPOTENCY_RECEIPTS:
             self._receipts.pop(next(iter(self._receipts)))
         await self._save()
@@ -423,7 +442,7 @@ class ManualLightOffProtectionCoordinator:
             "version": 1, "settingsRevision": self._settings_revision,
             "stateRevision": self._state_revision, "settings": self._settings.as_wire(),
             "protections": list(self._protections.values()), "completed": self._completed,
-            "receipts": [{"requestId": key, "receipt": value} for key, value in self._receipts.items()],
+            "receipts": [{"requestId": key, "receipt": value, "operation": self._receipt_requests.get(key, ("", ""))[0], "payloadFingerprint": self._receipt_requests.get(key, ("", ""))[1]} for key, value in self._receipts.items()],
             "frozenSensors": [
                 {"protectionId": key, "presenceSensorIds": list(sensor_ids)}
                 for key, sensor_ids in self._frozen_sensor_ids.items()
@@ -434,10 +453,15 @@ class ManualLightOffProtectionCoordinator:
         for listener in tuple(self._event_entity_listeners):
             listener()
 
-    def _receipt(self, request_id: str) -> dict[str, object] | None:
+    def _receipt(self, request_id: str, operation: str, fingerprint: str) -> dict[str, object] | None:
         if not isinstance(request_id, str) or not request_id or len(request_id) > 128:
             raise ValueError("request id is invalid")
-        return copy.deepcopy(self._receipts.get(request_id))
+        existing = self._receipts.get(request_id)
+        if existing is None:
+            return None
+        if self._receipt_requests.get(request_id) != (operation, fingerprint):
+            raise ValueError("idempotency conflict")
+        return copy.deepcopy(existing)
 
     def _require_healthy(self) -> None:
         if self.unhealthy or not self._loaded:
@@ -573,9 +597,11 @@ def _valid_protection(value: object) -> bool:
 
 
 def _valid_receipt(value: object) -> bool:
-    if not isinstance(value, Mapping) or set(value) != {"requestId", "receipt"}:
+    if not isinstance(value, Mapping) or set(value) not in ({"requestId", "receipt"}, {"requestId", "receipt", "operation", "payloadFingerprint"}):
         return False
     request_id, receipt = value["requestId"], value["receipt"]
+    if ("operation" in value and (value["operation"] not in {"settings_updated", "manual_release"} or not isinstance(value["payloadFingerprint"], str) or re.fullmatch(r"[a-f0-9]{64}", value["payloadFingerprint"]) is None)):
+        return False
     if not isinstance(request_id, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", request_id) is None or not isinstance(receipt, Mapping):
         return False
     if set(receipt) - {"contract", "requestId", "operation", "accepted", "confirmed", "status", "revision", "settings", "protection"}:
@@ -589,6 +615,12 @@ def _valid_receipt(value: object) -> bool:
     if receipt.get("operation") == "manual_release":
         return "settings" not in receipt and _valid_protection(receipt.get("protection"))
     return False
+
+
+def _request_fingerprint(payload: Mapping[str, object]) -> str:
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    ).hexdigest()
 
 
 def _valid_frozen_sensors(value: object) -> bool:

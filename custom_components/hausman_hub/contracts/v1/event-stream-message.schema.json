@@ -32,6 +32,7 @@
         "critical_alert",
         "attention_alert",
         "command_receipt",
+        "manual_light_off_protection_changed",
         "heartbeat"
       ]
     },
@@ -47,6 +48,7 @@
         { "$ref": "#/$defs/critical_alert" },
         { "$ref": "#/$defs/attention_alert" },
         { "$ref": "#/$defs/command_receipt" },
+        { "$ref": "#/$defs/manual_light_off_protection_changed" },
         { "$ref": "#/$defs/heartbeat" }
       ]
     }
@@ -75,6 +77,10 @@
     {
       "if": { "properties": { "type": { "const": "command_receipt" } } },
       "then": { "properties": { "data": { "$ref": "#/$defs/command_receipt" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "manual_light_off_protection_changed" } } },
+      "then": { "properties": { "data": { "$ref": "#/$defs/manual_light_off_protection_changed" } } }
     },
     {
       "if": { "properties": { "type": { "const": "heartbeat" } } },
@@ -184,6 +190,18 @@
         "target_id": { "type": ["string", "null"], "maxLength": 128 },
         "reason": { "type": ["string", "null"], "maxLength": 500 },
         "error_code": { "type": ["string", "null"], "maxLength": 128 }
+      }
+    },
+    "manual_light_off_protection_changed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roomId", "profileId", "state", "reason", "revision"],
+      "properties": {
+        "roomId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+        "profileId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+        "state": {"enum": ["active", "ready_to_release", "released", "cancelled_by_manual_on"]},
+        "reason": {"enum": ["manual_off", "manual_off_protection_active"]},
+        "revision": {"type": "integer", "minimum": 0}
       }
     },
     "heartbeat": {

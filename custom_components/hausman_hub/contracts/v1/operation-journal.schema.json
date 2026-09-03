@@ -85,7 +85,7 @@
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
         },
         "source": {
-          "enum": ["device", "climate", "scenario", "voice"]
+          "enum": ["device", "climate", "lighting", "scenario", "voice"]
         },
         "operation": {
           "type": "string",
@@ -105,7 +105,8 @@
         },
         "scenario": {"$ref": "#/$defs/scenario_run"},
         "manualOffProtection": {
-          "type": "object", "additionalProperties": false,
+          "type": "object",
+          "additionalProperties": false,
           "required": ["roomId", "profileId", "state", "reason"],
           "properties": {
             "roomId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},

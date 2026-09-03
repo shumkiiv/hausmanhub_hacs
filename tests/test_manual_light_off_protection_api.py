@@ -39,6 +39,8 @@ def test_release_by_contract_profile_identity_never_needs_a_private_storage_key(
         })
         from types import SimpleNamespace
         await coordinator.async_note_state_transition("light.points", SimpleNamespace(state="on"), SimpleNamespace(state="off"), None)
-        receipt = await coordinator.async_release_profile("release.1", "tambur", "tambur-points")
+        receipt = await coordinator.async_release_profile(
+            "release.1", "tambur", "tambur-points", 0
+        )
         assert receipt["operation"] == "manual_release"
     asyncio.run(exercise())

@@ -22,7 +22,7 @@ VENDORED_CONTRACT_HASHES = {
     "custom_components/hausman_hub/contracts/v1/scenario-node-red-source.schema.json": "4f281f11c55a235b78bb418977f948a06d4d1ba8b90b1fef4e389b3842e9f7ec",
     "custom_components/hausman_hub/contracts/v1/scenario-node-red-source-update-request.schema.json": "7712607bfe1e8cbe9a9287ea4812caed2ac2c47e93ff079458fea0a945a677a0",
     "custom_components/hausman_hub/contracts/v1/scenario-node-red-source-update-receipt.schema.json": "b57b3adcbd850af02c3c1112de9eef70fcf2e41483ae4c633b20d6db6dd33040",
-    "custom_components/hausman_hub/contracts/v1/api-capabilities.schema.json": "8a9fc97b9060604508707d904ea4aafe8aeaaaa898c7009afa8e24c466fa3a60",
+    "custom_components/hausman_hub/contracts/v1/api-capabilities.schema.json": "c0ec10eed3325d356795d2c55333667c5643dda91ca17478560780ca970cd20b",
     "custom_components/hausman_hub/contracts/v1/scenario-ai-draft-request.schema.json": "eeb72fc172f8730552fb174a1a0a55f58debeb9b5612068b0c2889190c37b9c1",
     "custom_components/hausman_hub/contracts/v1/scenario-ai-draft.schema.json": "585ec9c8e48c208452f4f80407feacfc04a00c8b580e04a63504fa049adedb5e",
     "custom_components/hausman_hub/contracts/v1/scenario-health.schema.json": "8a14e51bdb531dd674bede8e0e0618a2788df641dc23fc9da2e8af9b821890e4",
@@ -30,8 +30,8 @@ VENDORED_CONTRACT_HASHES = {
     "custom_components/hausman_hub/contracts/v1/device-action-receipt.schema.json": "82907a7b9326b00a050548665c45fe87e8095fbe31298a02f90b00bea36c4bde",
     "custom_components/hausman_hub/contracts/v1/intercom-release-receipt.schema.json": "ea11c82a77a3fe9195513d1a915336167c81a356fa0b56cf058384daedacf947",
     "custom_components/hausman_hub/contracts/v1/scenario-catalog.schema.json": "3b43fa73e6c254ed0f87188a9f7d50144ee43dd7542233b4dcaf32d3d2629f55",
-    "custom_components/hausman_hub/contracts/v1/scenario-dry-run-result.schema.json": "7604a9391d8bf03c5ae098a638c6ddd7412a883bf907f751decdfe7d25db4c7c",
-    "custom_components/hausman_hub/contracts/v1/operation-journal.schema.json": "79ad67f0e4b7a0eeade2fbc891eb3672ee2c23feea4ef9344196d30d342fc89d",
+    "custom_components/hausman_hub/contracts/v1/scenario-dry-run-result.schema.json": "533a303e6e9057efd8660972f3f1216b125cace27a152f9d029767968cc40a9f",
+    "custom_components/hausman_hub/contracts/v1/operation-journal.schema.json": "dad001704411f7b40746f20493953d213d8591f1e732cd12ea86a2c0b6104092",
     "custom_components/hausman_hub/contracts/v1/device-action-batch-request.schema.json": "ee18b9a830c5c122452477557b32300bba8f0956fa58d2ab7158949b686e00d1",
     "custom_components/hausman_hub/contracts/v1/device-action-batch-receipt.schema.json": "9ebd98dbd40f95c5757cc2751efa67612c6a41caadfc51d292d5968f07263089",
     "custom_components/hausman_hub/contracts/v1/device-feature-matrix.json": "ef1f2784f5ffdd0bde84282816f09542e4f7aabf3e9150c1dfe5b1f8c0315455",
@@ -49,7 +49,7 @@ VENDORED_CONTRACT_HASHES = {
     "custom_components/hausman_hub/contracts/v1/energy-settings-document.schema.json": "b1aaeaa7b7e37cc6ac49ab2cad5fd65e0d9a27f329e810cb0c599ac606c0e670",
     "custom_components/hausman_hub/contracts/v1/energy-meters.schema.json": "21a38ca9e1079d727c57a2f7ada6b3ba9a62bcc5b8a4d6501eb68e66e571713d",
     "custom_components/hausman_hub/contracts/v1/room-settings.schema.json": "b4903c645f91b87e64a18f672acc72256d7f90716b29bc171dfe9c6c9a540623",
-    "custom_components/hausman_hub/contracts/v1/event-stream-message.schema.json": "34a02ced6b53346c7cf72cfb3e7928ab642e68012dfe2279985634a70541aa82",
+    "custom_components/hausman_hub/contracts/v1/event-stream-message.schema.json": "c61f1dbf6371e388cb92a7dd416e94860f75224299b1fe0c58f0521299ca2abc",
     "custom_components/hausman_hub/contracts/v1/water-meter.schema.json": "7fc02e2a271754638a080302e8f28850fdd3e0fdfcc530a272f832ec847dd20c",
     "fixtures/hausmanhub_energy_meter_v1/energy-meter.json": "bc942d4c6bda816c1d7189c4d3a206f1111bd0e80ab776b4eee006e8b7cc9fa3",
     "custom_components/hausman_hub/contracts/v1/scenario-list.schema.json": "5565576e1e2046610a246f8bae5c5a57c2db58c979d54865ccd0f79bf6682e38",
@@ -79,14 +79,14 @@ def test_external_contract_pin_is_explicit_and_canonical() -> None:
 
     assert pin == {
         "repository": "shumkiiv/hausmanhub-contracts",
-        "version": "0.64.3",
-        "commit": "2a30a92",
+        "version": "0.65.0",
+        "commit": "28d21ed",
         "canonical": True,
         "role": "runtime-consumer",
     }
 
 
-def test_contract_0_64_3_vendored_files_match_canonical_hashes() -> None:
+def test_contract_0_65_0_vendored_files_match_canonical_hashes() -> None:
     for relative_path, expected_hash in VENDORED_CONTRACT_HASHES.items():
         payload = (REPOSITORY_ROOT / relative_path).read_bytes()
         assert hashlib.sha256(payload).hexdigest() == expected_hash, relative_path

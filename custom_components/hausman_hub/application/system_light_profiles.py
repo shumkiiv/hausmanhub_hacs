@@ -8,6 +8,8 @@ automation or alter the enabled state of an existing scenario.
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+from .scenario_catalog import _stable_target_id_from_entity
 @dataclass(frozen=True, slots=True)
 class ProtectedLightProfile:
     room_id: str
@@ -60,13 +62,12 @@ SYSTEM_LIGHT_PROFILES: tuple[ProtectedLightProfile, ...] = (
 
 def audit_system_light_protection_coverage(
     profiles: tuple[ProtectedLightProfile, ...],
-    scenario_targets: tuple[ScenarioTarget | str, ...],
+    scenario_targets: tuple[ScenarioTarget, ...],
 ) -> LightProtectionCoverageReport:
     """Fail closed when a first-wave automatic light lacks one owner.
 
-    Strings are supported for the immutable system-source audit.  Live catalog
-    callers must pass ``ScenarioTarget`` so a switch is accepted only after a
-    light role classification, never because of its entity domain.
+    Every item must retain the catalog's stable entity/target binding. A switch
+    is accepted only after an explicit light role classification.
     """
 
     ownership: dict[str, int] = {}
@@ -77,15 +78,16 @@ def audit_system_light_protection_coverage(
     target_ids: list[str] = []
     unsafe: list[str] = []
     for target in scenario_targets:
-        if isinstance(target, str):
-            target_ids.append(target)
-            continue
+        if not isinstance(target, ScenarioTarget):
+            raise TypeError("scenario target must retain its catalog classification")
         target_ids.append(target.target_id)
-        role = target.role.casefold().replace("_", " ")
+        role = " ".join(target.role.casefold().replace("_", " ").split())
         domain = target.entity_id.partition(".")[0]
-        if role in {"breaker", "valve", "water", "fan", "outlet", "generic outlet"}:
+        if target.target_id != _stable_target_id_from_entity(target.entity_id):
             unsafe.append(target.target_id)
-        elif domain == "switch" and role != "light":
+        elif domain == "light":
+            continue
+        elif domain != "switch" or role != "light":
             unsafe.append(target.target_id)
 
     return LightProtectionCoverageReport(

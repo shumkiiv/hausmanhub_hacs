@@ -44,6 +44,17 @@
         "conditionCount": {"type": "integer", "minimum": 0, "maximum": 32},
         "actionCount": {"type": "integer", "minimum": 1, "maximum": 64},
         "commandSent": {"const": false},
+        "manualOffProtection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["blocked", "reason"],
+          "properties": {
+            "blocked": {"type": "boolean"},
+            "reason": {"enum": ["manual_off_protection_active"]},
+            "roomId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+            "profileId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"}
+          }
+        },
         "executionBackend": {"enum": ["hausman", "node_red"]},
         "nodeRed": {
           "type": "object",

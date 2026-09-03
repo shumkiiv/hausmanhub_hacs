@@ -1522,6 +1522,22 @@
             }
           }
         },
+        "manual_light_off_protection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available", "settings_path", "settings_methods", "release_path", "release_method", "response_contract", "settings_request_contract", "release_request_contract", "receipt_contract"],
+          "properties": {
+            "available": {"type": "boolean"},
+            "settings_path": {"const": "/api/hausman_hub/v1/lighting/manual-off-protection"},
+            "settings_methods": {"const": ["GET", "PUT"]},
+            "release_path": {"const": "/api/hausman_hub/v1/lighting/manual-off-protection/release"},
+            "release_method": {"const": "POST"},
+            "response_contract": {"type": "object", "additionalProperties": false, "required": ["name", "version"], "properties": {"name": {"const": "hausman-hub-manual-light-off-protection"}, "version": {"const": 1}}},
+            "settings_request_contract": {"type": "object", "additionalProperties": false, "required": ["name", "version"], "properties": {"name": {"const": "hausman-hub-manual-light-off-protection-settings-request"}, "version": {"const": 1}}},
+            "release_request_contract": {"type": "object", "additionalProperties": false, "required": ["name", "version"], "properties": {"name": {"const": "hausman-hub-manual-light-off-protection-release-request"}, "version": {"const": 1}}},
+            "receipt_contract": {"type": "object", "additionalProperties": false, "required": ["name", "version"], "properties": {"name": {"const": "hausman-hub-manual-light-off-protection-command-receipt"}, "version": {"const": 1}}}
+          }
+        },
         "climate_room_recovery_v2": {
           "type": "object",
           "additionalProperties": false,
