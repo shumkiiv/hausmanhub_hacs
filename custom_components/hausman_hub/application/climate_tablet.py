@@ -732,6 +732,7 @@ class ClimateTabletService:
         # Legacy HTTP replies keep their execution facts outside the typed
         # receipt.  The sidecar is private and never changes that contract.
         self._legacy_home_execution_facts: dict[str, dict[str, object]] = {}
+        self._legacy_home_reservations: dict[str, dict[str, object]] = {}
         # Bindings must outlive a failed main-ledger write.  They are removed
         # only after the corresponding main record is durably gone.
         self._reliable_scope_binding_cleanup: set[str] = set()
@@ -769,11 +770,12 @@ class ClimateTabletService:
             stored_bindings = await load_bindings()
         except Exception as error:
             raise ClimateTabletUnavailable("reliable climate scope storage is unavailable") from error
-        if not isinstance(stored_bindings, Mapping) or len(stored_bindings) > MAX_RELIABLE_OPERATION_RECORDS + 3:
+        if not isinstance(stored_bindings, Mapping) or len(stored_bindings) > MAX_RELIABLE_OPERATION_RECORDS + 4:
             raise ClimateTabletUnavailable("reliable climate scope storage is invalid")
         stored_bindings = dict(stored_bindings)
         state_checkpoint = stored_bindings.pop("__tablet_state__", None)
         legacy_execution_facts = stored_bindings.pop("__legacy_home_execution_facts__", {})
+        legacy_reservations = stored_bindings.pop("__legacy_home_reservations__", {})
         if (
             not isinstance(legacy_execution_facts, Mapping)
             or len(legacy_execution_facts) > MAX_RELIABLE_OPERATION_RECORDS
@@ -784,6 +786,15 @@ class ClimateTabletService:
             )
         ):
             raise ClimateTabletUnavailable("legacy climate execution facts are invalid")
+        if (
+            not isinstance(legacy_reservations, Mapping)
+            or any(
+                not _valid_legacy_correlation_id(correlation_id)
+                or not _valid_legacy_home_reservation(reservation)
+                for correlation_id, reservation in legacy_reservations.items()
+            )
+        ):
+            raise ClimateTabletUnavailable("legacy climate reservations are invalid")
         if payload.get("version") == 6 and not _valid_tablet_state_checkpoint(
             state_checkpoint, payload, self._reliable_scope_integrity_key
         ):
@@ -894,6 +905,12 @@ class ClimateTabletService:
         if isinstance(state_checkpoint, Mapping):
             self._reliable_scope_bindings["__tablet_state__"] = dict(state_checkpoint)
         self._legacy_home_execution_facts = {}
+        self._legacy_home_reservations = {}
+        for correlation_id, reservation in legacy_reservations.items():
+            record = records.get(reservation["request_id"])
+            if not _legacy_home_reservation_matches_record(correlation_id, reservation, record):
+                raise ClimateTabletUnavailable("legacy climate reservations are invalid")
+            self._legacy_home_reservations[correlation_id] = dict(reservation)
         for correlation_id, fact in legacy_execution_facts.items():
             record = records.get(fact["request_id"])
             if not _legacy_home_execution_fact_matches_record(correlation_id, fact, record):
@@ -1270,6 +1287,10 @@ class ClimateTabletService:
                         pending_ledger,
                     )
                 )
+            if _legacy_correlation_id is not None:
+                self._legacy_home_reservations[_legacy_correlation_id] = (
+                    _legacy_home_reservation(request, operation_id, "reserved")
+                )
             self._remember(request, receipt, pending_ledger)
             await self._async_save()
             frozen_scope = receipt.get("action_snapshot", {}).get("resolved_scope", {})
@@ -1293,6 +1314,10 @@ class ClimateTabletService:
                         dispatched_at=dispatch_boundary,
                         metadata=pre_dispatch_metadata,
                     )
+                    if _legacy_correlation_id is not None:
+                        self._legacy_home_reservations[_legacy_correlation_id] = (
+                            _legacy_home_reservation(request, operation_id, "started")
+                        )
                     self._remember(request, receipt, started_ledger)
                     await self._async_save()
                     physical_started = True
@@ -1605,6 +1630,7 @@ class ClimateTabletService:
                         ),
                     )
                 )
+                self._legacy_home_reservations.pop(_legacy_correlation_id, None)
             self._remember(
                 request, receipt,
                 final_ledger if request.reliability_profile == "climate_reliability_v1" and physical_started else pending_ledger,
@@ -1670,6 +1696,17 @@ class ClimateTabletService:
                         code="revision_conflict",
                     )
                 return {**record.receipt, "duplicate": True, "__legacy_execution_fact__": dict(fact)}
+            reservation = self._legacy_home_reservations.get(correlation_id)
+            if reservation is not None:
+                record = self._records_by_request.get(reservation["request_id"])
+                if not _legacy_home_reservation_matches_record(correlation_id, reservation, record):
+                    raise ClimateTabletUnavailable("legacy climate reservations are invalid")
+                if reservation["parameters_fingerprint"] != _canonical_fingerprint(canonical_parameters):
+                    raise ClimateTabletViolation(
+                        "correlation id was already used for other climate targets",
+                        code="revision_conflict",
+                    )
+                return {**record.receipt, "duplicate": True}
             snapshot = await self._snapshot_unlocked()
             payload = {
                 "contract": {
@@ -2208,6 +2245,7 @@ class ClimateTabletService:
         }
         self._legacy_home_execution_facts = legacy_facts
         prepared_bindings["__legacy_home_execution_facts__"] = legacy_facts
+        prepared_bindings["__legacy_home_reservations__"] = self._legacy_home_reservations
         try:
             await save_bindings(prepared_bindings)
         except Exception:
@@ -2233,6 +2271,7 @@ class ClimateTabletService:
             self._reliable_scope_integrity_key,
         )
         final_bindings["__legacy_home_execution_facts__"] = legacy_facts
+        final_bindings["__legacy_home_reservations__"] = self._legacy_home_reservations
         try:
             await save_bindings(final_bindings)
         except Exception:
@@ -4466,6 +4505,46 @@ def _valid_legacy_correlation_id(value: object) -> bool:
     except CorrelationIdError:
         return False
     return True
+
+
+def _legacy_home_reservation(
+    request: ClimateTabletActionRequest, operation_id: str, state: str,
+) -> dict[str, object]:
+    return {
+        "request_id": request.request_id, "correlation_id": request.correlation_id,
+        "operation_id": operation_id, "request_fingerprint": request.fingerprint,
+        "parameters_fingerprint": _canonical_fingerprint(request.parameters),
+        "state": state,
+    }
+
+
+def _valid_legacy_home_reservation(value: object) -> bool:
+    return bool(
+        isinstance(value, Mapping)
+        and set(value) == {"request_id", "correlation_id", "operation_id", "request_fingerprint", "parameters_fingerprint", "state"}
+        and isinstance(value.get("request_id"), str) and _REQUEST_ID.fullmatch(value["request_id"]) is not None
+        and _valid_legacy_correlation_id(value.get("correlation_id"))
+        and isinstance(value.get("operation_id"), str) and _OPERATION_ID.fullmatch(value["operation_id"]) is not None
+        and all(isinstance(value.get(key), str) and re.fullmatch(r"[a-f0-9]{64}", value[key]) is not None for key in ("request_fingerprint", "parameters_fingerprint"))
+        and value.get("state") in {"reserved", "started"}
+    )
+
+
+def _legacy_home_reservation_matches_record(
+    correlation_id: object, reservation: object, record: _StoredOperation | None,
+) -> bool:
+    return bool(
+        _valid_legacy_correlation_id(correlation_id)
+        and _valid_legacy_home_reservation(reservation)
+        and isinstance(record, _StoredOperation)
+        and reservation["correlation_id"] == correlation_id
+        and reservation["request_id"] == record.request.request_id
+        and reservation["operation_id"] == record.receipt.get("operation_id")
+        and reservation["request_fingerprint"] == record.fingerprint
+        and record.request.action == "set_home_targets"
+        and record.request.correlation_id == correlation_id
+        and reservation["parameters_fingerprint"] == _canonical_fingerprint(record.request.parameters)
+    )
 
 
 def _valid_legacy_home_execution_fact(value: object) -> bool:
