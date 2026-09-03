@@ -4455,7 +4455,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(95, len(self.hass.http.views))
+        self.assertEqual(97, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -5974,7 +5974,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(94, len(closed_hass.http.views))
+        self.assertEqual(96, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -6071,6 +6071,8 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/admin/ir-codes/learn",
                 "/api/hausman_hub/v1/admin/ir-codes/test",
                 "/api/hausman_hub/v1/admin/ir-codes/delete",
+                "/api/hausman_hub/v1/lighting/manual-off-protection",
+                "/api/hausman_hub/v1/lighting/manual-off-protection/release",
             },
             {view.url for view in closed_hass.http.views},
         )

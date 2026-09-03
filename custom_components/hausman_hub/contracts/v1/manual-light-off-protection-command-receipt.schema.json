@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/manual-light-off-protection-command-receipt.schema.json",
+  "title": "HausmanHub manual light off protection command receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "requestId", "operation", "accepted", "confirmed", "status", "revision"],
+  "properties": {"contract": {"type": "object", "additionalProperties": false, "required": ["name", "version"], "properties": {"name": {"const": "hausman-hub-manual-light-off-protection-command-receipt"}, "version": {"const": 1}}}, "requestId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"}, "operation": {"enum": ["settings_updated", "manual_release"]}, "accepted": {"type": "boolean"}, "confirmed": {"type": "boolean"}, "status": {"enum": ["failed", "accepted", "confirmed"]}, "revision": {"type": "integer", "minimum": 0}, "settings": {"$ref": "manual-light-off-protection.schema.json#/$defs/settings"}, "protection": {"$ref": "manual-light-off-protection.schema.json#/$defs/protection"}},
+  "allOf": [{"if": {"properties": {"operation": {"const": "settings_updated"}}, "required": ["operation"]}, "then": {"required": ["settings"], "not": {"required": ["protection"]}}}, {"if": {"properties": {"operation": {"const": "manual_release"}}, "required": ["operation"]}, "then": {"required": ["protection"], "not": {"required": ["settings"]}}}, {"if": {"properties": {"status": {"const": "failed"}}, "required": ["status"]}, "then": {"properties": {"accepted": {"const": false}, "confirmed": {"const": false}}}}, {"if": {"properties": {"status": {"const": "accepted"}}, "required": ["status"]}, "then": {"properties": {"accepted": {"const": true}, "confirmed": {"const": false}}}}, {"if": {"properties": {"status": {"const": "confirmed"}}, "required": ["status"]}, "then": {"properties": {"accepted": {"const": true}, "confirmed": {"const": true}}}}]
+}

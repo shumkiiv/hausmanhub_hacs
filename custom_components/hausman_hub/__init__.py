@@ -462,6 +462,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         climate_shadow,
         climate_tablet,
     )
+    from .manual_light_off_protection_api import (
+        register_manual_light_off_protection_api,
+    )
+
+    register_manual_light_off_protection_api(hass)
     from .operation_journal_api import register_operation_journal_api
 
     register_operation_journal_api(hass)
@@ -493,12 +498,14 @@ async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     from .operation_journal_api import clear_operation_journal
     from .water_safety_api import clear_water_safety_api
     from .tablet_power_api import clear_tablet_power_api
+    from .manual_light_off_protection_api import clear_manual_light_off_protection_api
 
     clear_event_stream(hass, entry.entry_id)
     clear_voice_greeting(hass, entry.entry_id)
     clear_water_safety_api(hass)
     clear_operation_journal(hass)
     clear_tablet_power_api(hass)
+    clear_manual_light_off_protection_api(hass)
     clear_climate_api(hass, entry.entry_id)
 
     try:
@@ -531,6 +538,7 @@ async def _close_running_duplicate_hausmanhub_entries(
     from .operation_journal_api import clear_operation_journal
     from .water_safety_api import clear_water_safety_api
     from .tablet_power_api import clear_tablet_power_api
+    from .manual_light_off_protection_api import clear_manual_light_off_protection_api
 
     loaded_entries = tuple(hass.config_entries.async_loaded_entries(domain))
     for loaded_entry in loaded_entries:
@@ -540,6 +548,7 @@ async def _close_running_duplicate_hausmanhub_entries(
         clear_water_safety_api(hass)
         clear_operation_journal(hass)
         clear_tablet_power_api(hass)
+        clear_manual_light_off_protection_api(hass)
         clear_climate_api(hass, loaded_entry.entry_id)
     for loaded_entry in loaded_entries:
         await hass.config_entries.async_unload(loaded_entry.entry_id)
@@ -609,6 +618,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .operation_journal_api import clear_operation_journal
     from .water_safety_api import clear_water_safety_api
     from .tablet_power_api import clear_tablet_power_api
+    from .manual_light_off_protection_api import clear_manual_light_off_protection_api
 
     unloaded = await hass.config_entries.async_unload_platforms(
         entry,
@@ -622,6 +632,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         clear_water_safety_api(hass)
         clear_operation_journal(hass)
         clear_tablet_power_api(hass)
+        clear_manual_light_off_protection_api(hass)
         clear_climate_api(hass, entry.entry_id)
         from .panel import unregister_hausmanhub_panel
 

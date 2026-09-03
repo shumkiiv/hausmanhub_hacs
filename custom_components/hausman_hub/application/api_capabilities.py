@@ -39,6 +39,7 @@ API_CAPABILITIES_CONTRACT_NAME = "hausman-hub-capabilities"
 API_CAPABILITIES_CONTRACT_VERSION = 1
 API_MAJOR_VERSION = 1
 API_BASE_PATH = "/api/hausman_hub/v1"
+MANUAL_LIGHT_OFF_PROTECTION_PATH = f"{API_BASE_PATH}/lighting/manual-off-protection"
 
 CAPABILITIES_PATH = f"{API_BASE_PATH}/capabilities"
 HOME_PATH = f"{API_BASE_PATH}/home"
@@ -113,6 +114,17 @@ def api_capabilities_snapshot(
             "base_path": API_BASE_PATH,
         },
         "capabilities": {
+            "manual_light_off_protection": {
+                "available": True,
+                "settings_path": MANUAL_LIGHT_OFF_PROTECTION_PATH,
+                "settings_methods": ["GET", "PUT"],
+                "release_path": f"{MANUAL_LIGHT_OFF_PROTECTION_PATH}/release",
+                "release_method": "POST",
+                "response_contract": {"name": "hausman-hub-manual-light-off-protection", "version": 1},
+                "settings_request_contract": {"name": "hausman-hub-manual-light-off-protection-settings-request", "version": 1},
+                "release_request_contract": {"name": "hausman-hub-manual-light-off-protection-release-request", "version": 1},
+                "receipt_contract": {"name": "hausman-hub-manual-light-off-protection-command-receipt", "version": 1},
+            },
             "device_actions": {
                 "available": device_actions_available,
                 "path": DEVICE_ACTIONS_PATH,

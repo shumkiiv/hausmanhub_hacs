@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/manual-light-off-protection-settings-request.schema.json",
+  "title": "HausmanHub manual light off protection settings request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "requestId", "expectedRevision", "settings"],
+  "properties": {"contract": {"type": "object", "additionalProperties": false, "required": ["name", "version"], "properties": {"name": {"const": "hausman-hub-manual-light-off-protection-settings-request"}, "version": {"const": 1}}}, "requestId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"}, "expectedRevision": {"type": "integer", "minimum": 0}, "settings": {"$ref": "manual-light-off-protection.schema.json#/$defs/settings"}}
+}

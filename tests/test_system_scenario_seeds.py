@@ -405,6 +405,29 @@ class SystemScenarioSeedsTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(seed.title.strip())
             self.assertTrue(seed.description.strip())
             self.assertTrue(seed.triggers)
+
+    def test_storage_has_exactly_the_three_command_free_first_wave_seeds(self) -> None:
+        storage = [
+            seed for seed in SYSTEM_SCENARIO_SEEDS
+            if seed.scenario_id.startswith("system-storage-light-")
+        ]
+
+        self.assertEqual(
+            [
+                "system-storage-light-on-presence",
+                "system-storage-light-off-timer",
+                "system-storage-light-off-confirmed",
+            ],
+            [seed.scenario_id for seed in storage],
+        )
+        self.assertTrue(all(seed.command_mode == "shadow" for seed in storage))
+        targets = {
+            step["targetId"]
+            for seed in storage
+            for step in (*seed.triggers, *seed.conditions, *seed.actions)
+            if "targetId" in step
+        }
+        self.assertEqual({_stable_target_id_from_entity("switch.0x603d61fffe767806_1")}, targets)
         # Список выключения «не дома» не должен быть пустым.
         self.assertGreaterEqual(len(AWAY_OFF_ENTITIES), 10)
 

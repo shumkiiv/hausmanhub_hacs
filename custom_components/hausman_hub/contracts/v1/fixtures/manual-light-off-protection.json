@@ -1,0 +1,54 @@
+{
+  "contract": {"name": "hausman-hub-manual-light-off-protection", "version": 1},
+  "revision": 0,
+  "updatedAt": "2026-09-03T12:00:00Z",
+  "settings": {
+    "globalPolicy": {
+      "enabled": true,
+      "minimumIntervalSeconds": 600,
+      "releaseMode": "timer_and_absence",
+      "stableAbsenceSeconds": 30,
+      "extendOnRepeatedManualOff": true,
+      "noSensorFallback": "timer_only",
+      "protectedScope": "profile",
+      "allowManualRelease": true
+    },
+    "roomOverrides": {"shower": {"stableAbsenceSeconds": 45}},
+    "profileOverrides": {"shower-main": {"minimumIntervalSeconds": 900}},
+    "profiles": [
+      {
+        "roomId": "shower",
+        "profileId": "shower-main",
+        "lightIds": ["light.shower_main"],
+        "presenceSensorIds": ["binary_sensor.shower_presence"]
+      }
+    ]
+  },
+  "protections": [
+    {
+      "roomId": "shower",
+      "profileId": "shower-main",
+      "lightIds": ["light.shower_main"],
+      "startedAt": "2026-09-03T12:00:00Z",
+      "notBefore": "2026-09-03T12:10:00Z",
+      "absenceSince": null,
+      "effectivePolicy": {
+        "enabled": true,
+        "minimumIntervalSeconds": 600,
+        "releaseMode": "timer_and_absence",
+        "stableAbsenceSeconds": 30,
+        "extendOnRepeatedManualOff": true,
+        "noSensorFallback": "timer_only",
+        "protectedScope": "profile",
+        "allowManualRelease": true
+      },
+      "effectivePolicySource": "global",
+      "policyFingerprint": "f7c3a5d0d650f9d4c1a355d9e11a5d4ce0099709908dd15f6a515ee93a5b6c9a",
+      "reason": "manual_off",
+      "attributionSource": "manual_command",
+      "attributionId": "lighting.protection.release.0001",
+      "revision": 1,
+      "state": "active"
+    }
+  ]
+}

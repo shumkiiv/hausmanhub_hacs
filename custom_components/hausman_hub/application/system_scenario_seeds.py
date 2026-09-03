@@ -136,6 +136,7 @@ SWITCH_BATHROOM_LIGHT_2 = "switch.0xacbac0fffebe38d0_2"
 SWITCH_BATHROOM_FAN = "switch.0x54ef44100019fca5"
 
 LIGHT_HALLWAY = "light.0xa4c138784e5cbcd1"
+STORAGE_LINE_1 = "switch.0x603d61fffe767806_1"
 
 HUMIDITY_BATHROOM = "sensor.klimat_vanna_humidity"
 
@@ -692,6 +693,40 @@ SYSTEM_SCENARIO_SEEDS: tuple[SystemScenarioSeed, ...] = (
             SWITCH_BATHROOM_LIGHT_2,
             SWITCH_BATHROOM_FAN,
         ),
+    ),
+    SystemScenarioSeed(
+        scenario_id="system-storage-light-on-presence",
+        title="Кладовая: свет по присутствию",
+        description="Подготовленный системный профиль света кладовой. До подтверждения живого датчика работает только в теневом режиме.",
+        icon="mdi:warehouse",
+        command_mode="shadow",
+        triggers=(_device_trigger("t1", STORAGE_LINE_1, "changed"),),
+        conditions=(),
+        actions=(_device_action("a1", STORAGE_LINE_1, "turn_on"),),
+        required_entities=(STORAGE_LINE_1,),
+    ),
+    SystemScenarioSeed(
+        scenario_id="system-storage-light-off-timer",
+        title="Кладовая: таймер выключения света",
+        description="Подготовленный теневой таймер выключения света кладовой без физической команды.",
+        icon="mdi:timer-outline",
+        command_mode="shadow",
+        execution_mode="restart",
+        triggers=(_device_trigger("t1", STORAGE_LINE_1, "equals", "on"),),
+        conditions=(),
+        actions=(_delay("a1", 300), _device_action("a2", STORAGE_LINE_1, "turn_off")),
+        required_entities=(STORAGE_LINE_1,),
+    ),
+    SystemScenarioSeed(
+        scenario_id="system-storage-light-off-confirmed",
+        title="Кладовая: подтверждённое выключение света",
+        description="Теневая проверка подтверждённого выключения света кладовой.",
+        icon="mdi:lightbulb-off-outline",
+        command_mode="shadow",
+        triggers=(_device_trigger("t1", STORAGE_LINE_1, "equals", "off"),),
+        conditions=(),
+        actions=(_notify("a1", "Кладовая: выключение света подтверждено."),),
+        required_entities=(STORAGE_LINE_1,),
     ),
     SystemScenarioSeed(
         scenario_id="system-away-turn-off",

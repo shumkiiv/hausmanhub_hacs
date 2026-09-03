@@ -1,0 +1,27 @@
+{
+  "contract": {"name": "hausman-hub-manual-light-off-protection-settings-request", "version": 1},
+  "requestId": "lighting.protection.settings.0001",
+  "expectedRevision": 0,
+  "settings": {
+    "globalPolicy": {
+      "enabled": true,
+      "minimumIntervalSeconds": 600,
+      "releaseMode": "timer_and_absence",
+      "stableAbsenceSeconds": 30,
+      "extendOnRepeatedManualOff": true,
+      "noSensorFallback": "timer_only",
+      "protectedScope": "profile",
+      "allowManualRelease": true
+    },
+    "roomOverrides": {"shower": {"stableAbsenceSeconds": 45}},
+    "profileOverrides": {"shower-main": {"minimumIntervalSeconds": 900}},
+    "profiles": [
+      {
+        "roomId": "shower",
+        "profileId": "shower-main",
+        "lightIds": ["light.shower_main"],
+        "presenceSensorIds": ["binary_sensor.shower_presence"]
+      }
+    ]
+  }
+}

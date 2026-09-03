@@ -254,6 +254,44 @@ class ManualLightOffProtectionCoordinator:
             self._notify_event_entity_listeners()
             return copy.deepcopy(receipt)
 
+    async def async_release_profile(
+        self, request_id: str, room_id: str, profile_id: str
+    ) -> dict[str, object]:
+        """Release one active record by the public profile identity.
+
+        Storage keys are internal hashes and deliberately never cross the API
+        boundary.  This method retains the same durable receipt semantics as
+        the key-based operation while resolving the current record under its
+        lock, so a stale browser snapshot cannot release a replacement record.
+        """
+
+        async with self._lock:
+            existing = self._receipt(request_id)
+            if existing is not None:
+                return existing
+            self._require_healthy()
+            item = next(
+                ((key, value) for key, value in self._protections.items()
+                 if value["roomId"] == room_id and value["profileId"] == profile_id),
+                None,
+            )
+            if item is None:
+                raise ValueError("protection is not active")
+            key, record = item
+            if not record["effectivePolicy"]["allowManualRelease"]:
+                raise ValueError("manual release is disabled")
+            updated = copy.deepcopy(record)
+            updated["state"] = ProtectionState.RELEASED.value
+            updated["revision"] = int(record["revision"]) + 1
+            await self._complete(key, updated, request_id=request_id)
+            receipt = _receipt(request_id, "manual_release", int(updated["revision"]), protection=updated)
+            self._receipts[request_id] = receipt
+            if len(self._receipts) > MAX_IDEMPOTENCY_RECEIPTS:
+                self._receipts.pop(next(iter(self._receipts)))
+            await self._save()
+            self._notify_event_entity_listeners()
+            return copy.deepcopy(receipt)
+
     def snapshot(self) -> dict[str, object]:
         return {
             "contract": {"name": "hausman-hub-manual-light-off-protection", "version": 1},
