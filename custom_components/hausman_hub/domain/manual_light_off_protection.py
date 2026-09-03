@@ -80,10 +80,23 @@ class LightProtectionDecision:
     allowed: bool
     reason: str | None = None
     protection_id: str | None = None
+    details: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         if type(self.allowed) is not bool:
             raise ManualLightOffProtectionViolation("decision allowed is invalid")
+
+    def as_payload(self) -> dict[str, object]:
+        """Return the stable, non-sensitive guard decision for a receipt."""
+
+        payload: dict[str, object] = {
+            "allowed": self.allowed,
+            "reason": self.reason,
+            "protectionId": self.protection_id,
+        }
+        if self.details is not None:
+            payload.update(self.details)
+        return payload
 
 
 @dataclass(frozen=True, slots=True)

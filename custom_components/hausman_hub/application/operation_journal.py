@@ -321,6 +321,14 @@ def scenario_operation_receipt(result: Mapping[str, object]) -> dict[str, object
             item.get("reason") or item.get("error"),
             "action_failed" if action_outcome == "failed" else None,
         )
+        # A guard denial is a completed, command-free scenario action. Keep
+        # its stable reason in the durable trace so operators can distinguish
+        # it from a failed device dispatch without exposing protection state.
+        if (
+            item.get("physicalAttempted") is False
+            and item.get("reason") == "manual_off_protection_active"
+        ):
+            reason = "manual_off_protection_active"
         if command_mode == "shadow":
             confirmed = None
             if action_outcome != "failed":

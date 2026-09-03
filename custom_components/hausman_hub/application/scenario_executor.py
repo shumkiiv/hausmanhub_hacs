@@ -54,6 +54,7 @@ from .vendor_resilience import VendorCircuitBreaker, VendorServiceUnavailable
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
+    from .manual_light_off_protection import ManualLightOffProtectionCoordinator
     from .scenario_command_context import ScenarioCommandContextRegistry
 
 
@@ -546,6 +547,7 @@ class ScenarioExecutor:
         light_safety_obligations: LightSafetyObligations | None = None,
         contextual_dangerous_resolver: Callable[[str, str], bool] | None = None,
         command_contexts: ScenarioCommandContextRegistry | None = None,
+        manual_light_off_protection: ManualLightOffProtectionCoordinator | None = None,
     ):
         if not 0.01 <= readback_window_seconds <= 30.0:
             raise ValueError("readback window must be between 0.01 and 30 seconds")
@@ -566,6 +568,7 @@ class ScenarioExecutor:
         self._light_safety_obligations = light_safety_obligations
         self._contextual_dangerous_resolver = contextual_dangerous_resolver
         self._command_contexts = command_contexts
+        self._manual_light_off_protection = manual_light_off_protection
 
     def new_run_id(self) -> str:
         """Generate a unique execution trace id."""
@@ -653,6 +656,7 @@ class ScenarioExecutor:
                 expected_evidence_sequence=expected_evidence_sequence,
                 force_contextually_dangerous=contextually_dangerous,
                 command_request_id=request_id,
+                protection_trigger_context=None,
             )
 
         try:
@@ -1904,6 +1908,7 @@ class ScenarioExecutor:
                     authority_lock_held=authority_lock_held,
                     forbid_toggle=forbid_toggle,
                     before_dispatch=before_dispatch,
+                    protection_trigger_context=trigger_context,
                 )
             if action.type == ScenarioActionType.DELAY:
                 if not dry_run:
@@ -1955,6 +1960,7 @@ class ScenarioExecutor:
         authority_lock_held: bool = False,
         command_request_id: str | None = None,
         forbid_toggle: bool = False,
+        protection_trigger_context: Mapping[str, object] | None = None,
     ) -> dict[str, Any]:
         if action.target_id is None or action.action_id is None:
             return {
@@ -1989,6 +1995,43 @@ class ScenarioExecutor:
                 "status": "failed",
                 "error": "dispatch_descriptor_changed",
             }
+        if (
+            automatic
+            and allowed.domain == "light"
+            and allowed.service == "turn_on"
+            and self._manual_light_off_protection is not None
+        ):
+            decision = await self._manual_light_off_protection.async_decide(
+                action,
+                self._catalog,
+                automatic=True,
+                dry_run=dry_run,
+                trigger_context=protection_trigger_context,
+            )
+            if not decision.allowed:
+                protection = decision.as_payload()
+                protection["trigger"] = (
+                    dict(protection_trigger_context)
+                    if isinstance(protection_trigger_context, Mapping)
+                    else None
+                )
+                protection["effectiveState"] = str(
+                    getattr(self._hass.states.get(device.entity_id), "state", "unknown")
+                )
+                return {
+                    **base,
+                    "status": "completed",
+                    "target_id": action.target_id,
+                    "domain": allowed.domain,
+                    "service": allowed.service,
+                    "entity_id": device.entity_id,
+                    "reason": "manual_off_protection_active",
+                    "physicalAttempted": False,
+                    "protection": protection,
+                    "skipped": True,
+                    "confirmed": None if dry_run else True,
+                    **({"planned": True} if dry_run else {}),
+                }
         if forbid_toggle and action.action_id == "toggle":
             observed_state = str(
                 getattr(self._hass.states.get(device.entity_id), "state", "unknown")

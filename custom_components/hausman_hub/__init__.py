@@ -411,6 +411,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             scenario_service.is_contextually_dangerous_action
         ),
         command_contexts=scenario_command_contexts,
+        manual_light_off_protection=manual_light_off_protection,
     )
     entry.async_on_unload(
         light_safety_obligations.start(

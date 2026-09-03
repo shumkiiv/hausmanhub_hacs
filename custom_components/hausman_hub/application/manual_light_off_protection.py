@@ -185,7 +185,24 @@ class ManualLightOffProtectionCoordinator:
                         if now < _parse_time(record["notBefore"])
                         else "manual_off_protection_absence_required"
                     )
-                    return LightProtectionDecision(False, reason, key)
+                    return LightProtectionDecision(
+                        False,
+                        reason,
+                        key,
+                        {
+                            "profileId": record["profileId"],
+                            "policyFingerprint": record["policyFingerprint"],
+                            "protectionRevision": record["revision"],
+                            "remainingSeconds": max(
+                                0,
+                                int((_parse_time(record["notBefore"]) - now).total_seconds()),
+                            ),
+                            "attribution": {
+                                "source": record["attributionSource"],
+                                "id": record["attributionId"],
+                            },
+                        },
+                    )
                 releasable.append((key, record))
             if not dry_run:
                 await self._complete_many(releasable)

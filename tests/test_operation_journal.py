@@ -197,6 +197,31 @@ class OperationJournalTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await service.async_append(unsafe)
 
+    async def test_manual_off_protection_skip_is_retained_without_private_details(self) -> None:
+        normalized = scenario_operation_receipt(
+            {
+                "run_id": "run-protected-1",
+                "scenario_id": "presence_light",
+                "execution_mode": "restart",
+                "status": "completed",
+                "confirmed": True,
+                "condition_results": [],
+                "receipts": [{
+                    "action_id": "light_on",
+                    "status": "completed",
+                    "skipped": True,
+                    "physicalAttempted": False,
+                    "reason": "manual_off_protection_active",
+                    "protection": {"profileId": "private_room"},
+                }],
+            }
+        )
+
+        action = normalized["scenario"]["actions"][0]
+        self.assertEqual("skipped", action["outcome"])
+        self.assertEqual("manual_off_protection_active", action["reason"])
+        self.assertNotIn("private_room", str(normalized))
+
     async def test_shadow_trace_never_claims_physical_confirmation(self) -> None:
         store = MemoryStore()
         service = OperationJournalService(store, now_ms=lambda: 60)

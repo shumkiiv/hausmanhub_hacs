@@ -23,6 +23,9 @@ from custom_components.hausman_hub.application.scenario_executor import (
 from custom_components.hausman_hub.application.operation_journal import (
     scenario_operation_receipt,
 )
+from custom_components.hausman_hub.application.manual_light_off_protection import (
+    ManualLightOffProtectionCoordinator,
+)
 from custom_components.hausman_hub.application.device_action_receipts import (
     evidence_snapshot,
 )
@@ -331,6 +334,106 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             readback_window_seconds=0.02,
             readback_interval_seconds=0.01,
         )
+
+    async def test_manual_off_protection_blocks_automatic_light_before_power_preparation(
+        self,
+    ) -> None:
+        """A protected automatic activation must not energize its relay first."""
+
+        order: list[str] = []
+
+        class Store:
+            payload: object | None = None
+
+            async def async_load(self) -> object | None:
+                return self.payload
+
+            async def async_save(self, payload: dict[str, object]) -> None:
+                self.payload = payload
+
+        class BlockingProtection(ManualLightOffProtectionCoordinator):
+            async def async_decide(self, action, catalog, *, automatic, dry_run, trigger_context):
+                order.append("protection")
+                return await super().async_decide(
+                    action,
+                    catalog,
+                    automatic=automatic,
+                    dry_run=dry_run,
+                    trigger_context=trigger_context,
+                )
+
+        async def unexpected_power(*_args: object, **_kwargs: object):
+            raise AssertionError("power preparation must follow protection")
+
+        protection = BlockingProtection(Store())
+        await protection.async_load()
+        await protection.async_replace_settings(
+            "settings.1",
+            0,
+            {
+                "globalPolicy": {
+                    "enabled": True,
+                    "minimumIntervalSeconds": 600,
+                    "releaseMode": "timer_only",
+                    "stableAbsenceSeconds": 30,
+                    "extendOnRepeatedManualOff": True,
+                    "noSensorFallback": "timer_only",
+                    "protectedScope": "profile",
+                    "allowManualRelease": True,
+                },
+                "roomOverrides": {},
+                "profileOverrides": {},
+                "profiles": [{
+                    "roomId": "living_room",
+                    "profileId": "living_room_light",
+                    "lightIds": ["light.living_room"],
+                    "presenceSensorIds": [],
+                }],
+            },
+        )
+        await protection.async_note_state_transition(
+            "light.living_room",
+            SimpleNamespace(state="on"),
+            SimpleNamespace(state="off"),
+            None,
+        )
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            power_dependency_resolver=lambda: _power_link(policy="auto_turn_on"),
+            manual_light_off_protection=protection,
+            readback_window_seconds=0.02,
+            readback_interval_seconds=0.01,
+        )
+        self.hass.state_values["light.living_room"] = SimpleNamespace(
+            state="off", attributes={}
+        )
+        self.hass.state_values["switch.wall"] = SimpleNamespace(state="off", attributes={})
+        executor._prepare_power_dependency = unexpected_power  # type: ignore[method-assign]
+
+        result = await executor.async_execute(
+            _definition(
+                (
+                    ScenarioAction(
+                        id="protected_on",
+                        type=ScenarioActionType.DEVICE_ACTION,
+                        target_id="device_1",
+                        action_id="turn_on",
+                    ),
+                )
+            ),
+            "run-protected-on",
+            scenario_id="presence_light",
+            trigger_context={"source": "device_state", "target_id": "sensor_1"},
+        )
+
+        self.assertEqual(["protection"], order)
+        self.assertEqual("completed", result["status"])
+        self.assertEqual("manual_off_protection_active", result["receipts"][0]["reason"])
+        self.assertFalse(result["receipts"][0]["physicalAttempted"])
+        self.assertEqual("living_room_light", result["receipts"][0]["protection"]["profileId"])
+        self.hass.services.async_call.assert_not_awaited()
 
     async def test_device_action_calls_service(self) -> None:
         definition = _definition(
