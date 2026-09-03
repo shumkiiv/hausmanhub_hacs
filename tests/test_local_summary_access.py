@@ -86,6 +86,17 @@ class FakeHttp:
     def register_view(self, view: object) -> None:
         self.views.append(view)
 
+    async def dispatch(self, method: str, request: object) -> FakeResponse:
+        """Dependency-free equivalent of HA's registered-view dispatcher."""
+        path = getattr(request, "path", None)
+        view = next((item for item in self.views if getattr(item, "url", None) == path), None)
+        if view is None:
+            raise LookupError(path)
+        handler = getattr(view, method.casefold(), None)
+        if handler is None:
+            raise LookupError(method)
+        return await handler(request)
+
     async def async_register_static_paths(self, configs: list[object]) -> None:
         self.static_paths.extend(configs)
 
@@ -658,20 +669,50 @@ class LocalSummaryAccessTest(unittest.TestCase):
         }
 
     def test_manual_protection_http_replay_conflicts_and_no_store(self) -> None:
+        # The synthetic read-only catalog has no first-wave devices. This API
+        # boundary test replaces its intentionally fail-closed setup state.
+        self.hass.data["hausman_hub"]["manual_light_off_protection"].unhealthy = False
         view, release = self._manual_protection_views()
         admin = reader_user("system-admin", admin=True)
         request = self._manual_settings_request("replay.1")
-        first = asyncio.run(view.put(FakeJsonRequest("127.0.0.1", admin, view.url, request)))
-        same = asyncio.run(view.put(FakeJsonRequest("127.0.0.1", admin, view.url, request)))
+        first = asyncio.run(self.hass.http.dispatch("PUT", FakeJsonRequest("127.0.0.1", admin, view.url, request)))
+        same = asyncio.run(self.hass.http.dispatch("PUT", FakeJsonRequest("127.0.0.1", admin, view.url, request)))
         changed = self._manual_settings_request("replay.1", 31)
-        conflict = asyncio.run(view.put(FakeJsonRequest("127.0.0.1", admin, view.url, changed)))
-        cross = asyncio.run(release.post(FakeJsonRequest("127.0.0.1", admin, release.url, {"contract": {"name": "hausman-hub-manual-light-off-protection-release-request", "version": 1}, "requestId": "replay.1", "roomId": "room", "profileId": "profile", "expectedProtectionRevision": 0})))
+        conflict = asyncio.run(self.hass.http.dispatch("PUT", FakeJsonRequest("127.0.0.1", admin, view.url, changed)))
+        cross = asyncio.run(self.hass.http.dispatch("POST", FakeJsonRequest("127.0.0.1", admin, release.url, {"contract": {"name": "hausman-hub-manual-light-off-protection-release-request", "version": 1}, "requestId": "replay.1", "roomId": "room", "profileId": "profile", "expectedProtectionRevision": 0})))
         self.assertEqual(200, first.status)
         self.assertEqual(first.payload, same.payload)
         for response in (conflict, cross):
             self.assertEqual(409, response.status)
             self.assertEqual("hausman-hub-error", response.payload["contract"]["name"])
             self.assertEqual("no-store", response.headers["Cache-Control"])
+
+    def test_manual_protection_dispatcher_returns_canonical_no_store_405(self) -> None:
+        view, release = self._manual_protection_views()
+        admin = reader_user("system-admin", admin=True)
+        for method, path in (("POST", view.url), ("GET", release.url), ("PUT", release.url), ("PATCH", view.url), ("DELETE", view.url), ("HEAD", release.url), ("OPTIONS", release.url)):
+            response = asyncio.run(self.hass.http.dispatch(method, FakeJsonRequest("127.0.0.1", admin, path, {})))
+            self.assertEqual(405, response.status)
+            self.assertEqual("hausman-hub-error", response.payload["contract"]["name"])
+            self.assertEqual("no-store", response.headers["Cache-Control"])
+
+    def test_manual_protection_unload_and_reload_keep_exactly_two_routes(self) -> None:
+        admin = reader_user("system-admin", admin=True)
+        view, _ = self._manual_protection_views()
+        before = tuple(item for item in self.hass.http.views if "manual_light_off_protection" in getattr(item, "name", ""))
+        self.assertTrue(asyncio.run(self.integration.async_unload_entry(self.hass, self.entry)))
+        unavailable = asyncio.run(self.hass.http.dispatch("PUT", FakeJsonRequest("127.0.0.1", admin, view.url, self._manual_settings_request("unload.1"))))
+        self.assertEqual(503, unavailable.status)
+        self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
+        after = tuple(item for item in self.hass.http.views if "manual_light_off_protection" in getattr(item, "name", ""))
+        self.assertEqual(before, after)
+        self.assertEqual(2, len(after))
+
+    def test_manual_protection_failed_unload_keeps_old_coordinator(self) -> None:
+        self.hass.config_entries.unload_succeeds = False
+        old = self.hass.data["hausman_hub"]["manual_light_off_protection"]
+        self.assertFalse(asyncio.run(self.integration.async_unload_entry(self.hass, self.entry)))
+        self.assertIs(old, self.hass.data["hausman_hub"]["manual_light_off_protection"])
 
     def test_manual_protection_http_failed_save_cannot_replay_success(self) -> None:
         from custom_components.hausman_hub.application.manual_light_off_protection import ManualLightOffProtectionCoordinator

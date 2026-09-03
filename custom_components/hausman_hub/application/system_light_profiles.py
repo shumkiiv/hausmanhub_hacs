@@ -59,6 +59,34 @@ SYSTEM_LIGHT_PROFILES: tuple[ProtectedLightProfile, ...] = (
     ProtectedLightProfile("bathroom", "bathroom-lights", ("entity_a591e035e3e5b34f", "entity_d82766182d69dd51")),
 )
 
+# This is the typed, first-wave source of truth. It is intentionally separate
+# from a Home Assistant domain: a generic switch is never promoted to a light
+# merely because it has a turn_on service.
+FIRST_WAVE_AUTO_ON_LIGHT_TARGET_IDS = frozenset(
+    target_id for profile in SYSTEM_LIGHT_PROFILES for target_id in profile.light_ids
+)
+
+
+def scenario_targets_for_system_light_profiles(catalog: object) -> tuple[ScenarioTarget, ...]:
+    """Read every declared first-wave target from the live catalog fail-closed."""
+
+    targets: list[ScenarioTarget] = []
+    device_for = getattr(catalog, "device", None)
+    for target_id in sorted(FIRST_WAVE_AUTO_ON_LIGHT_TARGET_IDS):
+        device = device_for(target_id) if callable(device_for) else None
+        entity_id = getattr(device, "entity_id", None)
+        actions = getattr(device, "actions", ())
+        has_auto_on = any(
+            getattr(action, "action_id", None) == "turn_on"
+            and getattr(action, "domain", None) in {"light", "switch"}
+            for action in actions
+        )
+        if not isinstance(entity_id, str) or not has_auto_on:
+            targets.append(ScenarioTarget(target_id, "invalid.invalid", "invalid"))
+        else:
+            targets.append(ScenarioTarget(target_id, entity_id, "light"))
+    return tuple(targets)
+
 
 def audit_system_light_protection_coverage(
     profiles: tuple[ProtectedLightProfile, ...],
@@ -85,9 +113,7 @@ def audit_system_light_protection_coverage(
         domain = target.entity_id.partition(".")[0]
         if target.target_id != _stable_target_id_from_entity(target.entity_id):
             unsafe.append(target.target_id)
-        elif domain == "light":
-            continue
-        elif domain != "switch" or role != "light":
+        elif domain not in {"light", "switch"} or role != "light":
             unsafe.append(target.target_id)
 
     return LightProtectionCoverageReport(

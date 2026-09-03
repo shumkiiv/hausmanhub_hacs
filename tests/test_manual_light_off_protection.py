@@ -361,12 +361,35 @@ def test_manual_release_eviction_write_failure_and_repeated_lifecycle() -> None:
 
         failed = ManualLightOffProtectionCoordinator(FailingStore(), now=lambda: now)
         await failed.async_load()
-        with pytest.raises(OSError, match="disk full"):
+        with pytest.raises(OSError, match="persistence failed"):
             await failed.async_replace_settings("failure.1", 0, _settings())
         assert failed.unhealthy
         assert not (await failed.async_decide_entity(
             "light.tambur_points", automatic=True, dry_run=False
         )).allowed
+
+    asyncio.run(exercise())
+
+
+def test_legacy_receipt_is_dropped_before_restart_persistence() -> None:
+    async def exercise() -> None:
+        store = MemoryStore()
+        coordinator = ManualLightOffProtectionCoordinator(store)
+        await coordinator.async_load()
+        await coordinator.async_replace_settings("current.1", 0, _settings())
+        legacy = store.payload.copy()
+        legacy_receipt = legacy["receipts"][0]["receipt"].copy()
+        legacy_receipt["requestId"] = "legacy.1"
+        legacy["receipts"] = [{
+            "requestId": "legacy.1",
+            "receipt": legacy_receipt,
+        }]
+        store.payload = legacy
+        restarted = ManualLightOffProtectionCoordinator(store)
+        await restarted.async_load()
+        await restarted.async_replace_settings("current.2", 1, _settings())
+        assert all("operation" in item and "payloadFingerprint" in item for item in store.payload["receipts"])
+        assert all(item["requestId"] != "legacy.1" for item in store.payload["receipts"])
 
     asyncio.run(exercise())
 

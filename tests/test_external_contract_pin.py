@@ -10,6 +10,17 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 PIN_PATH = REPOSITORY_ROOT / "hausmanhub-contracts.json"
 
 VENDORED_CONTRACT_HASHES = {
+    "custom_components/hausman_hub/contracts/v1/api-surfaces.json": "b609af49d1a1fe687a812ec69206706dcef426348b7a64aecfe8e108875da060",
+    "custom_components/hausman_hub/contracts/v1/correlation-surfaces.json": "c4f5ba4907870ab5c6ed7842afc55939d1dcd3a5753c25431fda0ad0a8de37be",
+    "custom_components/hausman_hub/contracts/v1/optional-capabilities.json": "432bb61e1fdeddb9717ec6a54ef88544e40b687b7243174b790ca5f622d9f62d",
+    "custom_components/hausman_hub/contracts/v1/manual-light-off-protection.schema.json": "e760f0193b1c28197c46e7b3b4d221bc6240018f833b9f640c00a267ca58127b",
+    "custom_components/hausman_hub/contracts/v1/manual-light-off-protection-settings-request.schema.json": "d542048068355535a5410e089b28357bbb9b33ec20ff1748fb064b21bcd11cc7",
+    "custom_components/hausman_hub/contracts/v1/manual-light-off-protection-release-request.schema.json": "0149d7ae956e43f471b61f4c8589db9aa87cd022a16d285b7d239373bb4abd6e",
+    "custom_components/hausman_hub/contracts/v1/manual-light-off-protection-command-receipt.schema.json": "911a4bb43467f718410dd4d4f98fcfb1f62acc2cf6e049bf8b27c5a56086757e",
+    "custom_components/hausman_hub/contracts/v1/fixtures/manual-light-off-protection.json": "2cc591e7c373249e6730d4b9f0bf8183f83bb60c9c4c2500445f6955d1dce9ca",
+    "custom_components/hausman_hub/contracts/v1/fixtures/manual-light-off-protection-settings-request.json": "36d6d5b0e77baa2f8d25ae391b1c4d00ea3ea80fd4d1240093264362969bd690",
+    "custom_components/hausman_hub/contracts/v1/fixtures/manual-light-off-protection-release-request.json": "9a92e9387b4216bd4685992c14471571861f9753b72f10fd793df9f486426169",
+    "custom_components/hausman_hub/contracts/v1/fixtures/manual-light-off-protection-command-receipt.json": "9ff82f3668ce16b9caa9627f3fe4c29f8af5c5566d14e851508fd26698a82752",
     "custom_components/hausman_hub/contracts/v1/climate-reliability-semantic-rules.json": "1dbd75b40be1cfb5d1c23fce79819a047ba7a28556938782150dabeb88b6a6b2",
     "custom_components/hausman_hub/contracts/v1/climate-room-recovery-receipt.schema.json": "d34b54a177fcc5c77cd48d28233f4f90e6fde07e17596cfdbe27bde4c56246fe",
     "custom_components/hausman_hub/contracts/v1/climate-room-recovery-request.schema.json": "80b560590455e94dd944c2a6bbcbb00b47528e95ce8d036d320d485d156579e9",
@@ -90,3 +101,19 @@ def test_contract_0_65_0_vendored_files_match_canonical_hashes() -> None:
     for relative_path, expected_hash in VENDORED_CONTRACT_HASHES.items():
         payload = (REPOSITORY_ROOT / relative_path).read_bytes()
         assert hashlib.sha256(payload).hexdigest() == expected_hash, relative_path
+
+
+def test_manual_protection_contract_pin_covers_the_complete_surface() -> None:
+    required = {
+        "api-surfaces.json", "correlation-surfaces.json", "optional-capabilities.json",
+        "manual-light-off-protection.schema.json",
+        "manual-light-off-protection-settings-request.schema.json",
+        "manual-light-off-protection-release-request.schema.json",
+        "manual-light-off-protection-command-receipt.schema.json",
+        "fixtures/manual-light-off-protection.json",
+        "fixtures/manual-light-off-protection-settings-request.json",
+        "fixtures/manual-light-off-protection-release-request.json",
+        "fixtures/manual-light-off-protection-command-receipt.json",
+    }
+    covered = {path.removeprefix("custom_components/hausman_hub/contracts/v1/") for path in VENDORED_CONTRACT_HASHES}
+    assert required <= covered

@@ -273,6 +273,19 @@
         }
       }
     },
+    "manual_light_off_protection": {
+      "operations": [
+        {"method": "GET", "path": "/api/hausman_hub/v1/lighting/manual-off-protection"},
+        {"method": "PUT", "path": "/api/hausman_hub/v1/lighting/manual-off-protection"},
+        {"method": "POST", "path": "/api/hausman_hub/v1/lighting/manual-off-protection/release"}
+      ],
+      "payloadContracts": {
+        "response_contract": {"name": "hausman-hub-manual-light-off-protection", "version": 1},
+        "settings_request_contract": {"name": "hausman-hub-manual-light-off-protection-settings-request", "version": 1},
+        "release_request_contract": {"name": "hausman-hub-manual-light-off-protection-release-request", "version": 1},
+        "receipt_contract": {"name": "hausman-hub-manual-light-off-protection-command-receipt", "version": 1}
+      }
+    },
     "climate_room_recovery_v2": {
       "availabilitySemantics": {
         "available": "true only when runtime and durable recovery store are ready",

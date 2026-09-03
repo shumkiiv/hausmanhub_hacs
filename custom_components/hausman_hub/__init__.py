@@ -311,6 +311,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     scenario_store = HomeAssistantScenarioStore(hass, entry.entry_id)
     scenario_catalog = await async_build_scenario_catalog(hass)
+    from .application.manual_light_off_protection import (
+        ManualLightOffProtectionCoordinator,
+    )
+    from .application.system_light_profiles import (
+        SYSTEM_LIGHT_PROFILES,
+        audit_system_light_protection_coverage,
+        scenario_targets_for_system_light_profiles,
+    )
+    from .manual_light_off_protection_storage import (
+        HomeAssistantManualLightOffProtectionStore,
+    )
+
+    manual_light_off_protection = ManualLightOffProtectionCoordinator(
+        HomeAssistantManualLightOffProtectionStore(hass, entry.entry_id)
+    )
+    await manual_light_off_protection.async_load()
+    coverage = audit_system_light_protection_coverage(
+        SYSTEM_LIGHT_PROFILES,
+        scenario_targets_for_system_light_profiles(scenario_catalog),
+    )
+    if not coverage.healthy:
+        manual_light_off_protection.mark_unhealthy()
+    domain_data["manual_light_off_protection_coverage"] = coverage
+    domain_data["manual_light_off_protection"] = manual_light_off_protection
     from .application.scenario_node_red import NodeRedScenarioBackend
 
     scenario_node_red_backend = NodeRedScenarioBackend(hass)
@@ -380,18 +404,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         issue_reporter=HomeAssistantLightSafetyIssueReporter(hass),
     )
     await light_safety_obligations.async_load()
-    from .application.manual_light_off_protection import (
-        ManualLightOffProtectionCoordinator,
-    )
-    from .manual_light_off_protection_storage import (
-        HomeAssistantManualLightOffProtectionStore,
-    )
-
-    manual_light_off_protection = ManualLightOffProtectionCoordinator(
-        HomeAssistantManualLightOffProtectionStore(hass, entry.entry_id)
-    )
-    await manual_light_off_protection.async_load()
-    domain_data["manual_light_off_protection"] = manual_light_off_protection
     from .application.scenario_command_context import (
         ScenarioCommandContextRegistry,
     )

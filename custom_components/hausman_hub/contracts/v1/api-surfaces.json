@@ -162,6 +162,33 @@
       "target": "canonical"
     },
     {
+      "id": "integration.lighting.manual-off-protection.read",
+      "source": "integration",
+      "method": "GET",
+      "path": "/api/hausman_hub/v1/lighting/manual-off-protection",
+      "owner": "integration",
+      "status": "contracted",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.lighting.manual-off-protection.settings",
+      "source": "integration",
+      "method": "PUT",
+      "path": "/api/hausman_hub/v1/lighting/manual-off-protection",
+      "owner": "integration",
+      "status": "contracted",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.lighting.manual-off-protection.release",
+      "source": "integration",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/lighting/manual-off-protection/release",
+      "owner": "integration",
+      "status": "contracted",
+      "target": "canonical"
+    },
+    {
       "id": "integration.operations.journal",
       "source": "integration",
       "method": "GET",

@@ -96,6 +96,22 @@
       "journalSource": "scenario"
     },
     {
+      "operationId": "updateHausmanHubManualLightOffProtection",
+      "requestSchema": "schemas/v1/manual-light-off-protection-settings-request.schema.json",
+      "requestField": "requestId",
+      "receiptSchema": "schemas/v1/manual-light-off-protection-command-receipt.schema.json",
+      "receiptField": "requestId",
+      "journalSource": "lighting"
+    },
+    {
+      "operationId": "releaseHausmanHubManualLightOffProtection",
+      "requestSchema": "schemas/v1/manual-light-off-protection-release-request.schema.json",
+      "requestField": "requestId",
+      "receiptSchema": "schemas/v1/manual-light-off-protection-command-receipt.schema.json",
+      "receiptField": "requestId",
+      "journalSource": "lighting"
+    },
+    {
       "operationId": "testHausmanHubVoiceGreeting",
       "requestSchema": "schemas/v1/voice-greeting-test-request.schema.json",
       "requestField": "correlationId",
@@ -115,6 +131,7 @@
       "critical_alert",
       "attention_alert",
       "command_receipt",
+      "manual_light_off_protection_changed",
       "heartbeat"
     ]
   },

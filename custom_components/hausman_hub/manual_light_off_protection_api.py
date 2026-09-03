@@ -10,7 +10,16 @@ from typing import Any
 from homeassistant.components.http import HomeAssistantView
 
 from .application.api_capabilities import MANUAL_LIGHT_OFF_PROTECTION_PATH
-from .application.manual_light_off_protection import ManualLightOffProtectionCoordinator
+from .application.manual_light_off_protection import (
+    ManualLightOffProtectionCoordinator,
+    ManualLightOffProtectionIdempotencyConflict,
+    ManualLightOffProtectionNotFound,
+    ManualLightOffProtectionPersistenceError,
+    ManualLightOffProtectionPolicyConflict,
+    ManualLightOffProtectionRevisionConflict,
+    ManualLightOffProtectionUnavailable,
+    ManualLightOffProtectionValidationError,
+)
 from .climate_api import (
     DOMAIN,
     NO_STORE_HEADERS,
@@ -22,12 +31,14 @@ from .climate_api import (
     _not_found,
     _request_json,
 )
+from .error_taxonomy import api_error_payload
 
 MANUAL_LIGHT_OFF_PROTECTION_RELEASE_PATH = f"{MANUAL_LIGHT_OFF_PROTECTION_PATH}/release"
 DATA_MANUAL_LIGHT_OFF_PROTECTION = "manual_light_off_protection"
 DATA_MANUAL_LIGHT_OFF_PROTECTION_VIEWS = "manual_light_off_protection_views"
 MAX_MANUAL_LIGHT_OFF_PROTECTION_BODY_BYTES = 16 * 1024
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_STABLE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 
 
 class _BaseView(HomeAssistantView):
@@ -44,6 +55,13 @@ class _BaseView(HomeAssistantView):
 
     def _unavailable(self) -> Any:
         return _api_error(self, "unavailable")
+
+    def _method_not_allowed(self) -> Any:
+        return self.json(
+            api_error_payload("not_found"),
+            status_code=HTTPStatus.METHOD_NOT_ALLOWED,
+            headers=NO_STORE_HEADERS,
+        )
 
 
 class ManualLightOffProtectionView(_BaseView):
@@ -88,18 +106,36 @@ class ManualLightOffProtectionView(_BaseView):
             receipt = await coordinator.async_replace_settings(
                 request_id, expected_revision, settings
             )
-        except ValueError as error:
-            return _api_error(
-                self,
-                "revision_conflict" if "conflict" in str(error) else "invalid_request",
-            )
-        except RuntimeError:
-            return self._unavailable()
-        except OSError:
-            return _api_error(self, "internal_error")
-        except (KeyError, TypeError):
+        except ManualLightOffProtectionValidationError:
             return _api_error(self, "invalid_request")
+        except ManualLightOffProtectionRevisionConflict:
+            return _api_error(self, "revision_conflict")
+        except ManualLightOffProtectionIdempotencyConflict:
+            return _api_error(self, "conflict")
+        except ManualLightOffProtectionPersistenceError:
+            return _api_error(self, "internal_error")
+        except ManualLightOffProtectionUnavailable:
+            return self._unavailable()
+        except (KeyError, TypeError, ValueError):
+            return _api_error(self, "invalid_request")
+        except Exception:
+            return _api_error(self, "internal_error")
         return self.json(receipt, headers=NO_STORE_HEADERS)
+
+    async def post(self, request: Any) -> Any:
+        return self._method_not_allowed()
+
+    async def delete(self, request: Any) -> Any:
+        return self._method_not_allowed()
+
+    async def patch(self, request: Any) -> Any:
+        return self._method_not_allowed()
+
+    async def head(self, request: Any) -> Any:
+        return self._method_not_allowed()
+
+    async def options(self, request: Any) -> Any:
+        return self._method_not_allowed()
 
 
 class ManualLightOffProtectionReleaseView(_BaseView):
@@ -127,26 +163,51 @@ class ManualLightOffProtectionReleaseView(_BaseView):
             if (
                 not all(isinstance(value, str) for value in (request_id, room_id, profile_id))
                 or _REQUEST_ID.fullmatch(request_id) is None
+                or _STABLE_ID.fullmatch(room_id) is None
+                or _STABLE_ID.fullmatch(profile_id) is None
                 or type(expected_protection_revision) is not int
             ):
                 raise ValueError
             receipt = await coordinator.async_release_profile(
                 request_id, room_id, profile_id, expected_protection_revision
             )
-        except ValueError as error:
-            return _api_error(
-                self,
-                "revision_conflict"
-                if "conflict" in str(error) or "protection is not active" in str(error)
-                else "invalid_request",
-            )
-        except RuntimeError:
-            return self._unavailable()
-        except OSError:
-            return _api_error(self, "internal_error")
-        except (KeyError, TypeError):
+        except ManualLightOffProtectionValidationError:
             return _api_error(self, "invalid_request")
+        except ManualLightOffProtectionRevisionConflict:
+            return _api_error(self, "revision_conflict")
+        except ManualLightOffProtectionIdempotencyConflict:
+            return _api_error(self, "conflict")
+        except ManualLightOffProtectionNotFound:
+            return _api_error(self, "not_found")
+        except ManualLightOffProtectionPolicyConflict:
+            return _api_error(self, "conflict")
+        except ManualLightOffProtectionPersistenceError:
+            return _api_error(self, "internal_error")
+        except ManualLightOffProtectionUnavailable:
+            return self._unavailable()
+        except (KeyError, TypeError, ValueError):
+            return _api_error(self, "invalid_request")
+        except Exception:
+            return _api_error(self, "internal_error")
         return self.json(receipt, headers=NO_STORE_HEADERS)
+
+    async def get(self, request: Any) -> Any:
+        return self._method_not_allowed()
+
+    async def put(self, request: Any) -> Any:
+        return self._method_not_allowed()
+
+    async def delete(self, request: Any) -> Any:
+        return self._method_not_allowed()
+
+    async def patch(self, request: Any) -> Any:
+        return self._method_not_allowed()
+
+    async def head(self, request: Any) -> Any:
+        return self._method_not_allowed()
+
+    async def options(self, request: Any) -> Any:
+        return self._method_not_allowed()
 
 
 def register_manual_light_off_protection_api(hass: Any) -> None:
