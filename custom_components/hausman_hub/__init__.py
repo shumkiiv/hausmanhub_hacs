@@ -443,6 +443,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry,
         manual_light_off_protection,
         scenario_command_contexts,
+        scenario_catalog,
+        light_priority,
+        light_safety_obligations,
     )
 
     from .error_taxonomy import async_preload_error_policies

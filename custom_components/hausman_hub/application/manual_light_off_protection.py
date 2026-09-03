@@ -57,6 +57,7 @@ class ManualLightOffProtectionCoordinator:
         self._completed: list[dict[str, object]] = []
         self._receipts: dict[str, dict[str, object]] = {}
         self._sensor_states: dict[str, tuple[str, datetime]] = {}
+        self._event_entity_listeners: set[Callable[[], None]] = set()
         self._loaded = False
         self.unhealthy = False
         self._lock = asyncio.Lock()
@@ -108,6 +109,7 @@ class ManualLightOffProtectionCoordinator:
                 settings=parsed.as_wire(),
             )
             await self._persist_with_receipt(request_id, receipt)
+            self._notify_event_entity_listeners()
             return copy.deepcopy(receipt)
 
     async def async_note_state_transition(
@@ -229,6 +231,7 @@ class ManualLightOffProtectionCoordinator:
             if len(self._receipts) > MAX_IDEMPOTENCY_RECEIPTS:
                 self._receipts.pop(next(iter(self._receipts)))
             await self._save()
+            self._notify_event_entity_listeners()
             return copy.deepcopy(receipt)
 
     def snapshot(self) -> dict[str, object]:
@@ -239,6 +242,33 @@ class ManualLightOffProtectionCoordinator:
             "settings": self._settings.as_wire(),
             "protections": copy.deepcopy(list(self._protections.values())),
         }
+
+    def event_entity_ids(self) -> frozenset[str]:
+        """Return configured and frozen entities needed for protected events."""
+
+        entity_ids = {
+            entity_id
+            for profile in self._settings.profiles
+            for entity_id in (*profile.light_ids, *profile.presence_sensor_ids)
+        }
+        for key, sensor_ids in self._frozen_sensor_ids.items():
+            entity_ids.update(sensor_ids)
+            record = self._protections.get(key)
+            if record is not None:
+                entity_ids.update(record["lightIds"])
+        return frozenset(entity_ids)
+
+    def add_event_entity_listener(
+        self, listener: Callable[[], None]
+    ) -> Callable[[], None]:
+        """Register a local callback for exact event-subscription changes."""
+
+        self._event_entity_listeners.add(listener)
+
+        def _remove() -> None:
+            self._event_entity_listeners.discard(listener)
+
+        return _remove
 
     async def _activate(self, profile, entity_id: str, now: datetime, attribution) -> None:
         current_item = next(
@@ -287,6 +317,7 @@ class ManualLightOffProtectionCoordinator:
             self._frozen_sensor_ids[key] = tuple(profile.presence_sensor_ids)
         self._state_revision += 1
         await self._save()
+        self._notify_event_entity_listeners()
 
     async def _complete(self, key: str, record: dict[str, object], *, request_id: str | None = None) -> None:
         self._protections.pop(key, None)
@@ -296,6 +327,7 @@ class ManualLightOffProtectionCoordinator:
         self._state_revision += 1
         if request_id is None:
             await self._save()
+            self._notify_event_entity_listeners()
 
     async def _complete_many(self, items: list[tuple[str, dict[str, object]]]) -> None:
         for key, record in items:
@@ -308,6 +340,7 @@ class ManualLightOffProtectionCoordinator:
         self._completed = self._completed[-MAX_COMPLETED_PROTECTIONS:]
         self._state_revision += len(items)
         await self._save()
+        self._notify_event_entity_listeners()
 
     async def _persist_with_receipt(self, request_id: str, receipt: dict[str, object]) -> None:
         self._receipts[request_id] = receipt
@@ -333,6 +366,10 @@ class ManualLightOffProtectionCoordinator:
                 for key, sensor_ids in self._frozen_sensor_ids.items()
             ],
         }
+
+    def _notify_event_entity_listeners(self) -> None:
+        for listener in tuple(self._event_entity_listeners):
+            listener()
 
     def _receipt(self, request_id: str) -> dict[str, object] | None:
         if not isinstance(request_id, str) or not request_id or len(request_id) > 128:

@@ -14,6 +14,9 @@ from custom_components.hausman_hub.application.scenario_command_context import (
 from custom_components.hausman_hub.application.manual_light_off_protection import (
     ManualLightOffProtectionCoordinator,
 )
+from custom_components.hausman_hub.application.scenario_light_priority import (
+    LightAutomationPriority,
+)
 from custom_components.hausman_hub.manual_light_off_protection_events import (
     ManualLightOffProtectionEventListener,
     async_start_manual_light_off_protection_events,
@@ -129,6 +132,71 @@ def test_manual_on_cancels_protection_and_unrelated_entities_are_not_forwarded()
     asyncio.run(exercise())
 
 
+def test_external_transitions_update_light_ownership_before_protection() -> None:
+    async def exercise() -> None:
+        coordinator = await _coordinator()
+        hass = SimpleNamespace(states=SimpleNamespace(get=lambda _: _state("on")))
+        device = SimpleNamespace(
+            entity_id="light.tambur",
+            action=lambda action_id: SimpleNamespace(
+                domain="light",
+                service="turn_on" if action_id == "turn_on" else "turn_off",
+            ),
+        )
+        catalog = SimpleNamespace(
+            devices={"tambur": device}, device=lambda target_id: device
+        )
+        priority = LightAutomationPriority()
+        priority._owned_revisions["light.tambur"] = None  # noqa: SLF001
+        priority._owned_records["light.tambur"] = {"expiresAt": 9_999_999_999_999}  # noqa: SLF001
+        obligations = SimpleNamespace(async_cancel=AsyncMock())
+        listener = ManualLightOffProtectionEventListener(
+            coordinator,
+            None,
+            {"light.tambur", "binary_sensor.tambur_presence"},
+            hass=hass,
+            catalog=catalog,
+            light_priority=priority,
+            light_safety_obligations=obligations,
+        )
+
+        await listener.async_handle(_event("light.tambur", "on", "off"))
+        assert "light.tambur" not in priority._owned_records  # noqa: SLF001
+        obligations.async_cancel.assert_awaited_once_with("tambur")
+        await listener.async_handle(_event("light.tambur", "off", "on"))
+        assert "light.tambur" in priority._manual_records  # noqa: SLF001
+        assert coordinator.snapshot()["protections"] == []
+
+    asyncio.run(exercise())
+
+
+def test_automatic_transition_does_not_change_light_ownership() -> None:
+    async def exercise() -> None:
+        coordinator = await _coordinator()
+        contexts = ScenarioCommandContextRegistry(
+            context_factory=lambda: SimpleNamespace(id="automatic.light", parent_id=None)
+        )
+        context = contexts.create("light.tambur", "off")
+        priority = SimpleNamespace(async_clear_ownership=AsyncMock())
+        obligations = SimpleNamespace(async_cancel=AsyncMock())
+        listener = ManualLightOffProtectionEventListener(
+            coordinator,
+            contexts,
+            {"light.tambur"},
+            hass=SimpleNamespace(),
+            catalog=SimpleNamespace(devices={}),
+            light_priority=priority,
+            light_safety_obligations=obligations,
+        )
+
+        await listener.async_handle(_event("light.tambur", "on", "off", context))
+
+        priority.async_clear_ownership.assert_not_awaited()
+        obligations.async_cancel.assert_not_awaited()
+
+    asyncio.run(exercise())
+
+
 def test_restart_and_stale_presence_do_not_create_release_evidence() -> None:
     async def exercise() -> None:
         now = datetime(2026, 9, 3, 12, tzinfo=timezone.utc)
@@ -188,6 +256,70 @@ def test_configured_entities_include_only_profile_lights_and_presence_sensors() 
     }
 
 
+def test_configured_entities_preserve_active_frozen_scope_after_restart() -> None:
+    async def exercise() -> None:
+        store = _MemoryStore()
+        coordinator = ManualLightOffProtectionCoordinator(store)
+        await coordinator.async_load()
+        await coordinator.async_replace_settings("settings.1", 0, _settings())
+        await coordinator.async_note_state_transition(
+            "light.tambur", _state("on"), _state("off"), None
+        )
+        removed = _settings()
+        removed["profiles"] = []
+        await coordinator.async_replace_settings("settings.2", 1, removed)
+        restarted = ManualLightOffProtectionCoordinator(store)
+        await restarted.async_load()
+
+        assert configured_manual_light_off_protection_entities(restarted) == {
+            "light.tambur",
+            "binary_sensor.tambur_presence",
+        }
+
+    asyncio.run(exercise())
+
+
+def test_stale_or_restored_light_off_never_creates_protection() -> None:
+    async def exercise() -> None:
+        coordinator = await _coordinator()
+        listener = ManualLightOffProtectionEventListener(
+            coordinator, None, {"light.tambur"}
+        )
+        stale = SimpleNamespace(
+            state="off",
+            last_updated=datetime.now(timezone.utc) - timedelta(minutes=6),
+            attributes={},
+        )
+        restored = SimpleNamespace(
+            state="off",
+            last_updated=datetime.now(timezone.utc),
+            attributes={"restored": True},
+        )
+        unavailable = SimpleNamespace(
+            state="unavailable", last_updated=datetime.now(timezone.utc), attributes={}
+        )
+        future = SimpleNamespace(
+            state="off",
+            last_updated=datetime.now(timezone.utc) + timedelta(seconds=1),
+            attributes={},
+        )
+        for new_state in (stale, restored, unavailable, future):
+            await listener.async_handle(
+                SimpleNamespace(
+                    data={
+                        "entity_id": "light.tambur",
+                        "old_state": _state("on"),
+                        "new_state": new_state,
+                    },
+                    context=None,
+                )
+            )
+
+        assert coordinator.snapshot()["protections"] == []
+
+    asyncio.run(exercise())
+
+
 def test_start_subscribes_only_configured_entities() -> None:
     async def exercise() -> None:
         coordinator = SimpleNamespace(
@@ -215,6 +347,41 @@ def test_start_subscribes_only_configured_entities() -> None:
 
         subscribed_entities = subscribe.call_args.args[1]
         assert subscribed_entities == {"light.tambur", "binary_sensor.tambur_presence"}
-        entry.async_on_unload.assert_called_once_with(unsubscribe)
+        entry.async_on_unload.call_args.args[0]()
+        unsubscribe.assert_called_once()
+
+    asyncio.run(exercise())
+
+
+def test_start_rebuilds_exact_subscription_after_profile_change() -> None:
+    async def exercise() -> None:
+        entity_ids = {"light.tambur", "binary_sensor.tambur_presence"}
+        callbacks: list[object] = []
+        coordinator = SimpleNamespace(
+            event_entity_ids=lambda: frozenset(entity_ids),
+            add_event_entity_listener=lambda callback: callbacks.append(callback)
+            or (lambda: callbacks.remove(callback)),
+            async_note_state_transition=AsyncMock(),
+        )
+        entry = SimpleNamespace(async_on_unload=Mock())
+        first_unsubscribe = Mock()
+        second_unsubscribe = Mock()
+        with patch(
+            "custom_components.hausman_hub.manual_light_off_protection_events._async_track_state_change_event",
+            side_effect=[first_unsubscribe, second_unsubscribe],
+        ) as subscribe:
+            await async_start_manual_light_off_protection_events(
+                SimpleNamespace(async_create_task=asyncio.create_task),
+                entry,
+                coordinator,
+                None,
+            )
+            entity_ids.clear()
+            entity_ids.add("light.new")
+            callbacks[0]()
+            await asyncio.sleep(0)
+
+        assert subscribe.call_args_list[1].args[1] == {"light.new"}
+        first_unsubscribe.assert_called_once()
 
     asyncio.run(exercise())

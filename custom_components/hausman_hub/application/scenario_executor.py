@@ -2408,6 +2408,7 @@ class ScenarioExecutor:
                         "error": "stale_reassert_evidence",
                     }
             manual_token: Mapping[str, object] | None = None
+            service_context = None
             try:
                 if (
                     self._light_priority.is_lighting_action(action, self._catalog)
@@ -2434,9 +2435,28 @@ class ScenarioExecutor:
                     await self._light_safety_obligations.async_cancel(
                         action.target_id
                     )
+                if (
+                    automatic
+                    and self._command_contexts is not None
+                    and self._light_priority.is_lighting_action(
+                        action, self._catalog
+                    )
+                    and dispatch_service in {"turn_on", "turn_off"}
+                ):
+                    service_context = self._command_contexts.create(
+                        device.entity_id,
+                        "on" if dispatch_service == "turn_on" else "off",
+                    )
                 base["_physical_attempted"] = True
-                await self._call_service(allowed.domain, dispatch_service, service_data)
+                await self._call_service(
+                    allowed.domain,
+                    dispatch_service,
+                    service_data,
+                    context=service_context,
+                )
             except Exception:
+                if self._command_contexts is not None:
+                    self._command_contexts.discard(service_context)
                 if manual_token is not None:
                     rollback = (
                         self._light_priority._async_rollback_direct_action_unlocked

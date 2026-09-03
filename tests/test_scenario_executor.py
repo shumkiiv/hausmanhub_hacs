@@ -29,6 +29,12 @@ from custom_components.hausman_hub.application.device_action_receipts import (
 from custom_components.hausman_hub.application.scenario_light_priority import (
     LightAutomationPriority,
 )
+from custom_components.hausman_hub.application.scenario_command_context import (
+    ScenarioCommandContextRegistry,
+)
+from custom_components.hausman_hub.manual_light_off_protection_events import (
+    ManualLightOffProtectionEventListener,
+)
 from custom_components.hausman_hub.application.light_safety_obligations import (
     RECONCILE_INVALIDATED,
     LightSafetyObligations,
@@ -345,6 +351,63 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.hass.services.async_call.assert_awaited_once_with(
             "light", "turn_on", {"entity_id": "light.living_room"}, blocking=True
         )
+
+    async def test_automatic_light_off_registers_context_for_state_attribution(self) -> None:
+        """Removing context registration would make automatic off look manual."""
+
+        contexts = ScenarioCommandContextRegistry(
+            context_factory=lambda: SimpleNamespace(id="automatic.light.off")
+        )
+        priority = LightAutomationPriority()
+        priority._owned_revisions["light.living_room"] = None  # noqa: SLF001
+        priority._owned_records["light.living_room"] = {  # noqa: SLF001
+            "expiresAt": 9_999_999_999_999,
+        }
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            light_priority=priority,
+            command_contexts=contexts,
+            readback_window_seconds=0.02,
+            readback_interval_seconds=0.01,
+        )
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="automatic_off",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="turn_off",
+                ),
+            )
+        )
+
+        await executor.async_execute(
+            definition,
+            "automatic-off.1",
+            scenario_id="presence_off",
+            trigger_context={"source": "device_state", "target_id": "sensor_1"},
+        )
+
+        context = self.hass.services.async_call.await_args.kwargs["context"]
+        protected = SimpleNamespace(async_note_state_transition=AsyncMock())
+        listener = ManualLightOffProtectionEventListener(
+            protected, contexts, {"light.living_room"}
+        )
+        await listener.async_handle(
+            SimpleNamespace(
+                data={
+                    "entity_id": "light.living_room",
+                    "old_state": SimpleNamespace(state="on"),
+                    "new_state": SimpleNamespace(state="off"),
+                },
+                context=context,
+            )
+        )
+
+        attribution = protected.async_note_state_transition.await_args.args[3]
+        self.assertEqual("automatic", attribution.source)
 
     async def test_manual_authority_is_persisted_and_obligation_cancelled_before_dispatch(
         self,

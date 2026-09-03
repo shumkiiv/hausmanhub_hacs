@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from .domain.manual_light_off_protection import ScenarioCommandAttribution
@@ -15,6 +16,9 @@ if TYPE_CHECKING:
         ManualLightOffProtectionCoordinator,
     )
     from .application.scenario_command_context import ScenarioCommandContextRegistry
+    from .application.scenario_light_priority import LightAutomationPriority
+    from .application.light_safety_obligations import LightSafetyObligations
+    from .application.scenarios import ScenarioCatalog
 
 
 def _async_track_state_change_event(
@@ -37,10 +41,19 @@ class ManualLightOffProtectionEventListener:
         coordinator: ManualLightOffProtectionCoordinator,
         command_contexts: ScenarioCommandContextRegistry | None,
         entity_ids: Collection[str],
+        *,
+        hass: HomeAssistant | None = None,
+        catalog: ScenarioCatalog | None = None,
+        light_priority: LightAutomationPriority | None = None,
+        light_safety_obligations: LightSafetyObligations | None = None,
     ) -> None:
         self._coordinator = coordinator
         self._command_contexts = command_contexts
         self._entity_ids = frozenset(entity_ids)
+        self._hass = hass
+        self._catalog = catalog
+        self._light_priority = light_priority
+        self._light_safety_obligations = light_safety_obligations
 
     async def async_handle(self, event: Any) -> None:
         """Persist a relevant transition without issuing physical commands."""
@@ -60,6 +73,9 @@ class ManualLightOffProtectionEventListener:
             == getattr(new_state, "state", None)
         ):
             return
+        is_light = not entity_id.startswith(("binary_sensor.", "sensor."))
+        if is_light and not _is_fresh_light_transition(old_state, new_state):
+            return
         attribution = None
         if self._command_contexts is not None:
             matched = self._command_contexts.match(
@@ -72,9 +88,109 @@ class ManualLightOffProtectionEventListener:
                     source=matched.origin,
                     attribution_id=matched.request_id or entity_id,
                 )
+        if is_light and attribution is None and getattr(new_state, "state", None) == "off":
+            await self._async_note_manual_off(entity_id)
         await self._coordinator.async_note_state_transition(
             entity_id, old_state, new_state, attribution
         )
+        if is_light and attribution is None and getattr(new_state, "state", None) == "on":
+            await self._async_note_manual_on(entity_id)
+
+    async def _async_note_manual_off(self, entity_id: str) -> None:
+        target_id = self._target_id(entity_id)
+        if self._light_priority is not None:
+            await self._light_priority.async_clear_ownership(entity_id)
+        if target_id is not None and self._light_safety_obligations is not None:
+            await self._light_safety_obligations.async_cancel(target_id)
+
+    async def _async_note_manual_on(self, entity_id: str) -> None:
+        target_id = self._target_id(entity_id)
+        if target_id is not None and self._light_safety_obligations is not None:
+            await self._light_safety_obligations.async_cancel(target_id)
+        if (
+            target_id is not None
+            and self._light_priority is not None
+            and self._catalog is not None
+            and self._hass is not None
+        ):
+            await self._light_priority.async_begin_direct_action(
+                target_id, "turn_on", self._catalog, self._hass
+            )
+
+    def _target_id(self, entity_id: str) -> str | None:
+        devices = getattr(self._catalog, "devices", {})
+        if not isinstance(devices, Mapping):
+            return None
+        return next(
+            (
+                target_id
+                for target_id, device in devices.items()
+                if getattr(device, "entity_id", None) == entity_id
+            ),
+            None,
+        )
+
+
+class _ManualLightOffProtectionSubscription:
+    """Keep one exact Home Assistant state subscription current."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        coordinator: ManualLightOffProtectionCoordinator,
+        command_contexts: ScenarioCommandContextRegistry | None,
+        catalog: ScenarioCatalog | None,
+        light_priority: LightAutomationPriority | None,
+        light_safety_obligations: LightSafetyObligations | None,
+    ) -> None:
+        self._hass = hass
+        self._coordinator = coordinator
+        self._command_contexts = command_contexts
+        self._catalog = catalog
+        self._light_priority = light_priority
+        self._light_safety_obligations = light_safety_obligations
+        self._entity_ids = frozenset()
+        self._unsubscribe: Any = None
+
+    async def async_refresh(self) -> None:
+        entity_ids = configured_manual_light_off_protection_entities(
+            self._coordinator
+        )
+        if entity_ids == self._entity_ids:
+            return
+        if self._unsubscribe is not None:
+            self._unsubscribe()
+            self._unsubscribe = None
+        self._entity_ids = entity_ids
+        if not entity_ids:
+            return
+        listener = ManualLightOffProtectionEventListener(
+            self._coordinator,
+            self._command_contexts,
+            entity_ids,
+            hass=self._hass,
+            catalog=self._catalog,
+            light_priority=self._light_priority,
+            light_safety_obligations=self._light_safety_obligations,
+        )
+        self._unsubscribe = _async_track_state_change_event(
+            self._hass, entity_ids, listener.async_handle
+        )
+
+    def schedule_refresh(self) -> None:
+        create_task = getattr(self._hass, "async_create_task", None)
+        coroutine = self.async_refresh()
+        if callable(create_task):
+            create_task(coroutine)
+        else:
+            import asyncio  # noqa: PLC0415
+
+            asyncio.create_task(coroutine)
+
+    def cancel(self) -> None:
+        if self._unsubscribe is not None:
+            self._unsubscribe()
+            self._unsubscribe = None
 
 
 def configured_manual_light_off_protection_entities(
@@ -82,6 +198,9 @@ def configured_manual_light_off_protection_entities(
 ) -> frozenset[str]:
     """Return the exact configured protected lights and presence sensors."""
 
+    event_entity_ids = getattr(coordinator, "event_entity_ids", None)
+    if callable(event_entity_ids):
+        return frozenset(event_entity_ids())
     settings = coordinator.snapshot().get("settings", {})
     if not isinstance(settings, Mapping):
         return frozenset()
@@ -104,16 +223,55 @@ async def async_start_manual_light_off_protection_events(
     entry: ConfigEntry,
     coordinator: ManualLightOffProtectionCoordinator,
     command_contexts: ScenarioCommandContextRegistry | None,
+    catalog: ScenarioCatalog | None = None,
+    light_priority: LightAutomationPriority | None = None,
+    light_safety_obligations: LightSafetyObligations | None = None,
 ) -> None:
     """Subscribe exactly configured entities to the state-event adapter."""
 
-    entity_ids = configured_manual_light_off_protection_entities(coordinator)
-    if not entity_ids:
-        return
-    listener = ManualLightOffProtectionEventListener(
-        coordinator, command_contexts, entity_ids
+    subscription = _ManualLightOffProtectionSubscription(
+        hass,
+        coordinator,
+        command_contexts,
+        catalog,
+        light_priority,
+        light_safety_obligations,
     )
-    unsubscribe = _async_track_state_change_event(
-        hass, entity_ids, listener.async_handle
+    await subscription.async_refresh()
+    add_listener = getattr(coordinator, "add_event_entity_listener", None)
+    if callable(add_listener):
+        entry.async_on_unload(add_listener(subscription.schedule_refresh))
+    entry.async_on_unload(subscription.cancel)
+
+
+def _is_fresh_light_transition(old_state: object, new_state: object) -> bool:
+    """Reject restored, cached, unavailable and stale light evidence."""
+
+    if (
+        getattr(old_state, "state", None) not in {"on", "off"}
+        or getattr(new_state, "state", None) not in {"on", "off"}
+    ):
+        return False
+    attributes = getattr(new_state, "attributes", {})
+    if (
+        getattr(new_state, "assumed_state", False) is True
+        or getattr(new_state, "is_assumed_state", False) is True
+        or isinstance(attributes, Mapping)
+        and (
+            attributes.get("assumed_state") is True
+            or attributes.get("restored") is True
+            or attributes.get("cached") is True
+            or attributes.get("cache") is True
+            or attributes.get("evidence_source") in {"restore", "cache"}
+        )
+    ):
+        return False
+    observed = getattr(new_state, "last_changed", None) or getattr(
+        new_state, "last_updated", None
     )
-    entry.async_on_unload(unsubscribe)
+    if not isinstance(observed, datetime):
+        return True
+    if observed.tzinfo is None:
+        observed = observed.replace(tzinfo=timezone.utc)
+    age_seconds = (datetime.now(timezone.utc) - observed).total_seconds()
+    return 0 <= age_seconds <= 300
