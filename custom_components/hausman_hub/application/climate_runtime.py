@@ -737,7 +737,7 @@ class ClimateRuntime:
                         current, self._registry,
                         self.configuration.climate_bridge_mode, observation,
                         desired_state_changes=probe_changes,
-                        manual_device_ids=frozenset(self._manual_memory.manual_device_ids),
+                        manual_device_ids=self._effective_manual_target_device_ids(current),
                     )
                     snapshot["_home_target_available"] = probe.native_plan.preflight_permitted
                 except Exception:
@@ -1603,6 +1603,23 @@ class ClimateRuntime:
             self.last_error = None
             return _ClimateRoomModeReceipt()
 
+    def _effective_manual_target_device_ids(self, contour: object) -> frozenset[str]:
+        """Expand durable room ownership to every actuator in its target scope."""
+
+        manual = set(self._manual_memory.manual_device_ids)
+        manual_rooms = set(effective_manual_room_ids(self._manual_memory, self._registry))
+        if not manual_rooms or not hasattr(contour, "rooms"):
+            return frozenset(manual)
+        manual.update(
+            device_id
+            for room in contour.rooms
+            if room.room_id in manual_rooms
+            for device_id in room.device_ids
+            if (device := self._registry.device(device_id)) is not None
+            and device.kind not in _PASSIVE_KINDS
+        )
+        return frozenset(manual)
+
     async def async_set_device_mode(
         self,
         room_id: object,
@@ -1782,7 +1799,7 @@ class ClimateRuntime:
                     execution_contour, self._registry,
                     self.configuration.climate_bridge_mode, observation,
                     desired_state_changes=desired_state_changes,
-                    manual_device_ids=frozenset(self._manual_memory.manual_device_ids),
+                    manual_device_ids=self._effective_manual_target_device_ids(execution_contour),
                 )
                 if not preflight.native_plan.preflight_permitted:
                     raise ClimateRuntimeUnavailable("home climate target scope is unavailable")
@@ -1880,7 +1897,7 @@ class ClimateRuntime:
                 execution_contour, self._registry,
                 self.configuration.climate_bridge_mode, observation,
                 desired_state_changes=changes,
-                manual_device_ids=frozenset(self._manual_memory.manual_device_ids),
+                manual_device_ids=self._effective_manual_target_device_ids(execution_contour),
             )
             if not plan.native_plan.preflight_permitted:
                 raise ClimateRuntimeUnavailable("home climate target scope is unavailable")

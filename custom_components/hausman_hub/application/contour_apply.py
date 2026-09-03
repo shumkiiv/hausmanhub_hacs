@@ -1631,14 +1631,6 @@ def _receipt_from_stored_payload(
             != _canonical_receipt_fingerprint(desired)
         ):
             raise ValueError("enhanced receipt revision is invalid")
-        expected_intent_status = (
-            "saved_and_applied" if status is ContourApplyStatus.CONFIRMED
-            else "saved_pending_confirmation" if status is ContourApplyStatus.PENDING
-            else "saved_blocked_before_dispatch" if status is ContourApplyStatus.REJECTED
-            else "unsaved_unavailable"
-        )
-        if intent.get("status") != expected_intent_status:
-            raise ValueError("enhanced receipt intent is invalid")
         if context.room_id is not None and scope.get("room_ids") != [context.room_id]:
             raise ValueError("enhanced receipt scope is invalid")
         if action_snapshot["action"] == context.action.value:
@@ -1673,6 +1665,24 @@ def _receipt_from_stored_payload(
                     continue
                 for device_id, leaf in devices.items():
                     state = leaf.get("execution_state") if isinstance(leaf, Mapping) else None
+                    if (
+                        isinstance(device_id, str)
+                        and isinstance(leaf, Mapping)
+                        and leaf.get("status") == "manual"
+                        and leaf.get("reason") in {
+                            "manual_user_excluded", "manual_external_off",
+                        }
+                    ):
+                        leaf_ledger[device_id] = leaf["reason"]
+                        continue
+                    if (
+                        isinstance(device_id, str)
+                        and isinstance(leaf, Mapping)
+                        and leaf.get("status") == "deferred"
+                        and leaf.get("reason") == "device_unavailable"
+                    ):
+                        leaf_ledger[device_id] = "deferred_offline"
+                        continue
                     if isinstance(device_id, str) and state in {
                         "pending_dispatch", "dispatched_not_accepted", "accepted_unverified",
                         "applied", "already_in_sync", "blocked_before_dispatch",
@@ -1684,6 +1694,18 @@ def _receipt_from_stored_payload(
                                 already_in_sync_evidence[device_id] = dict(evidence)
         enhanced["leaf_ledger"] = leaf_ledger
         enhanced["already_in_sync_evidence"] = already_in_sync_evidence
+        expected_intent_status = (
+            "saved_deferred_offline"
+            if any(state == "deferred_offline" for state in leaf_ledger.values())
+            else "saved_for_manual_device"
+            if any(state in {"manual_user_excluded", "manual_external_off"} for state in leaf_ledger.values())
+            else "saved_and_applied" if status is ContourApplyStatus.CONFIRMED
+            else "saved_pending_confirmation" if status is ContourApplyStatus.PENDING
+            else "saved_blocked_before_dispatch" if status is ContourApplyStatus.REJECTED
+            else "unsaved_unavailable"
+        )
+        if intent.get("status") != expected_intent_status:
+            raise ValueError("enhanced receipt intent is invalid")
     return ContourApplyReceipt(
         operation_id=payload["operation_id"], request_id=payload["request_id"],
         correlation_id=payload.get("correlation_id"), contour_id=payload["contour_id"], context=context,

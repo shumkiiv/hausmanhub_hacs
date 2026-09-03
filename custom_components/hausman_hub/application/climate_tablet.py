@@ -3108,6 +3108,16 @@ def _valid_reliable_receipt_proof(
                     return False
                 unfinished += 1
                 all_confirmed = False
+            elif status == "manual":
+                if (
+                    execution is not None
+                    or leaf.get("reason") not in {
+                        "manual_user_excluded", "manual_external_off",
+                    }
+                    or not _strict_leaf_counts(leaf, 0, 0)
+                ):
+                    return False
+                all_confirmed = False
             elif status in {"failed", "not_attempted", "deferred"}:
                 expected = {
                     "dispatched_not_accepted": (1, 0),

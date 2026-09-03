@@ -112,15 +112,6 @@ def build_climate_application_plan(
                 room_id, device, registry, observation,
                 next(gate for gate in base_gates if gate.room_id == room_id),
                 device.device_id in manual_device_ids,
-                any(
-                    (observed := observation.device(candidate.device_id)) is not None
-                    and observed.availability is ClimateDeviceAvailability.UNAVAILABLE
-                    for candidate in _explicit_selected_devices(
-                        contour, registry, room_id,
-                        None if explicit_temperature_targets is None else explicit_temperature_targets.get(room_id),
-                        None if explicit_humidity_targets is None else explicit_humidity_targets.get(room_id),
-                    )
-                ),
                 (
                     None if explicit_temperature_targets is None
                     or device.kind not in {
@@ -205,7 +196,7 @@ def _explicit_selected_devices(contour, registry, room_id, temperature, humidity
                  if (device := registry.device(device_id)) is not None and device.kind in kinds)
 
 
-def _gate_explicit_device(room_id, device, registry, observation, room_gate, manual, room_has_known_offline, temperature, humidity):
+def _gate_explicit_device(room_id, device, registry, observation, room_gate, manual, temperature, humidity):
     # Per-device ownership must not bypass the room-level safety gate.  The
     # latter owns contour mode, managed runtime, membership, fresh observation,
     # isolation and comparison checks.  Only a denied gate contributes reasons:
@@ -219,16 +210,39 @@ def _gate_explicit_device(room_id, device, registry, observation, room_gate, man
         if room_gate.status is ClimateApplicationGateStatus.DENIED
         else ()
     )
-    reasons: list[ClimateApplicationDenialReason] = list(
+    # Room projections intentionally collapse their leaf causes.  An explicit
+    # atomic target must instead decide every selected owner independently:
+    # only a known unavailable owner (or an owner already left manual) may
+    # ignore that projection's availability/comparison symptom.  Structural
+    # and unknown-observation failures still deny the entire plan.
+    observed_room = observation.room(room_id)
+    leaf_can_defer = (
+        observation.runtime_fresh
+        and observed_room is not None
+        and observed_room.data_status.value == "fresh"
+        and observed is not None
+        and observed.room_id == room_id
+        and observed.availability in {
+            ClimateDeviceAvailability.AVAILABLE,
+            ClimateDeviceAvailability.UNAVAILABLE,
+        }
+    )
+    reasons: list[ClimateApplicationDenialReason] = [
         reason for reason in inherited
         if not (
-            reason in {
+            leaf_can_defer
+            and reason in {
                 ClimateApplicationDenialReason.ROOM_NOT_READY,
                 ClimateApplicationDenialReason.ROOM_NOT_COMPARABLE,
             }
-            and room_has_known_offline
         )
-    )
+    ]
+    if (
+        observed is None
+        or observed.room_id != room_id
+        or observed.availability is ClimateDeviceAvailability.MISSING
+    ):
+        reasons.append(ClimateApplicationDenialReason.TRANSLATION_INCOMPLETE)
     if device.control_scope is not ClimateControlScope.MANAGED or device.control_owner is not ClimateControlOwner.CLIMATE_CORE:
         reasons.append(ClimateApplicationDenialReason.ACTUATOR_NOT_MANAGED)
     if device.endpoint(ClimateEndpointRole.CONTROL) is None:

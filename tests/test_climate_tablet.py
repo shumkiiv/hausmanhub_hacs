@@ -1653,6 +1653,48 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
             })
         self.assertEqual(before_saves, len(contour_store.saved))
 
+    async def test_reserved_home_target_marks_every_manual_room_leaf_terminal_without_dispatch(self) -> None:
+        """A room-level manual choice owns every selected actuator, even offline ones."""
+        runtime, store, contour_store, executor = native_home_target_runtime(
+            include_humidifier=False,
+        )
+        await runtime.async_start()
+        offline = runtime._ha_state_view.states["climate.living_floor"]
+        runtime._ha_state_view.states["climate.living_floor"] = replace(
+            offline, state="unavailable", attributes={},
+        )
+        await runtime.async_set_room_mode("living", "manual")
+        service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await service.async_load()
+        request = {
+            "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+            "request_id": "tablet.climate.manual-room", "correlation_id": "corr.manual-room",
+            "expected_state_revision": 0, "expected_control_revision": 0,
+            "reliability_profile": "climate_reliability_v1", "action": "set_home_targets",
+            "room_id": None, "parameters": {"target_temperature": 25.5},
+        }
+
+        receipt = await service.async_execute(request)
+
+        self.assertEqual("partial", receipt["status"], receipt)
+        self.assertTrue(receipt["final"])
+        self.assertEqual("saved_for_manual_device", receipt["intent"]["status"])
+        self.assertEqual(1, len(contour_store.saved))
+        self.assertEqual([], executor.batches)
+        leaves = receipt["outcomes"]["rooms"]["living"]["devices"]
+        self.assertEqual(
+            {"living_air_conditioner", "living_radiator", "living_floor"}, set(leaves),
+        )
+        for leaf in leaves.values():
+            self.assertEqual("manual", leaf["status"])
+            self.assertEqual((0, 0), (leaf["command_count"], leaf["accepted_count"]))
+            self.assertNotIn("execution_state", leaf)
+        restarted = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await restarted.async_load()
+        replay = await restarted.async_execute(request)
+        self.assertTrue(replay["duplicate"])
+        self.assertEqual([], executor.batches)
+
     async def test_reserved_home_target_rejects_plan_changed_after_tablet_preflight(self) -> None:
         """The reserved native fingerprint closes the preflight-to-dispatch race."""
         class PlanChangingRuntime(ClimateRuntime):
