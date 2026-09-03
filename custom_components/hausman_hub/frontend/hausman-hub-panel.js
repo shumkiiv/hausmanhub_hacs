@@ -16,6 +16,7 @@ import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.205"
 import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.205";
 import { renderClimateOverview, setClimateManualMode } from "./hausman-hub-climate-overview.js?v=1.52.205";
 import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.52.205";
+import { clearManualLightProtectionTimer, refreshManualLightProtection, renderManualLightProtectionSettings } from "./hausman-hub-light-protection.js?v=1.52.205";
 import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.52.205";
 import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.52.205";
 import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.52.205";
@@ -119,6 +120,7 @@ const SETTINGS_VIEWS = [
   { id: "rooms", label: "Комнаты", description: "Комнаты, устройства и датчики" },
   { id: "bindings", label: "Привязки", description: "Сущности Home Assistant" },
   { id: "power", label: "Связи питания", description: "Автоматическое включение питающих устройств" },
+  { id: "light-protection", label: "Защита света", description: "Пауза автоматики после ручного выключения" },
   { id: "connection", label: "Подключение", description: "Связь с Home Assistant" },
   { id: "intercom", label: "Домофон", description: "Устройство и быстрый доступ" },
   { id: "appearance", label: "Интерфейс", description: "Тема, анимация и подсказки" },
@@ -401,6 +403,8 @@ class HausmanHubPanel extends HTMLElement {
     this._deviceDiscoveryMessages = {};
     this._deviceDiscoveryNotice = "";
     this._deviceDiscoveryAreaDrafts = {};
+    this._lightProtection = { state: "Loading", snapshot: null, error: "" };
+    this._lightProtectionTimer = null;
     this._deviceDiscoveryBadgeNode = null;
     this._energyHistory = null;
     this._energyTodayKwh = null;
@@ -585,6 +589,7 @@ class HausmanHubPanel extends HTMLElement {
   }
 
   disconnectedCallback() {
+    clearManualLightProtectionTimer(this);
     this._persistFirstRunBeforeUnload();
     if (this._eventStreamClient) {
       this._eventStreamClient.stop();
@@ -823,7 +828,9 @@ class HausmanHubPanel extends HTMLElement {
       if (typeof applyTabletProfile === "function") applyTabletProfile(this, results[8]);
       this._upcomingEvents = results[9];
       this._climateRuntime = results[10];
+      this._capabilities = results[11];
       this._deviceFeatures = await loadDeviceFeatureMatrix(this._hass, results[11]);
+      await refreshManualLightProtection(this, results[11]);
       const draftResumed = resumeFirstRunDraft(this);
       const wizardInProgress = draftResumed || (
         this._firstRun.completed !== true && this._firstRun.step !== "instructions"
@@ -6460,6 +6467,10 @@ class HausmanHubPanel extends HTMLElement {
     }
     if (activeView.id === "power") {
       renderPowerLinks(this, container, { el, svgIcon });
+      return;
+    }
+    if (activeView.id === "light-protection") {
+      renderManualLightProtectionSettings(this, container, { el, setAttr });
       return;
     }
     if (activeView.id === "connection") this._renderConnectionSettings(container);

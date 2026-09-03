@@ -3,6 +3,7 @@ import { appendDeviceRangeControls, appendDeviceVisual, localizedDeviceState, op
 import { lightingSideIcon, openLightingTurnOffConfirm, renderLightingSide } from "./hausman-hub-lighting-side.js?v=1.52.205";
 import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.205";
 import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.205";
+import { renderManualLightProtectionStatus } from "./hausman-hub-light-protection.js?v=1.52.205";
 
 const LIGHTING_EXCLUSIONS = [
   "ambilight", "глазок", "домофон", "пульт", "очистител", "аквариум", "aquarium",
@@ -447,6 +448,7 @@ export function renderLightingOverview(panel, container, deps) {
   const layout = deps.el("div", "lighting-layout");
   const main = deps.el("div", "lighting-main");
   main.appendChild(createLightingHero(panel, rooms, devices, deps));
+  renderManualLightProtectionStatus(panel, main, deps);
   if (!devices.length) {
     main.appendChild(deps.el("div", "card empty-state", "Физические устройства освещения пока не найдены."));
   } else {

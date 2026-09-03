@@ -9,7 +9,8 @@ const PANEL_READY_TIMEOUT_MS = 45_000;
 const states = [
   ["overview", ""], ["lighting", ""], ["climate", ""], ["rooms", ""], ["media", ""],
   ["security", ""], ["devices", ""], ["energy", ""], ["scenarios", ""], ["settings", ""],
-  ["climate-profiles", "&screen=profiles"], ["settings-rooms", "&screen=rooms"],
+  ["climate-profiles", "&screen=profiles"], ["settings-rooms", "&settings=rooms"],
+  ["settings-light-protection", "&settings=light-protection"],
   ["scenarios-editor", "&openScenario=Доброе"], ["scenarios-nodered", "&nodeRedEditor=1"], ["kiosk", "&kiosk=1"],
 ];
 const output = process.env.PLAYWRIGHT_OUTPUT_DIR || process.env.QA_ARTIFACT_ROOT;
@@ -57,6 +58,24 @@ function releaseProvenance() {
 // complete browser contexts and turn a resource check into a disk-pressure run.
 test.use({ trace: "off", video: "off", screenshot: "off" });
 
+test("настроечные маршруты открывают заявленные подвиды и оставляют исходную точку защиты света в аудите", async ({ browser }) => {
+  const context = await createStateContext(browser, { blocked: [], blockedAttempts: 0, continuedExternal: [] });
+  try {
+    const page = await freshStatePage(context, ["settings-light-protection", "&settings=light-protection"]);
+    await expect(page.locator("hausman-hub-panel").getByTestId("settings-manual-light-protection")).toBeVisible();
+    expect(await page.locator("hausman-hub-panel").evaluate(host => host._activeSettingsView)).toBe("light-protection");
+    await expect.poll(() => page.evaluate(() => window.__hausmanHubInteractionAudit.listeners.some((row) =>
+      row.source_id.includes("custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:")
+      && row.source_id.endsWith(":listener:1"))))
+      .toBe(true);
+    await page.goto(`${HARNESS}?section=settings&settings=rooms&theme=dark`, { waitUntil: "domcontentloaded" });
+    await expect(page.locator("hausman-hub-panel").locator("main")).toBeVisible();
+    expect(await page.locator("hausman-hub-panel").evaluate(host => host._activeSettingsView)).toBe("rooms");
+  } finally {
+    await context.close();
+  }
+});
+
 function auditInit() {
   // Four application frames are enough to reach el()'s caller and avoid
   // turning a rendering audit into an unbounded stack-formatting workload.
@@ -66,11 +85,11 @@ function auditInit() {
   let stackCaptures = 0;
   const sources = new WeakMap();
   const control = tag => ["BUTTON", "INPUT", "SELECT", "TEXTAREA", "A"].includes(String(tag).toUpperCase());
-  const caller = (construct) => {
+  const caller = (construct, force = false) => {
     // A fixture may repeatedly redraw the same card.  Capturing a bounded set
     // per freshly loaded state records source sites without making audit-only
     // stack collection alter the page's runtime characteristics.
-    if (++stackCaptures > 80) return null;
+    if (++stackCaptures > 80 && !force) return null;
     const frames = String(new Error().stack || "").split("\n");
     const found = [];
     for (const frame of frames) {
@@ -100,7 +119,7 @@ function auditInit() {
   const add = EventTarget.prototype.addEventListener;
   EventTarget.prototype.addEventListener = function(type, ...args) {
     if (["click", "change", "input", "submit"].includes(type) && (this.nodeType === 1 || this === document)) {
-      const source = caller("listener");
+      const source = caller("listener", this.dataset?.testid?.startsWith("manual-light-protection:") || this.dataset?.testid === "lighting-protection:status");
       if (source && !sourceIds.has(source.source_id)) { sourceIds.add(source.source_id); registry.listeners.push({ ...source, type, target: this.nodeType === 1 ? `${this.tagName}.${this.className || ""}` : "DOCUMENT", control_source: sources.get(this)?.source_id || null }); }
     }
     return add.call(this, type, ...args);
@@ -132,6 +151,13 @@ async function open(page, state) {
   // Keep the wait bounded, while preserving the same exact panel and error
   // assertions for every state and every independently opened action page.
   await expect(page.locator("hausman-hub-panel").locator("main")).toBeVisible({ timeout: PANEL_READY_TIMEOUT_MS });
+  if (state[0] === "settings-light-protection") {
+    await page.locator("hausman-hub-panel").evaluate(async (host) => {
+      host._capabilities = await host._hass.callApi("GET", "hausman_hub/v1/capabilities");
+      host._lightProtection = { state: "Active", snapshot: structuredClone(host._manualLightProtectionHarness), error: "" };
+      host._render();
+    });
+  }
   const errors = await page.evaluate(() => window.__hausmanHubHarnessErrors || []);
   expect(errors, `${state[0]} harness errors`).toEqual([]);
 }

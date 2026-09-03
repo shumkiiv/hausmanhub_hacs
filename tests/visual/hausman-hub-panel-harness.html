@@ -239,6 +239,12 @@ return msg;`;
         };
       }
       const harnessScenarioList = panel._scenarios.list;
+      panel._manualLightProtectionHarness = {
+        contract: { name: "hausman-hub-manual-light-off-protection", version: 1 }, revision: 4,
+        updatedAt: "2026-09-03T12:00:00Z",
+        settings: { globalPolicy: { enabled: true, minimumIntervalSeconds: 600, releaseMode: "timer_and_absence", stableAbsenceSeconds: 30, extendOnRepeatedManualOff: true, noSensorFallback: "timer_only", protectedScope: "profile", allowManualRelease: true }, roomOverrides: {}, profileOverrides: {}, profiles: [] },
+        protections: [{ roomId: "shower", profileId: "shower-main", lightIds: ["light.shower_main"], startedAt: "2026-09-03T12:00:00Z", notBefore: "2026-09-03T12:10:00Z", absenceSince: null, effectivePolicy: { enabled: true, minimumIntervalSeconds: 600, releaseMode: "timer_and_absence", stableAbsenceSeconds: 30, extendOnRepeatedManualOff: true, noSensorFallback: "timer_only", protectedScope: "profile", allowManualRelease: true }, effectivePolicySource: "global", policyFingerprint: "f7c3a5d0d650f9d4c1a355d9e11a5d4ce0099709908dd15f6a515ee93a5b6c9a", reason: "manual_off", attributionSource: "manual_command", attributionId: "harness", revision: 1, state: "active" }],
+      };
       window.__hausmanHubHarnessCalls = [];
       const cloneHarnessValue = (value) => JSON.parse(JSON.stringify(value ?? null));
       panel._hass = {
@@ -255,6 +261,10 @@ return msg;`;
           if (method === "GET" && path === "hausman_hub/v1/admin/panel") {
             return cloneHarnessValue(panel._data);
           }
+          if (method === "GET" && path === "hausman_hub/v1/capabilities") return { capabilities: { manual_light_off_protection: { available: true, settings_path: "/api/hausman_hub/v1/lighting/manual-off-protection", settings_methods: ["GET", "PUT"], release_path: "/api/hausman_hub/v1/lighting/manual-off-protection/release", release_method: "POST", response_contract: { name: "hausman-hub-manual-light-off-protection", version: 1 }, settings_request_contract: { name: "hausman-hub-manual-light-off-protection-settings-request", version: 1 }, release_request_contract: { name: "hausman-hub-manual-light-off-protection-release-request", version: 1 }, receipt_contract: { name: "hausman-hub-manual-light-off-protection-command-receipt", version: 1 } } } };
+          if (method === "GET" && path === "hausman_hub/v1/lighting/manual-off-protection") return cloneHarnessValue(panel._manualLightProtectionHarness);
+          if (method === "PUT" && path === "hausman_hub/v1/lighting/manual-off-protection") { panel._manualLightProtectionHarness.settings = payload.settings; panel._manualLightProtectionHarness.revision += 1; return { contract: { name: "hausman-hub-manual-light-off-protection-command-receipt", version: 1 }, requestId: payload.requestId, operation: "settings_updated", accepted: true, confirmed: true, status: "confirmed", revision: panel._manualLightProtectionHarness.revision, settings: payload.settings }; }
+          if (method === "POST" && path === "hausman_hub/v1/lighting/manual-off-protection/release") { panel._manualLightProtectionHarness.protections = []; return { contract: { name: "hausman-hub-manual-light-off-protection-command-receipt", version: 1 }, requestId: payload.requestId, operation: "manual_release", accepted: true, confirmed: true, status: "confirmed", revision: 2, protection: { roomId: payload.roomId, profileId: payload.profileId, lightIds: ["light.shower_main"], startedAt: "2026-09-03T12:00:00Z", notBefore: "2026-09-03T12:10:00Z", absenceSince: null, effectivePolicy: panel._manualLightProtectionHarness.settings.globalPolicy, effectivePolicySource: "global", policyFingerprint: "f7c3a5d0d650f9d4c1a355d9e11a5d4ce0099709908dd15f6a515ee93a5b6c9a", reason: "manual_off", attributionSource: "manual_command", attributionId: "harness", revision: 2, state: "released" } }; }
           if (method === "GET" && path === "hausman_hub/v1/admin/climate-mode") {
             return cloneHarnessValue(panel._settings?.mode);
           }
@@ -652,7 +662,7 @@ return msg;`;
         };
       }
       const settingsView = params.get("settings");
-      if (["overview", "rooms", "power", "connection", "appearance", "system"].includes(settingsView)) {
+      if (["overview", "rooms", "power", "light-protection", "connection", "appearance", "system"].includes(settingsView)) {
         panel._activeSettingsView = settingsView;
       }
       const energyMode = params.get("energyMode");

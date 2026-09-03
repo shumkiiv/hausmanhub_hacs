@@ -26,6 +26,7 @@ CLIMATE_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-climate-overview.js")
 CLIMATE_SIDE_JS = PANEL_JS.with_name("hausman-hub-climate-side.js")
 LIGHTING_SIDE_JS = PANEL_JS.with_name("hausman-hub-lighting-side.js")
 LIGHTING_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-lighting.js")
+LIGHT_PROTECTION_JS = PANEL_JS.with_name("hausman-hub-light-protection.js")
 ROOMS_SIDE_JS = PANEL_JS.with_name("hausman-hub-rooms-side.js")
 ROOMS_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-rooms.js")
 MEDIA_SIDE_JS = PANEL_JS.with_name("hausman-hub-media-side.js")
@@ -557,6 +558,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(LIGHTING_SIDE_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(LIGHTING_SIDE_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(LIGHT_PROTECTION_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(LIGHT_PROTECTION_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(LIGHTING_OVERVIEW_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),

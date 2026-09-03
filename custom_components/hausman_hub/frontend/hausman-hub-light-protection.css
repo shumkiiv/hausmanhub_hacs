@@ -1,0 +1,5 @@
+.light-protection-card { display:grid; gap:12px; }
+.light-protection-record { display:grid; gap:4px; padding:12px; border:1px solid var(--divider-color); border-radius:12px; }
+.light-protection-card.is-failure, .light-protection-card.is-conflict { border-color:var(--hmh-status-danger); }
+.light-protection-countdown { font-variant-numeric:tabular-nums; font-weight:700; }
+.light-protection-settings { display:grid; gap:12px; }

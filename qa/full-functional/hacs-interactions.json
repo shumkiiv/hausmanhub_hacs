@@ -99,6 +99,66 @@
       }
     },
     {
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:56:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:56",
+      "screen": "shared",
+      "module": "hausman-hub-light-protection.js",
+      "construct": "listener",
+      "classification": "observed-runtime-control-source",
+      "evidence": {
+        "source": true,
+        "runtime": true
+      }
+    },
+    {
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:57:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:57",
+      "screen": "shared",
+      "module": "hausman-hub-light-protection.js",
+      "construct": "listener",
+      "classification": "observed-runtime-control-source",
+      "evidence": {
+        "source": true,
+        "runtime": true
+      }
+    },
+    {
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:72:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:72",
+      "screen": "shared",
+      "module": "hausman-hub-light-protection.js",
+      "construct": "listener",
+      "classification": "observed-runtime-control-source",
+      "evidence": {
+        "source": true,
+        "runtime": true
+      }
+    },
+    {
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:73:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:73",
+      "screen": "shared",
+      "module": "hausman-hub-light-protection.js",
+      "construct": "listener",
+      "classification": "observed-runtime-control-source",
+      "evidence": {
+        "source": true,
+        "runtime": true
+      }
+    },
+    {
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:74:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:74",
+      "screen": "shared",
+      "module": "hausman-hub-light-protection.js",
+      "construct": "listener",
+      "classification": "observed-runtime-control-source",
+      "evidence": {
+        "source": true,
+        "runtime": true
+      }
+    },
+    {
       "source_id": "custom_components/hausman_hub/frontend/hausman-hub-navigation.js:104:listener:1",
       "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-navigation.js:104",
       "screen": "shared",
@@ -267,8 +327,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1121:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1121",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1128:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1128",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
       "construct": "listener",
@@ -279,8 +339,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1122:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1122",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1129:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1129",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
       "construct": "listener",
@@ -291,32 +351,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1155:create:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1155",
-      "screen": "shared",
-      "module": "hausman-hub-panel.js",
-      "construct": "create",
-      "classification": "observed-runtime-control-source",
-      "evidence": {
-        "source": true,
-        "runtime": true
-      }
-    },
-    {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1157:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1157",
-      "screen": "shared",
-      "module": "hausman-hub-panel.js",
-      "construct": "listener",
-      "classification": "observed-runtime-control-source",
-      "evidence": {
-        "source": true,
-        "runtime": true
-      }
-    },
-    {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1159:create:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1159",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1162:create:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1162",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
       "construct": "create",
@@ -339,8 +375,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1168:create:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1168",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1166:create:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1166",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
       "construct": "create",
@@ -351,8 +387,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1173:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1173",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1171:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1171",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
       "construct": "listener",
@@ -363,8 +399,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1226:create:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1226",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1175:create:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1175",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
       "construct": "create",
@@ -375,10 +411,34 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1233:listener:1",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1180:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1180",
+      "screen": "shared",
+      "module": "hausman-hub-panel.js",
+      "construct": "listener",
+      "classification": "observed-runtime-control-source",
+      "evidence": {
+        "source": true,
+        "runtime": true
+      }
+    },
+    {
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1233:create:1",
       "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1233",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
+      "construct": "create",
+      "classification": "observed-runtime-control-source",
+      "evidence": {
+        "source": true,
+        "runtime": true
+      }
+    },
+    {
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1240:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1240",
+      "screen": "shared",
+      "module": "hausman-hub-panel.js",
       "construct": "listener",
       "classification": "observed-runtime-control-source",
       "evidence": {
@@ -387,8 +447,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1241:create:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1241",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1248:create:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1248",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
       "construct": "create",
@@ -399,22 +459,22 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1246:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1246",
-      "screen": "shared",
-      "module": "hausman-hub-panel.js",
-      "construct": "listener",
-      "classification": "observed-runtime-control-source",
-      "evidence": {
-        "source": true,
-        "runtime": true
-      }
-    },
-    {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1253:create:1",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1253:listener:1",
       "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1253",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
+      "construct": "listener",
+      "classification": "observed-runtime-control-source",
+      "evidence": {
+        "source": true,
+        "runtime": true
+      }
+    },
+    {
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1260:create:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1260",
+      "screen": "shared",
+      "module": "hausman-hub-panel.js",
       "construct": "create",
       "classification": "observed-runtime-control-source",
       "evidence": {
@@ -423,8 +483,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1257:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1257",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1264:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1264",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
       "construct": "listener",
@@ -435,8 +495,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1288:create:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1288",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1295:create:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1295",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
       "construct": "create",
@@ -447,8 +507,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1293:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1293",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1300:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1300",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
       "construct": "listener",
@@ -463,6 +523,6 @@
   "runtime_report_required": true,
   "provenance": {
     "version": "1.52.205",
-    "content_digest": "788ae6649d131cbbf5a3f1337bdfc7e2751400cc3627a10febc4d9d55d8659ad"
+    "content_digest": "fa6ccdb09b887477acea486e67b26923380a9f11fea89dc9772b463e15bd153a"
   }
 }

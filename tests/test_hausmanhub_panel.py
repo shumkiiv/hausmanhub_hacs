@@ -67,6 +67,8 @@ LIBRARY_HERO_CSS = PANEL_JS.with_name("hausman-hub-library-hero.css")
 CLIMATE_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-climate-overview.js")
 CLIMATE_OVERVIEW_CSS = PANEL_JS.with_name("hausman-hub-climate-overview.css")
 LIGHTING_CSS = PANEL_JS.with_name("hausman-hub-lighting.css")
+LIGHT_PROTECTION_JS = PANEL_JS.with_name("hausman-hub-light-protection.js")
+LIGHT_PROTECTION_CSS = PANEL_JS.with_name("hausman-hub-light-protection.css")
 LIBRARY_HERO_CONSUMERS = (
     PANEL_JS.with_name("hausman-hub-lighting.js"),
     PANEL_JS.with_name("hausman-hub-climate-overview.js"),
@@ -97,7 +99,8 @@ CATALOG_CSS = PANEL_JS.with_name("hausman-hub-catalog.css")
 DEVICE_MAINTENANCE_CSS = PANEL_JS.with_name("hausman-hub-device-maintenance.css")
 DEVICES_OVERVIEW_CSS = PANEL_JS.with_name("hausman-hub-devices-overview.css")
 ROOMS_CSS = PANEL_JS.with_name("hausman-hub-rooms.css")
-MAX_PANEL_JS_BYTES = 296 * 1024
+# Panel wires another isolated, cacheable lighting module; its own source stays bounded.
+MAX_PANEL_JS_BYTES = 297 * 1024
 MAX_HOME_SECTIONS_JS_BYTES = 16 * 1024
 MAX_ROOM_SETUP_JS_BYTES = 24 * 1024
 MAX_ROOM_DEVICE_GROUPS_JS_BYTES = 12 * 1024
@@ -118,6 +121,25 @@ MAX_SETTINGS_CSS_BYTES = 24 * 1024
 
 class PanelJavaScriptContractTest(unittest.TestCase):
     """The local panel assets stay bounded and loadable."""
+
+    def test_manual_light_protection_is_a_validated_thin_client(self) -> None:
+        source = LIGHT_PROTECTION_JS.read_text(encoding="utf-8")
+        styles = LIGHT_PROTECTION_CSS.read_text(encoding="utf-8")
+
+        self.assertIn("hausman-hub-manual-light-off-protection", source)
+        self.assertIn("expectedProtectionRevision", source)
+        self.assertIn("remainingMinimumSeconds", source)
+        self.assertIn("setTimeout", source)
+        self.assertIn("refetch", source)
+        self.assertNotIn("turn_on", source)
+        self.assertNotIn("localStorage", source)
+        self.assertIn(".light-protection-card", styles)
+
+    def test_interaction_audit_preserves_manual_light_protection_listener_evidence(self) -> None:
+        audit = (ROOT / "tests/browser/hausman-hub-full-interaction.spec.js").read_text(encoding="utf-8")
+
+        self.assertIn("caller(\"listener\", this.dataset?.testid?.startsWith(\"manual-light-protection:\")", audit)
+        self.assertIn("this.dataset?.testid === \"lighting-protection:status\"", audit)
 
     def test_tablet_library_pages_share_one_canonical_hero(self) -> None:
         component = LIBRARY_HERO_JS.read_text(encoding="utf-8")
