@@ -1112,6 +1112,7 @@ class ScenarioExecutor:
 
         def protected_actions_for(
             decisions: Mapping[str, Any],
+            scope_actions: Sequence[ScenarioAction] = actions,
         ) -> frozenset[str]:
             blocked = tuple(decision for decision in decisions.values() if not decision.allowed)
             if not blocked:
@@ -1124,10 +1125,14 @@ class ScenarioExecutor:
             }
             if not protected_entity_ids:
                 # A broken scope cannot prove which earlier source-off is safe.
-                return light_priority.light_action_ids
+                return frozenset(
+                    action.id
+                    for action in scope_actions
+                    if action.id in light_priority.light_action_ids
+                )
             return frozenset(
                 action.id
-                for action in actions
+                for action in scope_actions
                 if action.id in light_priority.light_action_ids
                 and (
                     (device := self._catalog.device(action.target_id or "")) is not None
@@ -1135,7 +1140,15 @@ class ScenarioExecutor:
                 )
             )
 
-        if automatic_source and self._manual_light_off_protection is not None:
+        # A shadow run has no authority lock or physical boundary, but it must
+        # still compute the same protected receipts.  Live runs decide only at
+        # the contiguous-group boundary below, never during speculative
+        # discovery.
+        if (
+            dry_run
+            and automatic_source
+            and self._manual_light_off_protection is not None
+        ):
             for action in actions:
                 if not self._is_light_activation(action, scenario_text):
                     continue
@@ -1244,53 +1257,117 @@ class ScenarioExecutor:
             }
 
         absence_generations: dict[str, str] = {}
-        scenario_authority_lock_held = bool(
-            not dry_run
-            and automatic_source
-            and light_priority.light_action_ids
-            and self._manual_light_off_protection is not None
-        )
-        if scenario_authority_lock_held:
-            # The discovery above is deliberately dry-run. Recheck every
-            # descriptor-backed activation while holding the same authority
-            # lock that receives manual transitions, then retain that lock
-            # through every contiguous light mutation and ownership record.
+        scenario_authority_lock_held = False
+        light_group_start: int | None = None
+        light_group_receipt_start = 0
+
+        async def acquire_light_group(start: int) -> None:
+            """Acquire and re-evaluate one contiguous automatic light group.
+
+            Discovery above is deliberately read-only.  This is the only live
+            decision point: it follows a fresh descriptor lookup and precedes
+            every power/service call in the group.
+            """
+
+            nonlocal scenario_authority_lock_held
+            nonlocal protected_light_action_ids
+            nonlocal protection_decisions
+            if dry_run or not automatic_source or self._manual_light_off_protection is None:
+                return
             await self._light_priority.authority_lock().acquire()
+            scenario_authority_lock_held = True
+            owner_task = asyncio.current_task()
+
+            def release_abandoned_group(_task: asyncio.Task[Any]) -> None:
+                """Last-resort cancellation cleanup when a caller abandons a run."""
+
+                nonlocal scenario_authority_lock_held
+                if scenario_authority_lock_held:
+                    self._light_priority.authority_lock().release()
+                    scenario_authority_lock_held = False
+
+            if owner_task is not None:
+                owner_task.add_done_callback(release_abandoned_group)
             try:
                 protection_decisions = {}
-                for action in actions:
-                    if not self._is_light_activation(action, scenario_text):
+                group_actions: list[ScenarioAction] = []
+                for candidate in actions[start:]:
+                    if candidate.id not in light_priority.light_action_ids:
+                        break
+                    group_actions.append(candidate)
+                for candidate in group_actions:
+                    if not self._is_light_activation(candidate, scenario_text):
                         continue
-                    # Resolving this descriptor immediately before the live
-                    # decision prevents catalog replacement from reusing a stale
-                    # discovery result. _device_action_receipt repeats the check
-                    # before its own dispatch.
-                    device = self._catalog.device(action.target_id or "")
-                    allowed = device.action(action.action_id or "") if device is not None else None
+                    # Descriptor -> decision is intentionally adjacent while
+                    # the same lock serializes manual state transitions.
+                    device = self._catalog.device(candidate.target_id or "")
+                    allowed = (
+                        device.action(candidate.action_id or "")
+                        if device is not None
+                        else None
+                    )
                     if device is None or allowed is None:
                         continue
-                    protection_decisions[action.id] = await self._manual_light_off_protection.async_decide(
-                        action, self._catalog, automatic=True, dry_run=False,
-                        trigger_context=trigger_context,
+                    protection_decisions[candidate.id] = (
+                        await self._manual_light_off_protection.async_decide(
+                            candidate,
+                            self._catalog,
+                            automatic=True,
+                            dry_run=False,
+                            trigger_context=trigger_context,
+                        )
                     )
-                protected_light_action_ids = protected_actions_for(protection_decisions)
+                protected_light_action_ids = protected_actions_for(
+                    protection_decisions, group_actions
+                )
             except BaseException:
                 self._light_priority.authority_lock().release()
+                scenario_authority_lock_held = False
                 raise
-        for action_index, action in enumerate(actions):
-            if (
-                scenario_authority_lock_held
-                and action.type in {
-                    ScenarioActionType.DELAY,
-                    ScenarioActionType.NOTIFICATION,
-                    ScenarioActionType.RUN_SCENARIO,
-                }
-            ):
-                # A wait or child execution is a new authority boundary. Do
-                # not delay manual-off attribution or recursively acquire the
-                # non-reentrant light lock from a nested scenario.
+
+        async def finalize_light_group(end: int) -> None:
+            """Confirm and persist one group before releasing its authority."""
+
+            nonlocal scenario_authority_lock_held
+            nonlocal light_group_start
+            if light_group_start is None or not scenario_authority_lock_held:
+                return
+            group_actions = actions[light_group_start:end]
+            group_receipts = receipts[light_group_receipt_start:]
+            try:
+                await self._confirm_deferred_device_receipts(group_receipts)
+                await self._async_resolve_light_off_obligations(
+                    group_actions,
+                    group_receipts,
+                    resolved_action_ids=resolved_light_off_action_ids,
+                    expected_generations=absence_generations,
+                )
+                await self._light_priority.note_results(
+                    group_actions,
+                    group_receipts,
+                    light_priority,
+                    self._catalog,
+                    self._hass,
+                    automatic=True,
+                    dry_run=False,
+                    scenario_id=scenario_id,
+                    run_id=run_id,
+                    authority_lock_held=True,
+                )
+            finally:
                 self._light_priority.authority_lock().release()
                 scenario_authority_lock_held = False
+                light_group_start = None
+        for action_index, action in enumerate(actions):
+            if action.id not in light_priority.light_action_ids:
+                # DELAY, NOTIFICATION and RUN_SCENARIO are explicit authority
+                # boundaries.  The prior group is fully read back and saved
+                # before its lock is released.
+                await finalize_light_group(action_index)
+            elif not scenario_authority_lock_held:
+                light_group_start = action_index
+                light_group_receipt_start = len(receipts)
+                await acquire_light_group(action_index)
             if not dry_run and action.type is ScenarioActionType.DELAY:
                 await self._confirm_deferred_device_receipts(receipts)
                 await self._async_resolve_light_off_obligations(
@@ -1487,10 +1564,15 @@ class ScenarioExecutor:
                             authority_lock_held=True,
                             forbid_toggle=forbid_toggle,
                             before_dispatch=before_dispatch,
-                            # Re-decide while the Task 3 authority lock is held.
-                            # An allowed preflight result must never survive a
-                            # concurrent manual transition or catalog replacement.
-                            manual_off_protection_decision=None,
+                            # The group decision was made after the live
+                            # descriptor lookup under this same lock. Reusing
+                            # it keeps the durable-release -> power ordering
+                            # contiguous and prevents a per-action gap.
+                            manual_off_protection_decision=(
+                                protection_decisions.get(action.id)
+                                if self._is_light_activation(action, scenario_text)
+                                else None
+                            ),
                             lighting_scenario_text=scenario_text,
                             power_dependencies=power_dependencies,
                         )
@@ -1575,6 +1657,7 @@ class ScenarioExecutor:
                     elif action.action_id == "turn_off":
                         powered_sources.pop(entity_id, None)
 
+        await finalize_light_group(len(actions))
         if not dry_run:
             await self._confirm_deferred_device_receipts(receipts)
             await self._async_resolve_light_off_obligations(
@@ -1596,9 +1679,6 @@ class ScenarioExecutor:
             run_id=run_id,
             authority_lock_held=scenario_authority_lock_held,
         )
-        if scenario_authority_lock_held:
-            self._light_priority.authority_lock().release()
-
         completed = all(r.get("status") == "completed" for r in receipts)
         failed_after_progress = any(
             receipt.get("status") == "failed" for receipt in receipts

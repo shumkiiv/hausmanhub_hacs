@@ -431,7 +431,9 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             trigger_context={"source": "device_state", "target_id": "sensor_1"},
         )
 
-        self.assertEqual(["protection", "protection"], order)
+        # Live execution has one authoritative decision per contiguous group;
+        # speculative discovery is reserved for shadow runs.
+        self.assertEqual(["protection"], order)
         self.assertEqual("completed", result["status"])
         self.assertEqual("manual_off_protection_active", result["receipts"][0]["reason"])
         self.assertFalse(result["receipts"][0]["physicalAttempted"])
@@ -527,10 +529,9 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
                 self.manual_off_arrived = asyncio.Event()
 
             async def async_decide(self, action, catalog, *, dry_run, **_kwargs):
-                if dry_run:
+                if not dry_run:
                     self.discovery_complete.set()
                     await self.manual_off_arrived.wait()
-                    return LightProtectionDecision(True)
                 device = catalog.device(action.target_id)
                 return LightProtectionDecision(
                     device.entity_id != "light.alt",
@@ -597,6 +598,114 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("manual_off_protection_active", result["receipts"][0]["reason"])
         self.hass.services.async_call.assert_not_awaited()
+
+    async def test_scope_unavailable_substitution_skips_group_but_safe_off_survives(
+        self,
+    ) -> None:
+        """Unknown scope blocks the full source swap, never an unrelated off."""
+
+        class ScopeUnavailable:
+            async def async_decide(self, *_args, **_kwargs):
+                return LightProtectionDecision(
+                    False, "manual_off_protection_scope_unavailable", "missing", {}
+                )
+
+        self.catalog._devices["device_alt"] = ScenarioDeviceEntry(
+            target_id="device_alt", name="Alternate light", entity_id="light.alt",
+            actions=(ScenarioDeviceAction("turn_on", "On", "light", "turn_on", frozenset()),),
+        )
+        self.catalog._devices["safe_light"] = ScenarioDeviceEntry(
+            target_id="safe_light", name="Safe light", entity_id="light.safe",
+            actions=(ScenarioDeviceAction("turn_off", "Off", "light", "turn_off", frozenset()),),
+        )
+        self.hass.state_values["light.alt"] = SimpleNamespace(state="off", attributes={})
+        self.hass.state_values["light.safe"] = SimpleNamespace(state="on", attributes={})
+        priority = LightAutomationPriority()
+        priority._owned_revisions["light.living_room"] = None  # noqa: SLF001
+        priority._owned_records["light.living_room"] = {"expiresAt": 9_999_999_999_999}  # noqa: SLF001
+        priority._owned_revisions["light.safe"] = None  # noqa: SLF001
+        priority._owned_records["light.safe"] = {"expiresAt": 9_999_999_999_999}  # noqa: SLF001
+        executor = ScenarioExecutor(
+            self.hass, self.catalog, self.executor._run_callback,
+            light_priority=priority, manual_light_off_protection=ScopeUnavailable(),
+            readback_window_seconds=0.02, readback_interval_seconds=0.01,
+        )
+
+        result = await executor.async_execute(
+            _definition((
+                ScenarioAction(id="old_off", type=ScenarioActionType.DEVICE_ACTION, target_id="device_1", action_id="turn_off"),
+                ScenarioAction(id="new_on", type=ScenarioActionType.DEVICE_ACTION, target_id="device_alt", action_id="turn_on"),
+                ScenarioAction(id="boundary", type=ScenarioActionType.DELAY, delay_seconds=1),
+                ScenarioAction(id="safe_off", type=ScenarioActionType.DEVICE_ACTION, target_id="safe_light", action_id="turn_off"),
+            )),
+            "scope-substitution.1", scenario_id="source_substitution",
+        )
+
+        self.assertEqual(
+            ["manual_off_protection_active", "manual_off_protection_active"],
+            [item["reason"] for item in result["receipts"][:2]],
+        )
+        self.assertEqual("completed", result["receipts"][3]["status"])
+        self.hass.services.async_call.assert_awaited_once_with(
+            "light", "turn_off", {"entity_id": "light.safe"}, blocking=True
+        )
+
+    async def test_live_protection_save_failure_releases_group_lock_before_dispatch(
+        self,
+    ) -> None:
+        """A durable-release failure must leave neither command nor stuck lock."""
+
+        class FailingProtection:
+            async def async_decide(self, *_args, **kwargs):
+                if kwargs["dry_run"]:
+                    raise AssertionError("live runs do not use speculative discovery")
+                raise OSError("protection store unavailable")
+
+        priority = LightAutomationPriority()
+        executor = ScenarioExecutor(
+            self.hass, self.catalog, self.executor._run_callback,
+            light_priority=priority, manual_light_off_protection=FailingProtection(),
+        )
+
+        with self.assertRaisesRegex(OSError, "protection store unavailable"):
+            await executor.async_execute(
+                _definition((ScenarioAction(id="on", type=ScenarioActionType.DEVICE_ACTION, target_id="device_1", action_id="turn_on"),)),
+                "release-failure.1", scenario_id="presence_light",
+            )
+
+        self.assertFalse(priority.authority_lock().locked())
+        self.hass.services.async_call.assert_not_awaited()
+
+    async def test_cancelled_light_group_releases_authority_lock(self) -> None:
+        """Cancellation during service dispatch cannot strand manual events."""
+
+        class AllowingProtection:
+            async def async_decide(self, *_args, **_kwargs):
+                return LightProtectionDecision(True)
+
+        started = asyncio.Event()
+        unblock = asyncio.Event()
+
+        async def blocked_service(*_args: object, **_kwargs: object) -> None:
+            started.set()
+            await unblock.wait()
+
+        self.hass.services.async_call.side_effect = blocked_service
+        priority = LightAutomationPriority()
+        executor = ScenarioExecutor(
+            self.hass, self.catalog, self.executor._run_callback,
+            light_priority=priority, manual_light_off_protection=AllowingProtection(),
+        )
+        run = asyncio.create_task(executor.async_execute(
+            _definition((ScenarioAction(id="on", type=ScenarioActionType.DEVICE_ACTION, target_id="device_1", action_id="turn_on"),)),
+            "cancelled-group.1", scenario_id="presence_light",
+        ))
+        await started.wait()
+        run.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await run
+
+        self.assertFalse(priority.authority_lock().locked())
 
     async def test_device_action_calls_service(self) -> None:
         definition = _definition(
