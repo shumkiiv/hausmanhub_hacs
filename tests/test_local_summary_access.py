@@ -673,6 +673,67 @@ class LocalSummaryAccessTest(unittest.TestCase):
             self.assertEqual("hausman-hub-error", response.payload["contract"]["name"])
             self.assertEqual("no-store", response.headers["Cache-Control"])
 
+    def test_manual_protection_http_failed_save_cannot_replay_success(self) -> None:
+        from custom_components.hausman_hub.application.manual_light_off_protection import ManualLightOffProtectionCoordinator
+        import copy
+
+        class Store:
+            payload = None
+            fail = True
+            saves = 0
+            async def async_load(self): return copy.deepcopy(self.payload)
+            async def async_save(self, payload):
+                self.saves += 1
+                if self.fail: raise OSError("private storage failure")
+                self.payload = copy.deepcopy(payload)
+
+        store = Store()
+        failed = ManualLightOffProtectionCoordinator(store)
+        asyncio.run(failed.async_load())
+        self.hass.data["hausman_hub"]["manual_light_off_protection"] = failed
+        view, _ = self._manual_protection_views()
+        admin = reader_user("system-admin", admin=True)
+        request = self._manual_settings_request("failure.1")
+        response = asyncio.run(view.put(FakeJsonRequest("127.0.0.1", admin, view.url, request)))
+        self.assertIn(response.status, {500, 503})
+        self.assertEqual("hausman-hub-error", response.payload["contract"]["name"])
+        self.assertEqual("no-store", response.headers["Cache-Control"])
+        store.fail = False
+        restarted = ManualLightOffProtectionCoordinator(store)
+        asyncio.run(restarted.async_load())
+        self.hass.data["hausman_hub"]["manual_light_off_protection"] = restarted
+        retried = asyncio.run(view.put(FakeJsonRequest("127.0.0.1", admin, view.url, request)))
+        self.assertEqual(200, retried.status)
+        self.assertEqual(2, store.saves)
+
+    def test_manual_protection_http_restart_replays_only_same_payload(self) -> None:
+        from custom_components.hausman_hub.application.manual_light_off_protection import ManualLightOffProtectionCoordinator
+        import copy
+
+        class Store:
+            payload = None
+            saves = 0
+            async def async_load(self): return copy.deepcopy(self.payload)
+            async def async_save(self, payload): self.saves += 1; self.payload = copy.deepcopy(payload)
+
+        store = Store()
+        coordinator = ManualLightOffProtectionCoordinator(store)
+        asyncio.run(coordinator.async_load())
+        self.hass.data["hausman_hub"]["manual_light_off_protection"] = coordinator
+        view, _ = self._manual_protection_views()
+        admin = reader_user("system-admin", admin=True)
+        request = self._manual_settings_request("restart.1")
+        original = asyncio.run(view.put(FakeJsonRequest("127.0.0.1", admin, view.url, request)))
+        restarted = ManualLightOffProtectionCoordinator(store)
+        asyncio.run(restarted.async_load())
+        self.hass.data["hausman_hub"]["manual_light_off_protection"] = restarted
+        replay = asyncio.run(view.put(FakeJsonRequest("127.0.0.1", admin, view.url, request)))
+        changed = asyncio.run(view.put(FakeJsonRequest("127.0.0.1", admin, view.url, self._manual_settings_request("restart.1", 31))))
+        self.assertEqual(original.payload, replay.payload)
+        self.assertEqual(1, store.saves)
+        self.assertEqual(409, changed.status)
+        self.assertEqual("no-store", changed.headers["Cache-Control"])
+
     def test_setup_resets_stale_history_when_keyring_is_replaced_after_marker(self) -> None:
         """The ConfigEntry marker cannot authorize records under a new keyring."""
 
