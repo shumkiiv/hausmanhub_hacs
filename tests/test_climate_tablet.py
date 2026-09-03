@@ -1481,6 +1481,250 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(receipt["operation_id"], replay["operation_id"])
         self.assertEqual(0, len(executor.batches))
 
+    async def test_reserved_home_targets_retain_mixed_offline_scope_across_restart(self) -> None:
+        """An offline owner is saved as deferred and never replayed by a duplicate."""
+        runtime, store, contour_store, executor = native_home_target_runtime(
+            include_humidifier=False,
+        )
+        runtime = ClimateRuntime(
+            entry_id="entry", configuration=runtime.configuration,
+            registry_store=runtime._registry_store, contour_store=contour_store,
+            strict_ha_call_executor=executor, ha_state_view=runtime._ha_state_view,
+            operation_id_factory=iter(f"{index:032x}" for index in range(1, 20)).__next__,
+            now_ms=lambda: 1784280005000, direct_control_store=store,
+        )
+        # This is a production-shaped multi-owner contour: only the floor is
+        # currently available, while the other statically valid owners are
+        # offline.  The target remains a single whole-home intent.
+        for entity_id in (
+            "climate.living_air_conditioner",
+            "climate.living_radiator",
+        ):
+            current = executor._state_view.states[entity_id]
+            executor._state_view.states[entity_id] = replace(
+                current, state="unavailable", attributes={},
+            )
+        await runtime.async_start()
+        service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await service.async_load()
+        request_a = {
+            "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+            "request_id": "tablet.climate.mixed-offline-a",
+            "correlation_id": "corr.mixed-offline-a",
+            "expected_state_revision": 0,
+            "expected_control_revision": 0,
+            "reliability_profile": "climate_reliability_v1",
+            "action": "set_home_targets",
+            "room_id": None,
+            "parameters": {"target_temperature": 25.5},
+        }
+        receipt_a = await service.async_execute(request_a)
+        duplicate_a = await service.async_execute(request_a)
+        self.assertEqual("partial", receipt_a["status"], receipt_a)
+        self.assertTrue(receipt_a["final"], receipt_a)
+        self.assertEqual(["set_home_targets", "synchronize_home"], (
+            await service.async_snapshot()
+        )["home_control"]["allowed_actions"])
+        request_b = {
+            **request_a,
+            "request_id": "tablet.climate.mixed-offline-b",
+            "correlation_id": "corr.mixed-offline-b",
+            "expected_control_revision": 1,
+            "parameters": {"target_temperature": 25.0},
+        }
+        receipt_b = await service.async_execute(request_b)
+        duplicate_b = await service.async_execute(request_b)
+
+        self.assertEqual((1, 2), (
+            receipt_a["resulting_control_revision"],
+            receipt_b["resulting_control_revision"],
+        ))
+        self.assertIsNone(runtime.last_error, runtime.last_error)
+        self.assertEqual([25.5, 25.0], [
+            saved.contour("climate").rooms[0].target_temperature
+            for saved in contour_store.saved
+        ], receipt_b)
+        self.assertTrue(duplicate_a["duplicate"])
+        self.assertTrue(duplicate_b["duplicate"])
+        self.assertEqual(receipt_a["operation_id"], duplicate_a["operation_id"])
+        self.assertEqual(receipt_b["operation_id"], duplicate_b["operation_id"])
+        calls = tuple(call for batch in executor.batches for call in batch)
+        self.assertEqual([
+            ("climate.living_floor", 25.5),
+            ("climate.living_floor", 25.0),
+        ], [(call.entity_id, call.temperature) for call in calls])
+        for receipt in (receipt_a, receipt_b):
+            self.assertEqual("partial", receipt["status"], receipt)
+            self.assertTrue(receipt["final"])
+            self.assertEqual("saved_deferred_offline", receipt["intent"]["status"])
+            leaves = receipt["outcomes"]["rooms"]["living"]["devices"]
+            for device_id in ("living_air_conditioner", "living_radiator"):
+                self.assertEqual("deferred", leaves[device_id]["status"])
+                self.assertEqual("device_unavailable", leaves[device_id]["reason"])
+                self.assertEqual((0, 0), (
+                    leaves[device_id]["command_count"], leaves[device_id]["accepted_count"],
+                ))
+                self.assertNotIn("execution_state", leaves[device_id])
+            self.assertIn(leaves["living_floor"].get("execution_state"), {
+                "applied", "already_in_sync",
+            })
+
+        # Reconnecting an old owner after restart cannot turn a retained
+        # duplicate into a new physical command.
+        for entity_id in (
+            "climate.living_air_conditioner",
+            "climate.living_radiator",
+        ):
+            current = executor._state_view.states[entity_id]
+            executor._state_view.states[entity_id] = replace(
+                current, state="cool", attributes={"temperature": 25.0},
+            )
+        restarted_runtime = ClimateRuntime(
+            entry_id="entry", configuration=configuration(ClimateControlMode.MANAGED),
+            registry_store=runtime._registry_store, contour_store=contour_store,
+            strict_ha_call_executor=executor, ha_state_view=runtime._ha_state_view,
+            operation_id_factory=lambda: "b" * 32,
+            now_ms=lambda: 1784280005000, direct_control_store=store,
+        )
+        await restarted_runtime.async_start()
+        restarted = ClimateTabletService(restarted_runtime, store, now_ms=lambda: 1784280005000)
+        await restarted.async_load()
+        replay_b = await restarted.async_execute(request_b)
+        self.assertTrue(replay_b["duplicate"])
+        self.assertEqual(receipt_b["operation_id"], replay_b["operation_id"])
+        self.assertEqual(2, len(executor.batches))
+
+        request_c = {**request_b, "request_id": "tablet.climate.mixed-offline-c",
+                     "correlation_id": "corr.mixed-offline-c",
+                     "expected_control_revision": 2,
+                     "parameters": {"target_temperature": 25.5}}
+        await restarted.async_execute(request_c)
+        self.assertGreater(len(executor.batches), 2)
+
+    async def test_reserved_home_target_skips_real_manual_owner_but_rejects_missing_owner(self) -> None:
+        """Manual memory excludes a valid owner, never hides a broken binding."""
+        runtime, store, contour_store, executor = native_home_target_runtime(
+            include_humidifier=False,
+        )
+        await runtime.async_start()
+        # Use the production ownership API so the test exercises durable
+        # manual attribution rather than modifying private memory.
+        await runtime.async_set_device_mode("living", "living_radiator", "manual")
+        service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await service.async_load()
+        request = {
+            "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+            "request_id": "tablet.climate.manual-owner",
+            "correlation_id": "corr.manual-owner",
+            "expected_state_revision": 0, "expected_control_revision": 0,
+            "reliability_profile": "climate_reliability_v1", "action": "set_home_targets",
+            "room_id": None, "parameters": {"target_temperature": 25.5},
+        }
+        receipt = await service.async_execute(request)
+        leaves = receipt["outcomes"]["rooms"]["living"]["devices"]
+        manual = leaves["living_radiator"]
+        self.assertEqual(1, len(contour_store.saved))
+        self.assertEqual("manual", manual["status"])
+        self.assertEqual("manual_user_excluded", manual["reason"])
+        self.assertTrue(manual["message"])
+        self.assertEqual((0, 0), (manual["command_count"], manual["accepted_count"]))
+        self.assertNotIn("execution_state", manual)
+        self.assertNotIn("climate.living_radiator", [
+            call.entity_id for batch in executor.batches for call in batch
+        ])
+
+        missing = next(device for device in runtime._registry.devices if device.device_id == "living_radiator")
+        missing_registry = replace(
+            runtime._registry,
+            devices=tuple(
+                replace(device, endpoints=()) if device.device_id == missing.device_id else device
+                for device in runtime._registry.devices
+            ),
+        )
+        runtime._registry_store.registry = missing_registry
+        runtime._registry = missing_registry
+        before_saves = len(contour_store.saved)
+        with self.assertRaises(ClimateTabletUnavailable):
+            await service.async_execute({
+                **request, "request_id": "tablet.climate.manual-missing-owner",
+                "correlation_id": "corr.manual-missing-owner",
+                "expected_control_revision": 1,
+                "parameters": {"target_temperature": 25.0},
+            })
+        self.assertEqual(before_saves, len(contour_store.saved))
+
+    async def test_reserved_home_target_rejects_plan_changed_after_tablet_preflight(self) -> None:
+        """The reserved native fingerprint closes the preflight-to-dispatch race."""
+        class PlanChangingRuntime(ClimateRuntime):
+            async def async_preflight_home_climate_targets(self, payload: object) -> dict[str, object]:
+                result = await super().async_preflight_home_climate_targets(payload)
+                state = self._ha_state_view.states["climate.living_floor"]
+                self._ha_state_view.states["climate.living_floor"] = replace(
+                    state, state="unavailable", attributes={},
+                )
+                return result
+
+        runtime, store, contour_store, executor = native_home_target_runtime(include_humidifier=False)
+        runtime = PlanChangingRuntime(
+            entry_id="entry", configuration=runtime.configuration,
+            registry_store=runtime._registry_store, contour_store=contour_store,
+            strict_ha_call_executor=executor, ha_state_view=runtime._ha_state_view,
+            operation_id_factory=lambda: "a" * 32, now_ms=lambda: 1784280005000,
+            direct_control_store=store,
+        )
+        await runtime.async_start()
+        service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await service.async_load()
+        original = contour_store.registry
+        receipt = await service.async_execute({
+            "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+            "request_id": "tablet.climate.plan-race", "correlation_id": "corr.plan-race",
+            "expected_state_revision": 0, "expected_control_revision": 0,
+            "reliability_profile": "climate_reliability_v1", "action": "set_home_targets",
+            "room_id": None, "parameters": {"target_temperature": 25.5},
+        })
+
+        self.assertEqual("unavailable", receipt["status"], receipt)
+        self.assertTrue(receipt["final"])
+        self.assertEqual(original, contour_store.registry)
+        self.assertEqual([], contour_store.saved)
+        self.assertEqual([], executor.batches)
+
+    async def test_native_snapshot_advertises_home_target_for_offline_but_not_missing_scope(self) -> None:
+        """An offline owner remains eligible, unlike a missing required binding."""
+        runtime, store, _contour_store, executor = native_home_target_runtime(
+            include_humidifier=False,
+        )
+        state = executor._state_view.states["climate.living_radiator"]
+        executor._state_view.states["climate.living_radiator"] = replace(
+            state, state="unavailable", attributes={},
+        )
+        await runtime.async_start()
+        service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await service.async_load()
+        self.assertIn("set_home_targets", (
+            await service.async_snapshot()
+        )["home_control"]["allowed_actions"])
+
+        runtime, store, _contour_store, executor = native_home_target_runtime(
+            include_humidifier=False,
+        )
+        missing_registry = replace(
+            runtime._registry,
+            devices=tuple(
+                replace(device, endpoints=())
+                if device.device_id == "living_radiator" else device
+                for device in runtime._registry.devices
+            ),
+        )
+        runtime._registry_store.registry = missing_registry
+        await runtime.async_start()
+        service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await service.async_load()
+        self.assertNotIn("set_home_targets", (
+            await service.async_snapshot()
+        )["home_control"]["allowed_actions"])
+
     async def test_reserved_home_combined_mixed_axis_alignment_confirms_once(self) -> None:
         """The mixed proof works in both temperature and humidity directions."""
         for aligned_temperature, suffix in ((True, "temperature"), (False, "humidity")):

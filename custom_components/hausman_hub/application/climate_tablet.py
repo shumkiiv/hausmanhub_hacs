@@ -3844,10 +3844,14 @@ def _valid_reliable_dispatch_ledger(
             or receipt.get("final") is not True
             or receipt.get("confirmed") is not False
             or not isinstance(room_outcomes, Mapping)
-            or not _reliable_intent_has_status(receipt, "saved_apply_failed")
+            or not (
+                _reliable_intent_has_status(receipt, "saved_apply_failed")
+                or _reliable_intent_has_status(receipt, "saved_deferred_offline")
+            )
         ):
             return False
         failed = 0
+        deferred = 0
         for room_id, device_ids in expected.items():
             room = room_outcomes.get(room_id)
             device_outcomes = room.get("devices") if isinstance(room, Mapping) else None
@@ -3864,6 +3868,14 @@ def _valid_reliable_dispatch_ledger(
                 ):
                     failed += 1
                     continue
+                if (
+                    leaf.get("status") == "deferred"
+                    and leaf.get("reason") == "device_unavailable"
+                    and leaf.get("execution_state") is None
+                    and _strict_leaf_counts(leaf, 0, 0)
+                ):
+                    deferred += 1
+                    continue
                 evidence = leaf.get("evidence") if isinstance(leaf, Mapping) else None
                 observed_at = evidence.get("observed_at") if isinstance(evidence, Mapping) else None
                 if not (
@@ -3875,7 +3887,7 @@ def _valid_reliable_dispatch_ledger(
                     and observed_at > sources[room_id][device_id]
                 ):
                     return False
-        return failed > 0
+        return failed > 0 or deferred > 0
     if (
         receipt.get("status") != "confirmed"
         or receipt.get("accepted") is not True
@@ -5535,6 +5547,38 @@ def _reliable_outcomes(
                 continue
             if isinstance(execution_leaf, Mapping) and execution_leaf.get("execution_state") == "dispatched_not_accepted":
                 leaf_status, reason, execution, code, message = ("failed", "command_failed", "dispatched_not_accepted", "command_failed", "Команда не подтверждена, требуется проверка устройства.")
+            elif (
+                isinstance(execution_leaf, Mapping)
+                and execution_leaf.get("execution_state") == "accepted_unverified"
+                and (
+                    evidence := _reliable_evidence(
+                        request,
+                        room if isinstance(room, Mapping) else {},
+                        device if isinstance(device, Mapping) else {},
+                        snapshot,
+                        reliability_metadata.get((room_id, device_id), {})
+                        if isinstance(reliability_metadata, Mapping) else {},
+                    )
+                )
+                and _reliable_evidence_matches_request(evidence, request)
+                and snapshot.get("fresh") is True
+                and evidence.get("fresh") is True
+                and type(dispatched_at) is int
+                and dispatched_at < evidence["observed_at"] <= dispatched_at + 30_000
+                and isinstance(pre_dispatch_metadata, Mapping)
+                and type(pre_dispatch_metadata.get((room_id, device_id), {}).get("source_observed_at")) is int
+                and evidence["observed_at"]
+                > pre_dispatch_metadata[(room_id, device_id)]["source_observed_at"]
+            ):
+                # The native room aggregate remains pending while another
+                # statically valid owner is offline.  A per-device read-back
+                # newer than the dispatch checkpoint is nevertheless proof
+                # that this owner applied the target, so do not make a saved
+                # deferred operation poll forever or block its successor.
+                leaf_status, reason, execution, code, message = (
+                    "confirmed", "none", "applied", "confirmed",
+                    "Результат подтверждён чтением состояния.",
+                )
             elif (
                 isinstance(execution_leaf, Mapping)
                 and execution_leaf.get("execution_state") == "accepted_unverified"
