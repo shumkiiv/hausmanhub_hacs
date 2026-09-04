@@ -97,12 +97,30 @@ const confidentlyAbsent = presenceState === 'off' && motionState === 'off';
 const sunState = state(ID.sun);
 const outsideLux = numeric(state(ID.outsideLux));
 const manualChandelier = trigger.source === 'manual' && triggerId === 'manual_chandelier_on';
+const typedGroupAction = trigger.source === 'manual' &&
+  ['on', 'off', 'toggle'].includes(String(trigger.typed_intent || ''));
 
 let branch = 'presence_uncertain';
 let brightness = null;
 let kelvin = null;
 let actions = [];
-if (manualChandelier) {
+if (typedGroupAction) {
+  const chandelier = state(ID.chandelier);
+  const points = state(ID.points);
+  const known = (value) => value === 'on' || value === 'off';
+  const intent = String(trigger.typed_intent);
+  const turnOff = intent === 'off' || (intent === 'toggle' && (chandelier === 'on' || points === 'on'));
+  branch = `manual_group_${intent}`;
+  if (known(chandelier) && known(points)) {
+    if (turnOff) {
+      actions.push(switchAction('chandelier_off', ID.chandelier, 'Люстра тамбур', false));
+      actions.push(switchAction('points_off', ID.points, 'Точки тамбура', false));
+    } else {
+      if (chandelier === 'off') actions.push(switchAction('chandelier_on', ID.chandelier, 'Люстра тамбур', true));
+      if (points === 'off') actions.push(switchAction('points_on', ID.points, 'Точки тамбура', true));
+    }
+  }
+} else if (manualChandelier) {
   branch = 'manual_chandelier';
   brightness = 100;
   kelvin = 3000;

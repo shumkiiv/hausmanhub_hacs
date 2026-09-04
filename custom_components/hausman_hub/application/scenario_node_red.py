@@ -51,6 +51,7 @@ _TRUSTED_SYSTEM_SOURCE_HASHES = {
             "baa8044bf3cbcb360a963599b164434eb7b385f4d3b9a8cd156ee901fbf6dcff",
             "399a39d89a4b745c901b0201fe9510eb0a754106b49c1ef1a85c61359c1022c4",
             "0551ee02fc052a99a2e802054b8aaeaa1ada5885b927b90eb3cc8d2aca3414f9",
+            "e4f76cca39c5ee49f7ee216f3435f9ee0dc461826787a1df0135a4a5d2da5eb2",
         }
     ),
     "system-shower-comfort-controller": frozenset(
@@ -1864,6 +1865,18 @@ def _validate_system_branch(scenario_id: str, actions: list[ScenarioAction]) -> 
         points = "entity_cd0098e5ff95da46"
         mirror = "entity_fbdf27871edb89bf"
         if not actions:
+            return
+        if len(actions) in {1, 2} and all(
+            action.type is ScenarioActionType.DEVICE_ACTION
+            and action.target_id in {chandelier, points}
+            and action.action_id in {"turn_on", "turn_off"}
+            and action.value is None
+            and action.scenario_id is None
+            and action.message is None
+            for action in actions
+        ):
+            if any(action.target_id == mirror for action in actions):
+                raise NodeRedBackendError("Node-RED tambur manual group includes mirror")
             return
         if len(actions) == 1 and (
             device(actions[0], "mirror_on", mirror, "turn_on")

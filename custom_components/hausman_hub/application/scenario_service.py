@@ -1164,6 +1164,38 @@ class ScenarioService:
         if self._stopping:
             raise ScenarioServiceError("Scenario service is stopping", status=503)
 
+    async def async_run_typed_intent(
+        self,
+        *,
+        binding: str,
+        action: str,
+        correlation_id: str,
+        source: str,
+        trigger_id: str,
+    ) -> object:
+        """Run one release-owned smart-switch intent after strict validation."""
+        bindings = {
+            "shower-cabinet": {"toggle_b2_down", "on_b2_down"},
+            "tambur-light-group": {"on_down", "toggle_down", "off_up"},
+        }
+        if binding not in bindings or trigger_id not in bindings[binding]:
+            raise ValueError("unknown smart-switch binding or trigger")
+        if source != "manual" or not isinstance(correlation_id, str) or not correlation_id.strip():
+            raise ValueError("smart-switch intent must be manual and correlated")
+        allowed = {"shower-cabinet": {"toggle"}, "tambur-light-group": {"on", "off", "toggle"}}[binding]
+        if action not in allowed:
+            raise ValueError("smart-switch action does not match binding")
+        scenario_id = "system-shower-comfort-controller" if binding == "shower-cabinet" else "system-tambur-adaptive-controller"
+        return await self.async_run_scenario(
+            scenario_id,
+            trigger_context={
+                "source": source,
+                "trigger_id": trigger_id,
+                "correlation_id": correlation_id,
+                "typed_intent": action,
+            },
+        )
+
     async def _async_catalog_warmup(self) -> None:
         """Refresh after late integrations without an unbounded polling loop."""
 

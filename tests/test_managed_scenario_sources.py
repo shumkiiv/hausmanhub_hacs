@@ -107,6 +107,24 @@ def _action_ids(payload: dict[str, object]) -> list[str]:
 
 
 class ManagedTamburSourceTest(unittest.TestCase):
+    def test_typed_manual_group_off_turns_off_both_without_mirror(self) -> None:
+        states = self.base_states()
+        states.update({CHANDELIER: "on", POINTS: "on", MIRROR: "on"})
+        payload = _run_tambur(
+            timestamp="2026-08-27T12:00:00+06:00", states=states,
+            trigger={"source": "manual", "trigger_id": "off_up", "typed_intent": "off"},
+        )
+        self.assertEqual(["chandelier_off", "points_off"], _action_ids(payload))
+
+    def test_typed_manual_group_toggle_unknown_fails_closed(self) -> None:
+        states = self.base_states()
+        states.update({CHANDELIER: "unknown", POINTS: "off"})
+        payload = _run_tambur(
+            timestamp="2026-08-27T12:00:00+06:00", states=states,
+            trigger={"source": "manual", "trigger_id": "toggle_down", "typed_intent": "toggle"},
+        )
+        self.assertEqual([], _action_ids(payload))
+
     def base_states(self) -> dict[str, object]:
         return {
             PRESENCE: "off", MOTION: "off", SUN: "above_horizon",
