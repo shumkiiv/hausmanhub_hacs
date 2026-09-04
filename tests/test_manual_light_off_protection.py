@@ -56,6 +56,21 @@ class MemoryStore:
         self.payload = copy.deepcopy(payload)
 
 
+def test_catalog_coverage_can_recover_without_clearing_runtime_failure() -> None:
+    coordinator = ManualLightOffProtectionCoordinator(MemoryStore())
+
+    coordinator.set_catalog_coverage_healthy(False)
+    assert coordinator.unhealthy
+
+    coordinator.set_catalog_coverage_healthy(True)
+    assert not coordinator.unhealthy
+
+    coordinator.mark_unhealthy()
+    coordinator.set_catalog_coverage_healthy(False)
+    coordinator.set_catalog_coverage_healthy(True)
+    assert coordinator.unhealthy
+
+
 def _settings(*, release_mode: str = "timer_and_absence") -> dict[str, object]:
     return {
         "globalPolicy": {

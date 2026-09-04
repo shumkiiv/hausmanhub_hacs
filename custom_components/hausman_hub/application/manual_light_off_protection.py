@@ -95,8 +95,24 @@ class ManualLightOffProtectionCoordinator:
         self._sensor_states: dict[str, tuple[str, datetime]] = {}
         self._event_entity_listeners: set[Callable[[], None]] = set()
         self._loaded = False
-        self.unhealthy = False
+        self._runtime_unhealthy = False
+        self._catalog_coverage_healthy = True
         self._lock = asyncio.Lock()
+
+    @property
+    def unhealthy(self) -> bool:
+        """Fail closed for either runtime evidence or catalog coverage."""
+
+        return self._runtime_unhealthy or not self._catalog_coverage_healthy
+
+    @unhealthy.setter
+    def unhealthy(self, value: bool) -> None:
+        self._runtime_unhealthy = bool(value)
+
+    def set_catalog_coverage_healthy(self, healthy: bool) -> None:
+        """Refresh the recoverable catalog gate without clearing runtime faults."""
+
+        self._catalog_coverage_healthy = bool(healthy)
 
     async def async_load(self) -> None:
         try:

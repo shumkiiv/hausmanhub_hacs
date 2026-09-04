@@ -302,7 +302,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     climate_shadow = await async_start_climate_shadow(hass, entry, climate_runtime)
     await async_start_climate_trial(hass, entry, climate_runtime)
 
-    from .application.scenario_catalog import async_build_scenario_catalog
+    from .application.scenario_catalog import (
+        ScenarioCatalog,
+        async_build_scenario_catalog,
+    )
     from .application.scenario_executor import ScenarioExecutor
     from .application.scenario_service import ScenarioService
     from .scenario_schedule import async_start_scenario_schedule
@@ -327,13 +330,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         HomeAssistantManualLightOffProtectionStore(hass, entry.entry_id)
     )
     await manual_light_off_protection.async_load()
-    coverage = audit_system_light_protection_coverage(
-        SYSTEM_LIGHT_PROFILES,
-        scenario_targets_for_system_light_profiles(scenario_catalog),
-    )
-    if not coverage.healthy:
-        manual_light_off_protection.mark_unhealthy()
-    domain_data["manual_light_off_protection_coverage"] = coverage
+
+    def _refresh_manual_light_off_protection_coverage(
+        catalog: ScenarioCatalog,
+    ) -> None:
+        coverage = audit_system_light_protection_coverage(
+            SYSTEM_LIGHT_PROFILES,
+            scenario_targets_for_system_light_profiles(catalog),
+        )
+        manual_light_off_protection.set_catalog_coverage_healthy(coverage.healthy)
+        domain_data["manual_light_off_protection_coverage"] = coverage
+
+    _refresh_manual_light_off_protection_coverage(scenario_catalog)
+
+    async def _load_scenario_catalog() -> ScenarioCatalog:
+        catalog = await async_build_scenario_catalog(hass)
+        _refresh_manual_light_off_protection_coverage(catalog)
+        return catalog
+
     domain_data["manual_light_off_protection"] = manual_light_off_protection
     from .application.scenario_node_red import NodeRedScenarioBackend
 
@@ -371,7 +385,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass,
         scenario_store,
         scenario_catalog,
-        catalog_loader=lambda: async_build_scenario_catalog(hass),
+        catalog_loader=_load_scenario_catalog,
         intercom_entity_resolver=lambda: next(
             iter(tablet_preferences_service.tablet_pinned_entity_ids), None
         ),

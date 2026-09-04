@@ -735,7 +735,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
     def test_manual_protection_http_replay_conflicts_and_no_store(self) -> None:
         # The synthetic read-only catalog has no first-wave devices. This API
         # boundary test replaces its intentionally fail-closed setup state.
-        self.hass.data["hausman_hub"]["manual_light_off_protection"].unhealthy = False
+        self.hass.data["hausman_hub"]["manual_light_off_protection"].set_catalog_coverage_healthy(True)
         view, release = self._manual_protection_views()
         admin = reader_user("system-admin", admin=True)
         request = self._manual_settings_request("replay.1")
@@ -806,7 +806,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual(saves_after_first_release, store.saves)
 
     def test_manual_protection_release_request_id_conflicts_for_every_payload_change(self) -> None:
-        self.hass.data["hausman_hub"]["manual_light_off_protection"].unhealthy = False
+        self.hass.data["hausman_hub"]["manual_light_off_protection"].set_catalog_coverage_healthy(True)
         view, release = self._manual_protection_views()
         admin = reader_user("system-admin", admin=True)
         settings = self._manual_settings_request("seed.release.conflicts")
@@ -870,7 +870,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
     def test_manual_protection_failed_unload_keeps_old_coordinator(self) -> None:
         self.hass.config_entries.unload_succeeds = False
         old = self.hass.data["hausman_hub"]["manual_light_off_protection"]
-        old.unhealthy = False
+        old.set_catalog_coverage_healthy(True)
         view, _ = self._manual_protection_views()
         self.assertFalse(asyncio.run(self.integration.async_unload_entry(self.hass, self.entry)))
         self.assertIs(old, self.hass.data["hausman_hub"]["manual_light_off_protection"])
@@ -898,12 +898,37 @@ class LocalSummaryAccessTest(unittest.TestCase):
             {},
         )
 
-        async def missing_chandelier_auto_on(_hass): return catalog
+        healthy_catalog = ScenarioCatalog(
+            {
+                target.target_id: ScenarioDeviceEntry(
+                    target.target_id,
+                    target.target_id,
+                    target.entity_id or "light.unpinned_catalog_target",
+                    (
+                        ScenarioDeviceAction(
+                            "turn_on",
+                            "On",
+                            (target.entity_id or "light.unpinned_catalog_target").partition(".")[0],
+                            "turn_on",
+                            frozenset(),
+                        ),
+                    ),
+                )
+                for target in FIRST_WAVE_AUTO_ON_TARGETS
+            },
+            {},
+        )
+        catalogs = iter((catalog, healthy_catalog))
 
-        with patch.object(scenario_catalog, "async_build_scenario_catalog", missing_chandelier_auto_on):
+        async def warming_catalog(_hass):
+            return next(catalogs)
+
+        with patch.object(scenario_catalog, "async_build_scenario_catalog", warming_catalog):
             self.assertTrue(asyncio.run(self.integration.async_setup_entry(hass, entry)))
-
-        self.assertTrue(hass.data["hausman_hub"]["manual_light_off_protection"].unhealthy)
+            coordinator = hass.data["hausman_hub"]["manual_light_off_protection"]
+            self.assertTrue(coordinator.unhealthy)
+            asyncio.run(hass.data["hausman_hub"]["scenario_service"].async_refresh_catalog())
+            self.assertFalse(coordinator.unhealthy)
 
     def test_manual_protection_http_failed_save_cannot_replay_success(self) -> None:
         from custom_components.hausman_hub.application.manual_light_off_protection import ManualLightOffProtectionCoordinator
@@ -3792,7 +3817,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.212", panel.payload["integration_version"])
+        self.assertEqual("1.52.213", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
