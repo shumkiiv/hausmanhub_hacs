@@ -34,7 +34,22 @@ def validate_exact_device_trigger(
     return dict(actual) == dict(expected)
 
 
+class HomeAssistantSmartSwitchDedupStore:
+    """Small HA Store-backed state holder used by the runtime adapter."""
+
+    def __init__(self, hass: object, entry_id: str) -> None:
+        from homeassistant.helpers.storage import Store  # type: ignore[import-not-found]
+        self._store = Store(hass, 1, f"hausman_hub.smart_switch_dedup.{entry_id}", atomic_writes=True)
+
+    async def async_load(self) -> object:
+        return await self._store.async_load()
+
+    async def async_save(self, value: Mapping[str, object]) -> None:
+        await self._store.async_save(dict(value))
+
+
 class SmartSwitchTriggerAdapter:
+
     def __init__(
         self,
         hass: object,
@@ -55,8 +70,13 @@ class SmartSwitchTriggerAdapter:
 
     async def async_start(self) -> None:
         if self._api is None:
-            from homeassistant.components.device_automation import trigger as api  # type: ignore[import-not-found]
-            self._api = api
+            from homeassistant.components.device_automation import (  # type: ignore[import-not-found]
+                DeviceAutomationType,
+                async_get_device_automation_platform,
+            )
+            self._api = await async_get_device_automation_platform(
+                self._hass, "mqtt", DeviceAutomationType.TRIGGER
+            )
         if self._store is not None:
             try:
                 loaded = await self._store.async_load()

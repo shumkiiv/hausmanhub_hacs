@@ -65,8 +65,10 @@ const daylight = hour >= 9 && hour < 23 && sunState === 'above_horizon';
 const evening = hour >= 9 && hour < 23 && sunState === 'below_horizon';
 
 const actions = [];
-const semanticCabinetToggle = trigger.source === 'device' &&
-  (trigger.trigger_id === 'toggle_b2_down' || trigger.trigger_id === 'on_b2_down');
+const semanticCabinetToggle =
+  (trigger.source === 'device' && (trigger.trigger_id === 'toggle_b2_down' || trigger.trigger_id === 'on_b2_down')) ||
+  (trigger.source === 'manual' && trigger.typed_intent === 'toggle' &&
+    (trigger.trigger_id === 'toggle_b2_down' || trigger.trigger_id === 'on_b2_down'));
 const ignoredCabinetUp = trigger.source === 'device' && trigger.trigger_id === 'toggle_b2_up';
 let cabinetToggleHandled = false;
 if (semanticCabinetToggle) {

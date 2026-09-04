@@ -56,7 +56,7 @@ _TRUSTED_SYSTEM_SOURCE_HASHES = {
     ),
     "system-shower-comfort-controller": frozenset(
         {
-            "8c5b4d50f00199aefbb10108a625c137022b3f7af811fe52d8409e7bde9a6742",
+            "9060257eaa344944611e3992b33591ab6ddb24ddd984137fce7aeeea6703b55c",
         }
     ),
     "system-small-corridor-light-controller": frozenset(

@@ -461,6 +461,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         scenario_service,
         scenario_command_contexts,
     )
+    from .application.smart_switch_runtime import (
+        HomeAssistantSmartSwitchDedupStore,
+        SmartSwitchTriggerAdapter,
+    )
+    smart_switch_adapter = SmartSwitchTriggerAdapter(
+        hass,
+        scenario_service,
+        state_store=HomeAssistantSmartSwitchDedupStore(hass, entry.entry_id),
+    )
+    try:
+        await smart_switch_adapter.async_start()
+    except Exception:  # noqa: BLE001
+        # Device automation discovery is optional and fail-closed. Existing
+        # state/event scenarios remain available when MQTT is not ready.
+        smart_switch_adapter.async_unload()
+        hass.data.setdefault(entry.domain, {})["smart_switch_runtime"] = {
+            "state": "unavailable",
+            "reason": "device_trigger_attach_failed",
+        }
+    else:
+        entry.async_on_unload(smart_switch_adapter.async_unload)
+        hass.data.setdefault(entry.domain, {})["smart_switch_runtime"] = {
+            "state": "ready",
+            "adapter": smart_switch_adapter,
+        }
     from .manual_light_off_protection_events import (
         async_start_manual_light_off_protection_events,
     )
