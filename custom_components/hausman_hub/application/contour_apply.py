@@ -937,6 +937,17 @@ def build_contour_apply_plan(
         force_temperature_only=explicit_temperature_alignment or requested_temperature,
         requested_axes=desired_state_changes.requested_axes,
     )
+    application_room_ids = frozenset(
+        room.room_id for room in application_contour.rooms
+    )
+    assignments = tuple(
+        assignment
+        for assignment in assignments
+        if assignment.room_id in application_room_ids
+    )
+    selected_room_ids = frozenset(
+        assignment.room_id for assignment in assignments
+    )
     try:
         native_plan = build_climate_application_plan(
             application_contour,
@@ -947,7 +958,11 @@ def build_contour_apply_plan(
             target_room_ids=tuple(assignment.room_id for assignment in assignments),
             desired_state_changes=desired_state_changes,
             explicit_temperature_targets=(
-                explicit_temperature_targets
+                {
+                    room_id: target
+                    for room_id, target in explicit_temperature_targets.items()
+                    if room_id in selected_room_ids
+                }
                 if explicit_temperature_targets is not None
                 else (
                     {
@@ -959,7 +974,11 @@ def build_contour_apply_plan(
                 )
             ),
             explicit_humidity_targets=(
-                explicit_humidity_targets
+                {
+                    room_id: target
+                    for room_id, target in explicit_humidity_targets.items()
+                    if room_id in selected_room_ids
+                }
                 if explicit_humidity_targets is not None
                 else {
                     assignment.room_id: assignment.target_humidity
@@ -999,37 +1018,34 @@ def _temperature_only_application_contour(
     ):
         return contour
     targeted = frozenset(target_room_ids)
-    return replace(
-        contour,
-        rooms=tuple(
-            replace(
-                room,
-                device_ids=tuple(
-                    device_id
-                    for device_id in room.device_ids
-                    if (
-                        (device := registry.device(device_id)) is not None
-                        and (
-                            device.kind in {
-                                ClimateDeviceKind.AIR_CONDITIONER,
-                                ClimateDeviceKind.RADIATOR_THERMOSTAT,
-                                ClimateDeviceKind.FLOOR_HEATING,
-                            }
-                            and (
-                                not requested_axes
-                                or ClimateTargetAxis.TEMPERATURE in requested_axes
-                            )
-                            or device.kind is ClimateDeviceKind.HUMIDIFIER
-                            and ClimateTargetAxis.HUMIDITY in requested_axes
-                        )
+    rooms = []
+    for room in contour.rooms:
+        if room.room_id not in targeted:
+            rooms.append(room)
+            continue
+        device_ids = tuple(
+            device_id
+            for device_id in room.device_ids
+            if (
+                (device := registry.device(device_id)) is not None
+                and (
+                    device.kind in {
+                        ClimateDeviceKind.AIR_CONDITIONER,
+                        ClimateDeviceKind.RADIATOR_THERMOSTAT,
+                        ClimateDeviceKind.FLOOR_HEATING,
+                    }
+                    and (
+                        not requested_axes
+                        or ClimateTargetAxis.TEMPERATURE in requested_axes
                     )
-                ),
+                    or device.kind is ClimateDeviceKind.HUMIDIFIER
+                    and ClimateTargetAxis.HUMIDITY in requested_axes
+                )
             )
-            if room.room_id in targeted
-            else room
-            for room in contour.rooms
-        ),
-    )
+        )
+        if device_ids:
+            rooms.append(replace(room, device_ids=device_ids))
+    return replace(contour, rooms=tuple(rooms))
 
 
 def local_desired_state_changes(

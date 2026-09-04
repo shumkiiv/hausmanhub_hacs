@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 import hashlib
 import hmac
 import json
+import logging
 import re
 import secrets
 import time
@@ -18,9 +19,12 @@ from ..correlation import CorrelationIdError, resolve_correlation_id, validate_c
 from ..climate_revision import MAX_JS_SAFE_INTEGER, is_control_revision
 from ..climate_ledger_keyring import ClimateLedgerKeyring
 from ..climate_storage_errors import ClimateOperationRevisionConflict
-from .contour_apply import ContourApplyStatus, ContourApplyViolation
+from .contour_apply import ContourApplyReceipt, ContourApplyStatus, ContourApplyViolation
 from .contour_override import TemporaryTemperatureViolation
 from .home_climate_targets import HomeClimateTargetsViolation
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 CLIMATE_RUNTIME_CONTRACT_NAME = "hausman-hub-climate-runtime"
@@ -1331,7 +1335,23 @@ class ClimateTabletService:
                     await self._async_save()
                     physical_started = True
                 result = await self._async_dispatch(request)
-                final_snapshot = await self._snapshot_unlocked()
+                try:
+                    final_snapshot = await self._snapshot_unlocked()
+                except ClimateTabletUnavailable:
+                    # The native runtime has already crossed the physical
+                    # boundary and returned its exact per-device acceptance
+                    # map.  A transient projection failure cannot turn those
+                    # accepted calls into invented 1/0 failures.  Reuse the
+                    # frozen pre-dispatch view; its older observation times
+                    # keep the receipt pending until a later poll obtains a
+                    # fresh authoritative read-back.
+                    acceptance_only = _pending_contour_result_after_projection_failure(
+                        result
+                    )
+                    if acceptance_only is None:
+                        raise
+                    result = acceptance_only
+                    final_snapshot = snapshot
                 final_ledger: dict[str, object] | None = None
                 receipt = _receipt_from_contour_result(
                     request,
@@ -1573,6 +1593,11 @@ class ClimateTabletService:
                         resulting_control_revision=self._control_revision,
                     )
             except Exception as error:
+                if physical_started:
+                    _LOGGER.exception(
+                        "climate tablet post-dispatch processing failed: %s",
+                        type(error).__name__,
+                    )
                 if (
                     request.reliability_profile == "climate_reliability_v1"
                     and (
@@ -4288,9 +4313,12 @@ def _terminal_reliable_device_leaves(
         for device_id, leaf in devices.items():
             if not isinstance(device_id, str) or not isinstance(leaf, Mapping):
                 continue
-            if leaf.get("execution_state") in {
-                "applied", "already_in_sync", "dispatched_not_accepted",
-            }:
+            if (
+                leaf.get("execution_state") in {
+                    "applied", "already_in_sync", "dispatched_not_accepted",
+                }
+                or leaf.get("status") in {"manual", "deferred"}
+            ):
                 frozen[device_id] = dict(leaf)
     return frozen
 
@@ -4383,6 +4411,37 @@ def _receipt_from_contour_result(
             pre_dispatch_metadata=pre_dispatch_metadata,
         )
     return receipt
+
+
+def _pending_contour_result_after_projection_failure(
+    result: object,
+) -> ContourApplyReceipt | None:
+    """Keep exact native acceptance without trusting a stale final snapshot."""
+
+    if not isinstance(result, ContourApplyReceipt) or not isinstance(
+        result.device_outcomes, Mapping
+    ):
+        return None
+    outcomes: dict[str, dict[str, object]] = {}
+    for device_id, value in result.device_outcomes.items():
+        if not isinstance(device_id, str) or not isinstance(value, Mapping):
+            return None
+        leaf = dict(value)
+        if leaf.get("execution_state") == "applied":
+            leaf = {
+                "execution_state": "accepted_unverified",
+                "command_count": 1,
+                "accepted_count": 1,
+                "retry_policy": "forbidden_after_dispatch",
+            }
+        outcomes[device_id] = leaf
+    return replace(
+        result,
+        status=ContourApplyStatus.PENDING,
+        confirmed_room_count=0,
+        reasons=("verification_unavailable",),
+        device_outcomes=outcomes,
+    )
 
 
 def _terminal_receipt(
