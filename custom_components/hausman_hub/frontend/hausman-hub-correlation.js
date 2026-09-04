@@ -1,5 +1,5 @@
 /* Pinned snapshot of contracts inventory/correlation-surfaces.json */
-/* (hausman-hub-correlation-surfaces v1, contracts 0.64.3). Fail-closed: an */
+/* (hausman-hub-correlation-surfaces v1, contracts 0.65.0). Fail-closed: an */
 /* invalid client ID is rejected before the API call, an unknown command path */
 /* gets no injected field, and a legacy payload without the optional ID keeps */
 /* rendering. The ID is never an idempotency key, authorization or read-back. */
@@ -106,6 +106,22 @@ const SURFACES_SNAPSHOT = {
       "journalSource": "scenario"
     },
     {
+      "operationId": "updateHausmanHubManualLightOffProtection",
+      "requestSchema": "schemas/v1/manual-light-off-protection-settings-request.schema.json",
+      "requestField": "requestId",
+      "receiptSchema": "schemas/v1/manual-light-off-protection-command-receipt.schema.json",
+      "receiptField": "requestId",
+      "journalSource": "lighting"
+    },
+    {
+      "operationId": "releaseHausmanHubManualLightOffProtection",
+      "requestSchema": "schemas/v1/manual-light-off-protection-release-request.schema.json",
+      "requestField": "requestId",
+      "receiptSchema": "schemas/v1/manual-light-off-protection-command-receipt.schema.json",
+      "receiptField": "requestId",
+      "journalSource": "lighting"
+    },
+    {
       "operationId": "testHausmanHubVoiceGreeting",
       "requestSchema": "schemas/v1/voice-greeting-test-request.schema.json",
       "requestField": "correlationId",
@@ -125,6 +141,7 @@ const SURFACES_SNAPSHOT = {
       "critical_alert",
       "attention_alert",
       "command_receipt",
+      "manual_light_off_protection_changed",
       "heartbeat"
     ]
   },
@@ -165,11 +182,11 @@ const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const GENERATED_PREFIX = "corr.panel.";
 const GENERATED_BODY_LENGTH = 32;
 const TRACKER_DEFAULT_LIMIT = 256;
-const CORR_COMMAND_FIELDS = new Set(["correlation_id", "correlationId"]);
-const CORR_JOURNAL_SOURCES = new Set(["climate", "device", "scenario", "voice"]);
+const CORR_COMMAND_FIELDS = new Set(["correlation_id", "correlationId", "requestId"]);
+const CORR_JOURNAL_SOURCES = new Set(["climate", "device", "scenario", "lighting", "voice"]);
 const CORR_EVENT_TYPES = [
   "hello", "snapshot_invalidated", "scenario_changed", "critical_alert",
-  "attention_alert", "command_receipt", "heartbeat",
+  "attention_alert", "command_receipt", "manual_light_off_protection_changed", "heartbeat",
 ];
 const CORR_NOTIFICATION_SURFACES = new Set([
   "device_discovery", "dashboard_alarm", "dashboard_event",
@@ -235,7 +252,7 @@ export function validateCorrelationSurfaces(raw) {
   if (raw.idPattern !== ID_PATTERN.source) return false;
   if (!corrIsObject(raw.generation) || !corrExactKeys(raw.generation, CORR_GENERATION_KEYS)) return false;
   if (!CORR_GENERATION_KEYS.every((key) => raw.generation[key] === true)) return false;
-  if (!Array.isArray(raw.commands) || raw.commands.length !== 12) return false;
+  if (!Array.isArray(raw.commands) || raw.commands.length !== 14) return false;
   if (!raw.commands.every(corrValidCommand)) return false;
   const operationIds = raw.commands.map((command) => command.operationId);
   if (new Set(operationIds).size !== operationIds.length) return false;

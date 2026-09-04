@@ -91,7 +91,7 @@ class ManualLightOffProtectionCoordinator:
         self._frozen_sensor_ids: dict[str, tuple[str, ...]] = {}
         self._completed: list[dict[str, object]] = []
         self._receipts: dict[str, dict[str, object]] = {}
-        self._receipt_requests: dict[str, tuple[str, str]] = {}
+        self._receipt_metadata: dict[str, tuple[str, str]] = {}
         self._sensor_states: dict[str, tuple[str, datetime]] = {}
         self._event_entity_listeners: set[Callable[[], None]] = set()
         self._loaded = False
@@ -129,7 +129,7 @@ class ManualLightOffProtectionCoordinator:
                 str(item["requestId"]): copy.deepcopy(item["receipt"])
                 for item in verified_receipts
             }
-            self._receipt_requests = {
+            self._receipt_metadata = {
                 str(item["requestId"]): (str(item["operation"]), str(item["payloadFingerprint"]))
                 for item in verified_receipts
             }
@@ -468,11 +468,11 @@ class ManualLightOffProtectionCoordinator:
 
     async def _persist_with_receipt(self, request_id: str, receipt: dict[str, object], operation: str, fingerprint: str) -> None:
         self._receipts[request_id] = receipt
-        self._receipt_requests[request_id] = (operation, fingerprint)
+        self._receipt_metadata[request_id] = (operation, fingerprint)
         if len(self._receipts) > MAX_IDEMPOTENCY_RECEIPTS:
             evicted_request_id = next(iter(self._receipts))
             self._receipts.pop(evicted_request_id)
-            self._receipt_requests.pop(evicted_request_id, None)
+            self._receipt_metadata.pop(evicted_request_id, None)
         await self._save()
 
     async def _save(self) -> None:
@@ -491,7 +491,7 @@ class ManualLightOffProtectionCoordinator:
             "receipts": [
                 {"requestId": key, "receipt": value, "operation": metadata[0], "payloadFingerprint": metadata[1]}
                 for key, value in self._receipts.items()
-                if (metadata := self._receipt_requests.get(key)) is not None
+                if (metadata := self._receipt_metadata.get(key)) is not None
             ],
             "frozenSensors": [
                 {"protectionId": key, "presenceSensorIds": list(sensor_ids)}
@@ -509,7 +509,7 @@ class ManualLightOffProtectionCoordinator:
         existing = self._receipts.get(request_id)
         if existing is None:
             return None
-        if self._receipt_requests.get(request_id) != (operation, fingerprint):
+        if self._receipt_metadata.get(request_id) != (operation, fingerprint):
             raise ManualLightOffProtectionIdempotencyConflict("idempotency conflict")
         return copy.deepcopy(existing)
 

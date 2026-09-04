@@ -59,6 +59,19 @@ const TAXONOMY_SNAPSHOT = {
       ]
     },
     {
+      "code": "method_not_allowed",
+      "category": "input",
+      "httpStatus": 405,
+      "retryable": false,
+      "clientState": "failed",
+      "recoveryAction": "none",
+      "retryPolicy": "never",
+      "safeMessage": "Этот способ обращения к API не поддерживается.",
+      "detailsPolicy": "discard",
+      "allowedDetailKeys": [],
+      "aliases": []
+    },
+    {
       "code": "conflict",
       "category": "conflict",
       "httpStatus": 409,
