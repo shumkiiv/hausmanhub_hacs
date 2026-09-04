@@ -3,14 +3,17 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tempfile
 
 
 ROOT = Path(__file__).parents[1]
 PIN_MODULE = ROOT / "qa" / "full-functional" / "release_pin.py"
+CHECKER_MODULE = ROOT / "qa" / "full-functional" / "check_manifest.py"
 spec = importlib.util.spec_from_file_location("release_pin", PIN_MODULE)
 assert spec and spec.loader
 release_pin = importlib.util.module_from_spec(spec)
@@ -25,6 +28,43 @@ generator_spec.loader.exec_module(generator)
 
 def load_manifest() -> dict:
     return json.loads((ROOT / "qa/full-functional/hacs-interactions.json").read_text(encoding="utf-8"))
+
+
+def run_manifest_checker(report: dict) -> subprocess.CompletedProcess[str]:
+    with tempfile.TemporaryDirectory() as directory:
+        report_path = Path(directory) / "runtime-report.json"
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        environment = dict(os.environ)
+        environment["HACS_RUNTIME_REPORT"] = str(report_path)
+        return subprocess.run(
+            (sys.executable, str(CHECKER_MODULE)),
+            cwd=ROOT,
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+
+def minimal_runtime_report() -> dict:
+    manifest = load_manifest()
+    return {
+        "provenance": release_pin.provenance(),
+        "observed_source_ids": [item["source_id"] for item in manifest["interactions"]],
+        "signatures": ["lighting:room-power:0"],
+        "attempted_signatures": ["lighting:room-power:0"],
+        "clicked_signatures": [],
+        "blocked_signatures": ["lighting:room-power:0"],
+        "unrecorded_signatures": [],
+        "unclassified": [],
+        "unrecorded_commands": [],
+        "unexpected_calls": [],
+        "failed_effects": [],
+        "missing": [],
+        "errors": [],
+        "external_network": False,
+        "mutation_escape": False,
+    }
 
 
 def test_interaction_intents_are_technical_and_complete() -> None:
@@ -93,6 +133,19 @@ def test_manifest_provenance_matches_exact_prepared_content() -> None:
     assert release_pin.is_release_provenance(manifest.get("provenance"))
 
 
+def test_manifest_checker_accepts_explicitly_blocked_controls() -> None:
+    result = run_manifest_checker(minimal_runtime_report())
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_manifest_checker_rejects_control_marked_clicked_and_blocked() -> None:
+    report = minimal_runtime_report()
+    report["clicked_signatures"] = list(report["signatures"])
+    result = run_manifest_checker(report)
+    assert result.returncode == 1
+    assert "signature action coverage is incomplete" in result.stdout
+
+
 def test_digest_changes_for_an_audited_release_input() -> None:
     with tempfile.TemporaryDirectory() as directory:
         candidate = Path(directory)
@@ -119,5 +172,5 @@ def test_provenance_is_repeatable_without_git_head() -> None:
     first = release_pin.provenance()
     second = release_pin.provenance()
     assert first == second
-    assert first["version"] == "1.52.210"
+    assert first["version"] == "1.52.211"
     assert len(first["content_digest"]) == 64

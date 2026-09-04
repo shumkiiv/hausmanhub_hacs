@@ -33,10 +33,33 @@ else:
     observed = report.get("observed_source_ids", [])
     if set(expected) != set(observed) or len(observed) != len(set(observed)):
         errors.append("source manifest is not an exact runtime-stack set")
-    signatures, attempted, clicked = report.get("signatures", []), report.get("attempted_signatures", []), report.get("clicked_signatures", [])
-    if not signatures or set(signatures) != set(attempted) or set(signatures) != set(clicked):
+    signatures = report.get("signatures", [])
+    attempted = report.get("attempted_signatures", [])
+    clicked = report.get("clicked_signatures", [])
+    blocked = report.get("blocked_signatures", [])
+    signature_set = set(signatures)
+    attempted_set = set(attempted)
+    clicked_set = set(clicked)
+    blocked_set = set(blocked)
+    if (
+        not signatures
+        or any(len(items) != len(set(items)) for items in (signatures, attempted, clicked, blocked))
+        or signature_set != attempted_set
+        or signature_set != clicked_set | blocked_set
+        or clicked_set & blocked_set
+    ):
         errors.append("signature action coverage is incomplete")
-    if report.get("missing") or report.get("external_network") or report.get("mutation_escape") or report.get("errors"):
+    if (
+        report.get("missing")
+        or report.get("external_network")
+        or report.get("mutation_escape")
+        or report.get("errors")
+        or report.get("unrecorded_signatures")
+        or report.get("unclassified")
+        or report.get("unrecorded_commands")
+        or report.get("unexpected_calls")
+        or report.get("failed_effects")
+    ):
         errors.append("runtime report records an escape, missing control, or error")
 if errors:
     print("FAIL\n" + "\n".join(errors))
