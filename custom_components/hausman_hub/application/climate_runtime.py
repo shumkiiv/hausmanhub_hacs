@@ -2587,6 +2587,10 @@ class ClimateRuntime:
             plan,
             accepted_count,
         )
+        # A pending read-back is still an accepted physical boundary.  Persist
+        # its exact counts and per-device ledger before returning so a restart
+        # cannot reconstruct accepted calls as unattempted 0/0 failures.
+        await self._async_persist_direct_control_unlocked()
         if verified.status is ContourApplyStatus.CONFIRMED:
             record = self._contour_applications.by_request(request_id)
             enhanced = record.enhanced if record is not None and isinstance(record.enhanced, dict) else None
@@ -2975,6 +2979,26 @@ class ClimateRuntime:
                     accepted_count=accepted_count,
                     confirmed_room_count=confirmed,
                     reasons=(),
+                ).receipt
+            if (
+                verified.native_plan.device_gates
+                and all(
+                    gate.status.value in {"aligned", "deferred", "manual"}
+                    for gate in verified.native_plan.device_gates
+                )
+            ):
+                # A room aggregate remains deferred while any selected owner
+                # is off or offline, even after every dispatched owner has
+                # already reached its target.  Return that honest pending
+                # aggregate immediately: the tablet coordinator performs the
+                # authoritative per-device read-back and closes the mixed
+                # receipt without spending the full confirmation window.
+                return self._contour_applications.update(
+                    request_id,
+                    status=ContourApplyStatus.PENDING,
+                    accepted_count=accepted_count,
+                    confirmed_room_count=confirmed,
+                    reasons=("state_not_confirmed",),
                 ).receipt
             if attempt + 1 < _CLIMATE_READBACK_ATTEMPTS:
                 await asyncio.sleep(_CLIMATE_READBACK_INTERVAL_SECONDS)

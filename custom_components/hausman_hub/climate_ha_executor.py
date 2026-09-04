@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from .domain.climate_ha_calls import ClimateHaService, ClimateHaServiceCall
@@ -10,12 +11,16 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 
+_LOGGER = logging.getLogger(__name__)
+
+
 class ClimateHaExecutionError(RuntimeError):
     """One strict call failed; completed count is preserved for the receipt."""
 
-    def __init__(self, completed: int) -> None:
+    def __init__(self, completed: int, cause_type: str = "Exception") -> None:
         super().__init__("strict climate call failed")
         self.completed = completed
+        self.cause_type = cause_type
 
 
 class HomeAssistantClimateCallExecutor:
@@ -67,7 +72,12 @@ class HomeAssistantClimateCallExecutor:
                     **({"context": context} if context is not None else {}),
                 )
             except Exception as error:
-                raise ClimateHaExecutionError(completed) from error
+                cause_type = type(error).__name__
+                _LOGGER.warning(
+                    "strict climate service call failed: %s",
+                    cause_type,
+                )
+                raise ClimateHaExecutionError(completed, cause_type) from error
             completed += 1
         return completed
 

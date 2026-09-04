@@ -182,7 +182,7 @@ class NativeClimateApplicationPlannerTest(unittest.TestCase):
             plan.device_gates[0].status,
         )
 
-    def test_explicit_target_defers_a_known_stopped_owner_without_target(self) -> None:
+    def test_explicit_target_defers_a_known_stopped_owner_with_stale_target(self) -> None:
         """A fresh, known-off thermostat remains a no-call target owner."""
         registry, contour, observation = _native_inputs()
         observation = replace(
@@ -192,7 +192,7 @@ class NativeClimateApplicationPlannerTest(unittest.TestCase):
                     device,
                     availability=ClimateDeviceAvailability.AVAILABLE,
                     activity=ClimateDeviceActivity.STOPPED,
-                    current_target_temperature=None,
+                    current_target_temperature=27.0,
                 )
                 if device.device_id == "living_air_conditioner" else device
                 for device in observation.devices
@@ -204,6 +204,7 @@ class NativeClimateApplicationPlannerTest(unittest.TestCase):
             fingerprint="f" * 64, target_room_ids=("living",),
             desired_state_changes=ClimateDesiredStateChanges(1, 0, 0),
             explicit_temperature_targets={"living": 25.5},
+            defer_stopped_target_owners=True,
         )
 
         self.assertTrue(plan.preflight_permitted)

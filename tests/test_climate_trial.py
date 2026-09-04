@@ -99,11 +99,19 @@ class ClimateHaExecutorTest(unittest.IsolatedAsyncioTestCase):
         hass = _FakeHass(fail_at=1)
         executor = HomeAssistantClimateCallExecutor(hass)  # type: ignore[arg-type]
 
-        with self.assertRaises(ClimateHaExecutionError) as caught:
+        with self.assertLogs(
+            "custom_components.hausman_hub.climate_ha_executor", level="WARNING"
+        ) as logs, self.assertRaises(ClimateHaExecutionError) as caught:
             await executor.async_execute(_calls())
 
         self.assertEqual(1, caught.exception.completed)
+        self.assertEqual("RuntimeError", caught.exception.cause_type)
         self.assertEqual(1, len(hass.services.calls))
+        self.assertTrue(
+            logs.output[0].endswith(
+                ":strict climate service call failed: RuntimeError"
+            )
+        )
 
     async def test_executor_runs_power_calls_with_entity_only(self) -> None:
         hass = _FakeHass()

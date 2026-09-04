@@ -71,6 +71,7 @@ def build_climate_application_plan(
     explicit_temperature_targets: Mapping[str, float] | None = None,
     explicit_humidity_targets: Mapping[str, int] | None = None,
     manual_device_ids: frozenset[str] = frozenset(),
+    defer_stopped_target_owners: bool = False,
 ) -> ClimateApplicationPlan:
     if not isinstance(contour, ContourDefinition) or contour.contour_id != "climate":
         raise ClimateApplicationViolation("climate contour is unavailable")
@@ -127,6 +128,7 @@ def build_climate_application_plan(
                     or device.kind is not ClimateDeviceKind.HUMIDIFIER
                     else explicit_humidity_targets.get(room_id)
                 ),
+                defer_stopped_target_owners,
             )
             for room_id in target_ids
             for device in _explicit_selected_devices(
@@ -197,7 +199,17 @@ def _explicit_selected_devices(contour, registry, room_id, temperature, humidity
                  if (device := registry.device(device_id)) is not None and device.kind in kinds)
 
 
-def _gate_explicit_device(room_id, device, registry, observation, room_gate, manual, temperature, humidity):
+def _gate_explicit_device(
+    room_id,
+    device,
+    registry,
+    observation,
+    room_gate,
+    manual,
+    temperature,
+    humidity,
+    defer_stopped_target_owners,
+):
     # Per-device ownership must not bypass the room-level safety gate.  The
     # latter owns contour mode, managed runtime, membership, fresh observation,
     # isolation and comparison checks.  Only a denied gate contributes reasons:
@@ -219,14 +231,12 @@ def _gate_explicit_device(room_id, device, registry, observation, room_gate, man
     # ignore that projection's availability/comparison symptom.  Structural
     # and unknown-observation failures still deny the entire plan.
     observed_room = observation.room(room_id)
-    stopped_without_requested_target = (
-        observed is not None
+    stopped_target_owner = (
+        defer_stopped_target_owners
+        and observed is not None
         and observed.availability is ClimateDeviceAvailability.AVAILABLE
         and observed.activity is ClimateDeviceActivity.STOPPED
-        and (
-            temperature_owner and observed.current_target_temperature is None
-            or humidity_owner and observed.current_target_humidity is None
-        )
+        and (temperature_owner or humidity_owner)
     )
     leaf_can_defer = (
         observation.runtime_fresh
@@ -236,7 +246,7 @@ def _gate_explicit_device(room_id, device, registry, observation, room_gate, man
         and observed.room_id == room_id
         and (
             observed.availability is ClimateDeviceAvailability.UNAVAILABLE
-            or stopped_without_requested_target
+            or stopped_target_owner
             or (
                 observed.availability is ClimateDeviceAvailability.AVAILABLE
                 and observed.activity is not ClimateDeviceActivity.UNKNOWN
@@ -275,7 +285,7 @@ def _gate_explicit_device(room_id, device, registry, observation, room_gate, man
         and (
             observed.activity is ClimateDeviceActivity.UNKNOWN
             or (
-                not stopped_without_requested_target
+                not stopped_target_owner
                 and (
                     temperature_owner and observed.current_target_temperature is None
                     or humidity_owner and observed.current_target_humidity is None
@@ -319,7 +329,7 @@ def _gate_explicit_device(room_id, device, registry, observation, room_gate, man
         return ClimateApplicationDeviceGate(
             room_id, device.device_id, ClimateApplicationGateStatus.DEFERRED, (), ()
         )
-    if not reasons and stopped_without_requested_target:
+    if not reasons and stopped_target_owner:
         return ClimateApplicationDeviceGate(
             room_id, device.device_id, ClimateApplicationGateStatus.DEFERRED, (), ()
         )

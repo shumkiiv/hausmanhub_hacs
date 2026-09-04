@@ -3901,8 +3901,16 @@ def _valid_reliable_dispatch_ledger(
                     return False
                 if (
                     leaf.get("status") == "failed"
-                    and leaf.get("execution_state") == "dispatched_not_accepted"
-                    and _strict_leaf_counts(leaf, 1, 0)
+                    and leaf.get("execution_state") in {
+                        "dispatched_not_accepted", "accepted_timeout",
+                    }
+                    and _strict_leaf_counts(
+                        leaf,
+                        1,
+                        1
+                        if leaf.get("execution_state") == "accepted_timeout"
+                        else 0,
+                    )
                 ):
                     failed += 1
                     continue

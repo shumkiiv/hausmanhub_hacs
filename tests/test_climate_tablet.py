@@ -12,9 +12,11 @@ from pathlib import Path
 import time
 from types import SimpleNamespace
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from jsonschema import Draft202012Validator
 
+from custom_components.hausman_hub.application import climate_runtime as climate_runtime_module
 from custom_components.hausman_hub.application import climate_tablet as climate_tablet_module
 from custom_components.hausman_hub.application.climate_tablet import (
     ClimateTabletOperationNotFound,
@@ -887,6 +889,81 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
             local_now=lambda: datetime(2026, 8, 5, tzinfo=timezone.utc),
         )
 
+    def test_terminal_mixed_dispatch_ledger_accepts_timed_out_and_deferred_leaves(self) -> None:
+        """A receipt emitted by expiry must remain loadable after restart."""
+
+        payload = action_request(
+            self.home["state_revision"], request_id="tablet.climate.mixed-timeout"
+        )
+        payload.update(
+            reliability_profile="climate_reliability_v1",
+            expected_control_revision=0,
+        )
+        request = parse_climate_tablet_action(payload)
+        scope = {
+            "room_ids": ["living"],
+            "device_ids": ["living_ac", "living_offline"],
+            "devices_by_room": [
+                {
+                    "room_id": "living",
+                    "device_ids": ["living_ac", "living_offline"],
+                }
+            ],
+        }
+        receipt = {
+            "action_snapshot": {"resolved_scope": scope},
+            "status": "partial",
+            "accepted": True,
+            "confirmed": False,
+            "final": True,
+            "unfinished_device_count": 0,
+            "intent": {"status": "saved_apply_failed"},
+            "read_back": {
+                "attempted": True,
+                "matched": False,
+                "observed_at": None,
+                "evidence": {"accepted_count": 1, "confirmed_room_count": 0},
+            },
+            "outcomes": {
+                "rooms": {
+                    "living": {
+                        "devices": {
+                            "living_ac": {
+                                "status": "failed",
+                                "reason": "command_failed",
+                                "execution_state": "accepted_timeout",
+                                "command_count": 1,
+                                "accepted_count": 1,
+                            },
+                            "living_offline": {
+                                "status": "deferred",
+                                "reason": "device_unavailable",
+                                "execution_state": None,
+                                "command_count": 0,
+                                "accepted_count": 0,
+                            },
+                        }
+                    }
+                }
+            },
+        }
+        ledger = {
+            "state": "terminal_mixed",
+            "dispatched_at": self.now,
+            "pre_dispatch_sources": {
+                "living": {
+                    "living_ac": self.now - 10,
+                    "living_offline": self.now - 10,
+                }
+            },
+        }
+
+        self.assertTrue(
+            climate_tablet_module._valid_reliable_dispatch_ledger(
+                ledger, receipt, request
+            )
+        )
+
     async def test_reliability_readiness_is_off_until_external_ledger_loads(self) -> None:
         self.assertFalse(self.service.reliability_ready)
         await self.service.async_load()
@@ -1535,6 +1612,17 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
             {(leaf["command_count"], leaf["accepted_count"]) for leaf in leaves.values()},
         )
         self.assertEqual(3, len(executor.batches))
+        native_receipt = store._direct_control_records[0]["receipt"]
+        self.assertEqual("pending", native_receipt["status"])
+        self.assertEqual(3, native_receipt["accepted_count"])
+        self.assertEqual(
+            {"accepted_unverified"},
+            {
+                leaf["execution_state"]
+                for room in native_receipt["outcomes"]["rooms"].values()
+                for leaf in room["devices"].values()
+            },
+        )
 
     async def test_post_dispatch_snapshot_failure_never_confirms_from_stale_snapshot(self) -> None:
         """Native confirmation still needs the tablet's fresh final projection."""
@@ -1615,14 +1703,14 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(receipt["operation_id"], replay["operation_id"])
         self.assertEqual(0, len(executor.batches))
 
-    async def test_reserved_home_target_defers_known_stopped_owner_without_target(self) -> None:
+    async def test_reserved_home_target_defers_known_stopped_owner_with_stale_target(self) -> None:
         """A fresh HA ``off`` owner saves intent without waking the device."""
         runtime, store, contour_store, executor = native_home_target_runtime(
             include_humidifier=False,
         )
         stopped = executor._state_view.states["climate.living_air_conditioner"]
         executor._state_view.states["climate.living_air_conditioner"] = replace(
-            stopped, state="off", attributes={},
+            stopped, state="off", attributes={"temperature": 27.0},
         )
         await runtime.async_start()
         service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
@@ -1642,7 +1730,13 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
             "parameters": {"target_temperature": 25.5},
         }
 
-        receipt = await service.async_execute(request)
+        with patch.object(
+            climate_runtime_module.asyncio,
+            "sleep",
+            new_callable=AsyncMock,
+        ) as readback_sleep:
+            receipt = await service.async_execute(request)
+        readback_sleep.assert_not_awaited()
         dispatch_count = len(executor.batches)
         duplicate = await service.async_execute(request)
         restarted = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)

@@ -988,6 +988,9 @@ def build_contour_apply_plan(
                 else None
             ),
             manual_device_ids=manual_device_ids,
+            defer_stopped_target_owners=bool(
+                desired_state_changes.requested_axes
+            ),
         )
     except ClimateApplicationViolation as error:
         raise ContourApplyViolation(str(error)) from error
