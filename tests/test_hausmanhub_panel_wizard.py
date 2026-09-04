@@ -277,6 +277,7 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
           this.style = {{}};
           this.value = "";
           this.checked = false;
+          this.dataset = {{}};
           this._listeners = {{}};
         }}
         appendChild(child) {{
@@ -473,6 +474,7 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
         {{ filename: {str(PAGINATION_JS)!r} }}
       );
       const log = recordTechnicalEvent;
+      global.applyIntents = () => {{}};
       vm.runInThisContext(
         fs.readFileSync({str(KIOSK_JS)!r}, "utf8")
           .replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),

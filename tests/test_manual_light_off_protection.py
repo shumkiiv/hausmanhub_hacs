@@ -518,6 +518,24 @@ def test_snapshot_revision_is_the_settings_cas_revision() -> None:
     asyncio.run(exercise())
 
 
+def test_snapshot_derives_remaining_minimum_seconds_without_persisting_it() -> None:
+    async def exercise() -> None:
+        now = datetime(2026, 9, 3, 12, tzinfo=timezone.utc)
+        store = MemoryStore()
+        coordinator = ManualLightOffProtectionCoordinator(store, now=lambda: now)
+        await coordinator.async_load()
+        await coordinator.async_replace_settings("one", 0, _settings(release_mode="timer_only"))
+        await coordinator.async_note_state_transition(
+            "light.tambur_points", SimpleNamespace(state="on"), SimpleNamespace(state="off"), None
+        )
+        assert coordinator.snapshot()["protections"][0]["remainingMinimumSeconds"] == 600
+        now += timedelta(seconds=599, microseconds=1)
+        assert coordinator.snapshot()["protections"][0]["remainingMinimumSeconds"] == 1
+        assert "remainingMinimumSeconds" not in store.payload["protections"][0]
+
+    asyncio.run(exercise())
+
+
 def test_overlapping_protections_are_decided_atomically_without_partial_release() -> None:
     async def exercise() -> None:
         now = datetime(2026, 9, 3, 12, tzinfo=timezone.utc)

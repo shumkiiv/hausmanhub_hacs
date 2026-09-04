@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import gc
 import importlib
 import json
 import os
@@ -11,6 +12,7 @@ import sys
 import tempfile
 import time
 import unittest
+import weakref
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -461,6 +463,9 @@ def fake_home_assistant_modules() -> dict[str, ModuleType]:
 
     start.async_at_started = async_at_started  # type: ignore[attr-defined]
     storage = ModuleType("homeassistant.helpers.storage")
+    temporary_directories: weakref.WeakSet[tempfile.TemporaryDirectory] = (
+        weakref.WeakSet()
+    )
 
     class FakeStore:
         """Keep the newly added disabled climate registry empty in memory."""
@@ -482,7 +487,9 @@ def fake_home_assistant_modules() -> dict[str, ModuleType]:
             self.key = key
             self.max_readable_version = max_readable_version
             self.atomic_writes = atomic_writes
-            self.path = str(Path(tempfile.mkdtemp()) / key)
+            self._temporary_directory = tempfile.TemporaryDirectory()
+            temporary_directories.add(self._temporary_directory)
+            self.path = str(Path(self._temporary_directory.name) / key)
 
         async def async_load(self) -> object | None:
             path = Path(self.path)
@@ -503,7 +510,15 @@ def fake_home_assistant_modules() -> dict[str, ModuleType]:
                 encoding="utf-8",
             )
 
+    def cleanup_temporary_directories() -> None:
+        for temporary_directory in list(temporary_directories):
+            temporary_directory.cleanup()
+        temporary_directories.clear()
+
     storage.Store = FakeStore  # type: ignore[attr-defined]
+    storage.cleanup_temporary_directories = (  # type: ignore[attr-defined]
+        cleanup_temporary_directories
+    )
     util = ModuleType("homeassistant.util")
     dt = ModuleType("homeassistant.util.dt")
     dt.now = lambda: datetime(2026, 7, 19, 12, 0)  # type: ignore[attr-defined]
@@ -549,6 +564,31 @@ def fake_home_assistant_modules() -> dict[str, ModuleType]:
         "homeassistant.util": util,
         "homeassistant.util.dt": dt,
     }
+
+
+class FakeStoreLifecycleTest(unittest.TestCase):
+    """Keep test-only Home Assistant storage from leaking temporary paths."""
+
+    def test_temporary_storage_directory_is_removed_with_store(self) -> None:
+        storage = fake_home_assistant_modules()["homeassistant.helpers.storage"]
+        store = storage.Store(object(), 1, "hausman_hub.cleanup")
+        directory = Path(store.path).parent
+        self.assertTrue(directory.is_dir())
+
+        del store
+        gc.collect()
+
+        self.assertFalse(directory.exists())
+
+    def test_storage_cleanup_removes_live_store_directory(self) -> None:
+        storage = fake_home_assistant_modules()["homeassistant.helpers.storage"]
+        store = storage.Store(object(), 1, "hausman_hub.cleanup")
+        directory = Path(store.path).parent
+        self.assertTrue(directory.is_dir())
+
+        storage.cleanup_temporary_directories()
+
+        self.assertFalse(directory.exists())
 
 
 class _ManagedRecipeStore:
@@ -603,12 +643,15 @@ class LocalSummaryAccessTest(unittest.TestCase):
         }
         for name in (*FAKE_MODULE_NAMES, PACKAGE_MODULE, LOCAL_SUMMARY_MODULE, HOME_OBSERVATION_MODULE):
             sys.modules.pop(name, None)
-        sys.modules.update(fake_home_assistant_modules())
+        fake_modules = fake_home_assistant_modules()
+        cls.fake_storage = fake_modules["homeassistant.helpers.storage"]
+        sys.modules.update(fake_modules)
         cls.integration = importlib.import_module(PACKAGE_MODULE)
         cls.adapter = importlib.import_module(LOCAL_SUMMARY_MODULE)
 
     @classmethod
     def tearDownClass(cls) -> None:
+        cls.fake_storage.cleanup_temporary_directories()
         for name in (*FAKE_MODULE_NAMES, PACKAGE_MODULE, LOCAL_SUMMARY_MODULE, HOME_OBSERVATION_MODULE):
             sys.modules.pop(name, None)
         sys.modules.update(
@@ -628,6 +671,9 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.hass.config_entries.entries = [self.entry]
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
         self.view = self.hass.http.views[0]
+
+    def tearDown(self) -> None:
+        self.fake_storage.cleanup_temporary_directories()
 
     def assert_climate_route_payload_redacted(self, payload: object) -> None:
         serialized = json.dumps(payload, ensure_ascii=True, sort_keys=True)

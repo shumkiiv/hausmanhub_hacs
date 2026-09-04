@@ -593,12 +593,16 @@ function renderScenarioEditor(panel, container, deps) {
     && !(scenario.definition.nodeRed && scenario.definition.nodeRed.flowId);
   const test = el("button", "secondary", needsNodeRedSave ? "Сначала сохранить" : "Пробный запуск");
   test.disabled = panel._busy || issues.length > 0 || needsNodeRedSave;
+  setAttr(test, "data-harness-key", `scenario:${scenario.id}:test`);
+  setAttr(test, "data-harness-intent", "command");
   if (needsNodeRedSave) test.title = "Hausman создаст управляемую function-схему при первом сохранении";
   test.addEventListener("click", () => submitScenario(panel, deps, true));
   const cancel = el("button", "secondary", "Отмена");
   cancel.addEventListener("click", () => closeScenarioEditor(panel));
   const save = el("button", null, panel._busy ? "Сохранение…" : "Сохранить");
   save.disabled = panel._busy || issues.length > 0;
+  setAttr(save, "data-harness-key", `scenario:${scenario.id}:save`);
+  setAttr(save, "data-harness-intent", "command");
   save.addEventListener("click", () => submitScenario(panel, deps, false));
   buttons.appendChild(test); buttons.appendChild(cancel); buttons.appendChild(save);
   footerRow.appendChild(buttons);

@@ -123,6 +123,8 @@ export function overviewGreeting(now = new Date()) {
 function iconButton(deps, className, iconName, label, onClick) {
   const button = deps.el("button", className);
   button.type = "button";
+  deps.setAttr(button, "data-harness-key", `overview:${iconName}`);
+  deps.setAttr(button, "data-harness-intent", "ui-only");
   deps.setAttr(button, "aria-label", label);
   button.appendChild(deps.svgIcon(iconName));
   if (onClick) button.addEventListener("click", onClick);
@@ -155,6 +157,8 @@ function renderDashboardHeader(panel, connectionStatus, container, deps) {
   const upcoming = upcomingEventsSorted(panel._upcomingEvents, 100).visible.length;
   const events = deps.el("button", "overview-tablet-events");
   events.type = "button";
+  deps.setAttr(events, "data-harness-key", "overview:events");
+  deps.setAttr(events, "data-harness-intent", "ui-only");
   events.appendChild(deps.svgIcon("history"));
   events.appendChild(deps.el("span", null, `События · ${upcoming}`));
   events.addEventListener("click", () => openUpcomingEventsModal(panel, container, deps,
@@ -211,6 +215,8 @@ export function renderOverviewHero(panel, container, readiness, deps) {
   copy.appendChild(facts);
   const details = deps.el("button", "overview-canon-hero-action", "Подробнее о доме");
   details.type = "button";
+  deps.setAttr(details, "data-harness-key", "overview:hero-details");
+  deps.setAttr(details, "data-harness-intent", "ui-only");
   details.appendChild(deps.svgIcon("chevron-right"));
   details.addEventListener("click", () => {
     const room = rooms.find((candidate) => candidate.id === panel._overviewHeroRoomId);
@@ -279,6 +285,8 @@ function renderWeatherCard(panel, dashboard, deps) {
   const weather = weatherSnapshot(dashboard);
   const card = deps.el("button", "overview-canon-primary-card is-weather");
   card.type = "button";
+  deps.setAttr(card, "data-harness-key", "overview:weather");
+  deps.setAttr(card, "data-harness-intent", "ui-only");
   card.addEventListener("click", () => panel._activateSection("climate"));
   const head = deps.el("span", "overview-tablet-card-head");
   head.appendChild(deps.el("strong", null, "Погода"));
@@ -317,6 +325,8 @@ function renderComfortCard(panel, dashboard, deps) {
   const available = comfort.available === true && validNumber(comfort.score);
   const card = deps.el("button", `overview-canon-primary-card is-comfort${available ? "" : " is-empty"}`);
   card.type = "button";
+  deps.setAttr(card, "data-harness-key", "overview:comfort");
+  deps.setAttr(card, "data-harness-intent", "ui-only");
   card.addEventListener("click", () => panel._activateSection("climate"));
   const head = deps.el("span", "overview-tablet-comfort-head");
   head.appendChild(deps.svgIcon("leaf"));
@@ -368,6 +378,8 @@ function renderFavorites(panel, container, dashboard, deps) {
   head.appendChild(title);
   const all = deps.el("button", "overview-canon-link", "Все сценарии");
   all.type = "button";
+  deps.setAttr(all, "data-harness-key", "overview:all-scenarios");
+  deps.setAttr(all, "data-harness-intent", "ui-only");
   all.appendChild(deps.svgIcon("chevron-right"));
   all.addEventListener("click", () => panel._activateSection("scenarios"));
   head.appendChild(all);
@@ -383,6 +395,8 @@ function renderFavorites(panel, container, dashboard, deps) {
       const item = deps.el("button", "overview-canon-favorite");
       item.type = "button";
       item.disabled = panel._busy || scenario.enabled === false;
+      deps.setAttr(item, "data-harness-key", `scenario:${scenario.id}:run`);
+      deps.setAttr(item, "data-harness-intent", scenario.requiresConfirmation ? "blocked" : "command");
       deps.setAttr(item, "aria-label", `Запустить сценарий «${scenario.title}»`);
       const meta = scenarioIconMeta(scenario.icon, scenario.title);
       const icon = deps.el("span", "overview-canon-favorite-icon");
@@ -422,6 +436,8 @@ function appendUpcomingEventRow(panel, list, event, deps) {
     const cancel = deps.el("button", "overview-canon-upcoming-cancel", "Пропустить");
     cancel.type = "button";
     cancel.disabled = panel._busy === true;
+    deps.setAttr(cancel, "data-harness-key", `scenario:${event.scenarioId}:cancel-upcoming`);
+    deps.setAttr(cancel, "data-harness-intent", "blocked");
     cancel.addEventListener("click", () => panel._post(deps.upcomingCancelApi,
       { scenarioId: event.scenarioId, triggerId: event.triggerId, runAt: event.runAt },
       `Пропустить запуск «${event.scenarioTitle || "Сценарий"}» ${formatUpcomingRunTime(event.runAt)}?`));

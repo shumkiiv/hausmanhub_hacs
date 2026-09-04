@@ -20,6 +20,16 @@ def source_construct(path: str, line: int, construct: str, ordinal: int) -> bool
     text = (ROOT / path).read_text(encoding="utf-8").splitlines()[line - 1]
     return len(CONTROL.findall(text) if construct == "create" else EVENT.findall(text)) >= ordinal
 
+def load_interaction_intents() -> list[dict]:
+    existing = json.loads(OUT.read_text(encoding="utf-8"))
+    intents = existing.get("interaction_intents")
+    if not isinstance(intents, list) or not intents:
+        raise SystemExit("existing interaction_intents registry is required")
+    return intents
+
+def build_document(interactions: list[dict], intents: list[dict]) -> dict:
+    return {"schema_version": 3, "source": "captured runtime stacks verified against frontend source", "interactions": interactions, "missing_evidence": [], "runtime_report_required": True, "interaction_intents": intents}
+
 def main() -> int:
     report_path = os.environ.get("HACS_RUNTIME_REPORT")
     if not report_path: raise SystemExit("HACS_RUNTIME_REPORT is required; runtime stacks are the inventory source")
@@ -33,7 +43,7 @@ def main() -> int:
         interactions.append({"source_id": source_id, "source_ref": f"{match[1]}:{match[2]}", "screen": section_for(match[1]), "module": Path(match[1]).name, "construct": match[3], "classification": "observed-runtime-control-source", "evidence": {"source": True, "runtime": True}})
     if invalid: raise SystemExit("runtime stacks do not name a source construct: " + ", ".join(invalid[:8]))
     if not interactions or any(n > 1 for n in Counter(row["source_id"] for row in interactions).values()): raise SystemExit("empty or duplicate observed interaction inventory")
-    document = {"schema_version": 3, "source": "captured runtime stacks verified against frontend source", "interactions": interactions, "missing_evidence": [], "runtime_report_required": True}
+    document = build_document(interactions, load_interaction_intents())
     OUT.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     document["provenance"] = provenance(ROOT)
     OUT.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

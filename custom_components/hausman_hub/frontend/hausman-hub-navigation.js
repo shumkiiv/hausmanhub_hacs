@@ -85,6 +85,9 @@ export function createKioskButton(panel, className, deps) {
   const { el, svgIcon } = deps;
   const button = el("button", `kiosk-toggle ${className}`);
   button.type = "button";
+  if (!button.dataset) button.dataset = {};
+  button.dataset.harnessKey = "navigation:kiosk";
+  button.dataset.harnessIntent = "ui-only";
   button.appendChild(svgIcon("dashboard"));
   button.appendChild(el("span", "kiosk-label", "Режим киоска"));
   button.addEventListener("click", () => toggleKioskMode(panel));
@@ -99,6 +102,9 @@ export function createKioskDock(panel, deps) {
   const intercom = el("button", "kiosk-intercom");
   intercom.type = "button";
   setAttr(intercom, "aria-label", "Открыть домофон");
+  if (!intercom.dataset) intercom.dataset = {};
+  intercom.dataset.harnessKey = "navigation:intercom";
+  intercom.dataset.harnessIntent = "ui-only";
   intercom.appendChild(svgIcon("intercom"));
   intercom.appendChild(el("span", null, "Домофон"));
   intercom.addEventListener("click", () => openIntercomFromRail(panel));
@@ -106,6 +112,9 @@ export function createKioskDock(panel, deps) {
   const exit = el("button", "kiosk-exit");
   exit.type = "button";
   setAttr(exit, "aria-label", "Выйти из режима киоска");
+  if (!exit.dataset) exit.dataset = {};
+  exit.dataset.harnessKey = "navigation:kiosk-exit";
+  exit.dataset.harnessIntent = "ui-only";
   exit.appendChild(svgIcon("close"));
   exit.appendChild(el("span", null, "Выйти"));
   exit.addEventListener("click", () => toggleKioskMode(panel));
@@ -182,6 +191,8 @@ export function renderOverviewNavigationSummary(panel, container, metrics, deps)
     const targetLabel = sections.find((section) => section.id === targetSection).label;
     setAttr(item, "aria-label", `${label}: ${value}. Открыть раздел ${targetLabel}`);
     item.addEventListener("click", () => panel._activateSection(targetSection));
+    setAttr(item, "data-harness-key", `navigation:${targetSection}`);
+    setAttr(item, "data-harness-intent", "ui-only");
     const icon = el("span", "summary-icon");
     icon.appendChild(svgIcon(iconName));
     item.appendChild(icon);

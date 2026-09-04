@@ -7,6 +7,7 @@ import copy
 import hashlib
 import json
 import logging
+import math
 import re
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
@@ -345,12 +346,20 @@ class ManualLightOffProtectionCoordinator:
             return copy.deepcopy(receipt)
 
     def snapshot(self) -> dict[str, object]:
+        now = _utc(self._now())
+        protections = []
+        for stored in self._protections.values():
+            record = copy.deepcopy(stored)
+            record["remainingMinimumSeconds"] = max(
+                0, math.ceil((_parse_time(record["notBefore"]) - now).total_seconds())
+            )
+            protections.append(record)
         return {
             "contract": {"name": "hausman-hub-manual-light-off-protection", "version": 1},
             "revision": self._settings_revision,
-            "updatedAt": _wire_time(self._now()),
+            "updatedAt": _wire_time(now),
             "settings": self._settings.as_wire(),
-            "protections": copy.deepcopy(list(self._protections.values())),
+            "protections": protections,
         }
 
     def event_entity_ids(self) -> frozenset[str]:

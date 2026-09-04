@@ -22,12 +22,15 @@ def version(root: Path = ROOT) -> str:
     return result
 
 
-def _manifest_interactions(root: Path) -> object:
+def _manifest_qa_inputs(root: Path) -> tuple[list, list]:
     value = json.loads((root / "qa/full-functional/hacs-interactions.json").read_text(encoding="utf-8"))
     interactions = value.get("interactions") if isinstance(value, dict) else None
+    intents = value.get("interaction_intents") if isinstance(value, dict) else None
     if not isinstance(interactions, list):
         raise ValueError("interaction manifest has no interaction list")
-    return interactions
+    if not isinstance(intents, list) or not intents:
+        raise ValueError("interaction manifest has no intent registry")
+    return interactions, intents
 
 
 def audited_paths(root: Path = ROOT) -> tuple[Path, ...]:
@@ -47,13 +50,11 @@ def content_digest(root: Path = ROOT) -> str:
 
     digest = hashlib.sha256()
     digest.update(f"version\0{version(root)}\0".encode("utf-8"))
-    interactions = json.dumps(
-        _manifest_interactions(root), ensure_ascii=False,
-        separators=(",", ":"), sort_keys=True,
-    ).encode("utf-8")
-    digest.update(b"interactions\0")
-    digest.update(interactions)
-    digest.update(b"\0")
+    interactions, intents = _manifest_qa_inputs(root)
+    for name, value in (("interactions", interactions), ("interaction_intents", intents)):
+        digest.update(f"{name}\0".encode("utf-8"))
+        digest.update(json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+        digest.update(b"\0")
     for path in audited_paths(root):
         relative = path.relative_to(root).as_posix().encode("utf-8")
         digest.update(relative + b"\0")

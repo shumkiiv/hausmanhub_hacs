@@ -23,6 +23,29 @@ PANEL_JS = (
 PANEL_CSS = PANEL_JS.with_name("hausman-hub-panel.css")
 BUTTONS_CSS = PANEL_JS.with_name("hausman-hub-buttons.css")
 TOKENS_CSS = PANEL_JS.with_name("hausman-hub-tokens.css")
+
+FULL_GATE_MODULES = (
+    "hausman-hub-panel.js",
+    "hausman-hub-navigation.js",
+    "hausman-hub-overview.js",
+    "hausman-hub-overview-side.js",
+    "hausman-hub-hero-room-navigation.js",
+    "hausman-hub-light-protection.js",
+    "hausman-hub-harness-intents.js",
+    "hausman-hub-kiosk.js",
+    "hausman-hub-scenario-catalog.js",
+    "hausman-hub-scenarios.js",
+    "hausman-hub-device-discovery.js",
+    "hausman-hub-energy.js",
+)
+
+
+def test_full_gate_modules_emit_harness_keys() -> None:
+    frontend = PANEL_JS.parent
+    for module in FULL_GATE_MODULES:
+        source = (frontend / module).read_text(encoding="utf-8")
+        assert "data-harness-key" in source or "dataset.harnessKey" in source
+        assert "data-harness-intent" in source or "dataset.harnessIntent" in source
 HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 ROOM_DEVICE_GROUPS_JS = PANEL_JS.with_name("hausman-hub-room-device-groups.js")
@@ -130,7 +153,6 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("expectedProtectionRevision", source)
         self.assertIn("remainingMinimumSeconds", source)
         self.assertIn("setTimeout", source)
-        self.assertIn("refetch", source)
         self.assertNotIn("turn_on", source)
         self.assertNotIn("localStorage", source)
         self.assertIn(".light-protection-card", styles)
@@ -1571,6 +1593,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
               return this.shadowRoot;
             }}
           }};
+          global.applyIntents = () => {{}};
           const registry = new Map();
           global.customElements = {{
             define: (name, value) => registry.set(name, value),

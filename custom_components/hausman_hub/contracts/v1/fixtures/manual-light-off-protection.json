@@ -31,6 +31,7 @@
       "lightIds": ["light.shower_main"],
       "startedAt": "2026-09-03T12:00:00Z",
       "notBefore": "2026-09-03T12:10:00Z",
+      "remainingMinimumSeconds": 600,
       "absenceSince": null,
       "effectivePolicy": {
         "enabled": true,

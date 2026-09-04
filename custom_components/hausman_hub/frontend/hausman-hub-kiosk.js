@@ -141,7 +141,15 @@ function renderHero(panel, root, dashboard, deps) {
   overlay.appendChild(copy);
   hero.appendChild(overlay);
   const controls = deps.el("div", "kiosk-panorama-hero-controls");
-  controls.appendChild(iconButton(deps, "kiosk-panorama-hero-control", "star", "Закрепить слайд"));
+  const pin = iconButton(deps, "kiosk-panorama-hero-control", "star", "Закрепить слайд");
+  deps.setAttr(pin, "aria-pressed", String(panel._kioskHeroPinned === true));
+  pin.classList.toggle("is-active", panel._kioskHeroPinned === true);
+  pin.addEventListener("click", () => {
+    panel._kioskHeroPinned = !(panel._kioskHeroPinned === true);
+    deps.setAttr(pin, "aria-pressed", String(panel._kioskHeroPinned));
+    pin.classList.toggle("is-active", panel._kioskHeroPinned);
+  });
+  controls.appendChild(pin);
   controls.appendChild(iconButton(deps, "kiosk-panorama-hero-control", "more",
     "Открыть настройки", () => openSection(panel, "settings")));
   hero.appendChild(controls);
@@ -151,6 +159,8 @@ function renderHero(panel, root, dashboard, deps) {
   hero.appendChild(homeButton);
   const selectRoom = (room, animate = true) => {
     panel._overviewHeroRoomId = room?.id || null;
+    deps.setAttr(homeButton, "aria-pressed", String(!room));
+    homeButton.classList.toggle("is-active", !room);
     const image = stableOverviewHeroImage(panel, room, dashboard);
     if (image !== currentImage) {
       media.style.backgroundImage = `url("${image}")`;
@@ -268,6 +278,8 @@ function renderScenarios(panel, root, dashboard, deps) {
     const item = deps.el("button", "kiosk-panorama-scenario");
     item.type = "button";
     item.disabled = scenario.enabled === false || panel._busy;
+    deps.setAttr(item, "data-harness-key", `scenario:${scenario.id}:run`);
+    deps.setAttr(item, "data-harness-intent", scenario.requiresConfirmation ? "blocked" : "command");
     const meta = scenarioIconMeta(scenario.icon, scenario.title);
     const icon = deps.el("span", "kiosk-panorama-scenario-icon");
     icon.appendChild(deps.svgIcon(meta.glyph));

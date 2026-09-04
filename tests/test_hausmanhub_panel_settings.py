@@ -421,6 +421,7 @@ def panel_script(
           this.style = {{}};
           this.value = "";
           this.checked = false;
+          this.dataset = {{}};
           this.attributes = {{}};
           this._listeners = {{}};
           this.parentElement = null;
@@ -779,6 +780,7 @@ def panel_script(
         {{ filename: {str(PAGINATION_JS)!r} }}
       );
       const log = recordTechnicalEvent;
+      global.applyIntents = () => {{}};
       vm.runInThisContext(
         fs.readFileSync({str(KIOSK_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(KIOSK_JS)!r} }}

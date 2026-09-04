@@ -15,8 +15,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:19:create:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:19",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:21:create:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:21",
       "screen": "shared",
       "module": "hausman-hub-hero-room-navigation.js",
       "construct": "create",
@@ -27,8 +27,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:27:create:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:27",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:31:create:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:31",
       "screen": "shared",
       "module": "hausman-hub-hero-room-navigation.js",
       "construct": "create",
@@ -39,8 +39,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:54:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:54",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:62:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:62",
       "screen": "shared",
       "module": "hausman-hub-hero-room-navigation.js",
       "construct": "listener",
@@ -51,8 +51,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:55:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:55",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:63:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:63",
       "screen": "shared",
       "module": "hausman-hub-hero-room-navigation.js",
       "construct": "listener",
@@ -63,8 +63,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:65:create:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:65",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:73:create:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:73",
       "screen": "shared",
       "module": "hausman-hub-hero-room-navigation.js",
       "construct": "create",
@@ -75,8 +75,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:69:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:69",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:79:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-hero-room-navigation.js:79",
       "screen": "shared",
       "module": "hausman-hub-hero-room-navigation.js",
       "construct": "listener",
@@ -99,8 +99,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:56:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:56",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:107:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:107",
       "screen": "shared",
       "module": "hausman-hub-light-protection.js",
       "construct": "listener",
@@ -111,8 +111,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:57:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:57",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:108:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:108",
       "screen": "shared",
       "module": "hausman-hub-light-protection.js",
       "construct": "listener",
@@ -123,8 +123,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:72:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:72",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:109:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:109",
       "screen": "shared",
       "module": "hausman-hub-light-protection.js",
       "construct": "listener",
@@ -135,8 +135,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:73:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:73",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:85:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:85",
       "screen": "shared",
       "module": "hausman-hub-light-protection.js",
       "construct": "listener",
@@ -147,8 +147,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:74:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:74",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:88:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-light-protection.js:88",
       "screen": "shared",
       "module": "hausman-hub-light-protection.js",
       "construct": "listener",
@@ -159,20 +159,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-navigation.js:104:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-navigation.js:104",
-      "screen": "shared",
-      "module": "hausman-hub-navigation.js",
-      "construct": "listener",
-      "classification": "observed-runtime-control-source",
-      "evidence": {
-        "source": true,
-        "runtime": true
-      }
-    },
-    {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-navigation.js:106:create:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-navigation.js:106",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-navigation.js:102:create:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-navigation.js:102",
       "screen": "shared",
       "module": "hausman-hub-navigation.js",
       "construct": "create",
@@ -183,8 +171,32 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-navigation.js:111:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-navigation.js:111",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-navigation.js:110:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-navigation.js:110",
+      "screen": "shared",
+      "module": "hausman-hub-navigation.js",
+      "construct": "listener",
+      "classification": "observed-runtime-control-source",
+      "evidence": {
+        "source": true,
+        "runtime": true
+      }
+    },
+    {
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-navigation.js:112:create:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-navigation.js:112",
+      "screen": "shared",
+      "module": "hausman-hub-navigation.js",
+      "construct": "create",
+      "classification": "observed-runtime-control-source",
+      "evidence": {
+        "source": true,
+        "runtime": true
+      }
+    },
+    {
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-navigation.js:120:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-navigation.js:120",
       "screen": "shared",
       "module": "hausman-hub-navigation.js",
       "construct": "listener",
@@ -207,8 +219,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-navigation.js:90:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-navigation.js:90",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-navigation.js:93:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-navigation.js:93",
       "screen": "shared",
       "module": "hausman-hub-navigation.js",
       "construct": "listener",
@@ -219,20 +231,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-navigation.js:99:create:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-navigation.js:99",
-      "screen": "shared",
-      "module": "hausman-hub-navigation.js",
-      "construct": "create",
-      "classification": "observed-runtime-control-source",
-      "evidence": {
-        "source": true,
-        "runtime": true
-      }
-    },
-    {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-overview-side.js:74:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-overview-side.js:74",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-overview-side.js:76:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-overview-side.js:76",
       "screen": "overview",
       "module": "hausman-hub-overview-side.js",
       "construct": "listener",
@@ -255,8 +255,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:128:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:128",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:130:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:130",
       "screen": "overview",
       "module": "hausman-hub-overview.js",
       "construct": "listener",
@@ -267,8 +267,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:156:create:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:156",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:158:create:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:158",
       "screen": "overview",
       "module": "hausman-hub-overview.js",
       "construct": "create",
@@ -279,8 +279,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:160:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:160",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:164:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:164",
       "screen": "overview",
       "module": "hausman-hub-overview.js",
       "construct": "listener",
@@ -291,8 +291,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:212:create:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:212",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:216:create:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:216",
       "screen": "overview",
       "module": "hausman-hub-overview.js",
       "construct": "create",
@@ -303,8 +303,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:215:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:215",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:221:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:221",
       "screen": "overview",
       "module": "hausman-hub-overview.js",
       "construct": "listener",
@@ -315,8 +315,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:226:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:226",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:232:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-overview.js:232",
       "screen": "overview",
       "module": "hausman-hub-overview.js",
       "construct": "listener",
@@ -327,8 +327,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1128:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1128",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1131:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1131",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
       "construct": "listener",
@@ -339,8 +339,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1129:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1129",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1132:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1132",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
       "construct": "listener",
@@ -351,8 +351,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1162:create:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1162",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1165:create:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1165",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
       "construct": "create",
@@ -363,8 +363,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1164:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1164",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1167:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1167",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
       "construct": "listener",
@@ -375,8 +375,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1166:create:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1166",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1169:create:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1169",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
       "construct": "create",
@@ -387,8 +387,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1171:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1171",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1174:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1174",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
       "construct": "listener",
@@ -399,8 +399,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1175:create:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1175",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1178:create:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1178",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
       "construct": "create",
@@ -411,8 +411,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1180:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1180",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1183:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1183",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
       "construct": "listener",
@@ -423,8 +423,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1233:create:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1233",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1236:create:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1236",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
       "construct": "create",
@@ -435,8 +435,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1240:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1240",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1245:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1245",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
       "construct": "listener",
@@ -447,34 +447,10 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1248:create:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1248",
-      "screen": "shared",
-      "module": "hausman-hub-panel.js",
-      "construct": "create",
-      "classification": "observed-runtime-control-source",
-      "evidence": {
-        "source": true,
-        "runtime": true
-      }
-    },
-    {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1253:listener:1",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1253:create:1",
       "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1253",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
-      "construct": "listener",
-      "classification": "observed-runtime-control-source",
-      "evidence": {
-        "source": true,
-        "runtime": true
-      }
-    },
-    {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1260:create:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1260",
-      "screen": "shared",
-      "module": "hausman-hub-panel.js",
       "construct": "create",
       "classification": "observed-runtime-control-source",
       "evidence": {
@@ -483,8 +459,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1264:listener:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1264",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1258:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1258",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
       "construct": "listener",
@@ -495,8 +471,8 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1295:create:1",
-      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1295",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1265:create:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1265",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
       "construct": "create",
@@ -507,8 +483,32 @@
       }
     },
     {
-      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1300:listener:1",
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1269:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1269",
+      "screen": "shared",
+      "module": "hausman-hub-panel.js",
+      "construct": "listener",
+      "classification": "observed-runtime-control-source",
+      "evidence": {
+        "source": true,
+        "runtime": true
+      }
+    },
+    {
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1300:create:1",
       "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1300",
+      "screen": "shared",
+      "module": "hausman-hub-panel.js",
+      "construct": "create",
+      "classification": "observed-runtime-control-source",
+      "evidence": {
+        "source": true,
+        "runtime": true
+      }
+    },
+    {
+      "source_id": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1307:listener:1",
+      "source_ref": "custom_components/hausman_hub/frontend/hausman-hub-panel.js:1307",
       "screen": "shared",
       "module": "hausman-hub-panel.js",
       "construct": "listener",
@@ -521,8 +521,1378 @@
   ],
   "missing_evidence": [],
   "runtime_report_required": true,
+  "interaction_intents": [
+    {
+      "key": "navigation:overview",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-section",
+        "equals": "overview"
+      }
+    },
+    {
+      "key": "navigation:lighting",
+      "state": "lighting",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-section",
+        "equals": "lighting"
+      }
+    },
+    {
+      "key": "navigation:climate",
+      "state": "climate",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-section",
+        "equals": "climate"
+      }
+    },
+    {
+      "key": "navigation:rooms",
+      "state": "rooms",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-section",
+        "equals": "rooms"
+      }
+    },
+    {
+      "key": "navigation:media",
+      "state": "media",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-section",
+        "equals": "media"
+      }
+    },
+    {
+      "key": "navigation:security",
+      "state": "security",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-section",
+        "equals": "security"
+      }
+    },
+    {
+      "key": "navigation:devices",
+      "state": "devices",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-section",
+        "equals": "devices"
+      }
+    },
+    {
+      "key": "navigation:energy",
+      "state": "energy",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-section",
+        "equals": "energy"
+      }
+    },
+    {
+      "key": "navigation:scenarios",
+      "state": "scenarios",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-section",
+        "equals": "scenarios"
+      }
+    },
+    {
+      "key": "navigation:settings",
+      "state": "settings",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-section",
+        "equals": "settings"
+      }
+    },
+    {
+      "key": "overview:events",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "overview:events"
+      }
+    },
+    {
+      "key": "overview:fullscreen",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "overview:fullscreen"
+      }
+    },
+    {
+      "key": "overview:refresh",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "overview:refresh"
+      }
+    },
+    {
+      "key": "overview:hero-details",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "overview:hero-details"
+      }
+    },
+    {
+      "key": "overview:star",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "overview:star"
+      }
+    },
+    {
+      "key": "overview:more",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "overview:more"
+      }
+    },
+    {
+      "key": "overview:home-filled",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "overview:home-filled"
+      }
+    },
+    {
+      "key": "overview:rooms",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "overview:rooms"
+      }
+    },
+    {
+      "key": "overview:scenarios",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "overview:scenarios"
+      }
+    },
+    {
+      "key": "overview:weather",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "overview:weather"
+      }
+    },
+    {
+      "key": "overview:comfort",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "overview:comfort"
+      }
+    },
+    {
+      "key": "overview:all-scenarios",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "overview:all-scenarios"
+      }
+    },
+    {
+      "key": "hero-room:previous",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "hero-room:previous"
+      }
+    },
+    {
+      "key": "hero-room:previous-slide",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "hero-room:previous-slide"
+      }
+    },
+    {
+      "key": "hero-room:home",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "hero-room:home"
+      }
+    },
+    {
+      "key": "hero-room:next",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "hero-room:next"
+      }
+    },
+    {
+      "key": "hero-room:next-slide",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "hero-room:next-slide"
+      }
+    },
+    {
+      "key": "hero-room:dot:home",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "hero-room:dot:home"
+      }
+    },
+    {
+      "key": "hero-room:dot:living",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "hero-room:dot:living"
+      }
+    },
+    {
+      "key": "hero-room:dot:bedroom",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "hero-room:dot:bedroom"
+      }
+    },
+    {
+      "key": "hero-room:dot:kitchen",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "hero-room:dot:kitchen"
+      }
+    },
+    {
+      "key": "hero-room:dot:office",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "hero-room:dot:office"
+      }
+    },
+    {
+      "key": "hero-room:living",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "hero-room:living"
+      }
+    },
+    {
+      "key": "hero-room:bedroom",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "hero-room:bedroom"
+      }
+    },
+    {
+      "key": "hero-room:kitchen",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "hero-room:kitchen"
+      }
+    },
+    {
+      "key": "hero-room:office",
+      "state": "overview",
+      "intent": "ui-only",
+      "effect": {
+        "attribute": "data-harness-key",
+        "equals": "hero-room:office"
+      }
+    },
+    {
+      "key": "navigation:intercom",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "navigation:collapse",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "navigation:kiosk",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "climate-view:overview",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "climate-view:contour",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "climate-view:profiles",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "climate-view:schedule",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "climate-view:home",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "climate-view:windows",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "climate-view:assistant",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "overview:utility-mode",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "overview:energy-settings",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "overview:energy-source",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "overview:lighting-compact",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "lighting:all-devices",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "scroll-into-view"
+      }
+    },
+    {
+      "key": "lighting:search",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "lighting:filter",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "lighting:room",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "lighting:room-power",
+      "state": "shared",
+      "intent": "blocked"
+    },
+    {
+      "key": "lighting:device",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "lighting:side-action",
+      "state": "shared",
+      "intent": "blocked"
+    },
+    {
+      "key": "lighting:side-link",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "climate:category",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "climate:search",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "climate:mode-filter",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "climate:equipment",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "climate:side-link",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "climate-profile:input",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "climate-profile:select",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "climate-profile:save",
+      "state": "shared",
+      "intent": "blocked"
+    },
+    {
+      "key": "rooms:search",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "rooms:filter",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "rooms:room",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "rooms:side-room",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "rooms:side-link",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "media:search",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "media:filter",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "media:room",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "media:device",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "media:side-room",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "media:side-link",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "security:quick-filter",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "security:all",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "security:type",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "security:device",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "security:attention",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "devices:discovery-area",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "devices:all",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "devices:category",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "devices:search",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "devices:device",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "energy:meter",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "energy:metric",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "energy:range",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "energy:device-filter",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "energy:search",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "energy:device",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "scenario:create-ai",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "scenario:create",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "scenario:search",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "scenario:filter",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "scenario:room-filter",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "scenario:bulk-select",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "scenario:more-action",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "editor-open"
+      }
+    },
+    {
+      "key": "scenario:edit",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "editor-open"
+      }
+    },
+    {
+      "key": "scenario-editor:close",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "scenario-editor:about-input",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "scenario-editor:room",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "scenario-editor:room-shortcut",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "scenario-editor:icon",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "scenario-editor:description",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "scenario-editor:mode",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "scenario-editor:backend",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "scenario-editor:toggle",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "scenario-editor:rule-toggle",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "scenario-editor:rule-remove",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "scenario-editor:rule-select",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "scenario-editor:rule-input",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "scenario-editor:rule-textarea",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "scenario-editor:add-rule",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "settings:view",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "settings:card",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "settings:room-summary",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "settings:binding",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "light-protection:field",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "light-protection:scope",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "kiosk:exit",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "kiosk:hero-details",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "kiosk:hero-control",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "kiosk:home",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "kiosk:metric",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "kiosk:metric-action",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "kiosk:scenarios-all",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "kiosk:intercom",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "device-discovery:notice_0123456789abcdef:acknowledge",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/device-discovery"
+      }
+    },
+    {
+      "key": "device-discovery:notice_0123456789abcdef:assign_area",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/device-discovery"
+      }
+    },
+    {
+      "key": "device-discovery:notice_0123456789abcdef:show_on_dashboard",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/device-discovery"
+      }
+    },
+    {
+      "key": "device:breaker-232:turn_off",
+      "state": "shared",
+      "intent": "blocked"
+    },
+    {
+      "key": "device:breaker-233:turn_off",
+      "state": "shared",
+      "intent": "blocked"
+    },
+    {
+      "key": "scenario-editor:cancel",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
+      "key": "scenario:node_red_test:delete",
+      "state": "shared",
+      "intent": "blocked"
+    },
+    {
+      "key": "scenario:node_red_test:enabled",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/admin/scenarios"
+      }
+    },
+    {
+      "key": "scenario:node_red_test:favorite",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/admin/scenarios"
+      }
+    },
+    {
+      "key": "scenario:node_red_test:run",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/admin/scenarios/run"
+      }
+    },
+    {
+      "key": "scenario:scenario.all_climate_off:run",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/admin/scenarios/run"
+      }
+    },
+    {
+      "key": "scenario:scenario.all_lights_off:run",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/admin/scenarios/run"
+      }
+    },
+    {
+      "key": "scenario:scenario.evening_lights:cancel-upcoming",
+      "state": "shared",
+      "intent": "blocked"
+    },
+    {
+      "key": "scenario:scenario.good_morning:delete",
+      "state": "shared",
+      "intent": "blocked"
+    },
+    {
+      "key": "scenario:scenario.good_morning:enabled",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/admin/scenarios"
+      }
+    },
+    {
+      "key": "scenario:scenario.good_morning:favorite",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/admin/scenarios"
+      }
+    },
+    {
+      "key": "scenario:scenario.good_morning:run",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/admin/scenarios/run"
+      }
+    },
+    {
+      "key": "scenario:scenario.good_morning:save",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/admin/scenarios"
+      }
+    },
+    {
+      "key": "scenario:scenario.good_morning:test",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/admin/scenarios/test"
+      }
+    },
+    {
+      "key": "scenario:scenario.leaving_home:delete",
+      "state": "shared",
+      "intent": "blocked"
+    },
+    {
+      "key": "scenario:scenario.leaving_home:enabled",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/admin/scenarios"
+      }
+    },
+    {
+      "key": "scenario:scenario.leaving_home:favorite",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/admin/scenarios"
+      }
+    },
+    {
+      "key": "scenario:scenario.leaving_home:run",
+      "state": "shared",
+      "intent": "blocked"
+    },
+    {
+      "key": "scenario:scenario.movie:delete",
+      "state": "shared",
+      "intent": "blocked"
+    },
+    {
+      "key": "scenario:scenario.movie:enabled",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/admin/scenarios"
+      }
+    },
+    {
+      "key": "scenario:scenario.movie:favorite",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/admin/scenarios"
+      }
+    },
+    {
+      "key": "scenario:scenario.movie:run",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/admin/scenarios/run"
+      }
+    },
+    {
+      "key": "scenario:scenario.night_mode:cancel-upcoming",
+      "state": "shared",
+      "intent": "blocked"
+    },
+    {
+      "key": "scenario:scenario.night_mode:delete",
+      "state": "shared",
+      "intent": "blocked"
+    },
+    {
+      "key": "scenario:scenario.night_mode:enabled",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/admin/scenarios"
+      }
+    },
+    {
+      "key": "scenario:scenario.night_mode:favorite",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/admin/scenarios"
+      }
+    },
+    {
+      "key": "scenario:scenario.night_mode:run",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/admin/scenarios/run"
+      }
+    },
+    {
+      "key": "scenario:system.bathroom_fan:enabled",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/admin/scenarios"
+      }
+    },
+    {
+      "key": "scenario:system.bathroom_fan:favorite",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/admin/scenarios"
+      }
+    },
+    {
+      "key": "scenario:system.bathroom_fan:run",
+      "state": "shared",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/admin/scenarios/run"
+      }
+    },
+    {
+      "key": "light-protection:release",
+      "state": "settings-light-protection",
+      "intent": "command",
+      "request": {
+        "method": "POST",
+        "path": "/api/hausman_hub/v1/lighting/manual-off-protection/release"
+      }
+    },
+    {
+      "key": "light-protection:save",
+      "state": "settings-light-protection",
+      "intent": "command",
+      "request": {
+        "method": "PUT",
+        "path": "/api/hausman_hub/v1/lighting/manual-off-protection"
+      }
+    },
+    {
+      "key": "light-protection:reset",
+      "state": "settings-light-protection",
+      "intent": "command",
+      "request": {
+        "method": "PUT",
+        "path": "/api/hausman_hub/v1/lighting/manual-off-protection"
+      }
+    }
+  ],
   "provenance": {
     "version": "1.52.205",
-    "content_digest": "fa6ccdb09b887477acea486e67b26923380a9f11fea89dc9772b463e15bd153a"
+    "content_digest": "7deae13e12abb7b39ff0de1ea5412809006e401238cabaa9b95973b9669bb095"
   }
 }

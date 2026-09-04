@@ -26,6 +26,7 @@ import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.205";
 import { overviewHeroRenderKey } from "./hausman-hub-overview-hero-state.js?v=1.52.205";
 import { formatUpcomingCountdown, renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.205";
 import { renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.205";
+import { applyIntents } from "./hausman-hub-harness-intents.js?v=1.52.205";
 import { deviceActionInitialValue } from "./hausman-hub-device-controls.js?v=1.52.205";
 import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.205";
 import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.205";
@@ -564,6 +565,7 @@ class HausmanHubPanel extends HTMLElement {
     }
     this.addEventListener?.("pointerup", this._onKioskPointerUp);
     this._startEventStream();
+    if (this._capabilities) refreshManualLightProtection(this).then(() => this._render());
     this._render();
     this._loadActiveNavigationView();
   }
@@ -1111,6 +1113,7 @@ class HausmanHubPanel extends HTMLElement {
       this._renderHomeSection(this._activeSection, shell.homeSections[this._activeSection]);
     }
     this._syncSectionVisibility();
+    applyIntents(this.shadowRoot);
   }
 
   _ensureShell() {
@@ -1234,6 +1237,8 @@ class HausmanHubPanel extends HTMLElement {
       button.type = "button";
       button.id = `hausman-tab-${section.id}`;
       setAttr(button, "data-section", section.id);
+      setAttr(button, "data-harness-key", `navigation:${section.id}`);
+      setAttr(button, "data-harness-intent", "ui-only");
       setAttr(button, "role", "tab");
       setAttr(button, "aria-label", section.label);
       setAttr(button, "aria-controls", `hausman-${section.id}`);
@@ -1295,6 +1300,8 @@ class HausmanHubPanel extends HTMLElement {
       const button = el("button", "climate-subtab", view.label);
       button.type = "button";
       button.id = `hausman-climate-tab-${view.id}`;
+      setAttr(button, "data-harness-key", `climate-view:${view.id}`);
+      setAttr(button, "data-harness-intent", "ui-only");
       setAttr(button, "role", "tab");
       setAttr(button, "aria-controls", `hausman-climate-${view.id}`);
       button.addEventListener("click", () => this._activateClimateView(view.id));

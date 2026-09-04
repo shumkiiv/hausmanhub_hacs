@@ -426,21 +426,23 @@ function renderEnergyDevices(panel, container, sources, deps) {
     accumulated.appendChild(el("b", null, sourceMetric(source, source.todayKwh !== null && source.todayKwh !== undefined ? "todayKwh" : "totalKwh", "кВт·ч", 2)));
     accumulated.appendChild(el("small", null, source.todayKwh !== null && source.todayKwh !== undefined ? "за сегодня" : "накоплено"));
     open.appendChild(accumulated);
-    const isPoweredOff = source.available && source.powered === false;
-    const statusTone = !source.available ? "is-offline" : (isPoweredOff ? "is-powered-off" : "is-online");
-    const status = el("span", `energy-device-status ${statusTone}`);
-    status.appendChild(el("strong", null, !source.available ? "Нет связи" : (isPoweredOff ? "Выключен" : "В сети")));
-    status.appendChild(el("small", null, !source.available ? "проверьте устройство" : (isPoweredOff ? "питание отключено" : "обновляется")));
+    const isPoweredOff=source.available&&source.powered===false;
+    const statusTone=!source.available?"is-offline":(isPoweredOff?"is-powered-off":"is-online");
+    const status=el("span",`energy-device-status ${statusTone}`);
+    status.appendChild(el("strong",null,!source.available?"Нет связи":(isPoweredOff?"Выключен":"В сети")));
+    status.appendChild(el("small",null,!source.available?"проверьте устройство":(isPoweredOff?"питание отключено":"обновляется")));
     open.appendChild(status);
     open.appendChild(el("span", "energy-overview-chevron", "›"));
     row.appendChild(open);
-    const actionId = source.powered === false ? "turn_on" : "turn_off";
-    const action = energyPowerAction(panel, source, actionId);
+    const actionId=source.powered===false?"turn_on":"turn_off";
+    const action=energyPowerAction(panel,source,actionId);
     if (action) {
       const quick = el("button", `secondary energy-device-quick${actionId === "turn_off" ? " is-danger" : ""}`,
         actionId === "turn_off" ? "Отключить" : "Включить");
-      quick.type = "button";
-      quick.disabled = panel._busy || !source.available;
+      quick.type="button";
+      quick.disabled=panel._busy||!source.available;
+      quick.dataset.harnessKey=`device:${action.target.target_id}:${actionId}`;
+      quick.dataset.harnessIntent=actionId==="turn_off"&&/автомат|breaker|rcbo|mcb|din/i.test(`${source.name} ${device&&device.model||""}`)?"blocked":"command";
       setAttr(quick, "aria-label", `${actionId === "turn_off" ? "Отключить" : "Включить"} ${source.name}`);
       quick.addEventListener("click", () => runEnergyPowerAction(panel, source, actionId));
       row.appendChild(quick);

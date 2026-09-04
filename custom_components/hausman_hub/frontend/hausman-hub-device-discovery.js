@@ -143,6 +143,8 @@ function renderDiscoveryAreaAction(panel, notification, placement, box, busy, th
   box.appendChild(select);
   const button = el("button", "device-discovery-run", thisPending ? "Выполняется…" : placement.title || "Назначить комнату");
   button.type = "button";
+  setAttr(button, "data-harness-key", `device-discovery:${notification.id}:assign_area`);
+  setAttr(button, "data-harness-intent", "command");
   button.disabled = busy;
   if (thisPending) setAttr(button, "aria-busy", "true");
   button.addEventListener("click", () => postDeviceDiscoveryAction(panel, notification, "assign_area", {
@@ -168,6 +170,8 @@ function renderDiscoveryPlacement(panel, notification, placement, deps) {
   } else {
     const button = el("button", "device-discovery-run", thisPending ? "Выполняется…" : placement.title);
     button.type = "button";
+    setAttr(button, "data-harness-key", `device-discovery:${notification.id}:${placement.kind}`);
+    setAttr(button, "data-harness-intent", "command");
     button.disabled = busy;
     if (thisPending) setAttr(button, "aria-busy", "true");
     button.addEventListener("click", () => postDeviceDiscoveryAction(panel, notification, placement.kind));
@@ -178,7 +182,7 @@ function renderDiscoveryPlacement(panel, notification, placement, deps) {
 }
 
 function renderDiscoveryCard(panel, notification, deps) {
-  const { el } = deps;
+  const { el, setAttr } = deps;
   const card = el("article", "device-discovery-card");
   const head = el("div", "device-discovery-card-head");
   const title = el("div", "device-discovery-card-title");
@@ -208,6 +212,8 @@ function renderDiscoveryCard(panel, notification, deps) {
   const footer = el("div", "device-discovery-footer");
   const acknowledge = el("button", "secondary", "Скрыть");
   acknowledge.type = "button";
+  setAttr(acknowledge, "data-harness-key", `device-discovery:${notification.id}:acknowledge`);
+  setAttr(acknowledge, "data-harness-intent", "command");
   acknowledge.disabled = !!panel._deviceDiscoveryPending;
   acknowledge.addEventListener("click", () => postDeviceDiscoveryAction(panel, notification, "acknowledge"));
   footer.appendChild(acknowledge);

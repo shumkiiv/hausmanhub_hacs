@@ -66,11 +66,13 @@ function activityTextLabel(value) {
   return localized ? parts.join(": ") : text;
 }
 
-function makeSideCardInteractive(card, label, activate, deps) {
+function makeSideCardInteractive(card, label, activate, deps, key) {
   card.classList.add("is-interactive");
   deps.setAttr(card, "role", "button");
   deps.setAttr(card, "tabindex", "0");
   deps.setAttr(card, "aria-label", label);
+  deps.setAttr(card, "data-harness-key", key);
+  deps.setAttr(card, "data-harness-intent", "ui-only");
   card.addEventListener("click", activate);
   card.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
@@ -218,7 +220,7 @@ export function renderOverviewSideCards(panel, dashboard, devices, deps) {
   home.appendChild(deps.el("h2", null, "Дом сейчас"));
   appendCompactHome(home, state, deps);
   appendDetailedHome(home, state, deps);
-  makeSideCardInteractive(home, "Открыть раздел «Комнаты»", () => panel._activateSection("rooms"), deps);
+  makeSideCardInteractive(home, "Открыть раздел «Комнаты»", () => panel._activateSection("rooms"), deps, "overview:rooms");
   aside.appendChild(home);
   const activity = deps.el("section", "overview-tablet-side-card is-activity");
   const activityTitle = deps.el("h2");
@@ -228,7 +230,7 @@ export function renderOverviewSideCards(panel, dashboard, devices, deps) {
   const entries = activityEntries(panel, dashboard);
   appendActivityCards(activity, entries, true, deps);
   appendActivityCards(activity, entries, false, deps);
-  makeSideCardInteractive(activity, "Открыть раздел «Сценарии»", () => panel._activateSection("scenarios"), deps);
+  makeSideCardInteractive(activity, "Открыть раздел «Сценарии»", () => panel._activateSection("scenarios"), deps, "overview:scenarios");
   aside.appendChild(activity);
   return aside;
 }

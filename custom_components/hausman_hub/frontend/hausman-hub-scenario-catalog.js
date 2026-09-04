@@ -153,6 +153,8 @@ function scenarioCard(panel, source, deps, handlers) {
   head.appendChild(identity);
   const favorite = el("button", `scenario-favorite${scenario.favorite ? " is-active" : ""}`, scenario.favorite ? "★" : "☆");
   favorite.type = "button";
+  setAttr(favorite, "data-harness-key", `scenario:${scenario.id}:favorite`);
+  setAttr(favorite, "data-harness-intent", "command");
   setAttr(favorite, "aria-label", scenario.favorite ? "Убрать с главного экрана" : "Добавить на главный экран");
   favorite.addEventListener("click", () => {
     scenario.favorite = !scenario.favorite;
@@ -175,6 +177,8 @@ function scenarioCard(panel, source, deps, handlers) {
   if (!scenario.protected && scenarioActivationKind(scenario) !== "system") {
     const remove = el("button", "is-danger", "Удалить");
     remove.type = "button";
+    setAttr(remove, "data-harness-key", `scenario:${scenario.id}:delete`);
+    setAttr(remove, "data-harness-intent", "blocked");
     remove.addEventListener("click", () => handlers.delete(scenario));
     menuItems.appendChild(remove);
   }
@@ -218,6 +222,8 @@ function scenarioCard(panel, source, deps, handlers) {
   const actions = el("div", "scenario-actions scenario-library-actions");
   const enabled = el("button", `scenario-enabled${scenario.enabled ? " is-active" : ""}`);
   enabled.type = "button";
+  setAttr(enabled, "data-harness-key", `scenario:${scenario.id}:enabled`);
+  setAttr(enabled, "data-harness-intent", "command");
   setAttr(enabled, "role", "switch");
   setAttr(enabled, "aria-checked", String(scenario.enabled));
   setAttr(enabled, "aria-label", scenario.enabled ? "Сценарий включён" : "Сценарий отключён");
@@ -235,6 +241,8 @@ function scenarioCard(panel, source, deps, handlers) {
   const run = el("button", "secondary scenario-run");
   run.type = "button";
   run.disabled = panel._busy || !scenario.enabled;
+  setAttr(run, "data-harness-key", `scenario:${scenario.id}:run`);
+  setAttr(run, "data-harness-intent", requiresConfirmation ? "blocked" : "command");
   run.appendChild(svgIcon("play"));
   run.appendChild(el("span", null, "Запустить"));
   setAttr(run, "aria-label", scenario.enabled ? `Запустить сценарий «${title}»` : `Сценарий «${title}» выключен`);

@@ -11,6 +11,8 @@ export function createHeroRoomNavigation(panel, rooms, deps) {
   const strip = el("div", "overview-canon-room-strip");
   const home = el("button");
   home.type = "button";
+  setAttr(home, "data-harness-key", "hero-room:home");
+  setAttr(home, "data-harness-intent", "ui-only");
   home.appendChild(svgIcon("home-filled"));
   home.appendChild(el("span", null, "Дом"));
   strip.appendChild(home);
@@ -18,6 +20,8 @@ export function createHeroRoomNavigation(panel, rooms, deps) {
   rooms.forEach((room) => {
     const button = el("button");
     button.type = "button";
+    setAttr(button, "data-harness-key", `hero-room:${room.id}`);
+    setAttr(button, "data-harness-intent", "ui-only");
     button.appendChild(roomSvgIcon(roomIconName(room)));
     button.appendChild(el("span", null, room.name));
     setAttr(button, "aria-label", `Показать комнату ${room.name}`);
@@ -28,6 +32,10 @@ export function createHeroRoomNavigation(panel, rooms, deps) {
   next.type = "button";
   next.appendChild(svgIcon("chevron-right"));
   setAttr(next, "aria-label", "Следующая комната");
+  setAttr(previous, "data-harness-key", "hero-room:previous");
+  setAttr(previous, "data-harness-intent", "ui-only");
+  setAttr(next, "data-harness-key", "hero-room:next");
+  setAttr(next, "data-harness-intent", "ui-only");
   element.appendChild(previous);
   element.appendChild(strip);
   element.appendChild(next);
@@ -66,12 +74,16 @@ export function createHeroRoomNavigation(panel, rooms, deps) {
       edgePrevious.type = "button";
       edgePrevious.appendChild(svgIcon("chevron-left"));
       setAttr(edgePrevious, "aria-label", "Предыдущий слайд");
+      setAttr(edgePrevious, "data-harness-key", "hero-room:previous-slide");
+      setAttr(edgePrevious, "data-harness-intent", "ui-only");
       edgePrevious.addEventListener("click", () => move(-1));
       hero.appendChild(edgePrevious);
       const edgeNext = el("button", "overview-canon-hero-edge is-next");
       edgeNext.type = "button";
       edgeNext.appendChild(svgIcon("chevron-right"));
       setAttr(edgeNext, "aria-label", "Следующий слайд");
+      setAttr(edgeNext, "data-harness-key", "hero-room:next-slide");
+      setAttr(edgeNext, "data-harness-intent", "ui-only");
       edgeNext.addEventListener("click", () => move(1));
       hero.appendChild(edgeNext);
       const dots = el("div", "overview-canon-hero-dots");
@@ -79,6 +91,8 @@ export function createHeroRoomNavigation(panel, rooms, deps) {
         const dot = el("button", "overview-canon-hero-dot");
         dot.type = "button";
         setAttr(dot, "aria-label", room ? `Показать комнату ${room.name}` : "Показать весь дом");
+        setAttr(dot, "data-harness-key", `hero-room:dot:${room?.id || "home"}`);
+        setAttr(dot, "data-harness-intent", "ui-only");
         dot.addEventListener("click", () => selectHeroRoom?.(room));
         dots.appendChild(dot);
         carouselDots.push(dot);
