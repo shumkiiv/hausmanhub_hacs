@@ -55,12 +55,11 @@ _TRUSTED_SYSTEM_SOURCE_HASHES = {
     ),
     "system-shower-comfort-controller": frozenset(
         {
-            "ef263e1adbcaa2e69ff118d14411b31892cf73497626751fbfa3106b81f2e933",
-            "4ecf6735e3350c89116c9e1ec56f649fc9c6ba420ca884dcd43347bbc8bb3257",
+            "8c5b4d50f00199aefbb10108a625c137022b3f7af811fe52d8409e7bde9a6742",
         }
     ),
     "system-small-corridor-light-controller": frozenset(
-        {"ce2580a1a8616b313b832d4da4c7648c4d01e5ce6b65d1fabf0ae1ac15672a44"}
+        {"bc9a2c7883046e568a428e355af312953d70f0f504393b063130f516fe5052b1"}
     ),
 }
 # Release-trusted managed sources may select a branch, but cannot enlarge the
@@ -69,8 +68,8 @@ _TRUSTED_SYSTEM_SOURCE_HASHES = {
 _SYSTEM_PLAN_ENVELOPES = {
     "system-shower-comfort-controller": {
         "actions": {
-            ("entity_4be32416634e6416", "turn_on"): 1,
-            ("entity_4be32416634e6416", "turn_off"): 1,
+            ("entity_46174e1ff9913212", "turn_on"): 1,
+            ("entity_46174e1ff9913212", "turn_off"): 1,
             ("entity_1fdcd8b244637246", "turn_on"): 1,
             ("entity_1fdcd8b244637246", "turn_off"): 1,
             ("entity_e7a7c61eec7bdff8", "turn_on"): 1,
@@ -97,8 +96,8 @@ _SYSTEM_PLAN_ENVELOPES = {
     },
     "system-small-corridor-light-controller": {
         "actions": {
-            ("entity_ff0244d6b760be7e", "turn_on"): 1,
-            ("entity_ff0244d6b760be7e", "turn_off"): 1,
+            ("entity_4be32416634e6416", "turn_on"): 1,
+            ("entity_4be32416634e6416", "turn_off"): 1,
             ("entity_9ed909332fdaa8fd", "turn_on"): 1,
             ("entity_9ed909332fdaa8fd", "turn_off"): 1,
             ("entity_9ed909332fdaa8fd", "set_brightness_percent"): 4,
@@ -1918,7 +1917,7 @@ def _validate_system_branch(scenario_id: str, actions: list[ScenarioAction]) -> 
             raise NodeRedBackendError("Node-RED tambur profile order exceeds release source")
         return
     if scenario_id == "system-small-corridor-light-controller":
-        relay = "entity_ff0244d6b760be7e"
+        relay = "entity_4be32416634e6416"
         chandelier = "entity_9ed909332fdaa8fd"
         if not actions:
             return
@@ -1975,7 +1974,7 @@ def _validate_system_branch(scenario_id: str, actions: list[ScenarioAction]) -> 
         ):
             raise NodeRedBackendError("Node-RED small corridor profile exceeds release source")
         return
-    targets = {"main": "entity_4be32416634e6416", "extra": "entity_1fdcd8b244637246", "cabinet": "entity_e7a7c61eec7bdff8", "fan": "entity_afef5df0e0cae309"}
+    targets = {"main": "entity_46174e1ff9913212", "extra": "entity_1fdcd8b244637246", "cabinet": "entity_e7a7c61eec7bdff8", "fan": "entity_afef5df0e0cae309"}
     cursor = 0
     profiles = (
         ("main", "off", "extra", "off", "cabinet", "on"),

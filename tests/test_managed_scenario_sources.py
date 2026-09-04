@@ -25,11 +25,12 @@ TAMBUR_POWER = "entity_b47991988cc6b9f3"
 ENTRY_DOOR = "entity_170c7a4e2505b803"
 SMALL_MOTION = "entity_90417aada6a33491"
 SMALL_LOCAL_LIGHT = "entity_c9d6bc67f172f30d"
-SMALL_RELAY = "entity_ff0244d6b760be7e"
+SMALL_RELAY = "entity_4be32416634e6416"
 SMALL_CHANDELIER = "entity_9ed909332fdaa8fd"
 SHOWER_PRESENCE = "entity_d1fb2cbf2a691bba"
 SHOWER_HUMIDITY = "entity_fd3945cf1a2110f8"
-SHOWER_MAIN = "entity_4be32416634e6416"
+SHOWER_MAIN = "entity_46174e1ff9913212"
+SHOWER_MAIN_NEW = "entity_46174e1ff9913212"
 SHOWER_EXTRA = "entity_1fdcd8b244637246"
 SHOWER_FAN = "entity_afef5df0e0cae309"
 SHOWER_CABINET = "entity_e7a7c61eec7bdff8"
@@ -83,8 +84,8 @@ def _run_tambur(
     return _run_source(TAMBUR_SOURCE, timestamp=timestamp, states=states, trigger=trigger)
 
 
-def _run_shower(*, timestamp: str, states: dict[str, object]) -> dict[str, object]:
-    return _run_source(SHOWER_SOURCE, timestamp=timestamp, states=states)
+def _run_shower(*, timestamp: str, states: dict[str, object], trigger: dict[str, object] | None = None) -> dict[str, object]:
+    return _run_source(SHOWER_SOURCE, timestamp=timestamp, states=states, trigger=trigger)
 
 
 def _run_small_corridor(
@@ -294,6 +295,41 @@ class ManagedSmallCorridorSourceTest(unittest.TestCase):
 
 
 class ManagedShowerSourceTest(unittest.TestCase):
+    def test_cabinet_toggle_down_toggles_cabinet_without_touching_key1_relay(self) -> None:
+        payload = _run_shower(
+            timestamp="2026-08-27T12:00:00+06:00",
+            states={SHOWER_MAIN: "on", SHOWER_CABINET: "off"},
+            trigger={"source": "device", "trigger_id": "toggle_b2_down"},
+        )
+        self.assertEqual(["set_cabinet_on"], _action_ids(payload))
+        self.assertNotIn("set_main_off", _action_ids(payload))
+
+    def test_cabinet_toggle_down_unknown_state_fails_closed_with_reason(self) -> None:
+        payload = _run_shower(
+            timestamp="2026-08-27T12:00:00+06:00",
+            states={SHOWER_MAIN: "on", SHOWER_CABINET: "unknown"},
+            trigger={"source": "device", "trigger_id": "toggle_b2_down"},
+        )
+        self.assertEqual([], _action_ids(payload))
+        self.assertIn("недоступ", payload["trace"][2]["reason"].lower())
+
+    def test_cabinet_toggle_up_is_ignored(self) -> None:
+        payload = _run_shower(
+            timestamp="2026-08-27T12:00:00+06:00",
+            states={SHOWER_MAIN: "on", SHOWER_CABINET: "off"},
+            trigger={"source": "device", "trigger_id": "toggle_b2_up"},
+        )
+        self.assertEqual([], _action_ids(payload))
+
+    def test_shower_uses_released_main_relay_target(self) -> None:
+        states = {
+            SHOWER_PRESENCE: "on", SHOWER_HUMIDITY: "45", SUN: "above_horizon",
+            SHOWER_MAIN_NEW: "off", SHOWER_EXTRA: "off", SHOWER_FAN: "off", SHOWER_CABINET: "off",
+        }
+        payload = _run_shower(timestamp="2026-08-27T12:00:00+06:00", states=states)
+        actions = {item["id"]: item for item in payload["actions"]}
+        self.assertEqual(SHOWER_MAIN_NEW, actions["set_main_on"]["targetId"])
+
     def test_absent_humid_fan_off_keeps_fan_on_while_delaying_light_off(self) -> None:
         payload = _run_shower(
             timestamp="2026-08-27T12:00:00+06:00",

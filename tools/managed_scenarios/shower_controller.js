@@ -3,12 +3,13 @@
 const started = Date.now();
 const request = (msg.payload && typeof msg.payload === 'object') ? msg.payload : {};
 const inputs = (request.inputs && typeof request.inputs === 'object') ? request.inputs : {};
+const trigger = (request.context && request.context.trigger && typeof request.context.trigger === 'object') ? request.context.trigger : {};
 
 const ID = Object.freeze({
   presence: 'entity_d1fb2cbf2a691bba',
   humidity: 'entity_fd3945cf1a2110f8',
   sun: 'entity_6b9ccdab9bb484b2',
-  main: 'entity_4be32416634e6416',
+  main: 'entity_46174e1ff9913212',
   extra: 'entity_1fdcd8b244637246',
   fan: 'entity_afef5df0e0cae309',
   cabinet: 'entity_e7a7c61eec7bdff8',
@@ -64,6 +65,17 @@ const daylight = hour >= 9 && hour < 23 && sunState === 'above_horizon';
 const evening = hour >= 9 && hour < 23 && sunState === 'below_horizon';
 
 const actions = [];
+const semanticCabinetToggle = trigger.source === 'device' &&
+  (trigger.trigger_id === 'toggle_b2_down' || trigger.trigger_id === 'on_b2_down');
+const ignoredCabinetUp = trigger.source === 'device' && trigger.trigger_id === 'toggle_b2_up';
+let cabinetToggleHandled = false;
+if (semanticCabinetToggle) {
+  const cabinet = state(ID.cabinet);
+  if (cabinet === 'on' || cabinet === 'off') {
+    setSwitch(actions, 'cabinet', cabinet !== 'on');
+  }
+  cabinetToggleHandled = true;
+}
 const trace = [
   {
     id: 'presence',
@@ -83,31 +95,31 @@ const trace = [
   },
 ];
 
-let lightBranch = 'light_unknown';
+let lightBranch = cabinetToggleHandled ? (state(ID.cabinet) === 'on' || state(ID.cabinet) === 'off' ? 'cabinet_toggle' : 'cabinet_toggle_unavailable') : ignoredCabinetUp ? 'cabinet_action_ignored' : 'light_unknown';
 const delayedLightOffKeys = [];
-if (presenceKnown && !occupied) {
+if (!cabinetToggleHandled && !ignoredCabinetUp && presenceKnown && !occupied) {
   lightBranch = 'light_off_5m';
   for (const key of ['main', 'extra', 'cabinet']) {
     if (state(ID[key]) === 'on') delayedLightOffKeys.push(key);
   }
-} else if (occupied && night) {
+} else if (!cabinetToggleHandled && !ignoredCabinetUp && occupied && night) {
   lightBranch = 'night_cabinet';
   setSwitch(actions, 'main', false);
   setSwitch(actions, 'extra', false);
   // The forced claim preserves manual priority for the complete night profile.
   setSwitch(actions, 'cabinet', true, true);
-} else if (occupied && daylight) {
+} else if (!cabinetToggleHandled && !ignoredCabinetUp && occupied && daylight) {
   lightBranch = 'day_main';
   setSwitch(actions, 'main', true, true);
   setSwitch(actions, 'extra', false);
-} else if (occupied && evening) {
+} else if (!cabinetToggleHandled && !ignoredCabinetUp && occupied && evening) {
   lightBranch = 'evening_extra';
   setSwitch(actions, 'main', false);
   setSwitch(actions, 'extra', true, true);
 }
 
 // Днём и вечером подсветка шкафа дополняет основной временной профиль.
-if (occupied && !night) {
+if (!cabinetToggleHandled && !ignoredCabinetUp && occupied && !night) {
   setSwitch(actions, 'cabinet', true);
 }
 
@@ -119,19 +131,23 @@ trace.push({
   expected: lightBranch,
   reason: lightBranch === 'light_unknown'
     ? 'Для дневного профиля нужны доступные датчики присутствия и солнца.'
+    : lightBranch === 'cabinet_toggle_unavailable'
+      ? 'Состояние подсветки шкафа недоступно, команда toggle не отправляется.'
+      : lightBranch === 'cabinet_action_ignored'
+        ? 'Действие верхней клавиши B2 не является командой подсветки и игнорируется.'
     : null,
 });
 
 let fanBranch = 'fan_hold';
 const fanState = state(ID.fan);
 let delayedFanOff = false;
-if (humid) {
+if (!cabinetToggleHandled && !ignoredCabinetUp && humid) {
   fanBranch = 'fan_humidity';
   setSwitch(actions, 'fan', true);
-} else if (occupied && fanState !== 'on') {
+} else if (!cabinetToggleHandled && !ignoredCabinetUp && occupied && fanState !== 'on') {
   fanBranch = 'fan_presence';
   setSwitch(actions, 'fan', true);
-} else if (presenceKnown && !occupied && humidityKnown && fanState === 'on') {
+} else if (!cabinetToggleHandled && !ignoredCabinetUp && presenceKnown && !occupied && humidityKnown && fanState === 'on') {
   fanBranch = 'fan_off_5m';
   delayedFanOff = true;
 }

@@ -84,12 +84,11 @@ def test_release_trust_allows_exact_previous_and_current_system_sources() -> Non
             }
         ),
         "system-small-corridor-light-controller": frozenset(
-            {"ce2580a1a8616b313b832d4da4c7648c4d01e5ce6b65d1fabf0ae1ac15672a44"}
+            {"bc9a2c7883046e568a428e355af312953d70f0f504393b063130f516fe5052b1"}
         ),
         "system-shower-comfort-controller": frozenset(
             {
-                "ef263e1adbcaa2e69ff118d14411b31892cf73497626751fbfa3106b81f2e933",
-                "4ecf6735e3350c89116c9e1ec56f649fc9c6ba420ca884dcd43347bbc8bb3257",
+                "8c5b4d50f00199aefbb10108a625c137022b3f7af811fe52d8409e7bde9a6742",
             }
         ),
     }
@@ -238,15 +237,16 @@ def test_release_trust_hashes_match_managed_system_sources() -> None:
         assert managed_source_hash(source) in trusted
         assert len(trusted) == (
             4 if scenario_id == "system-tambur-adaptive-controller" else
-            2 if scenario_id == "system-shower-comfort-controller" else 1
+                1
         )
 
     assert (
-        "ef263e1adbcaa2e69ff118d14411b31892cf73497626751fbfa3106b81f2e933"
+        "8c5b4d50f00199aefbb10108a625c137022b3f7af811fe52d8409e7bde9a6742"
         in scenario_node_red._TRUSTED_SYSTEM_SOURCE_HASHES[
             "system-shower-comfort-controller"
         ]
     )
+    assert "ef263e1adbcaa2e69ff118d14411b31892cf73497626751fbfa3106b81f2e933" not in scenario_node_red._TRUSTED_SYSTEM_SOURCE_HASHES["system-shower-comfort-controller"]
     assert (
         "3183bc1806afdadd797968bafcc7cbb738f13d80cc02c28cc42852de07c36d21"
         in scenario_node_red._TRUSTED_SYSTEM_SOURCE_HASHES[
@@ -1000,7 +1000,7 @@ def test_system_branch_validator_rejects_mutated_values_order_unions_and_excess(
             "entity_d1fb2cbf2a691bba": {"state": "off", "attributes": {}},
             "entity_fd3945cf1a2110f8": {"state": "45", "attributes": {}},
             "entity_6b9ccdab9bb484b2": {"state": "above_horizon", "attributes": {}},
-            "entity_4be32416634e6416": {"state": "on", "attributes": {}},
+            "entity_46174e1ff9913212": {"state": "on", "attributes": {}},
             "entity_1fdcd8b244637246": {"state": "off", "attributes": {}},
             "entity_afef5df0e0cae309": {"state": "on", "attributes": {}},
             "entity_e7a7c61eec7bdff8": {"state": "off", "attributes": {}},
@@ -1053,7 +1053,7 @@ def test_system_branch_validator_accepts_exhaustive_real_source_plans() -> None:
             "entity_d1fb2cbf2a691bba": {"state": presence, "attributes": {}},
             "entity_fd3945cf1a2110f8": {"state": humidity, "attributes": {}},
             "entity_6b9ccdab9bb484b2": {"state": sun, "attributes": {}},
-            "entity_4be32416634e6416": {"state": main, "attributes": {}},
+            "entity_46174e1ff9913212": {"state": main, "attributes": {}},
             "entity_1fdcd8b244637246": {"state": extra, "attributes": {}},
             "entity_afef5df0e0cae309": {"state": fan, "attributes": {}},
             "entity_e7a7c61eec7bdff8": {"state": cabinet, "attributes": {}},
@@ -1098,7 +1098,7 @@ def test_system_branch_validator_accepts_exhaustive_real_source_plans() -> None:
                 "entity_6b9ccdab9bb484b2": {"state": sun, "attributes": {}},
                 "entity_5f3b4436fb7b6f2b": {"state": lux, "attributes": {}},
                 "entity_c9d6bc67f172f30d": {"state": local_light, "attributes": {}},
-                "entity_ff0244d6b760be7e": {"state": relay, "attributes": {}},
+                "entity_4be32416634e6416": {"state": relay, "attributes": {}},
                 "entity_9ed909332fdaa8fd": {
                     "state": chandelier,
                     "attributes": {"brightness": 255, "color_temp_kelvin": 3000},

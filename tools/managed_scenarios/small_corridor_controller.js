@@ -6,7 +6,7 @@ const inputs = (request.inputs && typeof request.inputs === 'object') ? request.
 const trigger = (request.context && request.context.trigger && typeof request.context.trigger === 'object') ? request.context.trigger : {};
 const ID = Object.freeze({motion: 'entity_90417aada6a33491', sun: 'entity_6b9ccdab9bb484b2',
   outsideLux: 'entity_5f3b4436fb7b6f2b', localLight: 'entity_c9d6bc67f172f30d',
-  relay: 'entity_ff0244d6b760be7e', chandelier: 'entity_9ed909332fdaa8fd'});
+  relay: 'entity_4be32416634e6416', chandelier: 'entity_9ed909332fdaa8fd'});
 function item(targetId) { const value = inputs[targetId]; return value && typeof value === 'object' ? value : {state: null, attributes: {}}; }
 function state(targetId) { const value = item(targetId).state; return value === null || value === undefined ? null : String(value); }
 function numeric(value) { if (value === null || value === undefined || value === '') return null; const number = Number(value); return Number.isFinite(number) ? number : null; }
