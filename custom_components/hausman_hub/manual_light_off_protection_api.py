@@ -134,9 +134,6 @@ class ManualLightOffProtectionView(_BaseView):
     async def head(self, request: Any) -> Any:
         return self._method_not_allowed("GET, PUT")
 
-    async def options(self, request: Any) -> Any:
-        return self._method_not_allowed("GET, PUT")
-
 
 class ManualLightOffProtectionReleaseView(_BaseView):
     url = MANUAL_LIGHT_OFF_PROTECTION_RELEASE_PATH
@@ -204,9 +201,6 @@ class ManualLightOffProtectionReleaseView(_BaseView):
         return self._method_not_allowed("POST")
 
     async def head(self, request: Any) -> Any:
-        return self._method_not_allowed("POST")
-
-    async def options(self, request: Any) -> Any:
         return self._method_not_allowed("POST")
 
 

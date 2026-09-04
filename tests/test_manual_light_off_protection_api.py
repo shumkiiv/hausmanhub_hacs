@@ -1,5 +1,8 @@
 """Manual light-off protection API boundary tests."""
 
+import ast
+from pathlib import Path
+
 from custom_components.hausman_hub.application.api_capabilities import (
     MANUAL_LIGHT_OFF_PROTECTION_PATH,
     api_capabilities_snapshot,
@@ -16,6 +19,33 @@ class _Store:
 
     async def async_save(self, payload):
         return None
+
+
+def test_manual_protection_views_leave_options_to_home_assistant_cors() -> None:
+    source = Path(
+        "custom_components/hausman_hub/manual_light_off_protection_api.py"
+    ).read_text(encoding="utf-8")
+    module = ast.parse(source)
+    view_classes = {
+        node.name: node
+        for node in module.body
+        if isinstance(node, ast.ClassDef)
+        and node.name in {
+            "ManualLightOffProtectionView",
+            "ManualLightOffProtectionReleaseView",
+        }
+    }
+
+    assert set(view_classes) == {
+        "ManualLightOffProtectionView",
+        "ManualLightOffProtectionReleaseView",
+    }
+    for view_class in view_classes.values():
+        assert not any(
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "options"
+            for node in view_class.body
+        )
 
 
 def test_capabilities_publish_the_exact_manual_protection_contract() -> None:

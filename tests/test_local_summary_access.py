@@ -754,7 +754,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
     def test_manual_protection_dispatcher_returns_canonical_no_store_405(self) -> None:
         view, release = self._manual_protection_views()
         admin = reader_user("system-admin", admin=True)
-        for method, path in (("POST", view.url), ("GET", release.url), ("PUT", release.url), ("PATCH", view.url), ("DELETE", view.url), ("HEAD", release.url), ("OPTIONS", release.url)):
+        for method, path in (("POST", view.url), ("GET", release.url), ("PUT", release.url), ("PATCH", view.url), ("DELETE", view.url), ("HEAD", release.url)):
             response = asyncio.run(self.hass.http.dispatch(method, FakeJsonRequest("127.0.0.1", admin, path, {})))
             self.assertEqual(405, response.status)
             self.assertEqual("hausman-hub-error", response.payload["contract"]["name"])
@@ -3792,7 +3792,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.211", panel.payload["integration_version"])
+        self.assertEqual("1.52.212", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
