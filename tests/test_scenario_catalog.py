@@ -11,6 +11,7 @@ from custom_components.hausman_hub.application.scenario_catalog import (
     _number_actions_with_policy,
     _number_range,
     _relative_capability_name,
+    _registry_entry,
     _stable_physical_id,
     _stable_target_id_from_entity,
     _state_property,
@@ -42,6 +43,31 @@ class ScenarioCatalogPureTest(unittest.TestCase):
                 "valve",
                 "water_heater",
             },
+        )
+
+    def test_registry_lookup_uses_current_api_and_keeps_old_mapping_fakes(self) -> None:
+        entry = object()
+
+        class FutureCollection:
+            def get(self, key):
+                raise AssertionError("collection.get is removed in HA 2027.9")
+
+        class CurrentRegistry:
+            devices = FutureCollection()
+
+            @staticmethod
+            def async_get(key):
+                return entry if key == "device-1" else None
+
+        self.assertIs(entry, _registry_entry(CurrentRegistry(), "device-1", "devices"))
+        self.assertIsNone(_registry_entry(CurrentRegistry(), "missing", "devices"))
+        self.assertIs(
+            entry,
+            _registry_entry(
+                type("OldRegistryFake", (), {"devices": {"device-1": entry}})(),
+                "device-1",
+                "devices",
+            ),
         )
 
     def test_light_actions_include_brightness(self) -> None:

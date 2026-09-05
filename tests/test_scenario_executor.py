@@ -21,6 +21,9 @@ from custom_components.hausman_hub.application.scenario_executor import (
     _value_parameter_name,
 )
 from custom_components.hausman_hub.application.scenario_service import ScenarioService
+from custom_components.hausman_hub.application.scenario_node_red import (
+    NodeRedBackendError,
+)
 from custom_components.hausman_hub.application.operation_journal import (
     scenario_operation_receipt,
 )
@@ -344,6 +347,95 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             readback_window_seconds=0.02,
             readback_interval_seconds=0.01,
         )
+
+    async def test_managed_light_zero_action_and_source_failures_have_sanitized_phase(self) -> None:
+        """Both managed controllers fail closed before any physical dispatch."""
+
+        definition = ScenarioDefinition(
+            version=1,
+            execution_mode=ScenarioExecutionMode.RESTART,
+            execution_backend=ScenarioExecutionBackend.NODE_RED,
+            command_mode=ScenarioCommandMode.LIVE,
+            triggers=(ScenarioTrigger(id="manual", type=ScenarioTriggerType.MANUAL),),
+            conditions=(),
+            actions=(
+                ScenarioAction(
+                    id="configured_light",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="turn_on",
+                ),
+            ),
+            node_red=ScenarioNodeRedMetadata(),
+        )
+        for scenario_id in (
+            "system-tambur-adaptive-controller",
+            "system-small-corridor-light-controller",
+        ):
+            with self.subTest(scenario_id=scenario_id, path="zero_action"):
+                backend = SimpleNamespace(
+                    async_plan=AsyncMock(
+                        return_value=(
+                            (),
+                            {
+                                "status": "skipped",
+                                "trace": [],
+                                "actions": [],
+                                "privateInput": "must-not-be-journaled",
+                            },
+                        )
+                    )
+                )
+                executor = ScenarioExecutor(
+                    self.hass,
+                    self.catalog,
+                    self.executor._run_callback,
+                    node_red_backend=backend,
+                    readback_window_seconds=0.02,
+                    readback_interval_seconds=0.01,
+                )
+                result = await executor.async_execute(
+                    definition,
+                    f"run-{scenario_id}-zero",
+                    scenario_id=scenario_id,
+                )
+                normalized = scenario_operation_receipt(result)
+                self.assertEqual("scenario_phase_source_execution", normalized["error_code"])
+                self.assertEqual("scenario_phase_source_execution", normalized["reason"])
+                self.assertEqual(
+                    "scenario_phase_source_execution",
+                    normalized["scenario"]["decisions"][-1]["reason"],
+                )
+                self.assertEqual([], normalized["scenario"]["actions"])
+                self.assertNotIn("privateInput", repr(normalized))
+
+            with self.subTest(scenario_id=scenario_id, path="source_failure"):
+                backend = SimpleNamespace(
+                    async_plan=AsyncMock(
+                        side_effect=NodeRedBackendError(
+                            "private entity id and supplied state must not escape"
+                        )
+                    )
+                )
+                executor = ScenarioExecutor(
+                    self.hass,
+                    self.catalog,
+                    self.executor._run_callback,
+                    node_red_backend=backend,
+                    readback_window_seconds=0.02,
+                    readback_interval_seconds=0.01,
+                )
+                result = await executor.async_execute(
+                    definition,
+                    f"run-{scenario_id}-failure",
+                    scenario_id=scenario_id,
+                )
+                normalized = scenario_operation_receipt(result)
+                self.assertEqual("scenario_phase_source_execution", normalized["error_code"])
+                self.assertNotIn("private entity", repr(normalized))
+                self.assertEqual([], normalized["scenario"]["actions"])
+
+        self.hass.services.async_call.assert_not_awaited()
 
     async def test_manual_off_protection_blocks_automatic_light_before_power_preparation(
         self,

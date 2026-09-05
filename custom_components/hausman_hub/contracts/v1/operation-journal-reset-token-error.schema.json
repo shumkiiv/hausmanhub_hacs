@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/operation-journal-reset-token-error.schema.json",
+  "title": "HausmanHub operation journal reset token error v1",
+  "description": "Externally indistinguishable response for an unknown, expired, consumed or superseded archive token. It never reveals token state.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "code", "message", "retryable", "status", "category", "details"],
+  "properties": {
+    "contract": {"type": "object", "additionalProperties": false, "required": ["name", "version"], "properties": {"name": {"const": "hausman-hub-error"}, "version": {"const": 1}}},
+    "code": {"const": "conflict"},
+    "message": {"const": "Архивный допуск недействителен. Создайте новый архив и повторите сброс."},
+    "retryable": {"const": false},
+    "status": {"const": 409},
+    "category": {"const": "conflict"},
+    "details": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["detailCode", "newArchiveRequired", "consumedByThisAttempt", "physicalCommandsSent"],
+      "properties": {
+        "detailCode": {"const": "reset_archive_token_invalid"},
+        "newArchiveRequired": {"const": true},
+        "consumedByThisAttempt": {"const": false},
+        "physicalCommandsSent": {"const": false}
+      }
+    }
+  }
+}

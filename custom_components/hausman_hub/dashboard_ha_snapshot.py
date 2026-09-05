@@ -62,6 +62,17 @@ def _enum_string(value: object) -> str | None:
     return raw if isinstance(raw, str) and raw else None
 
 
+def _registry_values(collection: object) -> tuple[object, ...]:
+    """Read old mapping fakes and HA 2027.9 iterable registry collections."""
+
+    if isinstance(collection, Mapping):
+        return tuple(collection.values())
+    try:
+        return tuple(iter(collection))
+    except TypeError:
+        return ()
+
+
 _ACTIVITY_PRESENTATION = {
     "scenario": ("Сценарий", "scenario"),
     "climate": ("Климат", "climate"),
@@ -74,18 +85,19 @@ _ACTIVITY_STATUS_MESSAGE = {
     "failed": "Операция завершилась ошибкой.",
 }
 _DATA_OPERATION_JOURNAL = "operation_journal"
+_DATA_WATER_SAFETY = "water_safety_service"
 _SENSOR_UNAVAILABLE_STATES = frozenset({"", "unavailable", "unknown"})
 
 
 def _attach_water_safety(hass: HomeAssistant, payload: dict[str, object]) -> None:
     """Add durable leak time and shutoff read-back to configured alarms."""
 
-    from .application.water_safety import WaterSafetyService  # noqa: PLC0415
-    from .water_safety_api import DATA_WATER_SAFETY  # noqa: PLC0415
-
     service = getattr(hass, "data", {}).get("hausman_hub", {}).get(
-        DATA_WATER_SAFETY
+        _DATA_WATER_SAFETY
     )
+    if service is None:
+        return
+    from .application.water_safety import WaterSafetyService  # noqa: PLC0415
     if not isinstance(service, WaterSafetyService):
         return
     alarms = payload.get("alarms")
@@ -397,7 +409,7 @@ async def async_dashboard_snapshot(
             name=area.name,
             icon=_non_empty_string(getattr(area, "icon", None)),
         )
-        for area in areas.areas.values()
+        for area in _registry_values(getattr(areas, "areas", ()))
     )
     device_values = tuple(
         DashboardDevice(
@@ -418,11 +430,12 @@ async def async_dashboard_snapshot(
                 getattr(device, "identifiers", ()) or (),
             ),
         )
-        for device in devices.devices.values()
+        for device in _registry_values(getattr(devices, "devices", ()))
+        if device is not None
     )
     device_area_by_id = {device.device_id: device.area_id for device in device_values}
     entity_values: list[DashboardEntity] = []
-    for entry in entities.entities.values():
+    for entry in _registry_values(getattr(entities, "entities", ())):
         if getattr(entry, "disabled_by", None) is not None:
             continue
         entity_id = getattr(entry, "entity_id", "")

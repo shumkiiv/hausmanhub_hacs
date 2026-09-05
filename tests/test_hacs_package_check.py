@@ -27,6 +27,9 @@ class HacsPackageCheckTest(unittest.TestCase):
         self.file_modes = package.indexed_file_modes(ROOT)
 
     def test_current_prepared_git_package_passes(self) -> None:
+        manifest = json.loads(file_content(self.files, package.MANIFEST_PATH))
+
+        self.assertEqual(["cryptography==48.0.0"], manifest.get("requirements"))
         self.assertEqual(
             (),
             package.find_hacs_package_violations(self.files, self.file_modes),
@@ -85,8 +88,25 @@ class HacsPackageCheckTest(unittest.TestCase):
             self.file_modes,
         )
         self.assertIn(
-            f"{package.MANIFEST_PATH}: must keep the approved manifest fields",
+            f"{package.MANIFEST_PATH}: requirements must be "
+            "['cryptography==48.0.0']",
             manifest_findings,
+        )
+
+    def test_manifest_accepts_only_the_home_assistant_cryptography_pin(self) -> None:
+        manifest = json.loads(file_content(self.files, package.MANIFEST_PATH))
+        manifest["requirements"] = ["cryptography==48.0.0"]
+        pinned_files = replace_file(
+            self.files,
+            package.MANIFEST_PATH,
+            json.dumps(manifest).encode("utf-8"),
+        )
+
+        findings = package.find_hacs_package_violations(pinned_files, self.file_modes)
+
+        self.assertNotIn(
+            f"{package.MANIFEST_PATH}: must keep the approved manifest fields",
+            findings,
         )
 
     def test_json_translation_icon_and_version_errors_are_rejected(self) -> None:

@@ -92,7 +92,15 @@ const TAXONOMY_SNAPSHOT = {
         "requestHash",
         "automaticRetryAllowed",
         "newUserActionRequired",
-        "freshConfirmationRequired"
+        "freshConfirmationRequired",
+        "expectedGeneration",
+        "actualGeneration",
+        "expectedSequence",
+        "actualSequence",
+        "newArchiveRequired",
+        "archivePreserved",
+        "consumedByThisAttempt",
+        "physicalCommandsSent"
       ],
       "aliases": [
         {
@@ -472,7 +480,16 @@ const TAXONOMY_SNAPSHOT = {
       "safeMessage": "Команда уже обрабатывается. Обновите состояние, не повторяя действие автоматически.",
       "automaticRetryAllowed": false,
       "newUserActionRequired": false,
-      "freshConfirmationRequired": false
+      "freshConfirmationRequired": false,
+      "allowedDetailKeys": [
+        "detailCode",
+        "state",
+        "recoveryRequired",
+        "operatorRecoveryRequired",
+        "automaticRetryAllowed",
+        "newUserActionRequired",
+        "freshConfirmationRequired"
+      ]
     },
     {
       "baseCode": "conflict",
@@ -484,7 +501,59 @@ const TAXONOMY_SNAPSHOT = {
       "safeMessage": "Ключ команды уже использован для другого запроса. Запустите действие заново вручную.",
       "automaticRetryAllowed": false,
       "newUserActionRequired": true,
-      "freshConfirmationRequired": true
+      "freshConfirmationRequired": true,
+      "allowedDetailKeys": [
+        "detailCode",
+        "recoveryRequired",
+        "automaticRetryAllowed",
+        "newUserActionRequired",
+        "freshConfirmationRequired",
+        "expectedHash",
+        "requestHash"
+      ]
+    },
+    {
+      "baseCode": "conflict",
+      "detailCode": "reset_precondition_conflict",
+      "retryable": false,
+      "clientState": "stale",
+      "recoveryAction": "retry",
+      "retryPolicy": "new_user_action",
+      "safeMessage": "Журнал изменился. Создайте новый архив перед повторным сбросом.",
+      "automaticRetryAllowed": false,
+      "newUserActionRequired": true,
+      "freshConfirmationRequired": true,
+      "allowedDetailKeys": [
+        "detailCode",
+        "expectedGeneration",
+        "actualGeneration",
+        "expectedSequence",
+        "actualSequence",
+        "expectedRevision",
+        "actualRevision",
+        "newArchiveRequired",
+        "archivePreserved",
+        "consumedByThisAttempt",
+        "physicalCommandsSent"
+      ]
+    },
+    {
+      "baseCode": "conflict",
+      "detailCode": "reset_archive_token_invalid",
+      "retryable": false,
+      "clientState": "failed",
+      "recoveryAction": "retry",
+      "retryPolicy": "new_user_action",
+      "safeMessage": "Архивный допуск недействителен. Создайте новый архив и повторите сброс.",
+      "automaticRetryAllowed": false,
+      "newUserActionRequired": true,
+      "freshConfirmationRequired": true,
+      "allowedDetailKeys": [
+        "detailCode",
+        "newArchiveRequired",
+        "consumedByThisAttempt",
+        "physicalCommandsSent"
+      ]
     }
   ]
 };

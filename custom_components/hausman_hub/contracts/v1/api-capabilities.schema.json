@@ -1538,6 +1538,25 @@
             "receipt_contract": {"type": "object", "additionalProperties": false, "required": ["name", "version"], "properties": {"name": {"const": "hausman-hub-manual-light-off-protection-command-receipt"}, "version": {"const": 1}}}
           }
         },
+        "operation_journal_reset": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available", "hidden_for_non_admin", "requires_ha_admin", "archive_path", "archive_method", "reset_path", "reset_method", "archive_request_contract", "archive_receipt_contract", "reset_request_contract", "reset_receipt_contract", "physical_commands"],
+          "properties": {
+            "available": {"type": "boolean"},
+            "hidden_for_non_admin": {"const": true},
+            "requires_ha_admin": {"const": true},
+            "archive_path": {"const": "/api/hausman_hub/v1/admin/operations/archive"},
+            "archive_method": {"const": "POST"},
+            "reset_path": {"const": "/api/hausman_hub/v1/admin/operations/reset"},
+            "reset_method": {"const": "POST"},
+            "physical_commands": {"const": false},
+            "archive_request_contract": {"type": "object", "additionalProperties": false, "required": ["name", "version"], "properties": {"name": {"const": "hausman-hub-operation-journal-archive-request"}, "version": {"const": 1}}},
+            "archive_receipt_contract": {"type": "object", "additionalProperties": false, "required": ["name", "version"], "properties": {"name": {"const": "hausman-hub-operation-journal-archive-receipt"}, "version": {"const": 1}}},
+            "reset_request_contract": {"type": "object", "additionalProperties": false, "required": ["name", "version"], "properties": {"name": {"const": "hausman-hub-operation-journal-reset-request"}, "version": {"const": 1}}},
+            "reset_receipt_contract": {"type": "object", "additionalProperties": false, "required": ["name", "version"], "properties": {"name": {"const": "hausman-hub-operation-journal-reset-receipt"}, "version": {"const": 1}}}
+          }
+        },
         "climate_room_recovery_v2": {
           "type": "object",
           "additionalProperties": false,

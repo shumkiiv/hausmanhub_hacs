@@ -1,0 +1,14 @@
+{
+  "contract": {"name": "hausman-hub-error", "version": 1},
+  "code": "conflict",
+  "message": "Архивный допуск недействителен. Создайте новый архив и повторите сброс.",
+  "retryable": false,
+  "status": 409,
+  "category": "conflict",
+  "details": {
+    "detailCode": "reset_archive_token_invalid",
+    "newArchiveRequired": true,
+    "consumedByThisAttempt": false,
+    "physicalCommandsSent": false
+  }
+}

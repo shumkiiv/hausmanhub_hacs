@@ -1,0 +1,107 @@
+{
+  "contract": {"name": "hausman-hub-operation-journal-archive-receipt", "version": 1},
+  "correlationId": "journal-archive-0001",
+  "accepted": true,
+  "confirmed": true,
+  "status": "confirmed",
+  "result": "archived",
+  "archiveToken": "T9m_Cc0o5u1dR7xK8pQ3vN6sH2aB4eF0gJ5wL7yZ9Uk",
+  "archivedSnapshotId": "journal-archive-20260905-0001",
+  "archiveSha256": "99769b984bdd82ba260b7de3637201a26b98cdc40d49cbaf5ef5a576d244fa8e",
+  "archiveAlgorithm": "RFC8785-SHA256",
+  "archivedRecords": 4,
+  "archiveStored": true,
+  "immutable": true,
+  "singleUse": true,
+  "issuedAt": 1788631200000,
+  "expiresAt": 1788631500000,
+  "snapshot": {
+    "contract": {"name": "hausman-hub-operation-journal", "version": 1},
+    "generated_at": 1788631200000,
+    "generation": 1,
+    "revision": "0123456789abcdef0123456789abcdef",
+    "sequence": 42,
+    "page": {
+      "order": "sequence_desc",
+      "limit": 512,
+      "returned": 4,
+      "has_more": false,
+      "next_before_sequence": null,
+      "retained_records": 4,
+      "retention_limit": 512
+    },
+    "records": [
+      {
+        "sequence": 42,
+        "correlation_id": "voice-test-0042",
+        "source": "voice",
+        "operation": "voice.yandex_greeting.test",
+        "accepted": false,
+        "confirmed": false,
+        "status": "failed",
+        "occurred_at": 1788631199000,
+        "reason": "Станция недоступна.",
+        "error_code": "station_unavailable"
+      },
+      {
+        "sequence": 40,
+        "correlation_id": "scenario-run-0040",
+        "source": "scenario",
+        "operation": "scenario_run",
+        "accepted": true,
+        "confirmed": false,
+        "status": "accepted",
+        "occurred_at": 1788631198000,
+        "reason": "Shadow-план рассчитан без физических команд.",
+        "error_code": null,
+        "scenario": {
+          "scenario_id": "scenario_evening",
+          "run_id": "scenario-run-0040",
+          "execution_mode": "single",
+          "command_mode": "shadow",
+          "trigger": {
+            "source": "device_state",
+            "trigger_id": "evening_light",
+            "target_id": "device-light-a",
+            "old_value": "off",
+            "new_value": "on",
+            "recovery": false
+          },
+          "outcome": "completed",
+          "evidence_revision": "state-revision-42",
+          "decisions": [
+            {"rule_id": "home_only", "outcome": "passed", "reason": null}
+          ],
+          "actions": [
+            {"action_id": "close_cover", "target_id": "device-cover-a", "outcome": "completed", "confirmed": null, "reason": "shadow_plan"}
+          ]
+        }
+      },
+      {
+        "sequence": 7,
+        "correlation_id": "climate-action-0007",
+        "source": "climate",
+        "operation": "climate.tablet_action",
+        "accepted": true,
+        "confirmed": false,
+        "status": "accepted",
+        "occurred_at": 1788631197000,
+        "reason": "Команда принята и ожидает подтверждения состояния.",
+        "error_code": null
+      },
+      {
+        "sequence": 1,
+        "correlation_id": "lighting-action-0001",
+        "source": "lighting",
+        "operation": "lighting.manual_action",
+        "accepted": true,
+        "confirmed": true,
+        "status": "confirmed",
+        "occurred_at": 1788631196000,
+        "reason": "Состояние подтверждено.",
+        "error_code": null
+      }
+    ]
+  },
+  "physicalCommandsSent": false
+}

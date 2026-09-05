@@ -13,5 +13,8 @@
     "recorder",
     "weather"
   ],
-  "version": "1.52.221"
+  "requirements": [
+    "cryptography==48.0.0"
+  ],
+  "version": "1.52.222"
 }

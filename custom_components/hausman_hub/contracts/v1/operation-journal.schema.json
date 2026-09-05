@@ -16,6 +16,8 @@
       }
     },
     "generated_at": {"type": "integer", "minimum": 0},
+    "generation": {"type": "integer", "minimum": 1, "maximum": 9007199254740991, "description": "Optional additive generation metadata. The reset capability is unavailable unless both generation and revision are present."},
+    "revision": {"type": "string", "pattern": "^[a-f0-9]{16,64}$", "description": "Optional opaque server revision for the complete journal snapshot. Legacy v1 payloads may omit it; reset is unavailable unless both generation and revision are present."},
     "sequence": {"type": "integer", "minimum": 0},
     "page": {
       "type": "object",
@@ -62,6 +64,42 @@
       "items": {"$ref": "#/$defs/record"}
     }
   },
+  "allOf": [
+    {
+      "if": {"required": ["generation"]},
+      "then": {"required": ["revision"]}
+    },
+    {
+      "if": {"required": ["revision"]},
+      "then": {"required": ["generation"]}
+    },
+    {
+      "if": {"required": ["generation", "revision"]},
+      "then": {
+        "properties": {
+          "records": {
+            "items": {
+              "if": {
+                "properties": {
+                  "scenario": {
+                    "properties": {"outcome": {"const": "skipped"}},
+                    "required": ["outcome"]
+                  }
+                },
+                "required": ["scenario"]
+              },
+              "then": {
+                "properties": {
+                  "confirmed": {"const": false},
+                  "status": {"const": "accepted"}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "record": {
       "type": "object",

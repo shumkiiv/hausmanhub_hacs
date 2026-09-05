@@ -786,10 +786,16 @@ def _number_actions_with_policy(
 
 
 def _registry_entry(registry: object, key: str, collection_name: str) -> object | None:
+    async_get = getattr(registry, "async_get", None)
+    if callable(async_get):
+        return async_get(key)
     collection = getattr(registry, collection_name, None)
-    if collection is None:
-        return None
-    return collection.get(key)
+    if isinstance(collection, Mapping):
+        try:
+            return collection[key]
+        except KeyError:
+            return None
+    return None
 
 
 async def async_build_scenario_catalog(hass: HomeAssistant) -> ScenarioCatalog:

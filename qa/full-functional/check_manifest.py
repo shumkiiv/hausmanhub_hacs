@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 
@@ -49,6 +50,18 @@ else:
         or clicked_set & blocked_set
     ):
         errors.append("signature action coverage is incomplete")
+    latency = report.get("safe_action_latency_ms")
+    latency_values = [latency.get(key) for key in ("p50_ms", "p95_ms", "max_ms")] if isinstance(latency, dict) else []
+    if (
+        not isinstance(latency, dict)
+        or not isinstance(latency.get("count"), int)
+        or isinstance(latency.get("count"), bool)
+        or latency.get("count") != len(clicked)
+        or len(latency_values) != 3
+        or any(not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value < 0 for value in latency_values)
+        or (len(latency_values) == 3 and latency_values != sorted(latency_values))
+    ):
+        errors.append("safe action latency telemetry is incomplete")
     if (
         report.get("missing")
         or report.get("external_network")

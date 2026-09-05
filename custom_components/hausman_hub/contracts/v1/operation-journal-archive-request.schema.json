@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/operation-journal-archive-request.schema.json",
+  "title": "HausmanHub operation journal archive request v1",
+  "description": "Local administrator request for a server-created immutable full retained journal archive. It intentionally carries no caller-supplied snapshot, digest or record count.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-operation-journal-archive-request"},
+        "version": {"const": 1}
+      }
+    },
+    "correlationId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"}
+  }
+}

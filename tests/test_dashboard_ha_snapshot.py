@@ -68,6 +68,74 @@ class _ScenarioService:
 
 
 class DashboardHaSnapshotTest(unittest.IsolatedAsyncioTestCase):
+    async def test_adapter_supports_ha_2027_9_iterable_registry_collections(self) -> None:
+        class FutureCollection:
+            def __init__(self, *values):
+                self._values = values
+
+            def __iter__(self):
+                return iter(self._values)
+
+            def values(self):
+                raise AssertionError("registry collection.values is removed in HA 2027.9")
+
+            def get(self, key):
+                raise AssertionError("registry collection.get is removed in HA 2027.9")
+
+        area = SimpleNamespace(id="future", name="Будущая", icon=None)
+        device = SimpleNamespace(
+            id="future-device",
+            name_by_user="Будущее устройство",
+            name=None,
+            area_id="future",
+            model=None,
+            manufacturer=None,
+            entry_type=None,
+            identifiers=(),
+            disabled_by=None,
+        )
+        entity = SimpleNamespace(
+            entity_id="switch.future",
+            device_id="future-device",
+            area_id=None,
+            disabled_by=None,
+            hidden_by=None,
+            entity_category=None,
+            name=None,
+            original_name="Future switch",
+        )
+        hass = SimpleNamespace(
+            data={},
+            config=SimpleNamespace(location_name="Дом"),
+            states=_States(
+                {
+                    "switch.future": SimpleNamespace(
+                        entity_id="switch.future",
+                        state="off",
+                        attributes={"friendly_name": "Будущий выключатель"},
+                    )
+                }
+            ),
+        )
+        registries = (
+            SimpleNamespace(areas=FutureCollection(area)),
+            SimpleNamespace(devices=FutureCollection(device)),
+            SimpleNamespace(entities=FutureCollection(entity)),
+        )
+        with (
+            patch.object(dashboard_ha_snapshot, "_registry_snapshot", return_value=registries),
+            patch.object(
+                dashboard_ha_snapshot,
+                "_local_now",
+                return_value=datetime(2027, 9, 1, tzinfo=timezone.utc),
+            ),
+        ):
+            payload = await dashboard_ha_snapshot.async_dashboard_snapshot(hass)
+
+        self.assertEqual("future", payload["rooms"][0]["id"])
+        self.assertEqual("Будущее устройство", payload["devices"][0]["name"])
+        self.assertEqual("future", payload["devices"][0]["roomId"])
+
     async def test_durable_journal_becomes_redacted_dashboard_activity(self) -> None:
         journal = OperationJournalService(
             _JournalStore(),

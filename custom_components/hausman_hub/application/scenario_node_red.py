@@ -120,6 +120,7 @@ _SYSTEM_INPUT_ATTRIBUTE_ALLOWLIST = {
     },
 }
 _TRACE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+_TRACE_REASON = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _RECEIPT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _RELEASE_TRIGGER_FIELDS = frozenset(
     {
@@ -1875,7 +1876,15 @@ class NodeRedScenarioBackend:
             reason = item.get("reason")
             if reason is not None and not isinstance(reason, str):
                 raise NodeRedBackendError("Node-RED trace reason is invalid")
-            safe_item["reason"] = reason[:500] if isinstance(reason, str) else None
+            # Keep early-phase evidence useful without allowing Node-RED text
+            # to leak entity IDs, secrets, or arbitrary exception details.
+            safe_item["reason"] = (
+                reason[:64]
+                if isinstance(reason, str) and _TRACE_REASON.fullmatch(reason)
+                else f"{trace_id}_{trace_status}"
+                if reason is not None
+                else None
+            )
             safe_trace.append(safe_item)
         result_status = body.get("status")
         if result_status not in _ALLOWED_RESULT_STATUSES:

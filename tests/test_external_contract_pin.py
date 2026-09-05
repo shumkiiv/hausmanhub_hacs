@@ -33,7 +33,7 @@ VENDORED_CONTRACT_HASHES = {
     "custom_components/hausman_hub/contracts/v1/scenario-node-red-source.schema.json": "4f281f11c55a235b78bb418977f948a06d4d1ba8b90b1fef4e389b3842e9f7ec",
     "custom_components/hausman_hub/contracts/v1/scenario-node-red-source-update-request.schema.json": "7712607bfe1e8cbe9a9287ea4812caed2ac2c47e93ff079458fea0a945a677a0",
     "custom_components/hausman_hub/contracts/v1/scenario-node-red-source-update-receipt.schema.json": "b57b3adcbd850af02c3c1112de9eef70fcf2e41483ae4c633b20d6db6dd33040",
-    "custom_components/hausman_hub/contracts/v1/api-capabilities.schema.json": "c0ec10eed3325d356795d2c55333667c5643dda91ca17478560780ca970cd20b",
+    "custom_components/hausman_hub/contracts/v1/api-capabilities.schema.json": "54ac3b2c3d382da0a320b7fb0af1ea4be9743db468d4c336980155126b21a65b",
     "custom_components/hausman_hub/contracts/v1/scenario-ai-draft-request.schema.json": "eeb72fc172f8730552fb174a1a0a55f58debeb9b5612068b0c2889190c37b9c1",
     "custom_components/hausman_hub/contracts/v1/scenario-ai-draft.schema.json": "585ec9c8e48c208452f4f80407feacfc04a00c8b580e04a63504fa049adedb5e",
     "custom_components/hausman_hub/contracts/v1/scenario-health.schema.json": "8a14e51bdb531dd674bede8e0e0618a2788df641dc23fc9da2e8af9b821890e4",
@@ -42,7 +42,7 @@ VENDORED_CONTRACT_HASHES = {
     "custom_components/hausman_hub/contracts/v1/intercom-release-receipt.schema.json": "ea11c82a77a3fe9195513d1a915336167c81a356fa0b56cf058384daedacf947",
     "custom_components/hausman_hub/contracts/v1/scenario-catalog.schema.json": "3b43fa73e6c254ed0f87188a9f7d50144ee43dd7542233b4dcaf32d3d2629f55",
     "custom_components/hausman_hub/contracts/v1/scenario-dry-run-result.schema.json": "533a303e6e9057efd8660972f3f1216b125cace27a152f9d029767968cc40a9f",
-    "custom_components/hausman_hub/contracts/v1/operation-journal.schema.json": "dad001704411f7b40746f20493953d213d8591f1e732cd12ea86a2c0b6104092",
+    "custom_components/hausman_hub/contracts/v1/operation-journal.schema.json": "3550cccabc86052c666a9fca3b2d69ba139218c50a657ca3161f7f4bdfc4b6d2",
     "custom_components/hausman_hub/contracts/v1/device-action-batch-request.schema.json": "ee18b9a830c5c122452477557b32300bba8f0956fa58d2ab7158949b686e00d1",
     "custom_components/hausman_hub/contracts/v1/device-action-batch-receipt.schema.json": "9ebd98dbd40f95c5757cc2751efa67612c6a41caadfc51d292d5968f07263089",
     "custom_components/hausman_hub/contracts/v1/device-feature-matrix.json": "ef1f2784f5ffdd0bde84282816f09542e4f7aabf3e9150c1dfe5b1f8c0315455",
@@ -73,8 +73,8 @@ VENDORED_CONTRACT_HASHES = {
     "fixtures/hausmanhub_tablet_power_v1/request.json": "0713606c6a19a2598c9cf82d07d69fc67038840f38682bb69c7403ef0f9d6a95",
     "fixtures/hausmanhub_tablet_power_v1/receipt.json": "feb9293e5f39bbb7fdda199ccc208b77114b43655668ab67d032844c380fdd9e",
     "custom_components/hausman_hub/contracts/v1/api-error.schema.json": "5f67860b5a3baedcabd70329e320f4a6d0b3d599c056a648d3b4d71c4fd474e8",
-    "custom_components/hausman_hub/contracts/v1/error-taxonomy.json": "a506b7a13a6c8c8ae7a69df629d657c2e7bbbdb73ccfb0a1802eeae675108866",
-    "custom_components/hausman_hub/contracts/v1/error-taxonomy.schema.json": "b6884ec927f83bb8907b856d1a4c438a75762342252b20a758b0e2d0b16d0ef4",
+    "custom_components/hausman_hub/contracts/v1/error-taxonomy.json": "24fc25f256ba8845095142f9b2b251c2265df555fcba3fa79265a83977e1b81c",
+    "custom_components/hausman_hub/contracts/v1/error-taxonomy.schema.json": "f0497234155f4f692913aa157246bb3e0d732ce6ba9fba25d99969526dc57595",
     "custom_components/hausman_hub/contracts/v1/fixtures/api-error.json": "24c338d919e0119c38869ff7a54d2a84395b53ab0b731470414eb341123c2c78",
     "custom_components/hausman_hub/contracts/v1/api-error-idempotency-conflict.schema.json": "bcf1642ce7cc3428a1b39f9613df857fdd517d98d0e51cc0c1172541c1d8b0c1",
     "custom_components/hausman_hub/contracts/v1/api-error-not-acceptable.schema.json": "1f54dd304c0fa59e565a258f07d85bd1aea6fd02520abf2115de6223fa3e636a",
@@ -82,9 +82,21 @@ VENDORED_CONTRACT_HASHES = {
     "custom_components/hausman_hub/contracts/v1/device-state-evidence-reason-code.schema.json": "7180b1d07ede8e77b4fdda23af421b82c3fdf3846e0f53b39b5f6dd140b3007b",
     "custom_components/hausman_hub/contracts/v1/device-state-evidence.schema.json": "4e658a34e9254b49473324ea90eab1c7accc769e746340367afd244269feea6c",
     "custom_components/hausman_hub/contracts/v1/device-state-evidence-reason-codes.json": "667409c7671a11f686dc4872dcebb456cfa1846ce16a5ee2caf170aea943bc90",
-    "custom_components/hausman_hub/contracts/v1/error-taxonomy.schema.json": "b6884ec927f83bb8907b856d1a4c438a75762342252b20a758b0e2d0b16d0ef4",
-    "custom_components/hausman_hub/contracts/v1/error-taxonomy.json": "a506b7a13a6c8c8ae7a69df629d657c2e7bbbdb73ccfb0a1802eeae675108866",
+    "custom_components/hausman_hub/contracts/v1/error-taxonomy.schema.json": "f0497234155f4f692913aa157246bb3e0d732ce6ba9fba25d99969526dc57595",
+    "custom_components/hausman_hub/contracts/v1/error-taxonomy.json": "24fc25f256ba8845095142f9b2b251c2265df555fcba3fa79265a83977e1b81c",
     "custom_components/hausman_hub/contracts/v1/lighting-profile-snapshots.json": "ef8a54c3a83da87986335c5d41dcfaa489945e4117eecfdc7094770466319aec",
+    "custom_components/hausman_hub/contracts/v1/operation-journal-archive-receipt.schema.json": "2fdf331cdb5e7bcb70befa2575cd248f3a1cdb4e37b2d786d6bd21d664f6c895",
+    "custom_components/hausman_hub/contracts/v1/operation-journal-archive-request.schema.json": "673ed885e2432b6b4423ce838bb3e93b4efd84b10d309ae82dbcd6e715821355",
+    "custom_components/hausman_hub/contracts/v1/operation-journal-reset-conflict.schema.json": "38c7d09350ae924f60785ada08b258faa5e12dc6bd219c63b244bffce9759086",
+    "custom_components/hausman_hub/contracts/v1/operation-journal-reset-receipt.schema.json": "6bb9f34625a003e0f728e749262263532eead1a889a9919be3dad9d680a9eb54",
+    "custom_components/hausman_hub/contracts/v1/operation-journal-reset-request.schema.json": "bfcaa6f0fd01d7aa708f1ab702c79d2849037facb24bc6d22cc83cf40c7f259d",
+    "custom_components/hausman_hub/contracts/v1/operation-journal-reset-token-error.schema.json": "527ba649d3b1da2e989be83c1d142667ce081871035a58caf075488c58c8d2f0",
+    "custom_components/hausman_hub/contracts/v1/fixtures/operation-journal-archive-receipt.json": "be2430e3514da71257ea6f767490031b88dc74a0954388c4b032a043683136e7",
+    "custom_components/hausman_hub/contracts/v1/fixtures/operation-journal-archive-request.json": "afde5a15412af74633b01a8de27e63d67fe4ade0ed8b94e291e176209739f2b7",
+    "custom_components/hausman_hub/contracts/v1/fixtures/operation-journal-reset-conflict.json": "c2d6af512c9b304d07b892a063935229c516b493f92067789e9a45405ca945b8",
+    "custom_components/hausman_hub/contracts/v1/fixtures/operation-journal-reset-receipt.json": "8e41b875b88adf03aba66bf4dde62133ffe8e55e2b01f64105458e0a6679de90",
+    "custom_components/hausman_hub/contracts/v1/fixtures/operation-journal-reset-request.json": "61dd9dacd630bd088e9cd2002add93f8cf988f8b2c5eca9b4e65c8aedc6d65a0",
+    "custom_components/hausman_hub/contracts/v1/fixtures/operation-journal-reset-token-error.json": "8c0f069fde2712d7cdbfd00c236b0b4529a0659ca3c2bf7b7aca0eda282128b5",
 }
 
 
@@ -93,14 +105,14 @@ def test_external_contract_pin_is_explicit_and_canonical() -> None:
 
     assert pin == {
         "repository": "shumkiiv/hausmanhub-contracts",
-        "version": "0.65.0",
-        "commit": "e2ba65a",
+        "version": "0.65.1",
+        "commit": "648850e",
         "canonical": True,
         "role": "runtime-consumer",
     }
 
 
-def test_contract_0_65_0_vendored_files_match_canonical_hashes() -> None:
+def test_contract_0_65_1_vendored_files_match_canonical_hashes() -> None:
     for relative_path, expected_hash in VENDORED_CONTRACT_HASHES.items():
         payload = (REPOSITORY_ROOT / relative_path).read_bytes()
         assert hashlib.sha256(payload).hexdigest() == expected_hash, relative_path

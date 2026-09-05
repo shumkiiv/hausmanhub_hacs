@@ -28,6 +28,16 @@ def local_checks(python_executable: str) -> tuple[Check, ...]:
             (python_executable, "-m", "unittest", "discover", "-s", "tests", "-v"),
         ),
         (
+            "archive/reset pytest",
+            (
+                python_executable,
+                "-m",
+                "pytest",
+                "-q",
+                "tests/test_operation_journal_admin.py",
+            ),
+        ),
+        (
             "common synthetic fixture",
             (
                 python_executable,

@@ -170,6 +170,7 @@ EXPECTED_MANIFEST_VALUES = {
     "integration_type": "hub",
     "single_config_entry": True,
     "after_dependencies": ["recorder", "weather"],
+    "requirements": ["cryptography==48.0.0"],
 }
 EXPECTED_MANIFEST_KEYS = frozenset((*EXPECTED_MANIFEST_VALUES, "version"))
 REGULAR_FILE_MODE = "100644"

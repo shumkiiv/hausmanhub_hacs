@@ -1,0 +1,21 @@
+{
+  "contract": {"name": "hausman-hub-error", "version": 1},
+  "code": "conflict",
+  "message": "Журнал изменился. Создайте новый архив перед повторным сбросом.",
+  "retryable": false,
+  "status": 409,
+  "category": "conflict",
+  "details": {
+    "detailCode": "reset_precondition_conflict",
+    "expectedGeneration": 1,
+    "actualGeneration": 1,
+    "expectedSequence": 42,
+    "actualSequence": 43,
+    "expectedRevision": "0123456789abcdef0123456789abcdef",
+    "actualRevision": "fedcba9876543210fedcba9876543210",
+    "newArchiveRequired": true,
+    "archivePreserved": true,
+    "consumedByThisAttempt": false,
+    "physicalCommandsSent": false
+  }
+}

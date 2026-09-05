@@ -990,6 +990,40 @@ class ClimateLedgerKeyringTest(unittest.IsolatedAsyncioTestCase):
                     config_dir=directory, environ={KEYRING_PATH_ENV: path}
                 )
 
+    def test_explicit_external_keyring_marks_only_non_backup_path_separated(self) -> None:
+        from custom_components.hausman_hub.climate_ledger_keyring import (
+            KEYRING_PATH_ENV,
+            _path_is_backup_separated,
+            load_external_climate_ledger_keyring,
+        )
+
+        external_path = Path(self.keyring_directory.name) / "keyring.json"
+        external_path.write_text(
+            json.dumps({"active_key_id": "k1", "keys": {"k1": "a" * 64}}),
+            encoding="utf-8",
+        )
+        external_path.chmod(0o600)
+        self.assertTrue(
+            load_external_climate_ledger_keyring(
+                config_dir="/config",
+                environ={KEYRING_PATH_ENV: str(external_path)},
+            ).backup_separated
+        )
+        self.assertTrue(
+            _path_is_backup_separated(
+                external_path,
+                "/config",
+            )
+        )
+        for root in ("/config", "/share", "/addons", "/ssl", "/media"):
+            with self.subTest(root=root):
+                self.assertFalse(
+                    _path_is_backup_separated(
+                        Path(root) / "hausman_hub" / "keyring.json",
+                        "/config",
+                    )
+                )
+
     def test_external_keyring_rejects_group_readable_file(self) -> None:
         from custom_components.hausman_hub.climate_ledger_keyring import (
             ClimateLedgerKeyringError,
@@ -1033,6 +1067,7 @@ class ClimateLedgerKeyringTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(path, keyring.source_path)
         self.assertEqual("haos-1", keyring.active_key_id)
+        self.assertFalse(keyring.backup_separated)
         self.assertEqual(32, len(keyring.active_key))
         self.assertEqual(0o700, path.parent.stat().st_mode & 0o777)
         self.assertEqual(0o600, path.stat().st_mode & 0o777)

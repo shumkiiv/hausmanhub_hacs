@@ -25,6 +25,7 @@ class LocalReleaseCheckTest(unittest.TestCase):
             tuple(label for label, _ in checks),
             (
                 "local tests",
+                "archive/reset pytest",
                 "common synthetic fixture",
                 "shadow synthetic fixture",
                 "diagnostics synthetic fixture",
@@ -35,6 +36,16 @@ class LocalReleaseCheckTest(unittest.TestCase):
                 "HACS installation package",
                 "published-file safety",
                 "staged-file safety",
+            ),
+        )
+        self.assertEqual(
+            checks[1][1],
+            (
+                "python-for-test",
+                "-m",
+                "pytest",
+                "-q",
+                "tests/test_operation_journal_admin.py",
             ),
         )
         self.assertEqual(

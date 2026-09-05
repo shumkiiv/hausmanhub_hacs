@@ -45,6 +45,50 @@ def receipt(
 
 
 class OperationJournalTests(unittest.IsolatedAsyncioTestCase):
+    async def test_append_save_failure_rolls_back_sequence_and_records(self) -> None:
+        class FailingStore(MemoryStore):
+            async def async_save(self, payload):
+                raise OSError("simulated journal save failure")
+
+        service = OperationJournalService(FailingStore(), now_ms=lambda: 10)
+        with self.assertRaises(OSError):
+            await service.async_append(receipt("failed-save", "device_action"))
+        snapshot = service.snapshot(limit=512)
+        self.assertEqual(0, snapshot["sequence"])
+        self.assertEqual([], snapshot["records"])
+
+    async def test_every_scenario_failure_phase_uses_only_its_stable_code(self) -> None:
+        phases = (
+            "scenario_phase_catalog_not_ready",
+            "scenario_phase_input_snapshot",
+            "scenario_phase_source_execution",
+            "scenario_phase_plan_validation",
+            "scenario_phase_dispatch",
+            "scenario_phase_persistence",
+        )
+        for index, phase in enumerate(phases):
+            with self.subTest(phase=phase):
+                normalized = scenario_operation_receipt(
+                    {
+                        "run_id": f"phase-{index}",
+                        "scenario_id": "managed_controller",
+                        "execution_mode": "restart",
+                        "command_mode": "live",
+                        "status": "failed",
+                        "error": "secret.entity user-supplied-value",
+                        "_journal_phase": phase,
+                        "condition_results": [],
+                        "receipts": [],
+                    }
+                )
+                self.assertEqual(phase, normalized["reason"])
+                self.assertEqual(phase, normalized["error_code"])
+                self.assertEqual(
+                    {"rule_id": phase, "outcome": "failed", "reason": phase},
+                    normalized["scenario"]["decisions"][-1],
+                )
+                self.assertNotIn("secret.entity", repr(normalized))
+
     def test_fixture_matches_public_contract_and_rejects_private_target(self) -> None:
         root = Path(__file__).resolve().parents[1]
         schema = json.loads(
@@ -345,7 +389,7 @@ class OperationJournalTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(record["scenario"]["actions"][0]["confirmed"])
         self.assertEqual("shadow_plan", record["scenario"]["actions"][0]["reason"])
 
-    async def test_skipped_shadow_trace_is_retained_as_failed_without_confirmation(
+    async def test_skipped_shadow_trace_is_accepted_without_confirmation(
         self,
     ) -> None:
         store = MemoryStore()
@@ -372,8 +416,8 @@ class OperationJournalTests(unittest.IsolatedAsyncioTestCase):
 
         record = await service.async_append(normalized)
 
-        self.assertEqual("failed", record["status"])
-        self.assertFalse(record["accepted"])
+        self.assertEqual("accepted", record["status"])
+        self.assertTrue(record["accepted"])
         self.assertFalse(record["confirmed"])
         self.assertEqual("skipped", record["scenario"]["outcome"])
 

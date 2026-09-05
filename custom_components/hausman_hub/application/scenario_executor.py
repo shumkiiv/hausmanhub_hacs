@@ -537,6 +537,35 @@ def _condition_evidence_snapshot(
     return (snapshot, revision, None)
 
 
+def _node_red_journal_phase(error: Exception) -> str:
+    """Separate transport/source failures from rejected executable plans."""
+
+    message = str(error).casefold()
+    plan_markers = (
+        "invalid response",
+        "unsupported contract",
+        "correlation evidence",
+        "too many actions",
+        "forbidden action",
+        "trace",
+        "result status",
+        "selected branch",
+        "duration",
+        "plan",
+        "action value",
+        "trusted envelope",
+        "branch exceeds",
+        "profile exceeds",
+        "profile order",
+        "manual group",
+    )
+    return (
+        "scenario_phase_plan_validation"
+        if any(marker in message for marker in plan_markers)
+        else "scenario_phase_source_execution"
+    )
+
+
 class ScenarioExecutor:
     """Run a scenario definition and collect confirmed action receipts."""
 
@@ -943,6 +972,7 @@ class ScenarioExecutor:
                 "command_mode": command_mode,
                 "status": "failed",
                 "error": "recursive scenario call detected",
+                "_journal_phase": "scenario_phase_plan_validation",
                 "receipts": [],
             }
         if len(visited_scenarios) > definition.safety_policy.nested_depth_limit:
@@ -953,6 +983,7 @@ class ScenarioExecutor:
                 "command_mode": command_mode,
                 "status": "failed",
                 "error": "scenario call depth limit exceeded",
+                "_journal_phase": "scenario_phase_plan_validation",
                 "receipts": [],
             }
         next_visited = visited_scenarios | ({scenario_id} if scenario_id else set())
@@ -990,6 +1021,7 @@ class ScenarioExecutor:
                 "status": "failed",
                 "reason": "stale_critical_evidence",
                 "error": evidence_error,
+                "_journal_phase": "scenario_phase_input_snapshot",
                 "evidence_revision": evidence_revision,
                 "condition_results": [],
                 "receipts": [],
@@ -1024,6 +1056,7 @@ class ScenarioExecutor:
                     "condition_results": condition_results,
                     "evidence_revision": evidence_revision,
                     "receipts": [],
+                    "_journal_phase": "scenario_phase_input_snapshot",
                 }
 
         actions = definition.actions
@@ -1038,6 +1071,7 @@ class ScenarioExecutor:
                     "command_mode": command_mode,
                     "status": "failed",
                     "error": "Node-RED backend is unavailable",
+                    "_journal_phase": "scenario_phase_source_execution",
                     "condition_results": condition_results,
                     "evidence_revision": evidence_revision,
                     "receipts": [],
@@ -1062,6 +1096,7 @@ class ScenarioExecutor:
                     "command_mode": command_mode,
                     "status": "failed",
                     "error": str(error),
+                    "_journal_phase": _node_red_journal_phase(error),
                     "condition_results": condition_results,
                     "evidence_revision": evidence_revision,
                     "receipts": [],
@@ -1079,6 +1114,7 @@ class ScenarioExecutor:
                     "condition_results": condition_results,
                     "evidence_revision": evidence_revision,
                     "node_red": node_red_result,
+                    "_journal_phase": "scenario_phase_source_execution",
                     "receipts": [],
                     "accepted": node_red_result["status"] == "skipped",
                     "confirmed": False,
@@ -1726,6 +1762,11 @@ class ScenarioExecutor:
             else "partial"
             if failed_after_progress
             else "failed",
+            **(
+                {"_journal_phase": "scenario_phase_dispatch"}
+                if not completed
+                else {}
+            ),
         }
 
     async def _async_arm_future_light_offs(

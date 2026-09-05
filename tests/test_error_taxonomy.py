@@ -14,6 +14,7 @@ from custom_components.hausman_hub.error_taxonomy import (
     api_error_payload,
     api_error_status,
     async_preload_error_policies,
+    error_detail_policies,
     error_policies,
 )
 
@@ -35,8 +36,8 @@ ERROR_SCHEMA_PATH = (
     / "v1"
     / "api-error.schema.json"
 )
-CONTRACTS_0_65_0_SHA256 = (
-    "a506b7a13a6c8c8ae7a69df629d657c2e7bbbdb73ccfb0a1802eeae675108866"
+CONTRACTS_0_65_1_SHA256 = (
+    "24fc25f256ba8845095142f9b2b251c2265df555fcba3fa79265a83977e1b81c"
 )
 
 
@@ -52,11 +53,11 @@ class ErrorTaxonomyTests(unittest.TestCase):
 
         hass = Hass()
         asyncio.run(async_preload_error_policies(hass))
-        self.assertEqual([error_policies], hass.targets)
+        self.assertEqual([error_policies, error_detail_policies], hass.targets)
 
-    def test_packaged_taxonomy_matches_contracts_0_65_0(self) -> None:
+    def test_packaged_taxonomy_matches_contracts_0_65_1(self) -> None:
         self.assertEqual(
-            CONTRACTS_0_65_0_SHA256,
+            CONTRACTS_0_65_1_SHA256,
             hashlib.sha256(TAXONOMY_PATH.read_bytes()).hexdigest(),
         )
         payload = json.loads(TAXONOMY_PATH.read_text(encoding="utf-8"))
@@ -65,7 +66,7 @@ class ErrorTaxonomyTests(unittest.TestCase):
             payload["contract"],
         )
         self.assertEqual(22, len(payload["entries"]))
-        self.assertEqual(2, len(payload["detailPolicies"]))
+        self.assertEqual(4, len(payload["detailPolicies"]))
 
     def test_every_policy_builds_one_safe_error_envelope(self) -> None:
         schema = json.loads(ERROR_SCHEMA_PATH.read_text(encoding="utf-8"))
@@ -103,6 +104,39 @@ class ErrorTaxonomyTests(unittest.TestCase):
         )
         too_long = api_error_payload("invalid_request", request_id="r" * 129)
         self.assertNotIn("requestId", too_long)
+
+    def test_reset_detail_policies_use_exact_opaque_contract_messages(self) -> None:
+        invalid = api_error_payload(
+            "conflict",
+            details={
+                "detailCode": "reset_archive_token_invalid",
+                "newArchiveRequired": True,
+                "consumedByThisAttempt": False,
+                "physicalCommandsSent": False,
+                "privateCause": "expired",
+            },
+        )
+        self.assertEqual(
+            "Архивный допуск недействителен. Создайте новый архив и повторите сброс.",
+            invalid["message"],
+        )
+        self.assertFalse(invalid["retryable"])
+        self.assertNotIn("privateCause", repr(invalid))
+        conflict = api_error_payload(
+            "conflict",
+            details={
+                "detailCode": "reset_precondition_conflict",
+                "expectedGeneration": 1,
+                "actualGeneration": 2,
+                "archivePreserved": True,
+                "physicalCommandsSent": False,
+            },
+        )
+        self.assertEqual(
+            "Журнал изменился. Создайте новый архив перед повторным сбросом.",
+            conflict["message"],
+        )
+        self.assertFalse(conflict["retryable"])
 
     def test_retryable_never_means_automatic_command_retry(self) -> None:
         safe_policies = {"read_only", "after_refresh", "after_delay"}

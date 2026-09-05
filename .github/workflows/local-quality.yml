@@ -29,8 +29,8 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-      - name: Установить проверки схем и покрытия
-        run: python3 -m pip install --disable-pip-version-check jsonschema==4.25.1 coverage==7.10.7 pytest==8.3.5
+      - name: Установить зависимости проверок
+        run: python3 -m pip install --disable-pip-version-check jsonschema==4.25.1 coverage==7.10.7 pytest==8.3.5 pytest-asyncio==1.3.0 cryptography==48.0.0
       - name: Установить browser-gate
         run: npm ci
       - name: Установить Chromium

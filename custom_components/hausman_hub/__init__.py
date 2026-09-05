@@ -185,14 +185,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     vendor_resilience = VendorCircuitBreaker()
     domain_data["vendor_resilience"] = vendor_resilience
     from .application.operation_journal import OperationJournalService
-    from .operation_journal_api import DATA_OPERATION_JOURNAL
-    from .operation_journal_storage import HomeAssistantOperationJournalStore
+    from .operation_journal_api import DATA_OPERATION_JOURNAL, DATA_OPERATION_JOURNAL_ARCHIVE
+    from .operation_journal_storage import HomeAssistantOperationJournalArchiveStore, HomeAssistantOperationJournalStore
 
     operation_journal = OperationJournalService(
         HomeAssistantOperationJournalStore(hass, entry.entry_id)
     )
     await operation_journal.async_load()
     domain_data[DATA_OPERATION_JOURNAL] = operation_journal
+    from .application.operation_journal_admin import OperationJournalArchiveService
+    operation_journal_archive = OperationJournalArchiveService(
+        operation_journal,
+        HomeAssistantOperationJournalArchiveStore(hass, entry.entry_id),
+        keyring=scope_integrity_key,
+    )
+    await operation_journal_archive.async_load()
+    domain_data[DATA_OPERATION_JOURNAL_ARCHIVE] = operation_journal_archive
     from .application.device_action_idempotency import DangerousActionIdempotency
     from .device_action_idempotency_storage import (
         HomeAssistantDeviceActionIdempotencyStore,

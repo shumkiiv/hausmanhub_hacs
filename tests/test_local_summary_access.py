@@ -317,6 +317,7 @@ class FakeJsonRequest(FakeRequest):
         super().__init__(remote, user, path=path)
         self._payload = payload
         self._raw_body = raw_body or json.dumps(payload).encode("utf-8")
+        self.content = self
         self.content_type = content_type
         self.content_length = len(self._raw_body)
         self.headers = {} if accept is None else {"Accept": accept}
@@ -324,8 +325,8 @@ class FakeJsonRequest(FakeRequest):
     async def json(self) -> object:
         return self._payload
 
-    async def read(self) -> bytes:
-        return self._raw_body
+    async def read(self, size: int = -1) -> bytes:
+        return self._raw_body if size < 0 else self._raw_body[:size]
 
 
 class FakeEntry:
@@ -3817,7 +3818,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.221", panel.payload["integration_version"])
+        self.assertEqual("1.52.222", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -4808,7 +4809,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(97, len(self.hass.http.views))
+        self.assertEqual(99, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -6081,6 +6082,206 @@ class LocalSummaryAccessTest(unittest.TestCase):
         invalid_response = asyncio.run(OperationJournalView(self.hass).get(invalid_request))
         self.assertEqual(400, invalid_response.status)
 
+    def test_operation_journal_admin_posts_are_strictly_bounded_and_no_store(self) -> None:
+        from custom_components.hausman_hub.operation_journal_api import (
+            OperationJournalArchiveView,
+            OperationJournalResetView,
+        )
+
+        user = reader_user(admin=True)
+        archive_body = {
+            "contract": {
+                "name": "hausman-hub-operation-journal-archive-request",
+                "version": 1,
+            }
+        }
+
+        class NeverReadRequest(FakeJsonRequest):
+            def __init__(self, path, declared):
+                super().__init__("192.168.1.20", user, path, archive_body)
+                self.content_length = declared
+                self.read_calls = 0
+
+            async def read(self, size=-1):
+                self.read_calls += 1
+                raise AssertionError("oversized or missing request must not be read")
+
+        for view, path in (
+            (OperationJournalArchiveView(self.hass), "/api/hausman_hub/v1/admin/operations/archive"),
+            (OperationJournalResetView(self.hass), "/api/hausman_hub/v1/admin/operations/reset"),
+        ):
+            oversized = NeverReadRequest(path, 4097)
+            response = asyncio.run(view.post(oversized))
+            self.assertEqual(413, response.status)
+            self.assertEqual("invalid_request", response.payload["code"])
+            self.assertEqual(0, oversized.read_calls)
+            self.assertEqual("no-store", response.headers["Cache-Control"])
+            self.assertEqual("no-cache", response.headers["Pragma"])
+
+            missing = NeverReadRequest(path, None)
+            response = asyncio.run(view.post(missing))
+            self.assertEqual(400, response.status)
+            self.assertEqual(0, missing.read_calls)
+
+        mismatch = FakeJsonRequest(
+            "192.168.1.20",
+            user,
+            "/api/hausman_hub/v1/admin/operations/archive",
+            archive_body,
+        )
+        mismatch.content_length += 1
+        response = asyncio.run(OperationJournalArchiveView(self.hass).post(mismatch))
+        self.assertEqual(400, response.status)
+        self.assertEqual("invalid_request", response.payload["code"])
+
+    def test_operation_journal_rate_and_opaque_token_errors_match_contract(self) -> None:
+        from custom_components.hausman_hub.application.operation_journal import (
+            OperationJournalService,
+        )
+        from custom_components.hausman_hub.application.operation_journal_admin import (
+            OperationJournalArchiveService,
+        )
+        from custom_components.hausman_hub.operation_journal_api import (
+            OperationJournalArchiveView,
+            OperationJournalResetView,
+        )
+
+        class Store:
+            def __init__(self):
+                self.payload = None
+
+            async def async_load(self):
+                return self.payload
+
+            async def async_save(self, payload):
+                self.payload = payload
+
+        class Keyring:
+            active_key_id = "external-test-key"
+            keys = {active_key_id: bytes.fromhex("55" * 32)}
+            active_key = keys[active_key_id]
+            backup_separated = True
+
+            def key_for(self, key_id):
+                return self.keys.get(key_id)
+
+        journal = OperationJournalService(Store(), now_ms=lambda: 100)
+        service = OperationJournalArchiveService(
+            journal, Store(), keyring=Keyring(), now_ms=lambda: 100
+        )
+        self.hass.data["hausman_hub"]["operation_journal_archive"] = service
+        user = reader_user(admin=True)
+        archive_body = {
+            "contract": {
+                "name": "hausman-hub-operation-journal-archive-request",
+                "version": 1,
+            }
+        }
+        archive_path = "/api/hausman_hub/v1/admin/operations/archive"
+        for _ in range(2):
+            response = asyncio.run(
+                OperationJournalArchiveView(self.hass).post(
+                    FakeJsonRequest("192.168.1.20", user, archive_path, archive_body)
+                )
+            )
+            self.assertEqual(201, response.status)
+            self.assertFalse(response.payload["physicalCommandsSent"])
+        archived_receipt = response.payload
+        limited = asyncio.run(
+            OperationJournalArchiveView(self.hass).post(
+                FakeJsonRequest("192.168.1.20", user, archive_path, archive_body)
+            )
+        )
+        self.assertEqual(429, limited.status)
+        self.assertEqual(
+            {
+                "contract": {"name": "hausman-hub-error", "version": 1},
+                "code": "rate_limited",
+                "message": "Слишком много запросов. Подождите перед повтором.",
+                "retryable": True,
+                "details": {"retryAfterSeconds": 60},
+            },
+            limited.payload,
+        )
+        self.assertEqual("60", limited.headers["Retry-After"])
+
+        reset_path = "/api/hausman_hub/v1/admin/operations/reset"
+        invalid = asyncio.run(
+            OperationJournalResetView(self.hass).post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    user,
+                    reset_path,
+                    {
+                        "contract": {
+                            "name": "hausman-hub-operation-journal-reset-request",
+                            "version": 1,
+                        },
+                        "archiveToken": "A" * 43,
+                        "expectedGeneration": 1,
+                        "expectedSequence": 0,
+                        "expectedRevision": "0" * 16,
+                    },
+                )
+            )
+        )
+        fixture = json.loads(
+            (
+                ROOT
+                / "custom_components/hausman_hub/contracts/v1/fixtures/operation-journal-reset-token-error.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(409, invalid.status)
+        self.assertEqual(fixture, invalid.payload)
+        self.assertEqual("no-store", invalid.headers["Cache-Control"])
+        self.assertEqual("no-cache", invalid.headers["Pragma"])
+
+        asyncio.run(
+            journal.async_append(
+                {
+                    "request_id": "journal-cas-change",
+                    "operation": "device_action",
+                    "accepted": True,
+                    "confirmed": True,
+                    "status": "confirmed",
+                    "reason": None,
+                    "error_code": None,
+                }
+            )
+        )
+        reset_body = {
+            "contract": {
+                "name": "hausman-hub-operation-journal-reset-request",
+                "version": 1,
+            },
+            "archiveToken": archived_receipt["archiveToken"],
+            "expectedGeneration": archived_receipt["snapshot"]["generation"],
+            "expectedSequence": archived_receipt["snapshot"]["sequence"],
+            "expectedRevision": archived_receipt["snapshot"]["revision"],
+        }
+        conflict = asyncio.run(
+            OperationJournalResetView(self.hass).post(
+                FakeJsonRequest("192.168.1.20", user, reset_path, reset_body)
+            )
+        )
+        self.assertEqual(409, conflict.status)
+        self.assertEqual("conflict", conflict.payload["code"])
+        self.assertEqual("conflict", conflict.payload["category"])
+        self.assertFalse(conflict.payload["retryable"])
+        self.assertEqual(
+            "Журнал изменился. Создайте новый архив перед повторным сбросом.",
+            conflict.payload["message"],
+        )
+        details = conflict.payload["details"]
+        self.assertEqual("reset_precondition_conflict", details["detailCode"])
+        self.assertTrue(details["newArchiveRequired"])
+        self.assertTrue(details["archivePreserved"])
+        self.assertFalse(details["consumedByThisAttempt"])
+        self.assertFalse(details["physicalCommandsSent"])
+        self.assertFalse(
+            service._archives[archived_receipt["archivedSnapshotId"]]["consumed"]
+        )
+
     def test_closed_optional_page_request_does_not_read_the_home(self) -> None:
         """The page request remains closed even with a stale runtime pointer."""
 
@@ -6376,6 +6577,40 @@ class LocalSummaryAccessTest(unittest.TestCase):
             hass.data["hausman_hub"]["smart_switch_runtime"],
         )
 
+    def test_archive_store_load_failure_does_not_abort_climate_setup(self) -> None:
+        from custom_components.hausman_hub.application.operation_journal_admin import (
+            JournalArchiveError,
+        )
+        from custom_components.hausman_hub.operation_journal_storage import (
+            HomeAssistantOperationJournalArchiveStore,
+        )
+
+        async def archive_load_failure(_store: object) -> object:
+            raise OSError("private archive storage detail")
+
+        hass = FakeHomeAssistant()
+        entry = FakeEntry(
+            {
+                "mode": "read-only",
+                "direct_execution_status": "direct_execution_blocked",
+            },
+            {},
+            "synthetic-archive-load-failure",
+        )
+        hass.config_entries.entries = [entry]
+
+        with patch.object(
+            HomeAssistantOperationJournalArchiveStore,
+            "async_load",
+            archive_load_failure,
+        ):
+            self.assertTrue(asyncio.run(self.integration.async_setup_entry(hass, entry)))
+
+        self.assertIn("climate_runtime", hass.data["hausman_hub"])
+        archive_service = hass.data["hausman_hub"]["operation_journal_archive"]
+        with self.assertRaisesRegex(JournalArchiveError, "archive_storage_unavailable"):
+            asyncio.run(archive_service.async_archive("admin"))
+
     def test_setup_rejects_an_unsafe_entry_before_registering_the_view(self) -> None:
         """A rejected entry must not open even the local count-only path."""
 
@@ -6411,7 +6646,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(96, len(closed_hass.http.views))
+        self.assertEqual(98, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -6451,6 +6686,8 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/admin/climate-shadow-comparison",
                 "/api/hausman_hub/v1/admin/climate-shadow-window",
                 "/api/hausman_hub/v1/admin/operations",
+                "/api/hausman_hub/v1/admin/operations/archive",
+                "/api/hausman_hub/v1/admin/operations/reset",
                 "/api/hausman_hub/v1/admin/climate-drafts",
                 "/api/hausman_hub/v1/admin/climate-drafts/current",
                 "/api/hausman_hub/v1/admin/climate-drafts/validate",

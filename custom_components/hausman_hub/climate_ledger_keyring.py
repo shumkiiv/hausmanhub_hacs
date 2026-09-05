@@ -23,6 +23,9 @@ _HEX_KEY = re.compile(r"[a-f0-9]{64}")
 KEYRING_PATH_ENV = "HAUSMAN_HUB_CLIMATE_LEDGER_KEYRING_PATH"
 HA_OS_KEYRING_PATH = Path("/media/hausman_hub/climate-ledger.json")
 _HA_OS_KEY_ID = "haos-1"
+_HA_FULL_BACKUP_ROOTS = tuple(
+    Path(root) for root in ("/config", "/share", "/addons", "/ssl", "/media")
+)
 
 
 class ClimateLedgerKeyringError(ValueError):
@@ -44,6 +47,7 @@ class ClimateLedgerKeyring:
     keys: Mapping[str, bytes]
     source_path: Path | None = None
     ledger_anchors: Mapping[str, LedgerAnchor] | None = None
+    backup_separated: bool = False
 
     @property
     def active_key(self) -> bytes:
@@ -219,7 +223,35 @@ def load_external_climate_ledger_keyring(
     anchors = document.get("ledger_anchors")
     if anchors is not None and not isinstance(anchors, dict):
         raise ClimateLedgerKeyringError("external climate ledger anchor is invalid")
-    return ClimateLedgerKeyring(active_key_id=active_key_id, keys=keys, source_path=path)
+    # HA OS includes ``media`` in a full backup together with the config Store.
+    # Its convenient generated keyring is therefore suitable for ledger
+    # authentication, but not for decrypting a credential stored in that same
+    # backup. Only the explicit administrator-managed provider establishes the
+    # separate-secret boundary required by the journal archive protocol.
+    backup_separated = (
+        isinstance(raw_path, str)
+        and bool(raw_path)
+        and _path_is_backup_separated(path, config_dir)
+    )
+    return ClimateLedgerKeyring(
+        active_key_id=active_key_id,
+        keys=keys,
+        source_path=path,
+        backup_separated=backup_separated,
+    )
+
+
+def _path_is_backup_separated(
+    path: Path,
+    config_dir: str | os.PathLike[str] | None,
+) -> bool:
+    """Reject locations collected with config in a standard HA full backup."""
+
+    resolved = path.resolve()
+    roots = list(_HA_FULL_BACKUP_ROOTS)
+    if config_dir is not None:
+        roots.append(Path(config_dir).resolve())
+    return not any(resolved == root or root in resolved.parents for root in roots)
 
 
 def _ensure_ha_os_keyring(path: Path) -> None:

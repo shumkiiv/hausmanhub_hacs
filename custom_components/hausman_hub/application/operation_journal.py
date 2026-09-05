@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import re
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Protocol
 
 OPERATION_JOURNAL_CONTRACT_NAME = "hausman-hub-operation-journal"
@@ -20,6 +22,16 @@ _SCENARIO_OUTCOMES = frozenset(
 )
 _EXECUTION_MODES = frozenset({"single", "restart", "queued"})
 _COMMAND_MODES = frozenset({"live", "shadow"})
+_SCENARIO_PHASE_CODES = frozenset(
+    {
+        "scenario_phase_catalog_not_ready",
+        "scenario_phase_input_snapshot",
+        "scenario_phase_source_execution",
+        "scenario_phase_plan_validation",
+        "scenario_phase_dispatch",
+        "scenario_phase_persistence",
+    }
+)
 
 
 class OperationJournalStore(Protocol):
@@ -41,6 +53,7 @@ class OperationJournalService:
         self._now_ms = now_ms or (lambda: time.time_ns() // 1_000_000)
         self._lock = asyncio.Lock()
         self._sequence = 0
+        self._generation = 1
         self._records: list[dict[str, object]] = []
 
     async def async_load(self) -> None:
@@ -61,9 +74,10 @@ class OperationJournalService:
         normalized.sort(key=lambda item: int(item["sequence"]), reverse=True)
         self._records = normalized
         self._sequence = max(
-            sequence,
-            *(int(item["sequence"]) for item in normalized),
+            (sequence, *(int(item["sequence"]) for item in normalized))
         )
+        generation = payload.get("generation", 1)
+        self._generation = generation if type(generation) is int and generation >= 1 else 1
 
     async def async_append(self, receipt: Mapping[str, object]) -> dict[str, object]:
         """Append one already normalized receipt without private target details."""
@@ -103,6 +117,8 @@ class OperationJournalService:
         ):
             raise ValueError("scenario trace must belong to scenario_run")
         async with self._lock:
+            old_sequence = self._sequence
+            old_records = self._records
             self._sequence += 1
             record = {
                 "sequence": self._sequence,
@@ -122,10 +138,50 @@ class OperationJournalService:
                 record["scenario"] = scenario
             if manual_off_protection is not None:
                 record["manualOffProtection"] = manual_off_protection
-            self._records.insert(0, record)
-            del self._records[MAX_OPERATION_JOURNAL_RECORDS:]
-            await self._store.async_save(self._storage_payload())
+            self._records = [record, *self._records][:MAX_OPERATION_JOURNAL_RECORDS]
+            try:
+                await self._store.async_save(self._storage_payload())
+            except Exception:
+                self._sequence = old_sequence
+                self._records = old_records
+                raise
             return dict(record)
+
+    async def async_reset_if_cas(
+        self,
+        expected_generation: int,
+        expected_sequence: int,
+        expected_revision: str,
+        *,
+        before_commit: Callable[[], Awaitable[None]] | None = None,
+    ) -> dict[str, object] | None:
+        """Clear records only when the complete journal CAS still matches."""
+        async with self._lock:
+            current = self.snapshot(limit=MAX_OPERATION_JOURNAL_RECORDS)
+            if (
+                expected_generation != current["generation"]
+                or expected_sequence != current["sequence"]
+                or expected_revision != current["revision"]
+            ):
+                return None
+            previous = dict(current)
+            if before_commit is not None:
+                await before_commit()
+            old_generation = self._generation
+            old_sequence = self._sequence
+            old_records = self._records
+            self._generation += 1
+            self._sequence = 0
+            self._records = []
+            try:
+                await self._store.async_save(self._storage_payload())
+            except Exception:
+                self._generation = old_generation
+                self._sequence = old_sequence
+                self._records = old_records
+                raise
+            resulting = self.snapshot(limit=MAX_OPERATION_JOURNAL_RECORDS)
+            return {"previous": previous, "resulting": resulting}
 
     def snapshot(
         self,
@@ -158,12 +214,14 @@ class OperationJournalService:
         ]
         records = eligible[:limit]
         has_more = len(eligible) > limit
-        return {
+        payload = {
             "contract": {
                 "name": OPERATION_JOURNAL_CONTRACT_NAME,
                 "version": OPERATION_JOURNAL_CONTRACT_VERSION,
             },
             "generated_at": max(0, self._now_ms()),
+            "generation": self._generation,
+            "revision": "",
             "sequence": self._sequence,
             "page": {
                 "order": "sequence_desc",
@@ -178,10 +236,13 @@ class OperationJournalService:
             },
             "records": records,
         }
+        payload["revision"] = _journal_revision(payload)
+        return payload
 
     def _storage_payload(self) -> dict[str, object]:
         return {
             "version": 1,
+            "generation": self._generation,
             "sequence": self._sequence,
             "records": [dict(item) for item in self._records],
         }
@@ -199,6 +260,14 @@ def _source_for_operation(operation: str) -> str:
     }:
         return "climate"
     return "device"
+
+
+def _journal_revision(snapshot: Mapping[str, object]) -> str:
+    value = dict(snapshot)
+    value.pop("generated_at", None)
+    value.pop("revision", None)
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _validated_record(value: object) -> dict[str, object] | None:
@@ -355,16 +424,30 @@ def scenario_operation_receipt(result: Mapping[str, object]) -> dict[str, object
         if isinstance(target_id, str) and _CORRELATION_ID.fullmatch(target_id):
             action_trace["target_id"] = target_id
         actions.append(action_trace)
-    completed = outcome == "completed"
-    confirmed = command_mode == "live" and completed and result.get("confirmed") is True
+    phase = _scenario_diagnostic_phase(result, outcome, condition_results, receipts)
+    if phase is not None:
+        decisions.append(
+            {
+                "rule_id": phase,
+                "outcome": "failed" if outcome in {"failed", "partial", "cancelled"} else "skipped",
+                "reason": phase,
+            }
+        )
+    # A skipped run is a valid accepted decision with no device confirmation.
+    # It is not an execution failure: conditions may intentionally suppress all
+    # actions, especially in shadow mode.
+    accepted = outcome in {"completed", "skipped"}
+    confirmed = command_mode == "live" and outcome == "completed" and result.get("confirmed") is True
     reason = _safe_trace_reason(
         result.get("reason") or result.get("error"),
         "scenario_failed"
-        if not completed
+        if not accepted
         else "shadow_plan"
         if command_mode == "shadow"
         else None,
     )
+    if phase is not None:
+        reason = phase
     scenario_trace: dict[str, object] = {
         "scenario_id": scenario_id,
         "run_id": run_id,
@@ -385,9 +468,9 @@ def scenario_operation_receipt(result: Mapping[str, object]) -> dict[str, object
     receipt = {
         "correlation_id": run_id,
         "operation": "scenario_run",
-        "accepted": completed,
+        "accepted": accepted,
         "confirmed": confirmed,
-        "status": "confirmed" if confirmed else "accepted" if completed else "failed",
+        "status": "confirmed" if confirmed else "accepted" if accepted else "failed",
         "reason": reason,
         "error_code": reason,
         "scenario": scenario_trace,
@@ -399,6 +482,48 @@ def scenario_operation_receipt(result: Mapping[str, object]) -> dict[str, object
             receipt["manualOffProtection"] = protection
             break
     return receipt
+
+
+def _scenario_diagnostic_phase(
+    result: Mapping[str, object],
+    outcome: object,
+    condition_results: list[object],
+    receipts: list[object],
+) -> str | None:
+    """Classify a non-success path without retaining raw values or identifiers."""
+
+    explicit = result.get("_journal_phase")
+    if explicit in _SCENARIO_PHASE_CODES:
+        return str(explicit)
+    if outcome == "completed":
+        return None
+    if result.get("execution_backend") == "node_red" or isinstance(result.get("node_red"), Mapping):
+        return "scenario_phase_source_execution"
+    raw = " ".join(
+        value.casefold()
+        for value in (result.get("reason"), result.get("error"))
+        if isinstance(value, str)
+    )
+    if any(word in raw for word in ("persist", "storage", "journal", "save")):
+        return "scenario_phase_persistence"
+    if any(word in raw for word in ("catalog", "not ready", "not found", "unavailable target")):
+        return "scenario_phase_catalog_not_ready"
+    if condition_results or "evidence" in raw:
+        return "scenario_phase_input_snapshot"
+    if receipts:
+        receipt_text = " ".join(
+            str(item.get("error") or item.get("reason") or "").casefold()
+            for item in receipts
+            if isinstance(item, Mapping)
+        )
+        if any(word in receipt_text for word in ("catalog", "not found", "unavailable target")):
+            return "scenario_phase_catalog_not_ready"
+        if any(word in receipt_text for word in ("persist", "storage", "save")):
+            return "scenario_phase_persistence"
+        return "scenario_phase_dispatch"
+    if any(word in raw for word in ("source", "node-red", "node_red")):
+        return "scenario_phase_source_execution"
+    return "scenario_phase_plan_validation"
 
 
 def _safe_trace_reason(value: object, fallback: str | None) -> str | None:

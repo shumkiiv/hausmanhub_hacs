@@ -127,12 +127,36 @@ function summarizeUnclassified(rows) {
 }
 
 function withOccurrences(items) {
+  const totals = new Map();
+  for (const item of items) totals.set(item.key, (totals.get(item.key) || 0) + 1);
   const seen = new Map();
   return items.map((item) => {
     const occurrence = seen.get(item.key) || 0;
     seen.set(item.key, occurrence + 1);
-    return { ...item, occurrence };
+    return { ...item, occurrence, occurrenceTotal: totals.get(item.key) };
   });
+}
+
+function latencySummary(samples) {
+  const sorted = samples
+    .filter((value) => Number.isFinite(value) && value >= 0)
+    .map((value) => Number(value.toFixed(3)))
+    .sort((left, right) => left - right);
+  if (!sorted.length) return { count: 0, p50_ms: 0, p95_ms: 0, max_ms: 0 };
+  const nearestRank = (quantile) => sorted[Math.max(0, Math.ceil(sorted.length * quantile) - 1)];
+  return {
+    count: sorted.length,
+    p50_ms: nearestRank(0.50),
+    p95_ms: nearestRank(0.95),
+    max_ms: sorted[sorted.length - 1],
+  };
+}
+
+function assignControlLanes(controls, requestedLaneCount) {
+  const laneCount = Math.max(1, Math.min(requestedLaneCount, controls.length || 1));
+  const lanes = Array.from({ length: laneCount }, () => []);
+  controls.forEach((control, index) => lanes[index % laneCount].push({ index, control }));
+  return lanes;
 }
 
 test("intent classifier: ui-only effect", async () => {
@@ -204,7 +228,31 @@ test("unclassified report groups technical controls without display text", async
 
 test("repeated controls keep one technical key and distinct runtime instances", async () => {
   expect(withOccurrences([{ key: "scenario:run" }, { key: "scenario:run" }, { key: "navigation:rooms" }]))
-    .toEqual([{ key: "scenario:run", occurrence: 0 }, { key: "scenario:run", occurrence: 1 }, { key: "navigation:rooms", occurrence: 0 }]);
+    .toEqual([
+      { key: "scenario:run", occurrence: 0, occurrenceTotal: 2 },
+      { key: "scenario:run", occurrence: 1, occurrenceTotal: 2 },
+      { key: "navigation:rooms", occurrence: 0, occurrenceTotal: 1 },
+    ]);
+});
+
+test("safe action latency summary uses nearest-rank percentiles", async () => {
+  expect(latencySummary([0.4, 0.8, 2.1, 15.3, 16.1])).toEqual({
+    count: 5,
+    p50_ms: 2.1,
+    p95_ms: 16.1,
+    max_ms: 16.1,
+  });
+  expect(latencySummary([])).toEqual({ count: 0, p50_ms: 0, p95_ms: 0, max_ms: 0 });
+});
+
+test("isolated action lanes cover every control exactly once in stable order", async () => {
+  const lanes = assignControlLanes(["a", "b", "c", "d", "e"], 3);
+  expect(lanes).toEqual([
+    [{ index: 0, control: "a" }, { index: 3, control: "d" }],
+    [{ index: 1, control: "b" }, { index: 4, control: "e" }],
+    [{ index: 2, control: "c" }],
+  ]);
+  expect(lanes.flat().sort((left, right) => left.index - right.index).map((item) => item.control)).toEqual(["a", "b", "c", "d", "e"]);
 });
 
 test("UI intent assignments have matching manifest entries", async () => {
@@ -243,6 +291,51 @@ test("настроечные маршруты открывают заявлен�
     await page.goto(`${HARNESS}?section=settings&settings=rooms&theme=dark`, { waitUntil: "domcontentloaded" });
     await expect(page.locator("hausman-hub-panel").locator("main")).toBeVisible();
     expect(await page.locator("hausman-hub-panel").evaluate(host => host._activeSettingsView)).toBe("rooms");
+  } finally {
+    await context.close();
+  }
+});
+
+test("повторно используемая страница получает чистый документ и storage перед действием", async ({ browser }) => {
+  const telemetry = { blocked: [], blockedAttempts: 0, continued: [], continuedExternal: [] };
+  const context = await createStateContext(browser, telemetry);
+  const page = await context.newPage();
+  try {
+    await open(page, ["overview", ""]);
+    await page.evaluate(() => {
+      localStorage.setItem("hacs-browser-reuse-probe", "stale");
+      document.body.dataset.hacsBrowserReuseProbe = "stale";
+      window.__hausmanHubInteractionAudit.reuseProbe = "stale";
+    });
+    await open(page, ["overview", ""]);
+    const state = await page.evaluate(() => ({
+      storage: localStorage.getItem("hacs-browser-reuse-probe"),
+      documentMarker: document.body.dataset.hacsBrowserReuseProbe || null,
+      auditMarker: window.__hausmanHubInteractionAudit.reuseProbe || null,
+    }));
+    expect(state).toEqual({ storage: null, documentMarker: null, auditMarker: null });
+    expect(telemetry.continuedExternal).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
+
+test("готовность повторяющихся Node-RED действий требует полного устойчивого набора", async ({ browser }) => {
+  const telemetry = { blocked: [], blockedAttempts: 0, continued: [], continuedExternal: [] };
+  const context = await createStateContext(browser, telemetry);
+  const page = await context.newPage();
+  const expected = { key: "scenario:more-action", occurrence: 11, occurrenceTotal: 12 };
+  try {
+    await open(page, ["scenarios-nodered", "&nodeRedEditor=1"]);
+    await waitForStableControlInventory(page, expected);
+    await page.locator("hausman-hub-panel").evaluate((host, key) => {
+      const controls = [...host.shadowRoot.querySelectorAll(`[data-harness-key="${key}"]`)];
+      const last = controls.at(-1);
+      delete last.dataset.harnessKey;
+      requestAnimationFrame(() => { last.dataset.harnessKey = key; });
+    }, expected.key);
+    await waitForStableControlInventory(page, expected);
+    await expect(page.locator("hausman-hub-panel").locator(`[data-harness-key="${expected.key}"]`)).toHaveCount(expected.occurrenceTotal);
   } finally {
     await context.close();
   }
@@ -367,12 +460,81 @@ async function freshStatePage(context, state) {
   return page;
 }
 
+async function waitForStableControlInventory(page, expected) {
+  let consecutiveReadySamples = 0;
+  const requiredReadySamples = expected.occurrenceTotal > 1 ? 2 : 1;
+  await expect.poll(async () => {
+    const snapshot = await page.locator("hausman-hub-panel").evaluate((host, key) => {
+      const visible = node => { const style = getComputedStyle(node); return !node.disabled && !node.hidden && style.display !== "none" && style.visibility !== "hidden" && node.getClientRects().length > 0; };
+      const count = [...host.shadowRoot.querySelectorAll("button,input,select,textarea,a,[role=button]")]
+        .filter(visible)
+        .filter(node => node.dataset?.harnessKey === key).length;
+      const stylesReady = [...host.shadowRoot.querySelectorAll('link[rel="stylesheet"]')]
+        .every(link => Boolean(link.sheet));
+      return { count, documentReady: document.readyState === "complete", stylesReady };
+    }, expected.key);
+    const ready = snapshot.documentReady && snapshot.stylesReady && snapshot.count === expected.occurrenceTotal;
+    consecutiveReadySamples = ready ? consecutiveReadySamples + 1 : 0;
+    return consecutiveReadySamples >= requiredReadySamples ? snapshot.count : -1;
+  }, {
+    timeout: PANEL_READY_TIMEOUT_MS,
+    message: `stable visible inventory for ${expected.key}`,
+  }).toBe(expected.occurrenceTotal);
+}
+
+async function exerciseControl(page, state, expected) {
+  await open(page, state);
+  await waitForStableControlInventory(page, expected);
+  const outcome = await page.locator("hausman-hub-panel").evaluate(async (host, control) => {
+    const root = host.shadowRoot;
+    const visible = node => { const style = getComputedStyle(node); return !node.disabled && !node.hidden && style.display !== "none" && style.visibility !== "hidden" && node.getClientRects().length > 0; };
+    const target = [...root.querySelectorAll("button,input,select,textarea,a,[role=button]")].filter(visible).filter(node => node.dataset?.harnessKey === control.key)[control.occurrence];
+    if (!target) return { missing: true, reason: "control disappeared" };
+    const before = (window.__hausmanHubHarnessCalls || []).length;
+    const beforeDom = root.innerHTML;
+    const beforeValue = "value" in target ? target.value : undefined;
+    const beforeChecked = "checked" in target ? target.checked : undefined;
+    if (target.dataset?.harnessIntent === "blocked") return { clicked: false, calls: [], domChanged: false, valueChanged: false, checkedChanged: false, attributes: {} };
+    const actionStartedAt = performance.now();
+    let scrollIntoViewCalls = 0;
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (...args) { scrollIntoViewCalls += 1; return originalScrollIntoView?.apply(this, args); };
+    if (target.tagName === "SELECT") {
+      if (target.options.length > 1) target.selectedIndex = (target.selectedIndex + 1) % target.options.length;
+      target.dispatchEvent(new Event("change", { bubbles: true }));
+    } else if (target.tagName === "TEXTAREA") {
+      target.value = target.value === "qa" ? "qa-2" : "qa";
+      target.dispatchEvent(new Event("input", { bubbles: true })); target.dispatchEvent(new Event("change", { bubbles: true }));
+    } else if (target.tagName === "INPUT" && ["checkbox", "radio"].includes(target.type)) target.click();
+    else if (target.tagName === "INPUT") {
+      if (target.type === "number") {
+        const step = Number(target.step) || 1, currentValue = Number(target.value) || 0, maximum = Number(target.max);
+        target.value = String(Number.isFinite(maximum) && currentValue + step > maximum ? currentValue - step : currentValue + step);
+      } else target.value = target.value === "qa" ? "qa-2" : "qa";
+      target.dispatchEvent(new Event("input", { bubbles: true })); target.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    else target.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    Element.prototype.scrollIntoView = originalScrollIntoView;
+    const current = [...root.querySelectorAll("[data-harness-key]")].filter(node => node.dataset.harnessKey === control.key)[control.occurrence];
+    const attributes = {
+      "data-section": current?.getAttribute("data-section") || "",
+      "data-harness-key": current?.getAttribute("data-harness-key") || "",
+    };
+    const selected = Boolean(current && (current.matches(".is-active,.is-selected") || ["true", "page"].includes(current.getAttribute("aria-selected")) || current.getAttribute("aria-pressed") === "true" || current.getAttribute("aria-checked") === "true"));
+    return { clicked: true, calls: (window.__hausmanHubHarnessCalls || []).slice(before), actionLatencyMs: performance.now() - actionStartedAt, domChanged: root.innerHTML !== beforeDom, valueChanged: beforeValue !== undefined && target.value !== beforeValue, checkedChanged: beforeChecked !== undefined && target.checked !== beforeChecked, selected, editorOpen: Boolean(root.querySelector(".scenario-editor-overlay")), scrollIntoViewCalls, attributes };
+  }, expected);
+  const current = await page.evaluate(() => ({ audit: window.__hausmanHubInteractionAudit, errors: window.__hausmanHubHarnessErrors || [] }));
+  return { outcome, current };
+}
+
 test("every visible enabled HACS control is located and safely exercised in the isolated harness", async ({ browser }) => {
   test.setTimeout(30 * 60_000);
   if (!output) throw new Error("PLAYWRIGHT_OUTPUT_DIR or QA_ARTIFACT_ROOT is required");
   fs.mkdirSync(output, { recursive: true, mode: 0o700 });
   const routeTelemetry = { blocked: [], blockedAttempts: 0, continued: [], continuedExternal: [] };
-  const report = { provenance: releaseProvenance(), observed_source_ids: [], signatures: [], attempted_signatures: [], clicked_signatures: [], blocked_signatures: [], unrecorded_signatures: [], unclassified: [], unrecorded_commands: [], unexpected_calls: [], failed_effects: [], missing: [], errors: [], sections: {}, blocked_external_attempts: 0, external_network: false, mutation_escape: false, harness_calls: 0 };
+  const safeActionLatencies = [];
+  const report = { provenance: releaseProvenance(), observed_source_ids: [], signatures: [], attempted_signatures: [], clicked_signatures: [], blocked_signatures: [], unrecorded_signatures: [], unclassified: [], unrecorded_commands: [], unexpected_calls: [], failed_effects: [], missing: [], errors: [], sections: {}, blocked_external_attempts: 0, external_network: false, mutation_escape: false, harness_calls: 0, safe_action_latency_ms: latencySummary(safeActionLatencies) };
   for (const state of states) {
     const context = await createStateContext(browser, routeTelemetry);
     try {
@@ -417,67 +579,43 @@ test("every visible enabled HACS control is located and safely exercised in the 
       }
       report.sections[state[0]] = { visible_enabled: controls.length, attempted: 0, clicked: 0, blocked: 0 };
       if (INVENTORY_ONLY) continue;
-      for (const control of controls) {
-        report.signatures.push(`${state[0]}:${control.key}:${control.occurrence}`);
-        const action = await freshStatePage(context, state);
-        let outcome;
+      // Four storage-isolated lanes retain a pristine document per action while
+      // allowing Chromium to use more than one CPU core. Each lane owns one
+      // context and Page, so navigation in one lane cannot reset another lane.
+      const laneRuns = assignControlLanes(controls, 4).map(async (lane, laneIndex) => {
+        const laneContext = laneIndex === 0 ? context : await createStateContext(browser, routeTelemetry);
+        let action;
         try {
-          outcome = await action.locator("hausman-hub-panel").evaluate(async (host, expected) => {
-        const root = host.shadowRoot;
-        const visible = node => { const style = getComputedStyle(node); return !node.disabled && !node.hidden && style.display !== "none" && style.visibility !== "hidden" && node.getClientRects().length > 0; };
-        const target = [...root.querySelectorAll("button,input,select,textarea,a,[role=button]")].filter(visible).filter(node => node.dataset?.harnessKey === expected.key)[expected.occurrence];
-        if (!target) return { missing: true, reason: "control disappeared" };
-        const before = (window.__hausmanHubHarnessCalls || []).length;
-        const beforeDom = root.innerHTML;
-        const beforeValue = "value" in target ? target.value : undefined;
-        const beforeChecked = "checked" in target ? target.checked : undefined;
-        if (target.dataset?.harnessIntent === "blocked") return { clicked: false, calls: [], domChanged: false, valueChanged: false, checkedChanged: false, attributes: {} };
-        let scrollIntoViewCalls = 0;
-        const originalScrollIntoView = Element.prototype.scrollIntoView;
-        Element.prototype.scrollIntoView = function (...args) { scrollIntoViewCalls += 1; return originalScrollIntoView?.apply(this, args); };
-        if (target.tagName === "SELECT") {
-          if (target.options.length > 1) target.selectedIndex = (target.selectedIndex + 1) % target.options.length;
-          target.dispatchEvent(new Event("change", { bubbles: true }));
-        } else if (target.tagName === "TEXTAREA") {
-          target.value = target.value === "qa" ? "qa-2" : "qa";
-          target.dispatchEvent(new Event("input", { bubbles: true })); target.dispatchEvent(new Event("change", { bubbles: true }));
-        } else if (target.tagName === "INPUT" && ["checkbox", "radio"].includes(target.type)) target.click();
-        else if (target.tagName === "INPUT") {
-          if (target.type === "number") {
-            const step = Number(target.step) || 1, currentValue = Number(target.value) || 0, maximum = Number(target.max);
-            target.value = String(Number.isFinite(maximum) && currentValue + step > maximum ? currentValue - step : currentValue + step);
-          } else target.value = target.value === "qa" ? "qa-2" : "qa";
-          target.dispatchEvent(new Event("input", { bubbles: true })); target.dispatchEvent(new Event("change", { bubbles: true }));
-        }
-        else target.click();
-        await new Promise((resolve) => setTimeout(resolve, 0));
-        Element.prototype.scrollIntoView = originalScrollIntoView;
-        const current = [...root.querySelectorAll("[data-harness-key]")].filter(node => node.dataset.harnessKey === expected.key)[expected.occurrence];
-        const attributes = {
-          "data-section": current?.getAttribute("data-section") || "",
-          "data-harness-key": current?.getAttribute("data-harness-key") || "",
-        };
-        const selected = Boolean(current && (current.matches(".is-active,.is-selected") || ["true", "page"].includes(current.getAttribute("aria-selected")) || current.getAttribute("aria-pressed") === "true" || current.getAttribute("aria-checked") === "true"));
-        return { clicked: true, calls: (window.__hausmanHubHarnessCalls || []).slice(before), domChanged: root.innerHTML !== beforeDom, valueChanged: beforeValue !== undefined && target.value !== beforeValue, checkedChanged: beforeChecked !== undefined && target.checked !== beforeChecked, selected, editorOpen: Boolean(root.querySelector(".scenario-editor-overlay")), scrollIntoViewCalls, attributes };
-          }, control);
-          const current = await action.evaluate(() => ({ audit: window.__hausmanHubInteractionAudit, errors: window.__hausmanHubHarnessErrors || [] }));
-          report.observed_source_ids.push(...current.audit.sources.map(row => row.source_id), ...current.audit.listeners.map(row => row.source_id)); report.errors.push(...current.errors);
+          action = await laneContext.newPage();
+          const results = [];
+          for (const item of lane) results.push({ ...item, ...await exerciseControl(action, state, item.control) });
+          return results;
         } finally {
-          await action.close();
+          await action?.close();
+          if (laneIndex !== 0) await laneContext.close();
         }
-        report.attempted_signatures.push(`${state[0]}:${control.key}:${control.occurrence}`); report.sections[state[0]].attempted += 1;
-        const intent = intentFor(state[0], control.key);
-        const classified = classify(intent, outcome);
-        if (classified.unclassified) report.unclassified.push({ state: state[0], key: control.key });
-        if (classified.unrecorded_command) report.unrecorded_commands.push({ state: state[0], key: control.key, occurrence: control.occurrence });
-        if (classified.unexpected_command) report.unexpected_calls.push({ state: state[0], key: control.key, occurrence: control.occurrence, calls: mutationCalls(outcome.calls).filter((call) => !requestMatches(intent.request, call)) });
-        if (intent?.intent === "ui-only" && !classified.pass && !mutationCalls(outcome.calls).length) report.failed_effects.push({ state: state[0], key: control.key, occurrence: control.occurrence });
-        if (intent?.intent === "ui-only" && mutationCalls(outcome.calls).length) report.unexpected_calls.push({ state: state[0], key: control.key, occurrence: control.occurrence, calls: mutationCalls(outcome.calls) });
-        if (outcome.missing || (intent?.intent === "blocked" ? outcome.clicked : !outcome.clicked)) report.missing.push({ state: state[0], key: control.key, reason: outcome.reason || "action failed" });
-        else if (intent?.intent === "blocked") { report.blocked_signatures.push(`${state[0]}:${control.key}:${control.occurrence}`); report.sections[state[0]].blocked += 1; }
-        else { report.clicked_signatures.push(`${state[0]}:${control.key}:${control.occurrence}`); report.sections[state[0]].clicked += 1; report.harness_calls += outcome.calls?.length || 0; }
+      });
+      const settledLanes = await Promise.allSettled(laneRuns);
+      const rejectedLane = settledLanes.find((item) => item.status === "rejected");
+      if (rejectedLane) throw rejectedLane.reason;
+      const actionResults = settledLanes.flatMap((item) => item.value).sort((left, right) => left.index - right.index);
+      for (const { control, outcome, current } of actionResults) {
+          report.signatures.push(`${state[0]}:${control.key}:${control.occurrence}`);
+          report.observed_source_ids.push(...current.audit.sources.map(row => row.source_id), ...current.audit.listeners.map(row => row.source_id)); report.errors.push(...current.errors);
+          report.attempted_signatures.push(`${state[0]}:${control.key}:${control.occurrence}`); report.sections[state[0]].attempted += 1;
+          const intent = intentFor(state[0], control.key);
+          const classified = classify(intent, outcome);
+          if (classified.unclassified) report.unclassified.push({ state: state[0], key: control.key });
+          if (classified.unrecorded_command) report.unrecorded_commands.push({ state: state[0], key: control.key, occurrence: control.occurrence });
+          if (classified.unexpected_command) report.unexpected_calls.push({ state: state[0], key: control.key, occurrence: control.occurrence, calls: mutationCalls(outcome.calls).filter((call) => !requestMatches(intent.request, call)) });
+          if (intent?.intent === "ui-only" && !classified.pass && !mutationCalls(outcome.calls).length) report.failed_effects.push({ state: state[0], key: control.key, occurrence: control.occurrence });
+          if (intent?.intent === "ui-only" && mutationCalls(outcome.calls).length) report.unexpected_calls.push({ state: state[0], key: control.key, occurrence: control.occurrence, calls: mutationCalls(outcome.calls) });
+          if (outcome.missing || (intent?.intent === "blocked" ? outcome.clicked : !outcome.clicked)) report.missing.push({ state: state[0], key: control.key, occurrence: control.occurrence, reason: outcome.reason || "action failed" });
+          else if (intent?.intent === "blocked") { report.blocked_signatures.push(`${state[0]}:${control.key}:${control.occurrence}`); report.sections[state[0]].blocked += 1; }
+          else { report.clicked_signatures.push(`${state[0]}:${control.key}:${control.occurrence}`); report.sections[state[0]].clicked += 1; report.harness_calls += outcome.calls?.length || 0; safeActionLatencies.push(outcome.actionLatencyMs); }
       }
       report.observed_source_ids = [...new Set(report.observed_source_ids)].sort(); report.signatures = [...new Set(report.signatures)]; report.attempted_signatures = [...new Set(report.attempted_signatures)]; report.clicked_signatures = [...new Set(report.clicked_signatures)]; report.blocked_signatures = [...new Set(report.blocked_signatures)]; report.unrecorded_signatures = [...new Set(report.unrecorded_signatures)]; report.errors = [...new Set(report.errors)];
+      report.safe_action_latency_ms = latencySummary(safeActionLatencies);
       report.blocked_external_attempts = routeTelemetry.blockedAttempts;
       writeReport(report);
     } finally {
@@ -485,6 +623,7 @@ test("every visible enabled HACS control is located and safely exercised in the 
     }
   }
   report.observed_source_ids = [...new Set(report.observed_source_ids)].sort(); report.signatures = [...new Set(report.signatures)]; report.attempted_signatures = [...new Set(report.attempted_signatures)]; report.clicked_signatures = [...new Set(report.clicked_signatures)]; report.blocked_signatures = [...new Set(report.blocked_signatures)]; report.unrecorded_signatures = [...new Set(report.unrecorded_signatures)]; report.errors = [...new Set(report.errors)];
+  report.safe_action_latency_ms = latencySummary(safeActionLatencies);
   report.unclassified = summarizeUnclassified(report.unclassified);
   report.external_network = routeTelemetry.continuedExternal.length > 0; report.blocked_external_attempts = routeTelemetry.blockedAttempts; report.continued_requests = [...new Set(routeTelemetry.continued)].sort(); report.blocked_requests = [...new Set(routeTelemetry.blocked)].sort();
   expect(report.continued_requests.every((request) => request.startsWith(`${HARNESS_ORIGIN}/`))).toBe(true);

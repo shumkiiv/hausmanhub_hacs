@@ -43,6 +43,7 @@ async def async_preload_error_policies(hass: HomeAssistant) -> None:
     """Load the packaged taxonomy outside the Home Assistant event loop."""
 
     await hass.async_add_executor_job(error_policies)
+    await hass.async_add_executor_job(error_detail_policies)
 
 
 def error_policy(code: str) -> Mapping[str, Any]:
@@ -50,6 +51,27 @@ def error_policy(code: str) -> Mapping[str, Any]:
 
     policies = error_policies()
     return policies.get(code, policies[_FALLBACK_CODE])
+
+
+@lru_cache(maxsize=1)
+def error_detail_policies() -> dict[tuple[str, str], dict[str, Any]]:
+    """Load exact safe overrides for typed conflict detail codes."""
+
+    payload = json.loads(_TAXONOMY_PATH.read_text(encoding="utf-8"))
+    entries = payload.get("detailPolicies") if isinstance(payload, dict) else None
+    if not isinstance(entries, list):
+        raise RuntimeError("HausmanHub error detail taxonomy is invalid")
+    policies = {
+        (entry["baseCode"], entry["detailCode"]): entry
+        for entry in entries
+        if isinstance(entry, dict)
+        and isinstance(entry.get("baseCode"), str)
+        and isinstance(entry.get("detailCode"), str)
+        and isinstance(entry.get("allowedDetailKeys"), list)
+    }
+    if len(policies) != len(entries):
+        raise RuntimeError("HausmanHub error detail taxonomy coverage is invalid")
+    return policies
 
 
 def api_error_payload(
@@ -62,16 +84,19 @@ def api_error_payload(
 
     policy = error_policy(code)
     canonical_code = str(policy["code"])
+    detail_code = details.get("detailCode") if isinstance(details, Mapping) else None
+    detail_policy = error_detail_policies().get((canonical_code, detail_code))
+    effective_policy = detail_policy or policy
     payload: dict[str, object] = {
         "contract": {"name": "hausman-hub-error", "version": 1},
         "code": canonical_code,
-        "message": str(policy["safeMessage"]),
-        "retryable": bool(policy["retryable"]),
+        "message": str(effective_policy["safeMessage"]),
+        "retryable": bool(effective_policy["retryable"]),
     }
     if isinstance(request_id, str) and 0 < len(request_id) <= 128:
         payload["requestId"] = request_id
     if details:
-        allowed = set(policy["allowedDetailKeys"])
+        allowed = set(effective_policy["allowedDetailKeys"])
         sanitized = {key: value for key, value in details.items() if key in allowed}
         if sanitized:
             payload["details"] = sanitized

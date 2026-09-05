@@ -64,6 +64,7 @@ def minimal_runtime_report() -> dict:
         "errors": [],
         "external_network": False,
         "mutation_escape": False,
+        "safe_action_latency_ms": {"count": 0, "p50_ms": 0, "p95_ms": 0, "max_ms": 0},
     }
 
 
@@ -146,6 +147,16 @@ def test_manifest_checker_rejects_control_marked_clicked_and_blocked() -> None:
     assert "signature action coverage is incomplete" in result.stdout
 
 
+def test_manifest_checker_rejects_incomplete_safe_action_latency_telemetry() -> None:
+    report = minimal_runtime_report()
+    report["clicked_signatures"] = ["lighting:room-power:0"]
+    report["blocked_signatures"] = []
+    report["safe_action_latency_ms"] = {"count": 0, "p50_ms": 0, "p95_ms": 0, "max_ms": 0}
+    result = run_manifest_checker(report)
+    assert result.returncode == 1
+    assert "safe action latency telemetry is incomplete" in result.stdout
+
+
 def test_digest_changes_for_an_audited_release_input() -> None:
     with tempfile.TemporaryDirectory() as directory:
         candidate = Path(directory)
@@ -172,5 +183,5 @@ def test_provenance_is_repeatable_without_git_head() -> None:
     first = release_pin.provenance()
     second = release_pin.provenance()
     assert first == second
-    assert first["version"] == "1.52.221"
+    assert first["version"] == "1.52.222"
     assert len(first["content_digest"]) == 64

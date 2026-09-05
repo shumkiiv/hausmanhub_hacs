@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/operation-journal-reset-conflict.schema.json",
+  "title": "HausmanHub operation journal reset conflict v1",
+  "description": "Typed CAS conflict for a journal reset. The server leaves the journal unchanged, preserves the immutable archive and does not consume the token in this attempt. The client must create a new archive before retrying.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "code", "message", "retryable", "status", "category", "details"],
+  "properties": {
+    "contract": {"type": "object", "additionalProperties": false, "required": ["name", "version"], "properties": {"name": {"const": "hausman-hub-error"}, "version": {"const": 1}}},
+    "code": {"const": "conflict"},
+    "message": {"const": "Журнал изменился. Создайте новый архив перед повторным сбросом."},
+    "retryable": {"const": false},
+    "status": {"const": 409},
+    "category": {"const": "conflict"},
+    "details": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["detailCode", "expectedGeneration", "actualGeneration", "expectedSequence", "actualSequence", "expectedRevision", "actualRevision", "newArchiveRequired", "archivePreserved", "consumedByThisAttempt", "physicalCommandsSent"],
+      "properties": {
+        "detailCode": {"const": "reset_precondition_conflict"},
+        "expectedGeneration": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "actualGeneration": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "expectedSequence": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "actualSequence": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "expectedRevision": {"type": "string", "pattern": "^[a-f0-9]{16,64}$"},
+        "actualRevision": {"type": "string", "pattern": "^[a-f0-9]{16,64}$"},
+        "newArchiveRequired": {"const": true},
+        "archivePreserved": {"const": true},
+        "consumedByThisAttempt": {"const": false},
+        "physicalCommandsSent": {"const": false}
+      }
+    }
+  }
+}

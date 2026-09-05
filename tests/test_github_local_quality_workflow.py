@@ -25,6 +25,9 @@ class GitHubLocalQualityWorkflowTest(unittest.TestCase):
             "python3 -m pip install --disable-pip-version-check jsonschema==4.25.1 coverage==7.10.7",
             workflow,
         )
+        self.assertIn("pytest==8.3.5", workflow)
+        self.assertIn("pytest-asyncio==1.3.0", workflow)
+        self.assertIn("cryptography==48.0.0", workflow)
         self.assertIn("run: python3 tools/check_local_release.py", workflow)
         self.assertIn("run: python3 tools/check_critical_coverage.py", workflow)
         self.assertIn("uses: actions/setup-node@v6", workflow)

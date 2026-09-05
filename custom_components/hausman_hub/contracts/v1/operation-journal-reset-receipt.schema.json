@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/operation-journal-reset-receipt.schema.json",
+  "title": "HausmanHub operation journal reset receipt v1",
+  "description": "Receipt for a committed journal generation reset. The runtime retrieves the immutable archive by token, recomputes its digest and checks all three CAS fields in one atomic transaction before resetting.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "accepted", "confirmed", "status", "result", "archivedSnapshotId", "archiveSha256", "archivedRecords", "archiveVerified", "archiveTokenConsumed", "expectedGeneration", "expectedSequence", "expectedRevision", "previousGeneration", "previousSequence", "previousRevision", "resultingGeneration", "resultingSequence", "resultingRevision", "recordsRemoved", "physicalCommandsSent", "message"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-operation-journal-reset-receipt"},
+        "version": {"const": 1}
+      }
+    },
+    "correlationId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "accepted": {"const": true},
+    "confirmed": {"const": true},
+    "status": {"const": "confirmed"},
+    "result": {"const": "reset"},
+    "archivedSnapshotId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "archiveSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "archivedRecords": {"type": "integer", "minimum": 0, "maximum": 512},
+    "archiveVerified": {"const": true},
+    "archiveTokenConsumed": {"const": true},
+    "expectedGeneration": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+    "expectedSequence": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "expectedRevision": {"type": "string", "pattern": "^[a-f0-9]{16,64}$"},
+    "previousGeneration": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+    "previousSequence": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "previousRevision": {"type": "string", "pattern": "^[a-f0-9]{16,64}$"},
+    "resultingGeneration": {"type": "integer", "minimum": 2, "maximum": 9007199254740991},
+    "resultingSequence": {"const": 0},
+    "resultingRevision": {"type": "string", "pattern": "^[a-f0-9]{16,64}$"},
+    "recordsRemoved": {"type": "integer", "minimum": 0, "maximum": 512},
+    "physicalCommandsSent": {"const": false},
+    "message": {"type": "string", "minLength": 1, "maxLength": 500}
+  }
+}

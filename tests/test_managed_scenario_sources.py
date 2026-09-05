@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import itertools
 from datetime import datetime
 from pathlib import Path
 import subprocess
@@ -337,6 +338,72 @@ class ManagedSmallCorridorSourceTest(unittest.TestCase):
 
 
 class ManagedShowerSourceTest(unittest.TestCase):
+    def test_direct_user_off_matrix_has_exactly_1296_safe_cases(self) -> None:
+        """A typed user-off owns the cabinet action and suppresses every profile.
+
+        Six independently realistic reports over four affected actuators give
+        6^4 cases.  This catches regressions where an automatic profile or the
+        five-minute absence branch leaks into a direct user decision.
+        """
+        reports = ("on", "off", "unknown", "unavailable", "restored", None)
+        observed: set[tuple[object, object, object, object]] = set()
+        for main, extra, fan, cabinet in itertools.product(reports, repeat=4):
+            case = (main, extra, fan, cabinet)
+            self.assertNotIn(case, observed)
+            observed.add(case)
+            payload = _run_shower(
+                timestamp="2026-08-27T12:00:00+06:00",
+                states={
+                    SHOWER_PRESENCE: "off", SHOWER_HUMIDITY: "45", SUN: "above_horizon",
+                    SHOWER_MAIN: main, SHOWER_EXTRA: extra, SHOWER_FAN: fan,
+                    SHOWER_CABINET: cabinet,
+                },
+                trigger=_typed("shower-cabinet", "toggle_b2_down", "toggle", "off"),
+            )
+            actions = _action_ids(payload)
+            cabinet_is_known = cabinet in {"on", "off"}
+            expected = ["set_cabinet_off"] if cabinet_is_known else []
+            self.assertEqual(expected, actions, case)
+            self.assertEqual(
+                "cabinet_toggle__fan_hold"
+                if cabinet_is_known
+                else "cabinet_toggle_unavailable__fan_hold",
+                payload["selectedBranch"],
+                case,
+            )
+            self.assertEqual("completed" if cabinet_is_known else "skipped", payload["status"], case)
+            self.assertEqual("fan_hold", payload["trace"][3]["expected"], case)
+            self.assertEqual(
+                "cabinet_toggle" if cabinet_is_known else "cabinet_toggle_unavailable",
+                payload["trace"][2]["expected"],
+                case,
+            )
+            if cabinet_is_known:
+                self.assertEqual(
+                    [
+                        {
+                            "id": "set_cabinet_off",
+                            "type": "device_action",
+                            "targetId": SHOWER_CABINET,
+                            "targetName": "Душевая: подсветка шкафа",
+                            "actionId": "turn_off",
+                            "actionTitle": "Выключить",
+                        }
+                    ],
+                    payload["actions"],
+                    case,
+                )
+            else:
+                self.assertEqual([], payload["actions"], case)
+            self.assertNotIn("absence_wait", actions)
+            self.assertFalse(any(action.get("delaySeconds") == 300 for action in payload["actions"]))
+            self.assertTrue(
+                all(action.get("targetId") == SHOWER_CABINET for action in payload["actions"]),
+                case,
+            )
+        self.assertEqual(6**4, len(observed))
+        self.assertEqual(1296, len(observed))
+
     def test_cabinet_toggle_down_toggles_cabinet_without_touching_key1_relay(self) -> None:
         payload = _run_shower(
             timestamp="2026-08-27T12:00:00+06:00",

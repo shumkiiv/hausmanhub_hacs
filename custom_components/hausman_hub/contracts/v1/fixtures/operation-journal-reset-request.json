@@ -1,0 +1,8 @@
+{
+  "contract": {"name": "hausman-hub-operation-journal-reset-request", "version": 1},
+  "correlationId": "journal-reset-0001",
+  "archiveToken": "T9m_Cc0o5u1dR7xK8pQ3vN6sH2aB4eF0gJ5wL7yZ9Uk",
+  "expectedGeneration": 1,
+  "expectedSequence": 42,
+  "expectedRevision": "0123456789abcdef0123456789abcdef"
+}

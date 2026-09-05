@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausmanhub.local/contracts/v1/operation-journal-archive-receipt.schema.json",
+  "title": "HausmanHub operation journal archive receipt v1",
+  "description": "Server-created immutable full retained journal archive and an opaque single-use reset token. archiveSha256 is SHA-256 of the RFC 8785 canonical UTF-8 JSON encoding of the exact snapshot object.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "accepted", "confirmed", "status", "result", "archiveToken", "archivedSnapshotId", "archiveSha256", "archiveAlgorithm", "archivedRecords", "archiveStored", "immutable", "singleUse", "issuedAt", "expiresAt", "snapshot", "physicalCommandsSent"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-operation-journal-archive-receipt"},
+        "version": {"const": 1}
+      }
+    },
+    "correlationId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "accepted": {"const": true},
+    "confirmed": {"const": true},
+    "status": {"const": "confirmed"},
+    "result": {"const": "archived"},
+    "archiveToken": {"type": "string", "pattern": "^[A-Za-z0-9_-]{43,128}$", "description": "Opaque, single-use, expiry-limited server token generated from at least 256 bits of cryptographic randomness. It must not be logged or persisted by clients beyond this reset flow."},
+    "archivedSnapshotId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "archiveSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "archiveAlgorithm": {"const": "RFC8785-SHA256"},
+    "archivedRecords": {"type": "integer", "minimum": 0, "maximum": 512},
+    "archiveStored": {"const": true},
+    "immutable": {"const": true},
+    "singleUse": {"const": true},
+    "issuedAt": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "expiresAt": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+    "snapshot": {
+      "allOf": [
+        {"$ref": "operation-journal.schema.json"},
+        {
+          "required": ["generation", "revision", "page"],
+          "properties": {
+            "generated_at": {"maximum": 9007199254740991},
+            "sequence": {"maximum": 9007199254740991},
+            "page": {
+              "properties": {
+                "limit": {"const": 512},
+                "has_more": {"const": false},
+                "next_before_sequence": {
+                  "oneOf": [
+                    {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+                    {"type": "null"}
+                  ],
+                  "const": null
+                }
+              }
+            },
+            "records": {
+              "items": {
+                "properties": {
+                  "sequence": {"maximum": 9007199254740991},
+                  "occurred_at": {"maximum": 9007199254740991},
+                  "scenario": {
+                    "properties": {
+                      "trigger": {
+                        "properties": {
+                          "old_value": {
+                            "oneOf": [
+                              {"type": "string", "maxLength": 256},
+                              {"type": "number", "minimum": -9007199254740991, "maximum": 9007199254740991},
+                              {"type": "boolean"},
+                              {"type": "null"}
+                            ]
+                          },
+                          "new_value": {
+                            "oneOf": [
+                              {"type": "string", "maxLength": 256},
+                              {"type": "number", "minimum": -9007199254740991, "maximum": 9007199254740991},
+                              {"type": "boolean"},
+                              {"type": "null"}
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "physicalCommandsSent": {"const": false}
+  }
+}
