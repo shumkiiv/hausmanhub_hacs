@@ -19,6 +19,7 @@ from custom_components.hausman_hub.scenario_events import (
 from custom_components.hausman_hub.application.scenario_command_context import (
     ScenarioCommandContextRegistry,
 )
+from custom_components.hausman_hub.application.activation_latch import ActivationLatch
 from custom_components.hausman_hub.manual_light_off_protection_events import (
     ManualLightOffProtectionEventListener,
 )
@@ -130,6 +131,38 @@ class StateTriggerMatchesTest(unittest.TestCase):
 
 
 class StateTriggerCoordinatorTest(unittest.IsolatedAsyncioTestCase):
+    async def test_state_trigger_is_inert_until_activation_commit(self) -> None:
+        service = SimpleNamespace(async_run_scenario=AsyncMock())
+        hass = SimpleNamespace(states=SimpleNamespace(get=lambda _: _state("on")))
+        latch = ActivationLatch()
+        coordinator = _StateTriggerCoordinator(hass, service, activation_latch=latch)
+        item = (
+            "scenario", "trigger", "switch.wall", "wall_target", "state",
+            ScenarioComparison.EQUALS, "on", 0, 0, 0, True,
+        )
+
+        await coordinator.async_handle(item, _state("off"), _state("on"))
+        service.async_run_scenario.assert_not_awaited()
+        latch.open()
+        await coordinator.async_handle(item, _state("off"), _state("on"))
+        service.async_run_scenario.assert_awaited_once()
+        latch.close()
+
+    async def test_delayed_state_trigger_rechecks_latch_after_wait(self) -> None:
+        service = SimpleNamespace(async_run_scenario=AsyncMock())
+        hass = SimpleNamespace(states=SimpleNamespace(get=lambda _: _state("on")))
+        latch = ActivationLatch()
+        coordinator = _StateTriggerCoordinator(hass, service, activation_latch=latch)
+        item = (
+            "scenario", "trigger", "switch.wall", "wall_target", "state",
+            ScenarioComparison.EQUALS, "on", 0.01, 0, 0, True,
+        )
+        latch.open()
+        await coordinator.async_handle(item, _state("off"), _state("on"))
+        latch.close()
+        await asyncio.sleep(0.02)
+        service.async_run_scenario.assert_not_awaited()
+
     async def test_manual_trigger_and_protection_listener_read_automatic_context_independently(self) -> None:
         """Changing lookup back to consuming would make listener order unsafe."""
 

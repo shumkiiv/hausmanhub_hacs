@@ -495,10 +495,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     entry.async_on_unload(scenario_service.cancel_running_scenarios)
     from .scenario_events import async_start_scenario_events
+    from .application.activation_latch import ActivationLatch
     from .application.smart_switch_runtime import (
         HomeAssistantSmartSwitchDedupStore,
         SmartSwitchTriggerAdapter,
     )
+    activation_latch = ActivationLatch()
     smart_switch_adapter = SmartSwitchTriggerAdapter(
         hass,
         scenario_service,
@@ -512,6 +514,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 for target_id in migration.input_target_ids
             )
         ),
+        activation_latch=activation_latch,
     )
     scenario_service.set_smart_switch_receipt_consumer(smart_switch_adapter)
 
@@ -522,6 +525,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             activation_unloads.append(callback)
 
     def _cleanup_managed_switch_runtime() -> None:
+        activation_latch.close()
         errors: list[Exception] = []
         try:
             smart_switch_adapter.async_unload()
@@ -542,14 +546,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         try:
             staged_entry = _ActivationEntry()
-            await async_start_scenario_schedule(hass, staged_entry, scenario_service)
+            await async_start_scenario_schedule(
+                hass, staged_entry, scenario_service, activation_latch
+            )
             await async_start_scenario_events(
                 hass,
                 staged_entry,
                 scenario_service,
                 scenario_command_contexts,
+                activation_latch,
             )
             await smart_switch_adapter.async_start()
+            # No await follows this synchronous commit. Every subscription is
+            # prepared before callbacks become capable of running scenarios.
+            activation_latch.open()
         except asyncio.CancelledError:
             try:
                 _cleanup_managed_switch_runtime()

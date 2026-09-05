@@ -167,6 +167,7 @@ class SmartSwitchTriggerAdapter:
         wall_clock: Callable[[], float] = time.time,
         receipt_factory: Callable[[], str] | None = None,
         readiness_check: Callable[[], bool] | None = None,
+        activation_latch: object | None = None,
     ) -> None:
         self._hass = hass
         self._service = service
@@ -177,6 +178,7 @@ class SmartSwitchTriggerAdapter:
             lambda: f"smart-switch.{uuid.uuid4().hex}"
         )
         self._readiness_check = readiness_check or (lambda: True)
+        self._activation_latch = activation_latch
         self._receipts: list[dict[str, object]] = []
         # Only receipts accepted by this live adapter generation may authorize
         # execution. Persisted receipts remain useful for deduplication after a
@@ -300,7 +302,9 @@ class SmartSwitchTriggerAdapter:
             # allow-listed config is the only source of switch identity; never
             # let callback payloads select a binding or action.
             del run_variables, context
-            if generation.get("active") is True:
+            if generation.get("active") is True and (
+                self._activation_latch is None or self._activation_latch.is_open
+            ):
                 await self.async_handle_trigger(
                     config,
                     {},
@@ -338,10 +342,14 @@ class SmartSwitchTriggerAdapter:
         del trigger_data
         if _generation is not None and _generation.get("active") is not True:
             return False
+        if self._activation_latch is not None and not self._activation_latch.is_open:
+            return False
         if not any(validate_exact_device_trigger(config, item) for item in _ALL_CONFIGS):
             return False
         async with self._receipt_lock:
             if _generation is not None and _generation.get("active") is not True:
+                return False
+            if self._activation_latch is not None and not self._activation_latch.is_open:
                 return False
             if not self._healthy or self._store is None:
                 return False

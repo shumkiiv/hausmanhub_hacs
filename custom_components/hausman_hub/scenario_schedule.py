@@ -31,6 +31,7 @@ async def async_start_scenario_schedule(
     hass: HomeAssistant,
     entry: ConfigEntry,
     service: ScenarioService,
+    activation_latch: object | None = None,
 ) -> None:
     """Arm every enabled time/sun trigger and keep the arming in sync."""
 
@@ -43,11 +44,15 @@ async def async_start_scenario_schedule(
     async def _async_run_due(
         scenario_id: str, trigger_id: str, _now: datetime
     ) -> None:
+        if activation_latch is not None and not activation_latch.is_open:
+            return
         day = dt_util.now().date().isoformat()
         if await service.async_consume_skip(scenario_id, trigger_id, day):
             _LOGGER.info(
                 "scheduled run of %s (%s) skipped by user", scenario_id, trigger_id
             )
+            return
+        if activation_latch is not None and not activation_latch.is_open:
             return
         try:
             await service.async_run_scenario(

@@ -118,10 +118,12 @@ class _StateTriggerCoordinator:
         hass: HomeAssistant,
         service: ScenarioService,
         command_contexts: ScenarioCommandContextRegistry | None = None,
+        activation_latch: object | None = None,
     ) -> None:
         self._hass = hass
         self._service = service
         self._command_contexts = command_contexts
+        self._activation_latch = activation_latch
         self._pending: dict[tuple[str, str], asyncio.Task[None]] = {}
         self._cooldown_until: dict[tuple[str, str], float] = {}
 
@@ -144,6 +146,8 @@ class _StateTriggerCoordinator:
         new_state: object | None,
         event_context: object | None = None,
     ) -> None:
+        if self._activation_latch is not None and not self._activation_latch.is_open:
+            return
         (
             scenario_id,
             trigger_id,
@@ -218,6 +222,8 @@ class _StateTriggerCoordinator:
         async def _async_delayed() -> None:
             try:
                 await asyncio.sleep(delay)
+                if self._activation_latch is not None and not self._activation_latch.is_open:
+                    return
                 current = self._hass.states.get(entity_id)
                 if state_level_matches(
                     current, property_name, comparison, expected
@@ -257,6 +263,8 @@ class _StateTriggerCoordinator:
         cooldown_seconds: int,
         trigger_context: Mapping[str, object],
     ) -> None:
+        if self._activation_latch is not None and not self._activation_latch.is_open:
+            return
         if cooldown_seconds:
             self._cooldown_until[key] = time.monotonic() + cooldown_seconds
         await self._service.async_run_scenario(
@@ -295,10 +303,13 @@ async def async_start_scenario_events(
     entry: ConfigEntry,
     service: ScenarioService,
     command_contexts: ScenarioCommandContextRegistry | None = None,
+    activation_latch: object | None = None,
 ) -> None:
     """Subscribe enabled device-state scenario triggers to HA state events."""
 
-    coordinator = _StateTriggerCoordinator(hass, service, command_contexts)
+    coordinator = _StateTriggerCoordinator(
+        hass, service, command_contexts, activation_latch
+    )
     entry.async_on_unload(coordinator.cancel)
 
     async def _async_handle(event: Any) -> None:
@@ -328,6 +339,8 @@ async def async_start_scenario_events(
                 )
 
     async def _async_handle_custom_event(event: Any) -> None:
+        if activation_latch is not None and not activation_latch.is_open:
+            return
         event_type = getattr(event, "event_type", None)
         data = getattr(event, "data", {})
         if not isinstance(event_type, str) or event_type == _EVENT_STATE_CHANGED:
@@ -336,6 +349,8 @@ async def async_start_scenario_events(
             if event_type != expected_type or not event_trigger_matches(data, expected_data):
                 continue
             try:
+                if activation_latch is not None and not activation_latch.is_open:
+                    return
                 await service.async_run_scenario(
                     scenario_id,
                     trigger_context={
