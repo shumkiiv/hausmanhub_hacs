@@ -12,7 +12,7 @@ import sys
 import unittest
 from dataclasses import replace
 from types import ModuleType, SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -196,7 +196,7 @@ class _ResponseContext:
         self.response.closed = True
 
 
-def _install_aiohttp_session(monkeypatch, response: _StreamedResponse) -> None:
+def _patched_aiohttp_session(response: _StreamedResponse):
     session = SimpleNamespace(
         request=lambda *_args, **_kwargs: _ResponseContext(response)
     )
@@ -206,47 +206,42 @@ def _install_aiohttp_session(monkeypatch, response: _StreamedResponse) -> None:
     aiohttp_client.async_get_clientsession = lambda _hass: session
     homeassistant.helpers = helpers
     helpers.aiohttp_client = aiohttp_client
-    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant)
-    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers)
-    monkeypatch.setitem(
+    return patch.dict(
         sys.modules,
-        "homeassistant.helpers.aiohttp_client",
-        aiohttp_client,
+        {
+            "homeassistant": homeassistant,
+            "homeassistant.helpers": helpers,
+            "homeassistant.helpers.aiohttp_client": aiohttp_client,
+        },
     )
 
 
-@pytest.mark.asyncio
-async def test_raw_request_rejects_oversized_content_length_without_reading(
-    monkeypatch,
-) -> None:
+def test_raw_request_rejects_oversized_content_length_without_reading() -> None:
     response = _StreamedResponse(
         [b'{}'],
         content_length=str(scenario_node_red.MAX_NODE_RED_RESPONSE_BYTES + 1),
     )
-    _install_aiohttp_session(monkeypatch, response)
     backend = NodeRedScenarioBackend(SimpleNamespace(), supervisor_token="trusted")
 
-    with pytest.raises(NodeRedBackendError, match="too large"):
-        await backend._raw_request("GET", "/flows")  # noqa: SLF001
+    with _patched_aiohttp_session(response):
+        with pytest.raises(NodeRedBackendError, match="too large"):
+            asyncio.run(backend._raw_request("GET", "/flows"))  # noqa: SLF001
 
     assert response.chunks_read == 0
     assert response.closed
 
 
-@pytest.mark.asyncio
-async def test_raw_request_bounds_unknown_length_stream_and_closes_response(
-    monkeypatch,
-) -> None:
+def test_raw_request_bounds_unknown_length_stream_and_closes_response() -> None:
     limit = scenario_node_red.MAX_NODE_RED_RESPONSE_BYTES
     response = _StreamedResponse(
         [b"x" * limit, b"y"],
         content_length=None,
     )
-    _install_aiohttp_session(monkeypatch, response)
     backend = NodeRedScenarioBackend(SimpleNamespace(), supervisor_token="trusted")
 
-    with pytest.raises(NodeRedBackendError, match="too large"):
-        await backend._raw_request("GET", "/flows")  # noqa: SLF001
+    with _patched_aiohttp_session(response):
+        with pytest.raises(NodeRedBackendError, match="too large"):
+            asyncio.run(backend._raw_request("GET", "/flows"))  # noqa: SLF001
 
     assert response.chunks_read == 2
     assert response.closed
