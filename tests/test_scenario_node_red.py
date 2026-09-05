@@ -76,21 +76,13 @@ def _global_revision(
 def test_release_trust_allows_exact_previous_and_current_system_sources() -> None:
     assert scenario_node_red._TRUSTED_SYSTEM_SOURCE_HASHES == {  # noqa: SLF001
         "system-tambur-adaptive-controller": frozenset(
-            {
-                "3183bc1806afdadd797968bafcc7cbb738f13d80cc02c28cc42852de07c36d21",
-                "baa8044bf3cbcb360a963599b164434eb7b385f4d3b9a8cd156ee901fbf6dcff",
-                "399a39d89a4b745c901b0201fe9510eb0a754106b49c1ef1a85c61359c1022c4",
-                    "0551ee02fc052a99a2e802054b8aaeaa1ada5885b927b90eb3cc8d2aca3414f9",
-                    "e4f76cca39c5ee49f7ee216f3435f9ee0dc461826787a1df0135a4a5d2da5eb2",
-            }
+            {"4daef9ac2de8dc1c95dd2da6887e178751a65d0e47bcf48443635f68eb1ba5dc"}
         ),
         "system-small-corridor-light-controller": frozenset(
             {"bc9a2c7883046e568a428e355af312953d70f0f504393b063130f516fe5052b1"}
         ),
         "system-shower-comfort-controller": frozenset(
-            {
-                "9060257eaa344944611e3992b33591ab6ddb24ddd984137fce7aeeea6703b55c",
-            }
+                {"757bde711c85ebad4826c2ec0bf2695d0034f7dd820c9ec7c30816f3f37c1551"}
         ),
     }
 
@@ -236,21 +228,18 @@ def test_release_trust_hashes_match_managed_system_sources() -> None:
         source = Path("tools/managed_scenarios", filename).read_text(encoding="utf-8")
         trusted = scenario_node_red._TRUSTED_SYSTEM_SOURCE_HASHES[scenario_id]
         assert managed_source_hash(source) in trusted
-        assert len(trusted) == (
-            5 if scenario_id == "system-tambur-adaptive-controller" else
-                1
-        )
+        assert len(trusted) == 1
 
     assert (
         "9060257eaa344944611e3992b33591ab6ddb24ddd984137fce7aeeea6703b55c"
-        in scenario_node_red._TRUSTED_SYSTEM_SOURCE_HASHES[
+        not in scenario_node_red._TRUSTED_SYSTEM_SOURCE_HASHES[
             "system-shower-comfort-controller"
         ]
     )
     assert "ef263e1adbcaa2e69ff118d14411b31892cf73497626751fbfa3106b81f2e933" not in scenario_node_red._TRUSTED_SYSTEM_SOURCE_HASHES["system-shower-comfort-controller"]
     assert (
         "3183bc1806afdadd797968bafcc7cbb738f13d80cc02c28cc42852de07c36d21"
-        in scenario_node_red._TRUSTED_SYSTEM_SOURCE_HASHES[
+        not in scenario_node_red._TRUSTED_SYSTEM_SOURCE_HASHES[
             "system-tambur-adaptive-controller"
         ]
     )
@@ -932,6 +921,60 @@ def test_tambur_power_up_plan_matches_release_envelope() -> None:
     assert sum(action.type is ScenarioActionType.DELAY for action in actions) == 1
 
 
+def test_release_owned_trigger_context_is_exact_and_correlated() -> None:
+    trigger = {
+        "source": "manual",
+        "trigger_id": "off_up",
+        "recovery": False,
+        "binding": "tambur-light-group",
+        "typed_intent": "off",
+        "direct_user_intent": "off",
+        "intent_receipt_id": "receipt.off-1",
+        "raw_subtype": "off_up",
+        "dedup_disposition": "accepted",
+        "correlation_id": "receipt.off-1",
+    }
+    assert scenario_node_red._validated_trigger_context(  # noqa: SLF001
+        trigger, "receipt.off-1"
+    ) == trigger
+    for invalid in (
+        {**trigger, "payload": {"identity": "attacker"}},
+        {**trigger, "correlation_id": "different"},
+        {**trigger, "raw_subtype": "toggle_down"},
+        {**trigger, "direct_user_intent": {"value": "off"}},
+        {key: value for key, value in trigger.items() if key != "binding"},
+    ):
+        with pytest.raises(NodeRedBackendError, match="trigger context"):
+            scenario_node_red._validated_trigger_context(  # noqa: SLF001
+                invalid, "receipt.off-1"
+            )
+
+
+def test_release_owned_direct_off_plan_is_exact_group_without_mirror() -> None:
+    trigger = {
+        "source": "manual", "trigger_id": "off_up", "recovery": False,
+        "binding": "tambur-light-group", "typed_intent": "off",
+        "direct_user_intent": "off", "intent_receipt_id": "receipt.off-1",
+        "raw_subtype": "off_up", "dedup_disposition": "accepted",
+        "correlation_id": "receipt.off-1",
+    }
+    group = [
+        ScenarioAction("chandelier_off", ScenarioActionType.DEVICE_ACTION, target_id="entity_71859313239a14e4", action_id="turn_off"),
+        ScenarioAction("points_off", ScenarioActionType.DEVICE_ACTION, target_id="entity_cd0098e5ff95da46", action_id="turn_off"),
+    ]
+    NodeRedScenarioBackend._validate_typed_plan(  # noqa: SLF001
+        "system-tambur-adaptive-controller", group, trigger
+    )
+    with pytest.raises(NodeRedBackendError, match="typed intent"):
+        NodeRedScenarioBackend._validate_typed_plan(  # noqa: SLF001
+            "system-tambur-adaptive-controller", group[:-1], trigger
+        )
+    with pytest.raises(NodeRedBackendError, match="typed intent"):
+        NodeRedScenarioBackend._validate_typed_plan(  # noqa: SLF001
+            "system-tambur-adaptive-controller",
+            [*group, ScenarioAction("mirror_off", ScenarioActionType.DEVICE_ACTION, target_id="entity_fbdf27871edb89bf", action_id="turn_off")],
+            trigger,
+        )
 def test_system_input_snapshot_drives_real_tambur_sunset_mired_branch() -> None:
     ids = {
         "sun": "entity_6b9ccdab9bb484b2",

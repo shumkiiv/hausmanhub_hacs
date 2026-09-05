@@ -188,6 +188,31 @@ class OperationJournalTests(unittest.IsolatedAsyncioTestCase):
         )
         Draft202012Validator(schema).validate(service.snapshot())
 
+    def test_release_owned_typed_trigger_is_preserved(self) -> None:
+        normalized = scenario_operation_receipt(
+            {
+                "run_id": "receipt.off-1",
+                "scenario_id": "system-tambur-adaptive-controller",
+                "execution_mode": "restart",
+                "command_mode": "live",
+                "status": "completed",
+                "confirmed": True,
+                "trigger_context": {
+                    "source": "manual", "trigger_id": "off_up", "recovery": False,
+                    "binding": "tambur-light-group", "typed_intent": "off",
+                    "direct_user_intent": "off", "intent_receipt_id": "receipt.off-1",
+                    "raw_subtype": "off_up", "dedup_disposition": "accepted",
+                    "correlation_id": "receipt.off-1",
+                },
+                "condition_results": [],
+                "receipts": [],
+            }
+        )
+        self.assertEqual("off_up", normalized["scenario"]["trigger"]["trigger_id"])
+        self.assertEqual("tambur-light-group", normalized["scenario"]["trigger"]["target_id"])
+        self.assertEqual("off", normalized["scenario"]["trigger"]["old_value"])
+        self.assertEqual("off", normalized["scenario"]["trigger"]["new_value"])
+
     async def test_invalid_scenario_trace_fails_closed(self) -> None:
         store = MemoryStore()
         service = OperationJournalService(store)

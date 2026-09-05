@@ -47,16 +47,12 @@ _ALLOWED_RESULT_STATUSES = frozenset({"completed", "skipped", "failed"})
 _TRUSTED_SYSTEM_SOURCE_HASHES = {
     "system-tambur-adaptive-controller": frozenset(
         {
-            "3183bc1806afdadd797968bafcc7cbb738f13d80cc02c28cc42852de07c36d21",
-            "baa8044bf3cbcb360a963599b164434eb7b385f4d3b9a8cd156ee901fbf6dcff",
-            "399a39d89a4b745c901b0201fe9510eb0a754106b49c1ef1a85c61359c1022c4",
-            "0551ee02fc052a99a2e802054b8aaeaa1ada5885b927b90eb3cc8d2aca3414f9",
-            "e4f76cca39c5ee49f7ee216f3435f9ee0dc461826787a1df0135a4a5d2da5eb2",
+            "4daef9ac2de8dc1c95dd2da6887e178751a65d0e47bcf48443635f68eb1ba5dc",
         }
     ),
     "system-shower-comfort-controller": frozenset(
         {
-            "9060257eaa344944611e3992b33591ab6ddb24ddd984137fce7aeeea6703b55c",
+            "757bde711c85ebad4826c2ec0bf2695d0034f7dd820c9ec7c30816f3f37c1551",
         }
     ),
     "system-small-corridor-light-controller": frozenset(
@@ -123,6 +119,14 @@ _SYSTEM_INPUT_ATTRIBUTE_ALLOWLIST = {
     },
 }
 _TRACE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+_RECEIPT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_RELEASE_TRIGGER_FIELDS = frozenset(
+    {
+        "source", "trigger_id", "recovery", "binding", "typed_intent",
+        "direct_user_intent", "intent_receipt_id", "raw_subtype",
+        "dedup_disposition", "correlation_id",
+    }
+)
 _FORBIDDEN_SOURCE_PATTERNS = (
     (
         "global_context",
@@ -232,6 +236,69 @@ def managed_source_hash(source: str) -> str:
     """Return the stable conflict hash stored with one scenario."""
 
     return hashlib.sha256(source.encode()).hexdigest()
+
+
+def _validated_trigger_context(
+    trigger_context: Mapping[str, object] | None, run_id: str
+) -> dict[str, object]:
+    """Validate release-owned fields exactly and sanitize legacy contexts."""
+
+    value = trigger_context or {}
+    release_owned = bool(
+        set(value)
+        & (_RELEASE_TRIGGER_FIELDS - {"source", "trigger_id", "recovery"})
+    )
+    if release_owned:
+        if set(value) != _RELEASE_TRIGGER_FIELDS:
+            raise NodeRedBackendError("release-owned trigger context is invalid")
+        if (
+            value.get("source") != "manual"
+            or value.get("recovery") is not False
+            or value.get("dedup_disposition") != "accepted"
+            or not all(
+                isinstance(value.get(key), str)
+                for key in _RELEASE_TRIGGER_FIELDS - {"recovery"}
+            )
+        ):
+            raise NodeRedBackendError("release-owned trigger context is invalid")
+        receipt = str(value["intent_receipt_id"])
+        trigger_id = str(value["trigger_id"])
+        binding = str(value["binding"])
+        typed_intent = str(value["typed_intent"])
+        direct_intent = str(value["direct_user_intent"])
+        valid_binding = (
+            binding == "shower-cabinet"
+            and trigger_id in {"toggle_b2_down", "on_b2_down"}
+            and typed_intent == "toggle"
+            or binding == "tambur-light-group"
+            and {
+                "on_down": "on", "toggle_down": "toggle", "off_up": "off"
+            }.get(trigger_id) == typed_intent
+        )
+        if (
+            _RECEIPT_ID.fullmatch(receipt) is None
+            or receipt != run_id
+            or value.get("correlation_id") != receipt
+            or value.get("raw_subtype") != trigger_id
+            or direct_intent not in {"on", "off"}
+            or typed_intent in {"on", "off"} and direct_intent != typed_intent
+            or not valid_binding
+        ):
+            raise NodeRedBackendError("release-owned trigger context is invalid")
+        return dict(value)
+    allowed = {
+        "source", "trigger_id", "target_id", "old_value", "new_value", "recovery"
+    }
+    return {
+        key: item
+        for key, item in value.items()
+        if key in allowed
+        and (
+            item is None
+            or isinstance(item, (str, int, bool))
+            or isinstance(item, float) and math.isfinite(item)
+        )
+    }
 
 
 def validate_managed_source(
@@ -697,6 +764,26 @@ class NodeRedScenarioBackend:
             "flow": body,
             "source": source,
             "source_hash": managed_source_hash(source),
+        }
+
+    async def async_verify_managed_topology(
+        self, scenario_id: str, flow_id: str
+    ) -> dict[str, str]:
+        """Return source evidence only for the fixed managed three-node topology."""
+
+        revision_before = await self._async_flow_revision(scenario_id, flow_id)
+        current = await self.async_read_source(scenario_id, flow_id)
+        source_hash = str(current["source_hash"])
+        topology_hash = _execution_topology_hash(
+            scenario_id, flow_id, current["flow"], source_hash
+        )
+        revision_after = await self._async_flow_revision(scenario_id, flow_id)
+        if revision_after != revision_before:
+            raise NodeRedBackendError("Node-RED flow changed during migration preflight")
+        return {
+            "source_hash": source_hash,
+            "topology": "managed-three-node-v1",
+            "topology_hash": topology_hash,
         }
 
     async def _async_flow_revision(
@@ -1254,6 +1341,32 @@ class NodeRedScenarioBackend:
             "previous_source": current["source"],
         }
 
+    async def async_prepare_release_source(
+        self,
+        scenario_id: str,
+        definition: ScenarioDefinition,
+        flow_id: str,
+        source: str,
+        expected_source_hash: str,
+        catalog: ScenarioCatalog | None,
+    ) -> dict[str, object]:
+        """Prepare one signed release source and retain exact CAS compensation."""
+
+        self._last_prepare_operation = None
+        result = await self.async_update_source(
+            scenario_id, definition, flow_id, source, expected_source_hash,
+            catalog, validate_only=False,
+        )
+        if result.get("saved") is True:
+            self._last_prepare_operation = {
+                "kind": "update",
+                "scenarioId": scenario_id,
+                "flowId": flow_id,
+                "sourceHash": str(result["proposed_source_hash"]),
+                "previousSource": result["previous_source"],
+            }
+        return result
+
     async def async_restore_source(
         self,
         scenario_id: str,
@@ -1626,26 +1739,7 @@ class NodeRedScenarioBackend:
             current["flow"],
             current_hash,
         )
-        safe_trigger = {
-            key: value
-            for key, value in (trigger_context or {}).items()
-            if key
-            in {
-                "source",
-                "trigger_id",
-                "target_id",
-                "old_value",
-                "new_value",
-                "recovery",
-            }
-            and (
-                value is None
-                or isinstance(value, (str, int, float, bool))
-                and not isinstance(value, float)
-                or isinstance(value, float)
-                and math.isfinite(value)
-            )
-        }
+        safe_trigger = _validated_trigger_context(trigger_context, run_id)
         payload = {
             "correlationId": run_id,
             "scenarioId": scenario_id,
@@ -1706,6 +1800,7 @@ class NodeRedScenarioBackend:
                 raise NodeRedBackendError("Node-RED returned a forbidden action type")
             actions.append(action)
         self._validate_plan_envelope(scenario_id, definition, actions)
+        self._validate_typed_plan(scenario_id, actions, safe_trigger)
         trace = body.get("trace")
         if not isinstance(trace, list) or len(trace) > 64:
             raise NodeRedBackendError("Node-RED trace is invalid")
@@ -1793,6 +1888,43 @@ class NodeRedScenarioBackend:
                     raise NodeRedBackendError("Node-RED nested scenario exceeds the release-trusted envelope")
             else:
                 raise NodeRedBackendError("Node-RED action type exceeds the release-trusted envelope")
+
+    @staticmethod
+    def _validate_typed_plan(
+        scenario_id: str,
+        actions: list[ScenarioAction],
+        trigger: Mapping[str, object],
+    ) -> None:
+        """Narrow direct-user plans beyond the general release envelope."""
+
+        binding = trigger.get("binding")
+        if binding not in {"shower-cabinet", "tambur-light-group"}:
+            return
+        intent = trigger.get("direct_user_intent")
+        signatures = [
+            (action.target_id, action.action_id)
+            for action in actions
+            if action.type is ScenarioActionType.DEVICE_ACTION
+        ]
+        if len(signatures) != len(actions):
+            raise NodeRedBackendError("Node-RED typed intent plan is invalid")
+        if binding == "shower-cabinet":
+            expected = [("entity_e7a7c61eec7bdff8", f"turn_{intent}")]
+            if scenario_id != "system-shower-comfort-controller" or signatures != expected:
+                raise NodeRedBackendError("Node-RED typed intent plan is invalid")
+            return
+        if scenario_id != "system-tambur-adaptive-controller":
+            raise NodeRedBackendError("Node-RED typed intent plan is invalid")
+        allowed = {
+            ("entity_71859313239a14e4", f"turn_{intent}"),
+            ("entity_cd0098e5ff95da46", f"turn_{intent}"),
+        }
+        if intent == "off":
+            valid = len(signatures) == 2 and set(signatures) == allowed
+        else:
+            valid = len(signatures) == len(set(signatures)) and set(signatures).issubset(allowed)
+        if not valid:
+            raise NodeRedBackendError("Node-RED typed intent plan is invalid")
 
 
 def _definition_envelope(definition: ScenarioDefinition) -> dict[str, dict[object, int]]:

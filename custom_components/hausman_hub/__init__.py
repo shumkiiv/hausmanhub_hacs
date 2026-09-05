@@ -11,6 +11,7 @@ strict climate-call executor used by trial, managed ticks, and settings applicat
 from __future__ import annotations
 
 from datetime import timedelta
+import logging
 from typing import TYPE_CHECKING
 
 from .application.configuration import (
@@ -20,6 +21,8 @@ from .application.configuration import (
     RELIABLE_SCOPE_INTEGRITY_KEY_FIELD,
     effective_configuration,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -395,8 +398,42 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         intercom_release_publisher=_publish_intercom_release,
         scenario_change_publisher=_publish_scenario_change,
         intercom_release_obligation=intercom_release_obligation,
+        manual_light_off_protection=manual_light_off_protection,
     )
     await scenario_service.async_load()
+    managed_switches_ready = False
+    try:
+        from .application.managed_switch_migration import (
+            HomeAssistantManagedSwitchMigrationStore,
+            ManagedSwitchMigration,
+        )
+
+        await ManagedSwitchMigration(
+            scenario_service,
+            HomeAssistantManagedSwitchMigrationStore(hass, entry.entry_id),
+        ).async_apply()
+    except Exception:  # noqa: BLE001
+        _LOGGER.exception("Release-owned managed switch migration is blocked")
+        domain_data["managed_switch_migration"] = {
+            "state": "blocked",
+            "reason": "verified_migration_failed",
+        }
+    else:
+        managed_switches_ready = True
+        domain_data["managed_switch_migration"] = {"state": "completed"}
+
+    sensor_states: dict[str, object] = {}
+    for sensor_target_id in (
+        "entity_156050daca86aa6c",
+        "entity_10b78187426f8485",
+    ):
+        sensor = scenario_service.current_catalog().device(sensor_target_id)
+        entity_id = getattr(sensor, "entity_id", None)
+        if isinstance(entity_id, str):
+            sensor_states[entity_id] = hass.states.get(entity_id)
+    await manual_light_off_protection.async_restore_release_owned_sensor_evidence(
+        sensor_states
+    )
     from .application.scenario_light_priority import LightAutomationPriority
     from .light_automation_priority_storage import (
         HomeAssistantLightAutomationPriorityStore,
@@ -452,15 +489,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     entry.async_on_unload(scenario_service.cancel_running_scenarios)
     entry.async_on_unload(scenario_service.start_catalog_warmup())
-    await async_start_scenario_schedule(hass, entry, scenario_service)
+    if managed_switches_ready:
+        await async_start_scenario_schedule(hass, entry, scenario_service)
     from .scenario_events import async_start_scenario_events
 
-    await async_start_scenario_events(
-        hass,
-        entry,
-        scenario_service,
-        scenario_command_contexts,
-    )
+    if managed_switches_ready:
+        await async_start_scenario_events(
+            hass,
+            entry,
+            scenario_service,
+            scenario_command_contexts,
+        )
     from .application.smart_switch_runtime import (
         HomeAssistantSmartSwitchDedupStore,
         SmartSwitchTriggerAdapter,
@@ -471,6 +510,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         state_store=HomeAssistantSmartSwitchDedupStore(hass, entry.entry_id),
     )
     try:
+        if not managed_switches_ready:
+            raise RuntimeError("verified managed switch migration is unavailable")
         await smart_switch_adapter.async_start()
     except Exception:  # noqa: BLE001
         # Device automation discovery is optional and fail-closed. Existing
@@ -478,7 +519,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         smart_switch_adapter.async_unload()
         hass.data.setdefault(entry.domain, {})["smart_switch_runtime"] = {
             "state": "unavailable",
-            "reason": "device_trigger_attach_failed",
+            "reason": (
+                "device_trigger_attach_failed"
+                if managed_switches_ready
+                else "verified_migration_failed"
+            ),
         }
     else:
         entry.async_on_unload(smart_switch_adapter.async_unload)

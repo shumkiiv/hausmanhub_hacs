@@ -33,6 +33,9 @@ MAX_ACTIVE_PROTECTIONS = 64
 MAX_COMPLETED_PROTECTIONS = 256
 MAX_IDEMPOTENCY_RECEIPTS = 128
 _FRESH_SENSOR_SECONDS = 300
+_DIRECT_USER_BLOCK_SECONDS = 180
+_DIRECT_USER_ROOM_ID = "tambur"
+_DIRECT_USER_PROFILE_ID = "tambur-direct-user-off"
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -178,6 +181,167 @@ class ManualLightOffProtectionCoordinator:
             await self._persist_with_receipt(request_id, receipt, "settings_updated", fingerprint)
             self._notify_event_entity_listeners()
             return copy.deepcopy(receipt)
+
+    async def async_arm_release_owned_direct_off(
+        self,
+        *,
+        request_id: str,
+        light_entity_ids: tuple[str, ...],
+        presence_sensor_entity_ids: tuple[str, ...],
+        sensor_states: Mapping[str, object],
+    ) -> dict[str, object]:
+        """Persist the fixed tambur block before a release-owned direct off."""
+
+        async with self._lock:
+            self._require_healthy()
+            if (
+                len(light_entity_ids) != 2
+                or len(set(light_entity_ids)) != 2
+                or len(presence_sensor_entity_ids) != 2
+                or len(set(presence_sensor_entity_ids)) != 2
+                or any(
+                    re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", item)
+                    is None
+                    for item in (*light_entity_ids, *presence_sensor_entity_ids)
+                )
+            ):
+                raise ManualLightOffProtectionValidationError(
+                    "release-owned direct-off scope is invalid"
+                )
+            request = {
+                "lightEntityIds": list(light_entity_ids),
+                "presenceSensorEntityIds": list(presence_sensor_entity_ids),
+            }
+            fingerprint = _request_fingerprint(request)
+            existing = self._receipt(
+                request_id, "direct_user_block_armed", fingerprint
+            )
+            if existing is not None:
+                return existing
+
+            now = _utc(self._now())
+            key = _profile_key(_DIRECT_USER_ROOM_ID, _DIRECT_USER_PROFILE_ID)
+            current = self._protections.get(key)
+            if current is not None:
+                if (
+                    tuple(current.get("lightIds", ())) != light_entity_ids
+                    or self._frozen_sensor_ids.get(key) != presence_sensor_entity_ids
+                    or current.get("state") != ProtectionState.ACTIVE.value
+                ):
+                    raise ManualLightOffProtectionValidationError(
+                        "release-owned direct-off scope conflicts with durable state"
+                    )
+                self._restore_sensor_evidence(sensor_states, now)
+                receipt = _receipt(
+                    request_id,
+                    "direct_user_block_armed",
+                    self._state_revision,
+                    protection=current,
+                )
+                await self._persist_with_receipt(
+                    request_id,
+                    receipt,
+                    "direct_user_block_armed",
+                    fingerprint,
+                )
+                return copy.deepcopy(receipt)
+            policy = parse_settings(
+                {
+                    "globalPolicy": {
+                        "enabled": True,
+                        "minimumIntervalSeconds": _DIRECT_USER_BLOCK_SECONDS,
+                        "releaseMode": "timer_and_absence",
+                        "stableAbsenceSeconds": _DIRECT_USER_BLOCK_SECONDS,
+                        "extendOnRepeatedManualOff": False,
+                        "noSensorFallback": "manual_release",
+                        "protectedScope": "profile",
+                        "allowManualRelease": False,
+                    },
+                    "roomOverrides": {},
+                    "profileOverrides": {},
+                    "profiles": [],
+                }
+            ).global_policy
+            revision = 0
+            record = {
+                "roomId": _DIRECT_USER_ROOM_ID,
+                "profileId": _DIRECT_USER_PROFILE_ID,
+                "lightIds": list(light_entity_ids),
+                "startedAt": _wire_time(now),
+                "notBefore": _wire_time(
+                    now.timestamp() + _DIRECT_USER_BLOCK_SECONDS
+                ),
+                "absenceSince": None,
+                "effectivePolicy": policy.as_wire(),
+                "effectivePolicySource": EffectivePolicySource.PROFILE.value,
+                "policyFingerprint": policy.fingerprint,
+                "reason": "manual_off",
+                "attributionSource": "manual_command",
+                "attributionId": request_id,
+                "revision": revision,
+                "state": ProtectionState.ACTIVE.value,
+            }
+            self._protections[key] = record
+            self._frozen_sensor_ids[key] = tuple(presence_sensor_entity_ids)
+            self._state_revision += 1
+            self._restore_sensor_evidence(sensor_states, now)
+            receipt = _receipt(
+                request_id,
+                "direct_user_block_armed",
+                self._state_revision,
+                protection=record,
+            )
+            await self._persist_with_receipt(
+                request_id,
+                receipt,
+                "direct_user_block_armed",
+                fingerprint,
+            )
+            self._notify_event_entity_listeners()
+            return copy.deepcopy(receipt)
+
+    async def async_restore_release_owned_sensor_evidence(
+        self, sensor_states: Mapping[str, object]
+    ) -> None:
+        """Rebuild only fresh sensor evidence after an integration restart."""
+
+        async with self._lock:
+            if self.unhealthy or not self._loaded:
+                return
+            self._restore_sensor_evidence(sensor_states, _utc(self._now()))
+
+    def _restore_sensor_evidence(
+        self, sensor_states: Mapping[str, object], now: datetime
+    ) -> None:
+        tracked = {
+            sensor_id
+            for sensor_ids in self._frozen_sensor_ids.values()
+            for sensor_id in sensor_ids
+        }
+        for sensor_id in tracked:
+            value = sensor_states.get(sensor_id)
+            state = _state(value)
+            observed = _state_timestamp(value, now)
+            attributes = getattr(value, "attributes", {})
+            trusted = (
+                state in {"on", "off"}
+                and 0 <= (now - observed).total_seconds() <= _FRESH_SENSOR_SECONDS
+                and not getattr(value, "assumed_state", False)
+                and not getattr(value, "is_assumed_state", False)
+                and not (
+                    isinstance(attributes, Mapping)
+                    and (
+                        attributes.get("assumed_state") is True
+                        or attributes.get("restored") is True
+                        or attributes.get("cached") is True
+                        or attributes.get("cache") is True
+                        or attributes.get("evidence_source") in {"restore", "cache"}
+                    )
+                )
+            )
+            self._sensor_states[sensor_id] = (
+                (state, observed) if trusted else ("unknown", observed)
+            )
 
     async def async_note_state_transition(
         self,
@@ -666,7 +830,7 @@ def _valid_receipt(value: object) -> bool:
     if not isinstance(value, Mapping) or set(value) not in ({"requestId", "receipt"}, {"requestId", "receipt", "operation", "payloadFingerprint"}):
         return False
     request_id, receipt = value["requestId"], value["receipt"]
-    if ("operation" in value and (value["operation"] not in {"settings_updated", "manual_release"} or not isinstance(value["payloadFingerprint"], str) or re.fullmatch(r"[a-f0-9]{64}", value["payloadFingerprint"]) is None)):
+    if ("operation" in value and (value["operation"] not in {"settings_updated", "manual_release", "direct_user_block_armed"} or not isinstance(value["payloadFingerprint"], str) or re.fullmatch(r"[a-f0-9]{64}", value["payloadFingerprint"]) is None)):
         return False
     if not isinstance(request_id, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", request_id) is None or not isinstance(receipt, Mapping):
         return False
@@ -681,6 +845,8 @@ def _valid_receipt(value: object) -> bool:
         except (KeyError, TypeError, ValueError, ManualLightOffProtectionViolation): return False
         return "protection" not in receipt
     if receipt.get("operation") == "manual_release":
+        return "settings" not in receipt and _valid_protection(receipt.get("protection"))
+    if receipt.get("operation") == "direct_user_block_armed":
         return "settings" not in receipt and _valid_protection(receipt.get("protection"))
     return False
 

@@ -379,7 +379,7 @@ def scenario_operation_receipt(result: Mapping[str, object]) -> dict[str, object
         "decisions": decisions[:64],
         "actions": actions[:64],
     }
-    trigger = _validated_scenario_trigger(result.get("trigger_context"))
+    trigger = _validated_scenario_trigger(result.get("trigger_context"), run_id)
     if trigger is not None:
         scenario_trace["trigger"] = trigger
     receipt = {
@@ -458,7 +458,9 @@ def _validated_scenario_trace(value: object) -> dict[str, object] | None:
     decisions = value.get("decisions")
     actions = value.get("actions")
     trigger_present = "trigger" in value
-    trigger = _validated_scenario_trigger(value.get("trigger"))
+    trigger = _validated_scenario_trigger(
+        value.get("trigger"), str(run_id) if isinstance(run_id, str) else None
+    )
     if (
         not isinstance(scenario_id, str)
         or _STABLE_ID.fullmatch(scenario_id) is None
@@ -548,10 +550,63 @@ def _validated_scenario_trace(value: object) -> dict[str, object] | None:
     return normalized
 
 
-def _validated_scenario_trigger(value: object) -> dict[str, object] | None:
+def _validated_scenario_trigger(
+    value: object, expected_correlation_id: str | None = None
+) -> dict[str, object] | None:
     if not isinstance(value, Mapping):
         return None
     required = {"source", "trigger_id", "recovery"}
+    release_fields = required | {
+        "binding", "typed_intent", "direct_user_intent", "intent_receipt_id",
+        "raw_subtype", "dedup_disposition", "correlation_id",
+    }
+    if set(value) & (release_fields - required):
+        if set(value) != release_fields:
+            return None
+        binding = value.get("binding")
+        trigger_id = value.get("trigger_id")
+        typed_intent = value.get("typed_intent")
+        receipt = value.get("intent_receipt_id")
+        if (
+            value.get("source") != "manual"
+            or value.get("recovery") is not False
+            or value.get("dedup_disposition") not in {"accepted", "deduplicated", "ignored"}
+            or value.get("raw_subtype") != trigger_id
+            or value.get("correlation_id") != receipt
+            or expected_correlation_id is not None
+            and receipt != expected_correlation_id
+            or value.get("direct_user_intent") not in {"on", "off", "none"}
+            or typed_intent in {"on", "off"}
+            and value.get("direct_user_intent") not in {typed_intent, "none"}
+            or not isinstance(receipt, str)
+            or _CORRELATION_ID.fullmatch(receipt) is None
+            or not (
+                binding == "shower-cabinet"
+                and trigger_id in {"toggle_b2_down", "on_b2_down"}
+                and typed_intent == "toggle"
+                or binding == "tambur-light-group"
+                and {"on_down": "on", "toggle_down": "toggle", "off_up": "off"}.get(trigger_id) == typed_intent
+                or binding == "shower-cabinet"
+                and trigger_id == "toggle_b2_up"
+                and typed_intent == "release"
+            )
+            or value.get("dedup_disposition") == "ignored"
+            and not (trigger_id == "toggle_b2_up" and value.get("direct_user_intent") == "none")
+            or value.get("dedup_disposition") == "deduplicated"
+            and not (typed_intent == "toggle" and value.get("direct_user_intent") == "none")
+            or value.get("dedup_disposition") == "accepted"
+            and value.get("direct_user_intent") == "none"
+            and typed_intent not in {"on", "off", "toggle"}
+        ):
+            return None
+        return {
+            "source": "manual",
+            "trigger_id": trigger_id,
+            "target_id": binding,
+            "old_value": typed_intent,
+            "new_value": value.get("direct_user_intent"),
+            "recovery": False,
+        }
     allowed = required | {"target_id", "old_value", "new_value"}
     if not required.issubset(value) or not set(value).issubset(allowed):
         return None

@@ -106,24 +106,48 @@ def _action_ids(payload: dict[str, object]) -> list[str]:
     return [str(item["id"]) for item in payload["actions"]]
 
 
+def _typed(binding: str, trigger_id: str, typed: str, direct: str) -> dict[str, object]:
+    return {
+        "source": "manual", "trigger_id": trigger_id, "recovery": False,
+        "binding": binding, "typed_intent": typed,
+        "direct_user_intent": direct, "intent_receipt_id": "receipt.test",
+        "raw_subtype": trigger_id, "dedup_disposition": "accepted",
+        "correlation_id": "receipt.test",
+    }
+
+
 class ManagedTamburSourceTest(unittest.TestCase):
+    def test_direct_group_on_only_enables_off_member_without_profile_rewrite(self) -> None:
+        states = self.base_states()
+        states.update({
+            CHANDELIER: {"state": "on", "attributes": {"brightness": 13, "color_temp_kelvin": 6500}},
+            POINTS: "off",
+            MIRROR: "on",
+        })
+        payload = _run_tambur(
+            timestamp="2026-08-27T12:00:00+06:00", states=states,
+            trigger=_typed("tambur-light-group", "on_down", "on", "on"),
+        )
+        self.assertEqual(["points_on"], _action_ids(payload))
+        self.assertNotIn(MIRROR, {item.get("targetId") for item in payload["actions"]})
+
     def test_typed_manual_group_off_turns_off_both_without_mirror(self) -> None:
         states = self.base_states()
         states.update({CHANDELIER: "on", POINTS: "on", MIRROR: "on"})
         payload = _run_tambur(
             timestamp="2026-08-27T12:00:00+06:00", states=states,
-            trigger={"source": "manual", "trigger_id": "off_up", "typed_intent": "off"},
+            trigger=_typed("tambur-light-group", "off_up", "off", "off"),
         )
         self.assertEqual(["chandelier_off", "points_off"], _action_ids(payload))
 
-    def test_typed_manual_group_toggle_unknown_fails_closed(self) -> None:
+    def test_resolved_direct_off_ignores_untrusted_payload_identity(self) -> None:
         states = self.base_states()
         states.update({CHANDELIER: "unknown", POINTS: "off"})
         payload = _run_tambur(
             timestamp="2026-08-27T12:00:00+06:00", states=states,
-            trigger={"source": "manual", "trigger_id": "toggle_down", "typed_intent": "toggle"},
+            trigger=_typed("tambur-light-group", "toggle_down", "toggle", "off"),
         )
-        self.assertEqual([], _action_ids(payload))
+        self.assertEqual(["chandelier_off", "points_off"], _action_ids(payload))
 
     def base_states(self) -> dict[str, object]:
         return {
@@ -317,7 +341,7 @@ class ManagedShowerSourceTest(unittest.TestCase):
         payload = _run_shower(
             timestamp="2026-08-27T12:00:00+06:00",
             states={SHOWER_MAIN: "on", SHOWER_CABINET: "off"},
-            trigger={"source": "device", "trigger_id": "toggle_b2_down"},
+            trigger=_typed("shower-cabinet", "toggle_b2_down", "toggle", "on"),
         )
         self.assertEqual(["set_cabinet_on"], _action_ids(payload))
         self.assertNotIn("set_main_off", _action_ids(payload))
@@ -326,7 +350,7 @@ class ManagedShowerSourceTest(unittest.TestCase):
         payload = _run_shower(
             timestamp="2026-08-27T12:00:00+06:00",
             states={SHOWER_MAIN: "on", SHOWER_CABINET: "unknown"},
-            trigger={"source": "device", "trigger_id": "toggle_b2_down"},
+            trigger=_typed("shower-cabinet", "toggle_b2_down", "toggle", "on"),
         )
         self.assertEqual([], _action_ids(payload))
         self.assertIn("недоступ", payload["trace"][2]["reason"].lower())

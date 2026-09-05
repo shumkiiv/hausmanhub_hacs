@@ -144,6 +144,198 @@ def test_manual_off_lifecycle_keeps_profile_blocked_until_timer_and_absence() ->
     asyncio.run(exercise())
 
 
+def test_release_owned_direct_off_is_durable_before_180_seconds_of_both_absent() -> None:
+    """Removing the fixed 180-second policy would release auto-on too early."""
+
+    async def exercise() -> None:
+        now = datetime(2026, 9, 5, 12, tzinfo=timezone.utc)
+        store = MemoryStore()
+        coordinator = ManualLightOffProtectionCoordinator(store, now=lambda: now)
+        await coordinator.async_load()
+        sensors = {
+            "binary_sensor.tambur_presence": SimpleNamespace(
+                state="off", last_updated=now, attributes={}
+            ),
+            "binary_sensor.tambur_motion": SimpleNamespace(
+                state="off", last_updated=now, attributes={}
+            ),
+        }
+
+        receipt = await coordinator.async_arm_release_owned_direct_off(
+            request_id="switch.receipt.1",
+            light_entity_ids=("light.tambur_chandelier", "switch.tambur_points"),
+            presence_sensor_entity_ids=tuple(sensors),
+            sensor_states=sensors,
+        )
+        assert receipt["operation"] == "direct_user_block_armed"
+        assert store.payload["protections"][0]["notBefore"] == "2026-09-05T12:03:00Z"
+
+        now += timedelta(seconds=179)
+        assert not (
+            await coordinator.async_decide_entity(
+                "light.tambur_chandelier", automatic=True, dry_run=False
+            )
+        ).allowed
+        now += timedelta(seconds=1)
+        assert (
+            await coordinator.async_decide_entity(
+                "switch.tambur_points", automatic=True, dry_run=False
+            )
+        ).allowed
+        assert coordinator.snapshot()["protections"] == []
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("bad_state", ["on", "unknown", "unavailable"])
+def test_release_owned_direct_off_requires_both_fresh_off_and_presence_cancels_release(
+    bad_state: str,
+) -> None:
+    """One unsafe sensor must keep both managed lights blocked."""
+
+    async def exercise() -> None:
+        now = datetime(2026, 9, 5, 12, tzinfo=timezone.utc)
+        coordinator = ManualLightOffProtectionCoordinator(MemoryStore(), now=lambda: now)
+        await coordinator.async_load()
+        sensors = {
+            "binary_sensor.tambur_presence": SimpleNamespace(
+                state="off", last_updated=now, attributes={}
+            ),
+            "binary_sensor.tambur_motion": SimpleNamespace(
+                state="off", last_updated=now, attributes={}
+            ),
+        }
+        await coordinator.async_arm_release_owned_direct_off(
+            request_id="switch.receipt.2",
+            light_entity_ids=("light.tambur_chandelier", "switch.tambur_points"),
+            presence_sensor_entity_ids=tuple(sensors),
+            sensor_states=sensors,
+        )
+        now += timedelta(seconds=120)
+        unsafe = SimpleNamespace(
+            state=bad_state,
+            last_updated=(
+                now - timedelta(minutes=6) if bad_state == "unknown" else now
+            ),
+            attributes={"restored": True} if bad_state == "unavailable" else {},
+        )
+        await coordinator.async_note_state_transition(
+            "binary_sensor.tambur_motion", sensors["binary_sensor.tambur_motion"], unsafe, None
+        )
+        now += timedelta(seconds=180)
+        decision = await coordinator.async_decide_entity(
+            "light.tambur_chandelier", automatic=True, dry_run=False
+        )
+        assert not decision.allowed
+
+    asyncio.run(exercise())
+
+
+def test_release_owned_direct_off_survives_restart_and_same_receipt_is_idempotent() -> None:
+    """A restart or retry must not erase or extend the persisted block."""
+
+    async def exercise() -> None:
+        now = datetime(2026, 9, 5, 12, tzinfo=timezone.utc)
+        store = MemoryStore()
+        sensors = {
+            "binary_sensor.tambur_presence": SimpleNamespace(
+                state="off", last_updated=now, attributes={}
+            ),
+            "binary_sensor.tambur_motion": SimpleNamespace(
+                state="off", last_updated=now, attributes={}
+            ),
+        }
+        first = ManualLightOffProtectionCoordinator(store, now=lambda: now)
+        await first.async_load()
+        receipt = await first.async_arm_release_owned_direct_off(
+            request_id="switch.receipt.restart",
+            light_entity_ids=("light.tambur_chandelier", "switch.tambur_points"),
+            presence_sensor_entity_ids=tuple(sensors),
+            sensor_states=sensors,
+        )
+        started_at = store.payload["protections"][0]["startedAt"]
+        duplicate = await first.async_arm_release_owned_direct_off(
+            request_id="switch.receipt.restart",
+            light_entity_ids=("light.tambur_chandelier", "switch.tambur_points"),
+            presence_sensor_entity_ids=tuple(sensors),
+            sensor_states=sensors,
+        )
+        assert duplicate == receipt
+        assert store.payload["protections"][0]["startedAt"] == started_at
+
+        now += timedelta(seconds=179)
+        restarted = ManualLightOffProtectionCoordinator(store, now=lambda: now)
+        await restarted.async_load()
+        await restarted.async_restore_release_owned_sensor_evidence(sensors)
+        assert not (
+            await restarted.async_decide_entity(
+                "light.tambur_chandelier", automatic=True, dry_run=False
+            )
+        ).allowed
+        now += timedelta(seconds=1)
+        await restarted.async_restore_release_owned_sensor_evidence(sensors)
+        assert (
+            await restarted.async_decide_entity(
+                "switch.tambur_points", automatic=True, dry_run=False
+            )
+        ).allowed
+
+    asyncio.run(exercise())
+
+
+def test_repeated_direct_off_with_new_receipt_does_not_extend_block() -> None:
+    async def exercise() -> None:
+        now = datetime(2026, 9, 5, 12, tzinfo=timezone.utc)
+        coordinator = ManualLightOffProtectionCoordinator(MemoryStore(), now=lambda: now)
+        await coordinator.async_load()
+        sensors = {
+            "binary_sensor.tambur_presence": SimpleNamespace(state="off", last_updated=now, attributes={}),
+            "binary_sensor.tambur_motion": SimpleNamespace(state="off", last_updated=now, attributes={}),
+        }
+        arguments = {
+            "light_entity_ids": ("light.tambur_chandelier", "switch.tambur_points"),
+            "presence_sensor_entity_ids": tuple(sensors),
+            "sensor_states": sensors,
+        }
+        await coordinator.async_arm_release_owned_direct_off(request_id="switch.first", **arguments)
+        now += timedelta(seconds=120)
+        await coordinator.async_arm_release_owned_direct_off(request_id="switch.second", **arguments)
+        now += timedelta(seconds=60)
+        assert (
+            await coordinator.async_decide_entity(
+                "light.tambur_chandelier", automatic=True, dry_run=False
+            )
+        ).allowed
+
+    asyncio.run(exercise())
+
+
+def test_release_owned_direct_off_save_failure_fails_closed() -> None:
+    """The adapter may dispatch only after the durable arm is verified."""
+
+    class FailingStore(MemoryStore):
+        async def async_save(self, payload: dict[str, object]) -> None:
+            raise OSError("disk full")
+
+    async def exercise() -> None:
+        now = datetime(2026, 9, 5, 12, tzinfo=timezone.utc)
+        coordinator = ManualLightOffProtectionCoordinator(FailingStore(), now=lambda: now)
+        await coordinator.async_load()
+        with pytest.raises(OSError, match="persistence failed"):
+            await coordinator.async_arm_release_owned_direct_off(
+                request_id="switch.receipt.failure",
+                light_entity_ids=("light.tambur_chandelier", "switch.tambur_points"),
+                presence_sensor_entity_ids=(
+                    "binary_sensor.tambur_presence",
+                    "binary_sensor.tambur_motion",
+                ),
+                sensor_states={},
+            )
+        assert coordinator.unhealthy
+
+    asyncio.run(exercise())
+
+
 @pytest.mark.parametrize("state", ["unknown", "unavailable", "off"])
 def test_unknown_unavailable_and_stale_presence_never_release_automatically(
     state: str,

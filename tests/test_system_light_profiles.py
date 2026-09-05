@@ -23,6 +23,7 @@ def test_first_wave_profiles_use_the_catalog_target_ids_and_exclude_non_lights()
     assert profiles["tambur-points"].light_ids == ("entity_cd0098e5ff95da46",)
     assert profiles["tambur-mirror"].light_ids == ("entity_fbdf27871edb89bf",)
     assert profiles["small-corridor-lights"].light_ids == (
+        "entity_4be32416634e6416",
         "entity_9ed909332fdaa8fd",
     )
     assert profiles["storage-line-1"].light_ids == ("entity_0ec37ef18b4b39a6",)
@@ -39,6 +40,7 @@ def test_small_corridor_registry_only_contains_approved_action_target() -> None:
     registered = {item.target_id for item in FIRST_WAVE_AUTO_ON_TARGETS}
 
     assert "entity_9ed909332fdaa8fd" in registered
+    assert "entity_4be32416634e6416" in registered
     assert "entity_c9d6bc67f172f30d" not in registered  # local bright/dark input
     assert "entity_90417aada6a33491" not in registered  # motion trigger
     assert "entity_ff0244d6b760be7e" not in registered  # power relay

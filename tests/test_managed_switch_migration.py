@@ -1,42 +1,100 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 
 import pytest
 
 from custom_components.hausman_hub.application.managed_switch_migration import (
     LEGACY_MANAGED_SWITCHES,
+    MANIFEST_HASH,
+    MIGRATION_MANIFEST,
     ManagedSwitchMigration,
     ManagedSwitchMigrationConflict,
+    valid_managed_switch_migration_payload,
 )
 
 
 class Store:
-    def __init__(self, value=None): self.value = value; self.saved = []
-    async def async_load(self): return self.value
-    async def async_save(self, value): self.saved.append(value); self.value = value
+    def __init__(self, value=None, *, fail_save=False):
+        self.value = value
+        self.saved = []
+        self.fail_save = fail_save
+
+    async def async_load(self):
+        return self.value
+
+    async def async_save(self, value):
+        if self.fail_save:
+            raise OSError("verified save failed")
+        self.saved.append(value)
+        self.value = value
 
 
-def test_migration_rejects_legacy_revision_or_hash_conflict_without_save() -> None:
-    store = Store()
-    service = SimpleNamespace(async_get_scenario=lambda _id: SimpleNamespace(protected=True, revision=99, definition=SimpleNamespace(node_red=SimpleNamespace(source_hash="changed"))))
-    migration = ManagedSwitchMigration(service, store)
-    with pytest.raises(ManagedSwitchMigrationConflict):
-        asyncio.run(migration.async_apply())
-    assert store.saved == []
+class Service:
+    def __init__(self, *, fail=False):
+        self.calls = []
+        self.fail = fail
+
+    async def async_apply_managed_switch_migration(self, entries):
+        self.calls.append(entries)
+        if self.fail:
+            raise RuntimeError("CAS conflict")
 
 
-def test_completed_receipt_is_idempotent() -> None:
-    store = Store({"migrationId": "managed-switches", "version": 1, "state": "completed"})
-    service = SimpleNamespace()
-    assert asyncio.run(ManagedSwitchMigration(service, store).async_apply()) == "completed"
-    assert store.saved == []
-
-
-def test_manifest_contains_exact_three_protected_scenarios() -> None:
+def test_manifest_contains_exact_three_protected_scenarios_and_sources() -> None:
     assert set(LEGACY_MANAGED_SWITCHES) == {
         "system-shower-comfort-controller",
         "system-small-corridor-light-controller",
         "system-tambur-adaptive-controller",
     }
+    for item in MIGRATION_MANIFEST:
+        assert item.legacy_topology == "managed-three-node-v1"
+        assert len(item.legacy_source_hash) == len(item.new_source_hash) == 64
+        assert item.input_target_ids
+
+
+def test_migration_persists_prepared_before_cas_and_completed_after() -> None:
+    store = Store()
+    service = Service()
+    assert asyncio.run(ManagedSwitchMigration(service, store).async_apply()) == "completed"
+    assert [item["state"] for item in store.saved] == ["prepared", "completed"]
+    assert all(valid_managed_switch_migration_payload(item) for item in store.saved)
+    assert len(service.calls[0]) == 3
+    assert all(item.source for item in service.calls[0])
+
+
+def test_storage_failure_before_prepare_causes_no_mutation() -> None:
+    store = Store(fail_save=True)
+    service = Service()
+    with pytest.raises(OSError, match="verified save failed"):
+        asyncio.run(ManagedSwitchMigration(service, store).async_apply())
+    assert service.calls == []
+
+
+def test_prepared_receipt_reconciles_and_completed_is_idempotent() -> None:
+    prepared = {
+        "migrationId": "managed-switches", "version": 2,
+        "state": "prepared", "manifestHash": MANIFEST_HASH,
+    }
+    store = Store(prepared)
+    service = Service()
+    asyncio.run(ManagedSwitchMigration(service, store).async_apply())
+    assert len(service.calls) == 1
+    completed = Store(store.value)
+    second = Service()
+    assert asyncio.run(ManagedSwitchMigration(second, completed).async_apply()) == "completed"
+    assert len(second.calls) == 1
+    assert completed.saved == []
+
+
+def test_invalid_or_foreign_receipt_fails_closed() -> None:
+    store = Store({"migrationId": "managed-switches", "version": 2, "state": "completed", "manifestHash": "0" * 64})
+    with pytest.raises(ManagedSwitchMigrationConflict, match="receipt"):
+        asyncio.run(ManagedSwitchMigration(Service(), store).async_apply())
+
+
+def test_cas_conflict_leaves_prepared_receipt_for_restart_reconciliation() -> None:
+    store = Store()
+    with pytest.raises(RuntimeError, match="CAS conflict"):
+        asyncio.run(ManagedSwitchMigration(Service(fail=True), store).async_apply())
+    assert store.value["state"] == "prepared"

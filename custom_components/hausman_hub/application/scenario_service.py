@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
 import re
@@ -487,6 +488,7 @@ class ScenarioService:
         ] | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         intercom_release_obligation: IntercomReleaseObligation | None = None,
+        manual_light_off_protection: object | None = None,
     ):
         self._hass = hass
         self._store = store
@@ -505,6 +507,7 @@ class ScenarioService:
         self._scenario_change_publisher = scenario_change_publisher
         self._monotonic = monotonic
         self._intercom_release_obligation = intercom_release_obligation
+        self._manual_light_off_protection = manual_light_off_protection
         self._path_metrics = ScenarioPathMetrics()
         self._scenario_content_revision_key: tuple[tuple[str, int], ...] | None = None
         self._scenario_content_revision: str | None = None
@@ -1102,6 +1105,159 @@ class ScenarioService:
                 "verification": result["verification"],
             }
 
+    async def async_apply_managed_switch_migration(
+        self, entries: tuple[object, ...]
+    ) -> str:
+        """CAS-migrate the three release-owned managed scenarios."""
+
+        self._require_running()
+        async with self._lock:
+            registry = self._ensure_loaded()
+            backend = self._node_red_backend
+            if backend is None:
+                raise ScenarioServiceError("Node-RED backend is unavailable.", status=503)
+            required_ids = {
+                "system-shower-comfort-controller",
+                "system-small-corridor-light-controller",
+                "system-tambur-adaptive-controller",
+            }
+            if (
+                len(entries) != len(required_ids)
+                or {str(getattr(item, "scenario_id", "")) for item in entries}
+                != required_ids
+            ):
+                raise ScenarioServiceError("Managed switch migration manifest is invalid.", status=500)
+
+            prepared: list[tuple[object, Scenario, ScenarioNodeRedMetadata, str, bool]] = []
+            for item in entries:
+                scenario_id = str(getattr(item, "scenario_id"))
+                scenario = registry.scenario(scenario_id)
+                if scenario is None:
+                    raise ScenarioNotFoundError(scenario_id)
+                if not scenario.protected:
+                    raise ScenarioProtectedError(scenario_id)
+                metadata = scenario.definition.node_red
+                if (
+                    scenario.definition.execution_backend is not ScenarioExecutionBackend.NODE_RED
+                    or metadata is None
+                    or not metadata.flow_id
+                ):
+                    raise ScenarioServiceError("Protected scenario topology is unavailable.", status=409)
+                legacy_revision = int(getattr(item, "legacy_revision"))
+                legacy_hash = str(getattr(item, "legacy_source_hash"))
+                new_hash = str(getattr(item, "new_source_hash"))
+                legacy_inputs = tuple(getattr(item, "legacy_input_target_ids"))
+                new_inputs = tuple(getattr(item, "input_target_ids"))
+                for target_id in new_inputs:
+                    device = self._catalog.device(target_id)
+                    if device is None or getattr(device, "target_id", None) != target_id:
+                        raise ScenarioServiceError("Managed switch migration target is missing.", status=409)
+                evidence = await backend.async_verify_managed_topology(scenario_id, metadata.flow_id)
+                if evidence.get("topology") != getattr(item, "legacy_topology"):
+                    raise ScenarioServiceError("Protected scenario topology changed.", status=409)
+                deployed_hash = str(evidence.get("source_hash"))
+                legacy_registry = (
+                    scenario.revision == legacy_revision
+                    and metadata.source_hash == legacy_hash
+                    and metadata.input_target_ids == legacy_inputs
+                )
+                migrated_registry = (
+                    scenario.revision == legacy_revision + 1
+                    and metadata.source_hash == new_hash
+                    and metadata.input_target_ids == new_inputs
+                    and metadata.generated_by is ScenarioNodeRedGeneratedBy.HAUSMAN
+                    and metadata.sync_status is ScenarioNodeRedSyncStatus.SYNCED
+                )
+                if migrated_registry and deployed_hash == new_hash:
+                    prepared.append((item, scenario, metadata, deployed_hash, True))
+                elif legacy_registry and deployed_hash in {legacy_hash, new_hash}:
+                    prepared.append((item, scenario, metadata, deployed_hash, False))
+                else:
+                    raise ScenarioRevisionConflictError(
+                        scenario_id,
+                        expected_revision=legacy_revision,
+                        current_revision=scenario.revision,
+                        changed_fields=("definition.nodeRed",),
+                        current_room_ids=scenario.room_ids,
+                        current_action_ids=tuple(action.id for action in scenario.definition.actions),
+                    )
+
+            changed_sources: list[tuple[str, str, str, str]] = []
+            replacements: dict[str, Scenario] = {}
+            last_uses_prepare = False
+            try:
+                for item, scenario, metadata, deployed_hash, already_done in prepared:
+                    if already_done:
+                        replacements[scenario.id] = scenario
+                        continue
+                    new_hash = str(getattr(item, "new_source_hash"))
+                    if deployed_hash != new_hash:
+                        prepare = getattr(backend, "async_prepare_release_source", None)
+                        if callable(prepare):
+                            last_uses_prepare = False
+                            result = await prepare(
+                                scenario.id, scenario.definition, str(metadata.flow_id),
+                                str(getattr(item, "source")), deployed_hash, self._catalog,
+                            )
+                            last_uses_prepare = True
+                        else:
+                            result = await backend.async_update_source(
+                                scenario.id, scenario.definition, str(metadata.flow_id),
+                                str(getattr(item, "source")), deployed_hash, self._catalog,
+                                validate_only=False,
+                            )
+                        previous_source = result.get("previous_source")
+                        if result.get("saved") is not True or not isinstance(previous_source, str):
+                            raise ScenarioServiceError("Managed source update was not confirmed.", status=503)
+                        changed_sources.append(
+                            (scenario.id, str(metadata.flow_id), previous_source, new_hash)
+                        )
+                        if result.get("proposed_source_hash") != new_hash:
+                            raise ScenarioServiceError("Managed source hash mismatch.", status=503)
+                    next_metadata = replace(
+                        metadata,
+                        flow_revision=metadata.flow_revision + 1,
+                        source_hash=new_hash,
+                        generated_by=ScenarioNodeRedGeneratedBy.HAUSMAN,
+                        sync_status=ScenarioNodeRedSyncStatus.SYNCED,
+                        input_target_ids=tuple(getattr(item, "input_target_ids")),
+                    )
+                    replacements[scenario.id] = replace(
+                        scenario,
+                        definition=replace(scenario.definition, node_red=next_metadata),
+                        revision=scenario.revision + 1,
+                        updated_at=int(time.time() * 1000),
+                    )
+                if any(not item[4] for item in prepared):
+                    next_registry = ScenarioRegistry(
+                        scenarios=tuple(replacements.get(item.id, item) for item in registry.scenarios)
+                    )
+                    await self.async_save(next_registry)
+                    self._registry = next_registry
+                    self._scenario_content_revision_key = None
+                    self._scenario_content_revision = None
+                    commit = getattr(backend, "async_commit_last_prepare", None)
+                    if callable(commit):
+                        await commit()
+            except Exception:
+                try:
+                    if last_uses_prepare and changed_sources:
+                        compensate = getattr(backend, "async_compensate_last_prepare", None)
+                        if callable(compensate):
+                            await compensate()
+                            changed_sources.pop()
+                    for scenario_id, flow_id, previous_source, new_hash in reversed(changed_sources):
+                        await backend.async_restore_source(
+                            scenario_id, flow_id, previous_source,
+                            expected_current_hash=new_hash,
+                        )
+                except NodeRedBackendError as rollback_error:
+                    raise ScenarioServiceError(
+                        "Managed migration failed and CAS rollback was rejected.", status=503
+                    ) from rollback_error
+                raise
+            return "completed"
+
     @property
     def performance_metrics(self) -> dict[str, dict[str, float | int | str]]:
         """Return bounded aggregate timings without payload or entity data."""
@@ -1172,6 +1328,9 @@ class ScenarioService:
         correlation_id: str,
         source: str,
         trigger_id: str,
+        intent_receipt_id: str,
+        raw_subtype: str,
+        dedup_disposition: str,
     ) -> object:
         """Run one release-owned smart-switch intent after strict validation."""
         bindings = {
@@ -1180,21 +1339,260 @@ class ScenarioService:
         }
         if binding not in bindings or trigger_id not in bindings[binding]:
             raise ValueError("unknown smart-switch binding or trigger")
-        if source != "manual" or not isinstance(correlation_id, str) or not correlation_id.strip():
+        if (
+            source != "manual"
+            or not isinstance(correlation_id, str)
+            or not correlation_id.strip()
+            or intent_receipt_id != correlation_id
+            or raw_subtype != trigger_id
+            or dedup_disposition != "accepted"
+        ):
             raise ValueError("smart-switch intent must be manual and correlated")
         allowed = {"shower-cabinet": {"toggle"}, "tambur-light-group": {"on", "off", "toggle"}}[binding]
         if action not in allowed:
             raise ValueError("smart-switch action does not match binding")
-        scenario_id = "system-shower-comfort-controller" if binding == "shower-cabinet" else "system-tambur-adaptive-controller"
+        scenario_id = (
+            "system-shower-comfort-controller"
+            if binding == "shower-cabinet"
+            else "system-tambur-adaptive-controller"
+        )
+        direct_user_intent = action
+        if binding == "shower-cabinet":
+            cabinet_state = self._trusted_typed_target_state(
+                "entity_e7a7c61eec7bdff8"
+            )
+            if cabinet_state is None:
+                return await self._async_record_typed_intent_skip(
+                    scenario_id,
+                    correlation_id,
+                    reason="smart_switch_state_untrusted",
+                    binding=binding,
+                    action=action,
+                    trigger_id=trigger_id,
+                    intent_receipt_id=intent_receipt_id,
+                    raw_subtype=raw_subtype,
+                    dedup_disposition=dedup_disposition,
+                )
+            direct_user_intent = "off" if cabinet_state == "on" else "on"
+        else:
+            if self._trusted_typed_target_state("entity_b47991988cc6b9f3") != "on":
+                return await self._async_record_typed_intent_skip(
+                    scenario_id,
+                    correlation_id,
+                    reason="smart_switch_power_untrusted",
+                    binding=binding,
+                    action=action,
+                    trigger_id=trigger_id,
+                    intent_receipt_id=intent_receipt_id,
+                    raw_subtype=raw_subtype,
+                    dedup_disposition=dedup_disposition,
+                )
+            group_states = tuple(
+                self._trusted_typed_target_state(target_id)
+                for target_id in (
+                    "entity_71859313239a14e4",
+                    "entity_cd0098e5ff95da46",
+                )
+            )
+            if action in {"on", "toggle"} and any(
+                state is None for state in group_states
+            ):
+                return await self._async_record_typed_intent_skip(
+                    scenario_id,
+                    correlation_id,
+                    reason="smart_switch_state_untrusted",
+                    binding=binding,
+                    action=action,
+                    trigger_id=trigger_id,
+                    intent_receipt_id=intent_receipt_id,
+                    raw_subtype=raw_subtype,
+                    dedup_disposition=dedup_disposition,
+                )
+            if action == "toggle":
+                direct_user_intent = (
+                    "off" if "on" in group_states else "on"
+                )
+            if direct_user_intent == "off":
+                protection = self._manual_light_off_protection
+                arm = getattr(
+                    protection, "async_arm_release_owned_direct_off", None
+                )
+                if not callable(arm):
+                    raise RuntimeError(
+                        "release-owned direct-user light protection is unavailable"
+                    )
+                light_entity_ids = self._typed_entity_ids(
+                    (
+                        "entity_71859313239a14e4",
+                        "entity_cd0098e5ff95da46",
+                    )
+                )
+                sensor_entity_ids = self._typed_entity_ids(
+                    (
+                        "entity_156050daca86aa6c",
+                        "entity_10b78187426f8485",
+                    )
+                )
+                sensor_states = {
+                    entity_id: self._hass.states.get(entity_id)
+                    for entity_id in sensor_entity_ids
+                }
+                armed = arm(
+                    request_id=intent_receipt_id,
+                    light_entity_ids=light_entity_ids,
+                    presence_sensor_entity_ids=sensor_entity_ids,
+                    sensor_states=sensor_states,
+                )
+                if inspect.isawaitable(armed):
+                    await armed
+        trigger_context = {
+            "source": source,
+            "trigger_id": trigger_id,
+            "recovery": False,
+            "binding": binding,
+            "typed_intent": action,
+            "direct_user_intent": direct_user_intent,
+            "intent_receipt_id": intent_receipt_id,
+            "raw_subtype": raw_subtype,
+            "dedup_disposition": dedup_disposition,
+            "correlation_id": correlation_id,
+        }
         return await self.async_run_scenario(
             scenario_id,
-            trigger_context={
-                "source": source,
-                "trigger_id": trigger_id,
-                "correlation_id": correlation_id,
-                "typed_intent": action,
-            },
+            correlation_id=correlation_id,
+            trigger_context=trigger_context,
         )
+
+    async def async_record_typed_intent_disposition(
+        self,
+        *,
+        binding: str,
+        correlation_id: str,
+        source: str,
+        trigger_id: str,
+        intent_receipt_id: str,
+        raw_subtype: str,
+        dedup_disposition: str,
+    ) -> dict[str, object]:
+        """Journal an ignored or deduplicated release-owned trigger."""
+
+        if (
+            binding not in {"shower-cabinet", "tambur-light-group"}
+            or source != "manual"
+            or intent_receipt_id != correlation_id
+            or raw_subtype != trigger_id
+            or dedup_disposition not in {"deduplicated", "ignored"}
+        ):
+            raise ValueError("smart-switch disposition is invalid")
+        scenario_id = (
+            "system-shower-comfort-controller"
+            if binding == "shower-cabinet"
+            else "system-tambur-adaptive-controller"
+        )
+        return await self._async_record_typed_intent_skip(
+            scenario_id,
+            correlation_id,
+            reason=(
+                "smart_switch_deduplicated"
+                if dedup_disposition == "deduplicated"
+                else "smart_switch_release_ignored"
+            ),
+            binding=binding,
+            action=None,
+            trigger_id=trigger_id,
+            intent_receipt_id=intent_receipt_id,
+            raw_subtype=raw_subtype,
+            dedup_disposition=dedup_disposition,
+        )
+
+    def _typed_entity_ids(self, target_ids: tuple[str, ...]) -> tuple[str, ...]:
+        resolved: list[str] = []
+        for target_id in target_ids:
+            device = self._catalog.device(target_id)
+            entity_id = getattr(device, "entity_id", None)
+            if not isinstance(entity_id, str) or not entity_id:
+                raise RuntimeError("release-owned smart-switch target is unavailable")
+            resolved.append(entity_id)
+        return tuple(resolved)
+
+    def _trusted_typed_target_state(self, target_id: str) -> str | None:
+        try:
+            entity_id = self._typed_entity_ids((target_id,))[0]
+        except RuntimeError:
+            return None
+        state = self._hass.states.get(entity_id)
+        value = str(getattr(state, "state", "unknown")).strip().casefold()
+        attributes = getattr(state, "attributes", {})
+        observed = getattr(state, "last_updated", None) or getattr(
+            state, "last_changed", None
+        )
+        if (
+            value not in {"on", "off"}
+            or not isinstance(observed, datetime)
+            or getattr(state, "assumed_state", False) is True
+            or getattr(state, "is_assumed_state", False) is True
+            or isinstance(attributes, Mapping)
+            and (
+                attributes.get("assumed_state") is True
+                or attributes.get("restored") is True
+                or attributes.get("cached") is True
+                or attributes.get("cache") is True
+                or attributes.get("evidence_source") in {"restore", "cache"}
+            )
+        ):
+            return None
+        if observed.tzinfo is None:
+            observed = observed.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - observed.astimezone(timezone.utc)).total_seconds()
+        return value if 0 <= age <= 300 else None
+
+    async def _async_record_typed_intent_skip(
+        self,
+        scenario_id: str,
+        correlation_id: str,
+        *,
+        reason: str,
+        binding: str,
+        action: str | None,
+        trigger_id: str,
+        intent_receipt_id: str,
+        raw_subtype: str,
+        dedup_disposition: str,
+    ) -> dict[str, object]:
+        trigger_context = {
+            "source": "manual",
+            "trigger_id": trigger_id,
+            "recovery": False,
+            "binding": binding,
+            "typed_intent": (
+                action
+                if action is not None
+                else "release"
+                if dedup_disposition == "ignored"
+                else "toggle"
+            ),
+            "direct_user_intent": "none",
+            "intent_receipt_id": intent_receipt_id,
+            "raw_subtype": raw_subtype,
+            "dedup_disposition": dedup_disposition,
+            "correlation_id": correlation_id,
+        }
+        result: dict[str, object] = {
+            "scenario_id": scenario_id,
+            "run_id": correlation_id,
+            "execution_mode": "restart",
+            "command_mode": "live",
+            "status": "skipped",
+            "reason": reason,
+            "evidence_revision": None,
+            "condition_results": [],
+            "receipts": [],
+            "accepted": False,
+            "confirmed": False,
+            "trigger_context": trigger_context,
+        }
+        await self._async_record_scenario_result(result)
+        return result
 
     async def _async_catalog_warmup(self) -> None:
         """Refresh after late integrations without an unbounded polling loop."""
