@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import unittest
 from dataclasses import dataclass
 
 from custom_components.hausman_hub.application.managed_switch_migration import (
@@ -304,3 +305,18 @@ def test_release_sources_are_loaded_through_executor_boundary() -> None:
         assert all(entry.source for entry in entries)
 
     asyncio.run(exercise())
+
+
+def load_tests(
+    loader: unittest.TestLoader,
+    tests: unittest.TestSuite,
+    pattern: str | None,
+) -> unittest.TestSuite:
+    """Expose function-style startup cases to the release runner."""
+
+    del loader, tests, pattern
+    suite = unittest.TestSuite()
+    for name, case in sorted(globals().items()):
+        if name.startswith("test_") and callable(case):
+            suite.addTest(unittest.FunctionTestCase(case))
+    return suite
