@@ -4,7 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from custom_components.hausman_hub.application.managed_switch_migration import MIGRATION_MANIFEST
+from custom_components.hausman_hub.application.managed_switch_migration import (
+    MIGRATION_MANIFEST,
+    ManagedSwitchMigration,
+    ManagedSwitchMigrationConflict,
+)
 from custom_components.hausman_hub.application.scenario_node_red import NodeRedSourceConflict
 from custom_components.hausman_hub.application.scenario_service import (
     ScenarioRevisionConflictError,
@@ -79,6 +83,7 @@ class Backend:
         }
         self.updated = []
         self.restored = []
+        self.commits = 0
         self.revisions = {
             item.scenario_id: "revision.stable" for item in MIGRATION_MANIFEST
         }
@@ -104,6 +109,9 @@ class Backend:
         self.deployed[scenario_id] = entry.legacy_source_hash
         self.restored.append(scenario_id)
 
+    async def async_commit_last_prepare(self):
+        self.commits += 1
+
 
 def _service(store, backend, *, missing=None):
     targets = {target for item in MIGRATION_MANIFEST for target in item.input_target_ids}
@@ -123,11 +131,14 @@ async def test_batch_migration_updates_three_sources_and_registry_once() -> None
     assert await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST) == "completed"
     assert set(backend.updated) == {item.scenario_id for item in MIGRATION_MANIFEST}
     assert len(store.saved) == 1
+    assert backend.commits == 0
     for entry in MIGRATION_MANIFEST:
         scenario = store.registry.scenario(entry.scenario_id)
         assert scenario.revision == entry.legacy_revision + 1
         assert scenario.definition.node_red.source_hash == entry.new_source_hash
         assert scenario.definition.node_red.input_target_ids == entry.input_target_ids
+    await service.async_finalize_managed_switch_migration(MIGRATION_MANIFEST)
+    assert backend.commits == 1
 
 
 @pytest.mark.asyncio
@@ -272,3 +283,72 @@ async def test_registry_failure_compensates_sources_and_later_manual_edit_blocks
     await service.async_load()
     with pytest.raises(ScenarioServiceError, match="CAS rollback was rejected"):
         await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
+
+
+@pytest.mark.asyncio
+async def test_final_snapshot_drift_can_restore_exact_sources_and_registry() -> None:
+    original = _registry()
+    store = RegistryStore(original)
+    backend = Backend()
+    service = _service(store, backend)
+    await service.async_load()
+    await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
+    backend.revisions[MIGRATION_MANIFEST[-1].scenario_id] = "revision.drifted"
+
+    with pytest.raises(ScenarioServiceError, match="snapshot changed"):
+        await service.async_verify_managed_switch_migration(MIGRATION_MANIFEST)
+
+    assert await service.async_rollback_managed_switch_migration(MIGRATION_MANIFEST)
+    assert store.registry == original
+    assert set(backend.restored) == {
+        item.scenario_id for item in MIGRATION_MANIFEST
+    }
+    assert backend.commits == 1
+
+
+@pytest.mark.asyncio
+async def test_manual_source_edit_rejects_final_rollback_without_overwrite() -> None:
+    store = RegistryStore(_registry())
+    backend = Backend()
+    service = _service(store, backend)
+    await service.async_load()
+    await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
+    first = MIGRATION_MANIFEST[0]
+    backend.deployed[first.scenario_id] = "f" * 64
+
+    assert not await service.async_rollback_managed_switch_migration(
+        MIGRATION_MANIFEST
+    )
+    assert backend.deployed[first.scenario_id] == "f" * 64
+    assert backend.restored == []
+    assert store.registry.scenario(first.scenario_id).revision == first.legacy_revision + 1
+
+
+@pytest.mark.asyncio
+async def test_completed_receipt_failure_with_manual_edit_stays_prepared_and_blocked() -> None:
+    store = RegistryStore(_registry())
+    backend = Backend()
+    service = _service(store, backend)
+    await service.async_load()
+    first = MIGRATION_MANIFEST[0]
+
+    class ReceiptStore:
+        def __init__(self) -> None:
+            self.value = None
+
+        async def async_load(self):
+            return self.value
+
+        async def async_save(self, value):
+            if value["state"] == "completed":
+                backend.deployed[first.scenario_id] = "f" * 64
+                raise OSError("receipt store failed")
+            self.value = value
+
+    receipt_store = ReceiptStore()
+    with pytest.raises(ManagedSwitchMigrationConflict, match="recovery"):
+        await ManagedSwitchMigration(service, receipt_store).async_apply()
+
+    assert receipt_store.value["state"] == "prepared"
+    assert backend.deployed[first.scenario_id] == "f" * 64
+    assert backend.restored == []

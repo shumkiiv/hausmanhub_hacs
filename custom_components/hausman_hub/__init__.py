@@ -527,11 +527,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except Exception:  # noqa: BLE001
         # Device automation discovery is optional and fail-closed. Existing
         # state/event scenarios remain available when MQTT is not ready.
-        smart_switch_adapter.async_unload()
+        cleanup_failed = False
+        try:
+            smart_switch_adapter.async_unload()
+        except Exception:  # noqa: BLE001
+            cleanup_failed = True
+            _LOGGER.error("Smart switch device trigger cleanup failed")
         hass.data.setdefault(entry.domain, {})["smart_switch_runtime"] = {
             "state": "unavailable",
             "reason": (
-                "device_trigger_attach_failed"
+                "device_trigger_cleanup_failed"
+                if cleanup_failed
+                else "device_trigger_attach_failed"
                 if managed_switches_ready
                 else "verified_migration_failed"
             ),

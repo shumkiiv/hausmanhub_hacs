@@ -10,7 +10,7 @@ import logging
 import re
 import time
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -459,6 +459,14 @@ class ScenarioValidationError(ScenarioServiceError):
         self.violations = violations
 
 
+@dataclass(frozen=True)
+class _ManagedSwitchMigrationTransaction:
+    previous_registry: ScenarioRegistry
+    migrated_registry: ScenarioRegistry
+    changed_sources: tuple[tuple[str, str, str, str], ...]
+    scenario_ids: frozenset[str]
+
+
 class ScenarioService:
     """Coordinate scenario persistence, validation and execution."""
 
@@ -509,6 +517,9 @@ class ScenarioService:
         self._intercom_release_obligation = intercom_release_obligation
         self._manual_light_off_protection = manual_light_off_protection
         self._smart_switch_receipt_consumer: object | None = None
+        self._managed_switch_migration_transaction: (
+            _ManagedSwitchMigrationTransaction | None
+        ) = None
         self._path_metrics = ScenarioPathMetrics()
         self._scenario_content_revision_key: tuple[tuple[str, int], ...] | None = None
         self._scenario_content_revision: str | None = None
@@ -1118,6 +1129,10 @@ class ScenarioService:
 
         self._require_running()
         async with self._lock:
+            if self._managed_switch_migration_transaction is not None:
+                raise ScenarioServiceError(
+                    "Managed switch migration recovery is required.", status=409
+                )
             registry = self._ensure_loaded()
             backend = self._node_red_backend
             if backend is None:
@@ -1242,9 +1257,16 @@ class ScenarioService:
                     self._registry = next_registry
                     self._scenario_content_revision_key = None
                     self._scenario_content_revision = None
-                    commit = getattr(backend, "async_commit_last_prepare", None)
-                    if callable(commit):
-                        await commit()
+                else:
+                    next_registry = registry
+                self._managed_switch_migration_transaction = (
+                    _ManagedSwitchMigrationTransaction(
+                        previous_registry=registry,
+                        migrated_registry=next_registry,
+                        changed_sources=tuple(changed_sources),
+                        scenario_ids=frozenset(required_ids),
+                    )
+                )
             except Exception:
                 try:
                     if last_uses_prepare and changed_sources:
@@ -1264,6 +1286,97 @@ class ScenarioService:
                 raise
             return "completed"
 
+    async def async_finalize_managed_switch_migration(
+        self, entries: tuple[object, ...]
+    ) -> None:
+        """Commit retained compensation only after the durable final receipt."""
+
+        self._require_running()
+        async with self._lock:
+            transaction = self._managed_switch_migration_transaction
+            if transaction is None:
+                raise ScenarioServiceError(
+                    "Managed switch migration transaction is unavailable.", status=409
+                )
+            if {
+                str(getattr(item, "scenario_id", "")) for item in entries
+            } != set(transaction.scenario_ids):
+                raise ScenarioServiceError(
+                    "Managed switch migration manifest is invalid.", status=500
+                )
+            if self._ensure_loaded() != transaction.migrated_registry:
+                raise ScenarioServiceError(
+                    "Protected scenario final CAS evidence changed.", status=409
+                )
+            await self._async_verify_managed_switch_migration_locked(entries)
+            commit = getattr(
+                self._node_red_backend, "async_commit_last_prepare", None
+            )
+            if callable(commit):
+                await commit()
+            self._managed_switch_migration_transaction = None
+
+    async def async_rollback_managed_switch_migration(
+        self, entries: tuple[object, ...]
+    ) -> bool:
+        """Restore an exact prepared migration without overwriting later edits."""
+
+        self._require_running()
+        async with self._lock:
+            transaction = self._managed_switch_migration_transaction
+            backend = self._node_red_backend
+            if transaction is None or backend is None:
+                return False
+            if {
+                str(getattr(item, "scenario_id", "")) for item in entries
+            } != set(transaction.scenario_ids):
+                return False
+            if self._ensure_loaded() != transaction.migrated_registry:
+                return False
+
+            entries_by_id = {
+                str(getattr(item, "scenario_id", "")): item for item in entries
+            }
+            try:
+                for scenario_id in transaction.scenario_ids:
+                    scenario = transaction.migrated_registry.scenario(scenario_id)
+                    item = entries_by_id[scenario_id]
+                    metadata = scenario.definition.node_red if scenario else None
+                    if metadata is None or not metadata.flow_id:
+                        return False
+                    evidence = await backend.async_verify_managed_topology(
+                        scenario_id, metadata.flow_id
+                    )
+                    if (
+                        evidence.get("source_hash")
+                        != str(getattr(item, "new_source_hash"))
+                        or evidence.get("topology")
+                        != getattr(item, "legacy_topology")
+                    ):
+                        return False
+
+                for scenario_id, flow_id, previous_source, new_hash in reversed(
+                    transaction.changed_sources
+                ):
+                    await backend.async_restore_source(
+                        scenario_id,
+                        flow_id,
+                        previous_source,
+                        expected_current_hash=new_hash,
+                    )
+                if transaction.previous_registry != transaction.migrated_registry:
+                    await self.async_save(transaction.previous_registry)
+                    self._registry = transaction.previous_registry
+                    self._scenario_content_revision_key = None
+                    self._scenario_content_revision = None
+                commit = getattr(backend, "async_commit_last_prepare", None)
+                if callable(commit):
+                    await commit()
+            except (NodeRedBackendError, ScenarioServiceError):
+                return False
+            self._managed_switch_migration_transaction = None
+            return True
+
     async def async_verify_managed_switch_migration(
         self, entries: tuple[object, ...]
     ) -> str:
@@ -1271,85 +1384,90 @@ class ScenarioService:
 
         self._require_running()
         async with self._lock:
-            registry = self._ensure_loaded()
-            backend = self._node_red_backend
-            if backend is None:
-                raise ScenarioServiceError(
-                    "Node-RED backend is unavailable.", status=503
-                )
-            required_ids = {
-                "system-shower-comfort-controller",
-                "system-small-corridor-light-controller",
-                "system-tambur-adaptive-controller",
-            }
+            return await self._async_verify_managed_switch_migration_locked(entries)
+
+    async def _async_verify_managed_switch_migration_locked(
+        self, entries: tuple[object, ...]
+    ) -> str:
+        registry = self._ensure_loaded()
+        backend = self._node_red_backend
+        if backend is None:
+            raise ScenarioServiceError(
+                "Node-RED backend is unavailable.", status=503
+            )
+        required_ids = {
+            "system-shower-comfort-controller",
+            "system-small-corridor-light-controller",
+            "system-tambur-adaptive-controller",
+        }
+        if (
+            len(entries) != len(required_ids)
+            or {str(getattr(item, "scenario_id", "")) for item in entries}
+            != required_ids
+        ):
+            raise ScenarioServiceError(
+                "Managed switch migration manifest is invalid.", status=500
+            )
+
+        revisions: set[str] = set()
+        for item in entries:
+            scenario_id = str(getattr(item, "scenario_id"))
+            scenario = registry.scenario(scenario_id)
+            if scenario is None:
+                raise ScenarioNotFoundError(scenario_id)
+            if not scenario.protected:
+                raise ScenarioProtectedError(scenario_id)
+            metadata = scenario.definition.node_red
+            expected_revision = int(getattr(item, "legacy_revision")) + 1
+            expected_hash = str(getattr(item, "new_source_hash"))
+            expected_inputs = tuple(getattr(item, "input_target_ids"))
             if (
-                len(entries) != len(required_ids)
-                or {str(getattr(item, "scenario_id", "")) for item in entries}
-                != required_ids
+                scenario.revision != expected_revision
+                or scenario.definition.execution_backend
+                is not ScenarioExecutionBackend.NODE_RED
+                or metadata is None
+                or not metadata.flow_id
+                or metadata.source_hash != expected_hash
+                or metadata.input_target_ids != expected_inputs
+                or metadata.generated_by is not ScenarioNodeRedGeneratedBy.HAUSMAN
+                or metadata.sync_status is not ScenarioNodeRedSyncStatus.SYNCED
+            ):
+                raise ScenarioRevisionConflictError(
+                    scenario_id,
+                    expected_revision=expected_revision,
+                    current_revision=scenario.revision,
+                    changed_fields=("definition.nodeRed",),
+                    current_room_ids=scenario.room_ids,
+                    current_action_ids=tuple(
+                        action.id for action in scenario.definition.actions
+                    ),
+                )
+            for target_id in expected_inputs:
+                device = self._catalog.device(target_id)
+                if device is None or getattr(device, "target_id", None) != target_id:
+                    raise ScenarioServiceError(
+                        "Managed switch migration target is missing.", status=409
+                    )
+            evidence = await backend.async_verify_managed_topology(
+                scenario_id, metadata.flow_id
+            )
+            revision = evidence.get("revision")
+            if (
+                evidence.get("topology")
+                != getattr(item, "legacy_topology")
+                or evidence.get("source_hash") != expected_hash
+                or not isinstance(revision, str)
+                or not revision
             ):
                 raise ScenarioServiceError(
-                    "Managed switch migration manifest is invalid.", status=500
+                    "Protected scenario final CAS evidence changed.", status=409
                 )
-
-            revisions: set[str] = set()
-            for item in entries:
-                scenario_id = str(getattr(item, "scenario_id"))
-                scenario = registry.scenario(scenario_id)
-                if scenario is None:
-                    raise ScenarioNotFoundError(scenario_id)
-                if not scenario.protected:
-                    raise ScenarioProtectedError(scenario_id)
-                metadata = scenario.definition.node_red
-                expected_revision = int(getattr(item, "legacy_revision")) + 1
-                expected_hash = str(getattr(item, "new_source_hash"))
-                expected_inputs = tuple(getattr(item, "input_target_ids"))
-                if (
-                    scenario.revision != expected_revision
-                    or scenario.definition.execution_backend
-                    is not ScenarioExecutionBackend.NODE_RED
-                    or metadata is None
-                    or not metadata.flow_id
-                    or metadata.source_hash != expected_hash
-                    or metadata.input_target_ids != expected_inputs
-                    or metadata.generated_by is not ScenarioNodeRedGeneratedBy.HAUSMAN
-                    or metadata.sync_status is not ScenarioNodeRedSyncStatus.SYNCED
-                ):
-                    raise ScenarioRevisionConflictError(
-                        scenario_id,
-                        expected_revision=expected_revision,
-                        current_revision=scenario.revision,
-                        changed_fields=("definition.nodeRed",),
-                        current_room_ids=scenario.room_ids,
-                        current_action_ids=tuple(
-                            action.id for action in scenario.definition.actions
-                        ),
-                    )
-                for target_id in expected_inputs:
-                    device = self._catalog.device(target_id)
-                    if device is None or getattr(device, "target_id", None) != target_id:
-                        raise ScenarioServiceError(
-                            "Managed switch migration target is missing.", status=409
-                        )
-                evidence = await backend.async_verify_managed_topology(
-                    scenario_id, metadata.flow_id
-                )
-                revision = evidence.get("revision")
-                if (
-                    evidence.get("topology")
-                    != getattr(item, "legacy_topology")
-                    or evidence.get("source_hash") != expected_hash
-                    or not isinstance(revision, str)
-                    or not revision
-                ):
-                    raise ScenarioServiceError(
-                        "Protected scenario final CAS evidence changed.", status=409
-                    )
-                revisions.add(revision)
-            if len(revisions) != 1:
-                raise ScenarioServiceError(
-                    "Protected scenario cross-scenario snapshot changed.", status=409
-                )
-            return next(iter(revisions))
+            revisions.add(revision)
+        if len(revisions) != 1:
+            raise ScenarioServiceError(
+                "Protected scenario cross-scenario snapshot changed.", status=409
+            )
+        return next(iter(revisions))
 
     @property
     def performance_metrics(self) -> dict[str, dict[str, float | int | str]]:

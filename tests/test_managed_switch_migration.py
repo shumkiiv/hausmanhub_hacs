@@ -15,27 +15,41 @@ from custom_components.hausman_hub.application.managed_switch_migration import (
 
 
 class Store:
-    def __init__(self, value=None, *, fail_save=False):
+    def __init__(self, value=None, *, fail_save=False, fail_save_at=None):
         self.value = value
         self.saved = []
         self.fail_save = fail_save
+        self.fail_save_at = fail_save_at
+        self.save_attempts = 0
 
     async def async_load(self):
         return self.value
 
     async def async_save(self, value):
-        if self.fail_save:
+        self.save_attempts += 1
+        if self.fail_save or self.save_attempts == self.fail_save_at:
             raise OSError("verified save failed")
         self.saved.append(value)
         self.value = value
 
 
 class Service:
-    def __init__(self, *, fail=False, verification_drift=None):
+    def __init__(
+        self,
+        *,
+        fail=False,
+        verification_drift=None,
+        verification_drift_at=1,
+        rollback_complete=True,
+    ):
         self.calls = []
         self.fail = fail
         self.verification_drift = verification_drift
+        self.verification_drift_at = verification_drift_at
+        self.rollback_complete = rollback_complete
         self.verifications = 0
+        self.finalizations = 0
+        self.rollbacks = 0
 
     async def async_apply_managed_switch_migration(self, entries):
         self.calls.append(entries)
@@ -44,10 +58,22 @@ class Service:
 
     async def async_verify_managed_switch_migration(self, entries):
         self.verifications += 1
-        if self.verification_drift is not None:
+        if (
+            self.verification_drift is not None
+            and self.verifications == self.verification_drift_at
+        ):
             raise RuntimeError(f"final drift: {self.verification_drift}")
         assert len(entries) == 3
         return "revision.final"
+
+    async def async_finalize_managed_switch_migration(self, entries):
+        assert len(entries) == 3
+        self.finalizations += 1
+
+    async def async_rollback_managed_switch_migration(self, entries):
+        assert len(entries) == 3
+        self.rollbacks += 1
+        return self.rollback_complete
 
 
 def test_manifest_contains_exact_three_protected_scenarios_and_sources() -> None:
@@ -70,6 +96,8 @@ def test_migration_persists_prepared_before_cas_and_completed_after() -> None:
     assert all(valid_managed_switch_migration_payload(item) for item in store.saved)
     assert len(service.calls[0]) == 3
     assert all(item.source for item in service.calls[0])
+    assert service.finalizations == 1
+    assert service.rollbacks == 0
 
 
 def test_storage_failure_before_prepare_causes_no_mutation() -> None:
@@ -123,4 +151,55 @@ def test_final_cross_scenario_drift_never_completes_receipt(
         asyncio.run(ManagedSwitchMigration(service, store).async_apply())
 
     assert service.verifications == 1
+    assert service.rollbacks == 1
+    assert service.finalizations == 0
     assert store.value["state"] == "prepared"
+
+
+def test_completed_receipt_save_failure_rolls_back_prepared_migration() -> None:
+    store = Store(fail_save_at=2)
+    service = Service()
+
+    with pytest.raises(OSError, match="verified save failed"):
+        asyncio.run(ManagedSwitchMigration(service, store).async_apply())
+
+    assert store.value["state"] == "prepared"
+    assert service.rollbacks == 1
+    assert service.finalizations == 0
+
+
+def test_ambiguous_completed_receipt_write_is_reverted_to_prepared() -> None:
+    class PartialWriteStore(Store):
+        async def async_save(self, value):
+            if value["state"] == "completed":
+                self.value = value
+                self.saved.append(value)
+                raise OSError("completed receipt outcome is ambiguous")
+            await super().async_save(value)
+
+    store = PartialWriteStore()
+    service = Service()
+
+    with pytest.raises(OSError, match="outcome is ambiguous"):
+        asyncio.run(ManagedSwitchMigration(service, store).async_apply())
+
+    assert store.value["state"] == "prepared"
+    assert service.rollbacks == 1
+    assert service.finalizations == 0
+
+
+def test_drift_after_completed_write_reverts_receipt_and_blocks_unsafe_rollback() -> None:
+    store = Store()
+    service = Service(
+        verification_drift="manual edit",
+        verification_drift_at=2,
+        rollback_complete=False,
+    )
+
+    with pytest.raises(ManagedSwitchMigrationConflict, match="recovery"):
+        asyncio.run(ManagedSwitchMigration(service, store).async_apply())
+
+    assert store.value["state"] == "prepared"
+    assert service.verifications == 2
+    assert service.rollbacks == 1
+    assert service.finalizations == 0

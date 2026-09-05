@@ -6292,6 +6292,53 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         self.assertEqual(200, response.status)
 
+    def test_setup_keeps_switch_runtime_unavailable_when_attach_cleanup_fails(self) -> None:
+        from custom_components.hausman_hub.application.managed_switch_migration import (
+            ManagedSwitchMigration,
+        )
+        from custom_components.hausman_hub.application.smart_switch_runtime import (
+            SmartSwitchTriggerAdapter,
+        )
+
+        async def migration_ready(_migration: object) -> str:
+            return "completed"
+
+        async def attach_failure(_adapter: object) -> None:
+            raise RuntimeError("attach failed with private details")
+
+        def cleanup_failure(_adapter: object) -> None:
+            raise RuntimeError("device trigger cleanup failed")
+
+        hass = FakeHomeAssistant()
+        entry = FakeEntry(
+            {
+                "mode": "read-only",
+                "direct_execution_status": "direct_execution_blocked",
+            },
+            {},
+            "synthetic-switch-cleanup-failure",
+        )
+        hass.config_entries.entries = [entry]
+
+        with self.assertLogs("custom_components.hausman_hub", level="ERROR") as logs:
+            with (
+                patch.object(ManagedSwitchMigration, "async_apply", migration_ready),
+                patch.object(SmartSwitchTriggerAdapter, "async_start", attach_failure),
+                patch.object(SmartSwitchTriggerAdapter, "async_unload", cleanup_failure),
+            ):
+                self.assertTrue(asyncio.run(self.integration.async_setup_entry(hass, entry)))
+
+        self.assertEqual(
+            {
+                "state": "unavailable",
+                "reason": "device_trigger_cleanup_failed",
+            },
+            hass.data["hausman_hub"]["smart_switch_runtime"],
+        )
+        rendered_logs = "\n".join(logs.output)
+        self.assertIn("Smart switch device trigger cleanup failed", rendered_logs)
+        self.assertNotIn("private details", rendered_logs)
+
     def test_setup_rejects_an_unsafe_entry_before_registering_the_view(self) -> None:
         """A rejected entry must not open even the local count-only path."""
 

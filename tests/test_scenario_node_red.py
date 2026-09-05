@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import traceback
 import unittest
 from dataclasses import replace
 from types import ModuleType, SimpleNamespace
@@ -196,10 +197,21 @@ class _ResponseContext:
         self.response.closed = True
 
 
-def _patched_aiohttp_session(response: _StreamedResponse):
-    session = SimpleNamespace(
-        request=lambda *_args, **_kwargs: _ResponseContext(response)
-    )
+def _patched_aiohttp_session(
+    response: _StreamedResponse,
+    *,
+    captured: dict[str, object] | None = None,
+    request_error: Exception | None = None,
+):
+    def request(*args: object, **kwargs: object) -> _ResponseContext:
+        if captured is not None:
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+        if request_error is not None:
+            raise request_error
+        return _ResponseContext(response)
+
+    session = SimpleNamespace(request=request)
     homeassistant = ModuleType("homeassistant")
     helpers = ModuleType("homeassistant.helpers")
     aiohttp_client = ModuleType("homeassistant.helpers.aiohttp_client")
@@ -245,6 +257,55 @@ def test_raw_request_bounds_unknown_length_stream_and_closes_response() -> None:
 
     assert response.chunks_read == 2
     assert response.closed
+
+
+def test_raw_request_disables_redirects() -> None:
+    response = _StreamedResponse([b'{}'], content_length="2")
+    captured: dict[str, object] = {}
+    backend = NodeRedScenarioBackend(SimpleNamespace(), supervisor_token="trusted")
+
+    with _patched_aiohttp_session(response, captured=captured):
+        status, body = asyncio.run(backend._raw_request("GET", "/flows"))  # noqa: SLF001
+
+    assert (status, body) == (200, {})
+    assert captured["kwargs"]["allow_redirects"] is False
+    assert response.closed
+
+
+def test_raw_request_sanitizes_network_failure_without_secret_exception_chain() -> None:
+    response = _StreamedResponse([], content_length="0")
+    leaked_url = "http://supervisor/ingress/ingress-secret/flows"
+    request_error = OSError(
+        f"network failed for {leaked_url} with Bearer supervisor-secret "
+        "and ingress_session=cookie-secret"
+    )
+    backend = NodeRedScenarioBackend(
+        SimpleNamespace(), supervisor_token="supervisor-secret"
+    )
+    backend._ingress_token = "ingress-secret"  # noqa: SLF001
+    backend._ingress_session = "cookie-secret"  # noqa: SLF001
+
+    with _patched_aiohttp_session(response, request_error=request_error):
+        with pytest.raises(NodeRedBackendError) as raised:
+            asyncio.run(
+                backend._raw_request("GET", "/flows", ingress=True)  # noqa: SLF001
+            )
+
+    error = raised.value
+    rendered = "".join(
+        traceback.format_exception(type(error), error, error.__traceback__)
+    )
+    assert str(error) == "Node-RED request failed"
+    assert error.__cause__ is None
+    assert error.__suppress_context__
+    for secret in (
+        leaked_url,
+        "ingress-secret",
+        "supervisor-secret",
+        "cookie-secret",
+        "Bearer",
+    ):
+        assert secret not in rendered
 
 
 def test_prepare_compensation_restores_update_and_commit_clears_metadata() -> None:

@@ -185,20 +185,56 @@ class ManagedSwitchMigration:
         if not callable(apply):
             raise ManagedSwitchMigrationConflict("scenario migration CAS is unavailable")
         entries = _entries_with_sources()
-        await apply(entries)
-        verify = getattr(
-            self._service,
-            "async_verify_managed_switch_migration",
-            None,
-        )
-        if not callable(verify):
-            raise ManagedSwitchMigrationConflict(
-                "scenario migration final CAS verification is unavailable"
+        applied = False
+        try:
+            await apply(entries)
+            applied = True
+            verify = getattr(
+                self._service,
+                "async_verify_managed_switch_migration",
+                None,
             )
-        await verify(entries)
-        if not completed:
-            await self._store.async_save(_receipt("completed"))
-            # A receipt write is not execution authority by itself. Recheck
-            # after persistence so drift in that gap still keeps the adapter off.
+            if not callable(verify):
+                raise ManagedSwitchMigrationConflict(
+                    "scenario migration final CAS verification is unavailable"
+                )
             await verify(entries)
+            if not completed:
+                await self._store.async_save(_receipt("completed"))
+                # A receipt write is not execution authority by itself. Recheck
+                # after persistence so drift in that gap keeps the adapter off.
+                await verify(entries)
+            finalize = getattr(
+                self._service,
+                "async_finalize_managed_switch_migration",
+                None,
+            )
+            if not callable(finalize):
+                raise ManagedSwitchMigrationConflict(
+                    "scenario migration finalization is unavailable"
+                )
+            await finalize(entries)
+        except Exception as error:
+            if not applied:
+                raise
+            try:
+                await self._store.async_save(_receipt("prepared"))
+            except Exception:  # noqa: BLE001
+                pass
+            rollback = getattr(
+                self._service,
+                "async_rollback_managed_switch_migration",
+                None,
+            )
+            rollback_complete = False
+            if callable(rollback):
+                try:
+                    rollback_complete = await rollback(entries) is True
+                except Exception:  # noqa: BLE001
+                    rollback_complete = False
+            if not rollback_complete:
+                raise ManagedSwitchMigrationConflict(
+                    "managed switch migration recovery is required"
+                ) from error
+            raise
         return "completed"

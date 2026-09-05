@@ -646,6 +646,7 @@ class NodeRedScenarioBackend:
                 headers=headers,
                 json=payload,
                 timeout=NODE_RED_TIMEOUT_SECONDS,
+                allow_redirects=False,
             ) as response:
                 declared_length = response.headers.get("Content-Length")
                 if declared_length is not None:
@@ -682,8 +683,14 @@ class NodeRedScenarioBackend:
                 except json.JSONDecodeError:
                     body = text
                 return response.status, body
-        except TimeoutError as error:
-            raise NodeRedBackendError("Node-RED did not answer in time") from error
+        except NodeRedBackendError:
+            raise
+        except TimeoutError:
+            raise NodeRedBackendError("Node-RED did not answer in time") from None
+        except Exception:  # noqa: BLE001
+            # Client/network exceptions may include the complete ingress URL,
+            # authorization header or cookie in their message and traceback.
+            raise NodeRedBackendError("Node-RED request failed") from None
 
     @staticmethod
     def _data(body: object) -> Mapping[str, object]:

@@ -222,6 +222,106 @@ async def test_partial_attach_failure_cleans_every_callback_once() -> None:
 
 
 @pytest.mark.asyncio
+async def test_callback_during_attach_cannot_persist_or_dispatch_before_activation() -> None:
+    actions: list[object] = []
+    service_calls: list[dict[str, object]] = []
+    removed: list[str] = []
+    attempts = 0
+
+    async def get_triggers(_hass: object, device_id: str) -> list[dict[str, object]]:
+        configs = (
+            SHOWER_TRIGGER_CONFIGS
+            if device_id == SHOWER_TRIGGER_CONFIGS[0]["device_id"]
+            else PASS_THROUGH_TRIGGER_CONFIGS
+        )
+        return [dict(item) for item in configs]
+
+    async def attach(
+        _hass: object,
+        config: dict[str, object],
+        action: object,
+        _info: object,
+    ) -> object:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            actions.append(action)
+            await action({})
+            return lambda: removed.append(str(config["subtype"]))
+        raise RuntimeError("later attach failed")
+
+    store = MemoryStore()
+    adapter = SmartSwitchTriggerAdapter(
+        SimpleNamespace(),
+        SimpleNamespace(
+            async_run_typed_intent=lambda **item: service_calls.append(item)
+        ),
+        trigger_api=SimpleNamespace(
+            async_get_triggers=get_triggers,
+            async_attach_trigger=attach,
+        ),
+        state_store=store,
+        receipt_factory=lambda: "receipt.pre-activation",
+    )
+
+    with pytest.raises(RuntimeError, match="later attach failed"):
+        await adapter.async_start()
+
+    assert len(actions) == 1
+    assert service_calls == []
+    assert store.payload is None
+    assert removed == ["toggle_b2_down"]
+
+
+@pytest.mark.asyncio
+async def test_readiness_is_rechecked_after_all_listeners_attach_before_activation() -> None:
+    actions: list[object] = []
+    removed: list[str] = []
+    readiness = iter((True, False))
+
+    async def get_triggers(_hass: object, device_id: str) -> list[dict[str, object]]:
+        configs = (
+            SHOWER_TRIGGER_CONFIGS
+            if device_id == SHOWER_TRIGGER_CONFIGS[0]["device_id"]
+            else PASS_THROUGH_TRIGGER_CONFIGS
+        )
+        return [dict(item) for item in configs]
+
+    async def attach(
+        _hass: object,
+        config: dict[str, object],
+        action: object,
+        _info: object,
+    ) -> object:
+        actions.append(action)
+        return lambda: removed.append(str(config["subtype"]))
+
+    store = MemoryStore()
+    adapter = SmartSwitchTriggerAdapter(
+        SimpleNamespace(),
+        SimpleNamespace(
+            async_run_typed_intent=lambda **_item: pytest.fail(
+                "inactive callback dispatched"
+            )
+        ),
+        trigger_api=SimpleNamespace(
+            async_get_triggers=get_triggers,
+            async_attach_trigger=attach,
+        ),
+        state_store=store,
+        readiness_check=lambda: next(readiness),
+    )
+
+    with pytest.raises(RuntimeError, match="readiness"):
+        await adapter.async_start()
+    await actions[-1]({})
+
+    assert len(actions) == 6
+    assert len(removed) == 6
+    assert store.payload is None
+
+
+@pytest.mark.asyncio
 async def test_startup_readiness_failure_attaches_no_listener() -> None:
     discovery_calls: list[str] = []
     attach_calls: list[dict[str, object]] = []

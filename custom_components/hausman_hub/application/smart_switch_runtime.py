@@ -206,12 +206,7 @@ class SmartSwitchTriggerAdapter:
 
     async def async_start(self) -> None:
         await self.async_load_state()
-        try:
-            ready = self._readiness_check()
-        except Exception as err:  # noqa: BLE001
-            raise RuntimeError("smart switch startup readiness check failed") from err
-        if ready is not True:
-            raise RuntimeError("smart switch startup readiness is unavailable")
+        self._require_startup_ready()
         if self._api is None:
             from homeassistant.components.device_automation import (  # type: ignore[import-not-found]
                 DeviceAutomationType,
@@ -240,7 +235,7 @@ class SmartSwitchTriggerAdapter:
                 )
 
         pending: list[Callable[[], None]] = []
-        generation = {"active": True}
+        generation = {"active": False}
         try:
             for expected in _ALL_CONFIGS:
                 cleanup = await attach(
@@ -252,6 +247,8 @@ class SmartSwitchTriggerAdapter:
                 if not callable(cleanup):
                     raise RuntimeError("device trigger attach did not return cleanup callback")
                 pending.append(cleanup)
+            self._require_startup_ready()
+            generation["active"] = True
         except Exception as attach_error:
             generation["active"] = False
             try:
@@ -261,6 +258,14 @@ class SmartSwitchTriggerAdapter:
             raise
         self._active_generation = generation
         self._unloads.extend(pending)
+
+    def _require_startup_ready(self) -> None:
+        try:
+            ready = self._readiness_check()
+        except Exception as err:  # noqa: BLE001
+            raise RuntimeError("smart switch startup readiness check failed") from err
+        if ready is not True:
+            raise RuntimeError("smart switch startup readiness is unavailable")
 
     def _make_action(
         self,
