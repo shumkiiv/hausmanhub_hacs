@@ -23,13 +23,35 @@ def test_exact_trigger_validation_rejects_wrong_device_or_subtype() -> None:
     assert not validate_exact_device_trigger({**expected, "device_id": "other"}, expected)
 
 
+@pytest.mark.parametrize("expected", [*SHOWER_TRIGGER_CONFIGS, *PASS_THROUGH_TRIGGER_CONFIGS])
+def test_exact_trigger_validation_accepts_ha_2026_9_empty_metadata(expected: dict[str, object]) -> None:
+    assert validate_exact_device_trigger({**expected, "metadata": {}}, expected)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"metadata": {"topic": "secret"}},
+        {"metadata": []},
+        {"metadata": None},
+        {"unexpected": "value"},
+        {"metadata": {}, "unexpected": "value"},
+    ],
+)
+def test_exact_trigger_validation_rejects_non_identity_discovery_fields(
+    extra: dict[str, object],
+) -> None:
+    expected = SHOWER_TRIGGER_CONFIGS[0]
+    assert not validate_exact_device_trigger({**expected, **extra}, expected)
+
+
 def test_adapter_attaches_only_allowlisted_configs_and_unloads() -> None:
     attached: list[dict[str, object]] = []
     removed: list[str] = []
 
     async def get_triggers(_hass: object, device_id: str) -> list[dict[str, object]]:
         configs = SHOWER_TRIGGER_CONFIGS if device_id == SHOWER_TRIGGER_CONFIGS[0]["device_id"] else PASS_THROUGH_TRIGGER_CONFIGS
-        return [dict(item) for item in configs]
+        return [{**item, "metadata": {}} for item in configs]
 
     async def attach(_hass: object, config: dict[str, object], _action: object, _info: object):
         attached.append(config)
@@ -46,6 +68,7 @@ def test_adapter_attaches_only_allowlisted_configs_and_unloads() -> None:
             "toggle_b2_down", "on_b2_down", "toggle_b2_up",
             "on_down", "toggle_down", "off_up",
         }
+        assert all(set(item) == set(expected) for item, expected in zip(attached, (*SHOWER_TRIGGER_CONFIGS, *PASS_THROUGH_TRIGGER_CONFIGS)))
         adapter.async_unload()
         adapter.async_unload()
         assert set(removed) == {
@@ -179,8 +202,8 @@ async def test_discovery_is_complete_before_first_attach() -> None:
 
     async def get_triggers(_hass: object, device_id: str) -> list[dict[str, object]]:
         if device_id == SHOWER_TRIGGER_CONFIGS[0]["device_id"]:
-            return [dict(item) for item in SHOWER_TRIGGER_CONFIGS]
-        return [dict(item) for item in PASS_THROUGH_TRIGGER_CONFIGS[:-1]]
+            return [{**item, "metadata": {}} for item in SHOWER_TRIGGER_CONFIGS]
+        return [{**item, "metadata": {}} for item in PASS_THROUGH_TRIGGER_CONFIGS[:-1]]
 
     async def attach(_hass: object, config: dict[str, object], _action: object, _info: object):
         attached.append(config)
@@ -190,9 +213,32 @@ async def test_discovery_is_complete_before_first_attach() -> None:
         SimpleNamespace(), SimpleNamespace(),
         trigger_api=SimpleNamespace(async_get_triggers=get_triggers, async_attach_trigger=attach),
     )
-    with pytest.raises(RuntimeError, match="off_up"):
+    with pytest.raises(RuntimeError, match="SMART_SWITCH_DISCOVERY_INCOMPLETE"):
         await adapter.async_start()
     assert attached == []
+
+
+@pytest.mark.asyncio
+async def test_discovery_failure_log_is_fixed_and_sanitized(caplog: pytest.LogCaptureFixture) -> None:
+    async def get_triggers(_hass: object, _device_id: str) -> list[dict[str, object]]:
+        return []
+
+    adapter = SmartSwitchTriggerAdapter(
+        SimpleNamespace(),
+        SimpleNamespace(),
+        trigger_api=SimpleNamespace(
+            async_get_triggers=get_triggers,
+            async_attach_trigger=lambda *_args: None,
+        ),
+    )
+    with caplog.at_level("ERROR"):
+        with pytest.raises(RuntimeError, match="SMART_SWITCH_DISCOVERY_INCOMPLETE"):
+            await adapter.async_start()
+
+    message = " ".join(record.getMessage() for record in caplog.records)
+    assert "SMART_SWITCH_DISCOVERY_INCOMPLETE" in message
+    assert "2685c1523cb5151baeaf65aebe830c53" not in message
+    assert "609ee914f1d93194cd157612d7d086e9" not in message
 
 
 @pytest.mark.asyncio

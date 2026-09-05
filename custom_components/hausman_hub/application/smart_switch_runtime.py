@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
+
+_LOGGER = logging.getLogger(__name__)
 
 SHOWER_DEVICE_ID = "2685c1523cb5151baeaf65aebe830c53"
 PASSTHROUGH_DEVICE_ID = "609ee914f1d93194cd157612d7d086e9"
@@ -26,6 +29,7 @@ PASS_THROUGH_TRIGGER_CONFIGS = tuple(
     for subtype in ("on_down", "toggle_down", "off_up")
 )
 _ALL_CONFIGS = SHOWER_TRIGGER_CONFIGS + PASS_THROUGH_TRIGGER_CONFIGS
+_TRIGGER_IDENTITY_FIELDS = frozenset({"platform", "domain", "type", "device_id", "subtype"})
 _DEDUP_SECONDS = 0.6
 _MAX_RECEIPTS = 32
 _RECEIPT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -98,9 +102,20 @@ def valid_smart_switch_dedup_payload(value: object) -> bool:
 def validate_exact_device_trigger(
     actual: Mapping[str, object], expected: Mapping[str, object]
 ) -> bool:
-    """Require the complete public device-trigger identity, fail closed."""
+    """Require identity, allowing HA 2026.9's empty discovery metadata."""
 
-    return dict(actual) == dict(expected)
+    if not isinstance(actual, Mapping) or not isinstance(expected, Mapping):
+        return False
+    if set(expected) != _TRIGGER_IDENTITY_FIELDS:
+        return False
+    actual_fields = set(actual)
+    if actual_fields == _TRIGGER_IDENTITY_FIELDS:
+        return all(actual[field] == expected[field] for field in _TRIGGER_IDENTITY_FIELDS)
+    if actual_fields == _TRIGGER_IDENTITY_FIELDS | {"metadata"}:
+        return actual.get("metadata") == {} and all(
+            actual[field] == expected[field] for field in _TRIGGER_IDENTITY_FIELDS
+        )
+    return False
 
 
 def _semantic_intent(binding: str, subtype: str) -> str:
@@ -223,6 +238,9 @@ class SmartSwitchTriggerAdapter:
         for device_id in (SHOWER_DEVICE_ID, PASSTHROUGH_DEVICE_ID):
             discovered = await get_triggers(self._hass, device_id)
             if not isinstance(discovered, list):
+                _LOGGER.error(
+                    "smart_switch_startup_blocked code=SMART_SWITCH_DISCOVERY_INVALID reason=discovery_not_list"
+                )
                 raise RuntimeError("Home Assistant device trigger discovery is invalid")
             discovered_by_device[device_id] = tuple(
                 item for item in discovered if isinstance(item, Mapping)
@@ -230,9 +248,10 @@ class SmartSwitchTriggerAdapter:
         for expected in _ALL_CONFIGS:
             discovered = discovered_by_device[str(expected["device_id"])]
             if not any(validate_exact_device_trigger(item, expected) for item in discovered):
-                raise RuntimeError(
-                    f"required MQTT device trigger missing: {expected['subtype']}"
+                _LOGGER.error(
+                    "smart_switch_startup_blocked code=SMART_SWITCH_DISCOVERY_INCOMPLETE reason=required_trigger_missing"
                 )
+                raise RuntimeError("SMART_SWITCH_DISCOVERY_INCOMPLETE")
 
         pending: list[Callable[[], None]] = []
         generation = {"active": False}
