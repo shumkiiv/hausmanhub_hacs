@@ -24,6 +24,7 @@ SUITES = (
     "tests.test_scenario_light_priority_storage",
     "tests.test_intercom_release_obligation",
     "tests.test_scenario_service",
+    "tests.test_managed_switch_migration_service",
     "tests.test_climate_deviation_guard",
     "tests.test_verified_safety_storage",
 )

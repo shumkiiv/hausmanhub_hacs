@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from functools import wraps
+import unittest
 from types import SimpleNamespace
 
-import pytest
 
 from custom_components.hausman_hub.application.managed_switch_migration import (
     MIGRATION_MANIFEST,
@@ -122,7 +123,6 @@ def _service(store, backend, *, missing=None):
     return ScenarioService(None, store, catalog, node_red_backend=backend)
 
 
-@pytest.mark.asyncio
 async def test_batch_migration_updates_three_sources_and_registry_once() -> None:
     store = RegistryStore(_registry())
     backend = Backend()
@@ -141,7 +141,6 @@ async def test_batch_migration_updates_three_sources_and_registry_once() -> None
     assert backend.commits == 1
 
 
-@pytest.mark.asyncio
 async def test_partial_restart_reconciles_new_source_without_redeploy() -> None:
     partial = MIGRATION_MANIFEST[0]
     backend = Backend({
@@ -158,7 +157,6 @@ async def test_partial_restart_reconciles_new_source_without_redeploy() -> None:
     assert migrated.definition.node_red.flow_revision == 9
 
 
-@pytest.mark.asyncio
 async def test_completed_registry_is_verified_without_any_mutation() -> None:
     migrated = {item.scenario_id for item in MIGRATION_MANIFEST}
     backend = Backend({item.scenario_id: item.new_source_hash for item in MIGRATION_MANIFEST})
@@ -170,7 +168,6 @@ async def test_completed_registry_is_verified_without_any_mutation() -> None:
     assert store.saved == []
 
 
-@pytest.mark.asyncio
 async def test_final_verification_requires_one_cross_scenario_cas_snapshot() -> None:
     migrated = {item.scenario_id for item in MIGRATION_MANIFEST}
     backend = Backend(
@@ -180,11 +177,10 @@ async def test_final_verification_requires_one_cross_scenario_cas_snapshot() -> 
     service = _service(RegistryStore(_registry(migrated=migrated)), backend)
     await service.async_load()
 
-    with pytest.raises(ScenarioServiceError, match="snapshot changed"):
+    with unittest.TestCase().assertRaisesRegex(ScenarioServiceError, "snapshot changed"):
         await service.async_verify_managed_switch_migration(MIGRATION_MANIFEST)
 
 
-@pytest.mark.asyncio
 async def test_conflict_or_missing_target_causes_no_mutation() -> None:
     registry = _registry()
     changed = registry.scenarios[0]
@@ -197,7 +193,7 @@ async def test_conflict_or_missing_target_causes_no_mutation() -> None:
     backend = Backend()
     service = _service(RegistryStore(registry), backend)
     await service.async_load()
-    with pytest.raises(ScenarioRevisionConflictError):
+    with unittest.TestCase().assertRaises(ScenarioRevisionConflictError):
         await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
     assert backend.updated == []
 
@@ -205,19 +201,18 @@ async def test_conflict_or_missing_target_causes_no_mutation() -> None:
     backend.deployed[MIGRATION_MANIFEST[0].scenario_id] = "a" * 64
     service = _service(RegistryStore(_registry()), backend)
     await service.async_load()
-    with pytest.raises(ScenarioRevisionConflictError):
+    with unittest.TestCase().assertRaises(ScenarioRevisionConflictError):
         await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
     assert backend.updated == []
 
     backend = Backend()
     service = _service(RegistryStore(_registry()), backend, missing=MIGRATION_MANIFEST[0].input_target_ids[0])
     await service.async_load()
-    with pytest.raises(ScenarioServiceError, match="target is missing"):
+    with unittest.TestCase().assertRaisesRegex(ScenarioServiceError, "target is missing"):
         await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
     assert backend.updated == []
 
 
-@pytest.mark.asyncio
 async def test_topology_or_non_protected_scenario_conflict_causes_no_mutation() -> None:
     class WrongTopology(Backend):
         async def async_verify_managed_topology(self, scenario_id, flow_id):
@@ -228,7 +223,7 @@ async def test_topology_or_non_protected_scenario_conflict_causes_no_mutation() 
     backend = WrongTopology()
     service = _service(RegistryStore(_registry()), backend)
     await service.async_load()
-    with pytest.raises(ScenarioServiceError, match="topology changed"):
+    with unittest.TestCase().assertRaisesRegex(ScenarioServiceError, "topology changed"):
         await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
     assert backend.updated == []
 
@@ -244,18 +239,21 @@ async def test_topology_or_non_protected_scenario_conflict_causes_no_mutation() 
         backend,
     )
     await service.async_load()
-    with pytest.raises(ScenarioServiceError, match="protected by system policy"):
+    with unittest.TestCase().assertRaisesRegex(
+        ScenarioServiceError, "protected by system policy"
+    ):
         await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
     assert backend.updated == []
 
 
-@pytest.mark.asyncio
 async def test_duplicate_manifest_entry_is_rejected_before_any_mutation() -> None:
     backend = Backend()
     service = _service(RegistryStore(_registry()), backend)
     await service.async_load()
 
-    with pytest.raises(ScenarioServiceError, match="manifest is invalid"):
+    with unittest.TestCase().assertRaisesRegex(
+        ScenarioServiceError, "manifest is invalid"
+    ):
         await service.async_apply_managed_switch_migration(
             (*MIGRATION_MANIFEST, MIGRATION_MANIFEST[0])
         )
@@ -263,13 +261,12 @@ async def test_duplicate_manifest_entry_is_rejected_before_any_mutation() -> Non
     assert backend.updated == []
 
 
-@pytest.mark.asyncio
 async def test_registry_failure_compensates_sources_and_later_manual_edit_blocks_rollback() -> None:
     backend = Backend()
     store = RegistryStore(_registry(), fail=True)
     service = _service(store, backend)
     await service.async_load()
-    with pytest.raises(ScenarioServiceError, match="write failed"):
+    with unittest.TestCase().assertRaisesRegex(ScenarioServiceError, "write failed"):
         await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
     assert set(backend.restored) == {item.scenario_id for item in MIGRATION_MANIFEST}
 
@@ -281,11 +278,12 @@ async def test_registry_failure_compensates_sources_and_later_manual_edit_blocks
     )
     service = _service(store, backend)
     await service.async_load()
-    with pytest.raises(ScenarioServiceError, match="CAS rollback was rejected"):
+    with unittest.TestCase().assertRaisesRegex(
+        ScenarioServiceError, "CAS rollback was rejected"
+    ):
         await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
 
 
-@pytest.mark.asyncio
 async def test_final_snapshot_drift_can_restore_exact_sources_and_registry() -> None:
     original = _registry()
     store = RegistryStore(original)
@@ -295,7 +293,7 @@ async def test_final_snapshot_drift_can_restore_exact_sources_and_registry() -> 
     await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
     backend.revisions[MIGRATION_MANIFEST[-1].scenario_id] = "revision.drifted"
 
-    with pytest.raises(ScenarioServiceError, match="snapshot changed"):
+    with unittest.TestCase().assertRaisesRegex(ScenarioServiceError, "snapshot changed"):
         await service.async_verify_managed_switch_migration(MIGRATION_MANIFEST)
 
     assert await service.async_rollback_managed_switch_migration(MIGRATION_MANIFEST)
@@ -306,7 +304,6 @@ async def test_final_snapshot_drift_can_restore_exact_sources_and_registry() -> 
     assert backend.commits == 1
 
 
-@pytest.mark.asyncio
 async def test_manual_source_edit_rejects_final_rollback_without_overwrite() -> None:
     store = RegistryStore(_registry())
     backend = Backend()
@@ -324,7 +321,6 @@ async def test_manual_source_edit_rejects_final_rollback_without_overwrite() -> 
     assert store.registry.scenario(first.scenario_id).revision == first.legacy_revision + 1
 
 
-@pytest.mark.asyncio
 async def test_completed_receipt_failure_with_manual_edit_stays_prepared_and_blocked() -> None:
     store = RegistryStore(_registry())
     backend = Backend()
@@ -346,9 +342,73 @@ async def test_completed_receipt_failure_with_manual_edit_stays_prepared_and_blo
             self.value = value
 
     receipt_store = ReceiptStore()
-    with pytest.raises(ManagedSwitchMigrationConflict, match="recovery"):
+    with unittest.TestCase().assertRaisesRegex(
+        ManagedSwitchMigrationConflict, "recovery"
+    ):
         await ManagedSwitchMigration(service, receipt_store).async_apply()
 
     assert receipt_store.value["state"] == "prepared"
     assert backend.deployed[first.scenario_id] == "f" * 64
     assert backend.restored == []
+
+
+def _as_unittest_case(test):
+    @wraps(test)
+    async def run() -> None:
+        await test()
+
+    return staticmethod(run)
+
+
+class ManagedSwitchMigrationServiceTest(unittest.IsolatedAsyncioTestCase):
+    """Expose the async migration cases to unittest and pytest alike."""
+
+    test_batch_migration_updates_three_sources_and_registry_once = _as_unittest_case(
+        test_batch_migration_updates_three_sources_and_registry_once
+    )
+    test_partial_restart_reconciles_new_source_without_redeploy = _as_unittest_case(
+        test_partial_restart_reconciles_new_source_without_redeploy
+    )
+    test_completed_registry_is_verified_without_any_mutation = _as_unittest_case(
+        test_completed_registry_is_verified_without_any_mutation
+    )
+    test_final_verification_requires_one_cross_scenario_cas_snapshot = _as_unittest_case(
+        test_final_verification_requires_one_cross_scenario_cas_snapshot
+    )
+    test_conflict_or_missing_target_causes_no_mutation = _as_unittest_case(
+        test_conflict_or_missing_target_causes_no_mutation
+    )
+    test_topology_or_non_protected_scenario_conflict_causes_no_mutation = _as_unittest_case(
+        test_topology_or_non_protected_scenario_conflict_causes_no_mutation
+    )
+    test_duplicate_manifest_entry_is_rejected_before_any_mutation = _as_unittest_case(
+        test_duplicate_manifest_entry_is_rejected_before_any_mutation
+    )
+    test_registry_failure_compensates_sources_and_later_manual_edit_blocks_rollback = _as_unittest_case(
+        test_registry_failure_compensates_sources_and_later_manual_edit_blocks_rollback
+    )
+    test_final_snapshot_drift_can_restore_exact_sources_and_registry = _as_unittest_case(
+        test_final_snapshot_drift_can_restore_exact_sources_and_registry
+    )
+    test_manual_source_edit_rejects_final_rollback_without_overwrite = _as_unittest_case(
+        test_manual_source_edit_rejects_final_rollback_without_overwrite
+    )
+    test_completed_receipt_failure_with_manual_edit_stays_prepared_and_blocked = _as_unittest_case(
+        test_completed_receipt_failure_with_manual_edit_stays_prepared_and_blocked
+    )
+
+
+for _test in (
+    test_batch_migration_updates_three_sources_and_registry_once,
+    test_partial_restart_reconciles_new_source_without_redeploy,
+    test_completed_registry_is_verified_without_any_mutation,
+    test_final_verification_requires_one_cross_scenario_cas_snapshot,
+    test_conflict_or_missing_target_causes_no_mutation,
+    test_topology_or_non_protected_scenario_conflict_causes_no_mutation,
+    test_duplicate_manifest_entry_is_rejected_before_any_mutation,
+    test_registry_failure_compensates_sources_and_later_manual_edit_blocks_rollback,
+    test_final_snapshot_drift_can_restore_exact_sources_and_registry,
+    test_manual_source_edit_rejects_final_rollback_without_overwrite,
+    test_completed_receipt_failure_with_manual_edit_stays_prepared_and_blocked,
+):
+    _test.__test__ = False
