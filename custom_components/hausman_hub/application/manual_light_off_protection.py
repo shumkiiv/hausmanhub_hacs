@@ -117,41 +117,51 @@ class ManualLightOffProtectionCoordinator:
 
         self._catalog_coverage_healthy = bool(healthy)
 
+    @property
+    def ready_for_release_owned_switches(self) -> bool:
+        """Expose the complete fail-closed startup gate for physical switches."""
+
+        return bool(
+            self._loaded
+            and not self.unhealthy
+            and not getattr(self._store, "recovered_previous", False)
+        )
+
     async def async_load(self) -> None:
         try:
             payload = await self._store.async_load()
-            if payload is None:
-                self._loaded = True
-                return
-            if not valid_manual_light_off_protection_payload(payload):
-                raise RuntimeError("manual light-off protection store is corrupt")
-            self._settings = parse_settings(payload["settings"])
-            self._settings_revision = int(payload["settingsRevision"])
-            self._state_revision = int(payload["stateRevision"])
-            self._protections = {
-                _protection_key(item): copy.deepcopy(item)
-                for item in payload["protections"]
-            }
-            self._frozen_sensor_ids = {
-                str(item["protectionId"]): tuple(item["presenceSensorIds"])
-                for item in payload["frozenSensors"]
-            }
-            self._completed = copy.deepcopy(payload["completed"])
-            # Old records have no request fingerprint and cannot safely be
-            # replayed. Drop them before the next save instead of emitting an
-            # invalid empty wrapper or claiming a replay we cannot prove.
-            verified_receipts = [
-                item for item in payload["receipts"]
-                if "operation" in item and "payloadFingerprint" in item
-            ]
-            self._receipts = {
-                str(item["requestId"]): copy.deepcopy(item["receipt"])
-                for item in verified_receipts
-            }
-            self._receipt_metadata = {
-                str(item["requestId"]): (str(item["operation"]), str(item["payloadFingerprint"]))
-                for item in verified_receipts
-            }
+            if payload is not None:
+                if not valid_manual_light_off_protection_payload(payload):
+                    raise RuntimeError("manual light-off protection store is corrupt")
+                self._settings = parse_settings(payload["settings"])
+                self._settings_revision = int(payload["settingsRevision"])
+                self._state_revision = int(payload["stateRevision"])
+                self._protections = {
+                    _protection_key(item): copy.deepcopy(item)
+                    for item in payload["protections"]
+                }
+                self._frozen_sensor_ids = {
+                    str(item["protectionId"]): tuple(item["presenceSensorIds"])
+                    for item in payload["frozenSensors"]
+                }
+                self._completed = copy.deepcopy(payload["completed"])
+                # Old records have no request fingerprint and cannot safely be
+                # replayed. Drop them before the next save instead of emitting an
+                # invalid empty wrapper or claiming a replay we cannot prove.
+                verified_receipts = [
+                    item for item in payload["receipts"]
+                    if "operation" in item and "payloadFingerprint" in item
+                ]
+                self._receipts = {
+                    str(item["requestId"]): copy.deepcopy(item["receipt"])
+                    for item in verified_receipts
+                }
+                self._receipt_metadata = {
+                    str(item["requestId"]): (str(item["operation"]), str(item["payloadFingerprint"]))
+                    for item in verified_receipts
+                }
+            if getattr(self._store, "recovered_previous", False):
+                self.unhealthy = True
         except Exception:  # persistence evidence must never open automatic control
             self.unhealthy = True
         finally:
@@ -320,28 +330,8 @@ class ManualLightOffProtectionCoordinator:
         }
         for sensor_id in tracked:
             value = sensor_states.get(sensor_id)
-            state = _state(value)
-            observed = _state_timestamp(value, now)
-            attributes = getattr(value, "attributes", {})
-            trusted = (
-                state in {"on", "off"}
-                and 0 <= (now - observed).total_seconds() <= _FRESH_SENSOR_SECONDS
-                and not getattr(value, "assumed_state", False)
-                and not getattr(value, "is_assumed_state", False)
-                and not (
-                    isinstance(attributes, Mapping)
-                    and (
-                        attributes.get("assumed_state") is True
-                        or attributes.get("restored") is True
-                        or attributes.get("cached") is True
-                        or attributes.get("cache") is True
-                        or attributes.get("evidence_source") in {"restore", "cache"}
-                    )
-                )
-            )
-            self._sensor_states[sensor_id] = (
-                (state, observed) if trusted else ("unknown", observed)
-            )
+            evidence = trusted_presence_sensor_evidence(value, now)
+            self._sensor_states[sensor_id] = evidence or ("unknown", now)
 
     async def async_note_state_transition(
         self,
@@ -359,16 +349,14 @@ class ManualLightOffProtectionCoordinator:
                 if entity_id in sensor_ids
             ]
             if affected:
-                observed = _state_timestamp(new_state, now)
-                if new == "off" and (now - observed).total_seconds() <= _FRESH_SENSOR_SECONDS:
-                    self._sensor_states[entity_id] = ("off", observed)
-                else:
-                    self._sensor_states[entity_id] = (new, observed)
+                evidence = trusted_presence_sensor_evidence(new_state, now)
+                sensor_state, observed = evidence or ("unknown", now)
+                self._sensor_states[entity_id] = (sensor_state, observed)
                 for record_key in affected:
                     record = self._protections[record_key]
                     absence_since = (
                         _wire_time(observed)
-                        if new == "off" and (now - observed).total_seconds() <= _FRESH_SENSOR_SECONDS
+                        if sensor_state == "off"
                         else None
                     )
                     if record["absenceSince"] != absence_since:
@@ -760,6 +748,34 @@ def _protection_key(value: Mapping[str, object]) -> str:
 
 def _state(value: object) -> str:
     return str(getattr(value, "state", "")).casefold()
+
+
+def trusted_presence_sensor_evidence(
+    value: object, now: datetime
+) -> tuple[str, datetime] | None:
+    """Return only live, fresh binary sensor evidence."""
+
+    state = _state(value)
+    attributes = getattr(value, "attributes", {})
+    observed = getattr(value, "last_changed", None) or getattr(
+        value, "last_updated", None
+    )
+    if (
+        state not in {"on", "off"}
+        or not isinstance(observed, datetime)
+        or not isinstance(attributes, Mapping)
+        or getattr(value, "assumed_state", False) is True
+        or getattr(value, "is_assumed_state", False) is True
+        or attributes.get("assumed_state") is True
+        or attributes.get("restored") is True
+        or attributes.get("cached") is True
+        or attributes.get("cache") is True
+        or attributes.get("evidence_source") in {"restore", "cache"}
+    ):
+        return None
+    observed = _utc(observed)
+    age_seconds = (_utc(now) - observed).total_seconds()
+    return (state, observed) if 0 <= age_seconds <= _FRESH_SENSOR_SECONDS else None
 
 
 def _automatic(attribution: ScenarioCommandAttribution | None) -> bool:

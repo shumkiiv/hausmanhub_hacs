@@ -184,7 +184,21 @@ class ManagedSwitchMigration:
         apply = getattr(self._service, "async_apply_managed_switch_migration", None)
         if not callable(apply):
             raise ManagedSwitchMigrationConflict("scenario migration CAS is unavailable")
-        await apply(_entries_with_sources())
+        entries = _entries_with_sources()
+        await apply(entries)
+        verify = getattr(
+            self._service,
+            "async_verify_managed_switch_migration",
+            None,
+        )
+        if not callable(verify):
+            raise ManagedSwitchMigrationConflict(
+                "scenario migration final CAS verification is unavailable"
+            )
+        await verify(entries)
         if not completed:
             await self._store.async_save(_receipt("completed"))
+            # A receipt write is not execution authority by itself. Recheck
+            # after persistence so drift in that gap still keeps the adapter off.
+            await verify(entries)
         return "completed"

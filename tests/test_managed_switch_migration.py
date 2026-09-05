@@ -31,14 +31,23 @@ class Store:
 
 
 class Service:
-    def __init__(self, *, fail=False):
+    def __init__(self, *, fail=False, verification_drift=None):
         self.calls = []
         self.fail = fail
+        self.verification_drift = verification_drift
+        self.verifications = 0
 
     async def async_apply_managed_switch_migration(self, entries):
         self.calls.append(entries)
         if self.fail:
             raise RuntimeError("CAS conflict")
+
+    async def async_verify_managed_switch_migration(self, entries):
+        self.verifications += 1
+        if self.verification_drift is not None:
+            raise RuntimeError(f"final drift: {self.verification_drift}")
+        assert len(entries) == 3
+        return "revision.final"
 
 
 def test_manifest_contains_exact_three_protected_scenarios_and_sources() -> None:
@@ -97,4 +106,21 @@ def test_cas_conflict_leaves_prepared_receipt_for_restart_reconciliation() -> No
     store = Store()
     with pytest.raises(RuntimeError, match="CAS conflict"):
         asyncio.run(ManagedSwitchMigration(Service(fail=True), store).async_apply())
+    assert store.value["state"] == "prepared"
+
+
+@pytest.mark.parametrize(
+    "scenario_id",
+    [item.scenario_id for item in MIGRATION_MANIFEST],
+)
+def test_final_cross_scenario_drift_never_completes_receipt(
+    scenario_id: str,
+) -> None:
+    store = Store()
+    service = Service(verification_drift=scenario_id)
+
+    with pytest.raises(RuntimeError, match="final drift"):
+        asyncio.run(ManagedSwitchMigration(service, store).async_apply())
+
+    assert service.verifications == 1
     assert store.value["state"] == "prepared"

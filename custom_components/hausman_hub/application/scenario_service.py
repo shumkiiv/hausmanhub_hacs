@@ -508,6 +508,7 @@ class ScenarioService:
         self._monotonic = monotonic
         self._intercom_release_obligation = intercom_release_obligation
         self._manual_light_off_protection = manual_light_off_protection
+        self._smart_switch_receipt_consumer: object | None = None
         self._path_metrics = ScenarioPathMetrics()
         self._scenario_content_revision_key: tuple[tuple[str, int], ...] | None = None
         self._scenario_content_revision: str | None = None
@@ -844,6 +845,11 @@ class ScenarioService:
         """Wire the executor after both objects are created."""
 
         self._executor = executor
+
+    def set_smart_switch_receipt_consumer(self, consumer: object) -> None:
+        """Wire the sole durable authority for release-owned switch receipts."""
+
+        self._smart_switch_receipt_consumer = consumer
 
     @property
     def catalog_readiness(self) -> dict[str, object]:
@@ -1258,6 +1264,93 @@ class ScenarioService:
                 raise
             return "completed"
 
+    async def async_verify_managed_switch_migration(
+        self, entries: tuple[object, ...]
+    ) -> str:
+        """Verify all managed definitions and flows in one final CAS revision."""
+
+        self._require_running()
+        async with self._lock:
+            registry = self._ensure_loaded()
+            backend = self._node_red_backend
+            if backend is None:
+                raise ScenarioServiceError(
+                    "Node-RED backend is unavailable.", status=503
+                )
+            required_ids = {
+                "system-shower-comfort-controller",
+                "system-small-corridor-light-controller",
+                "system-tambur-adaptive-controller",
+            }
+            if (
+                len(entries) != len(required_ids)
+                or {str(getattr(item, "scenario_id", "")) for item in entries}
+                != required_ids
+            ):
+                raise ScenarioServiceError(
+                    "Managed switch migration manifest is invalid.", status=500
+                )
+
+            revisions: set[str] = set()
+            for item in entries:
+                scenario_id = str(getattr(item, "scenario_id"))
+                scenario = registry.scenario(scenario_id)
+                if scenario is None:
+                    raise ScenarioNotFoundError(scenario_id)
+                if not scenario.protected:
+                    raise ScenarioProtectedError(scenario_id)
+                metadata = scenario.definition.node_red
+                expected_revision = int(getattr(item, "legacy_revision")) + 1
+                expected_hash = str(getattr(item, "new_source_hash"))
+                expected_inputs = tuple(getattr(item, "input_target_ids"))
+                if (
+                    scenario.revision != expected_revision
+                    or scenario.definition.execution_backend
+                    is not ScenarioExecutionBackend.NODE_RED
+                    or metadata is None
+                    or not metadata.flow_id
+                    or metadata.source_hash != expected_hash
+                    or metadata.input_target_ids != expected_inputs
+                    or metadata.generated_by is not ScenarioNodeRedGeneratedBy.HAUSMAN
+                    or metadata.sync_status is not ScenarioNodeRedSyncStatus.SYNCED
+                ):
+                    raise ScenarioRevisionConflictError(
+                        scenario_id,
+                        expected_revision=expected_revision,
+                        current_revision=scenario.revision,
+                        changed_fields=("definition.nodeRed",),
+                        current_room_ids=scenario.room_ids,
+                        current_action_ids=tuple(
+                            action.id for action in scenario.definition.actions
+                        ),
+                    )
+                for target_id in expected_inputs:
+                    device = self._catalog.device(target_id)
+                    if device is None or getattr(device, "target_id", None) != target_id:
+                        raise ScenarioServiceError(
+                            "Managed switch migration target is missing.", status=409
+                        )
+                evidence = await backend.async_verify_managed_topology(
+                    scenario_id, metadata.flow_id
+                )
+                revision = evidence.get("revision")
+                if (
+                    evidence.get("topology")
+                    != getattr(item, "legacy_topology")
+                    or evidence.get("source_hash") != expected_hash
+                    or not isinstance(revision, str)
+                    or not revision
+                ):
+                    raise ScenarioServiceError(
+                        "Protected scenario final CAS evidence changed.", status=409
+                    )
+                revisions.add(revision)
+            if len(revisions) != 1:
+                raise ScenarioServiceError(
+                    "Protected scenario cross-scenario snapshot changed.", status=409
+                )
+            return next(iter(revisions))
+
     @property
     def performance_metrics(self) -> dict[str, dict[str, float | int | str]]:
         """Return bounded aggregate timings without payload or entity data."""
@@ -1351,6 +1444,27 @@ class ScenarioService:
         allowed = {"shower-cabinet": {"toggle"}, "tambur-light-group": {"on", "off", "toggle"}}[binding]
         if action not in allowed:
             raise ValueError("smart-switch action does not match binding")
+        consume = getattr(
+            self._smart_switch_receipt_consumer,
+            "async_consume_intent_receipt",
+            None,
+        )
+        if not callable(consume):
+            raise RuntimeError("smart-switch receipt consumer is unavailable")
+        consumed = consume(
+            binding=binding,
+            action=action,
+            correlation_id=correlation_id,
+            source=source,
+            trigger_id=trigger_id,
+            intent_receipt_id=intent_receipt_id,
+            raw_subtype=raw_subtype,
+            dedup_disposition=dedup_disposition,
+        )
+        if inspect.isawaitable(consumed):
+            consumed = await consumed
+        if consumed is not True:
+            raise ValueError("smart-switch receipt is unknown or already consumed")
         scenario_id = (
             "system-shower-comfort-controller"
             if binding == "shower-cabinet"
@@ -1394,9 +1508,7 @@ class ScenarioService:
                     "entity_cd0098e5ff95da46",
                 )
             )
-            if action in {"on", "toggle"} and any(
-                state is None for state in group_states
-            ):
+            if any(state is None for state in group_states):
                 return await self._async_record_typed_intent_skip(
                     scenario_id,
                     correlation_id,

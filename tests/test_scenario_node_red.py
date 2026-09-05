@@ -8,9 +8,10 @@ from itertools import product
 import json
 from pathlib import Path
 import subprocess
+import sys
 import unittest
 from dataclasses import replace
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -165,6 +166,90 @@ def test_revisioned_flow_post_uses_nodes_deployment_header() -> None:
 
     asyncio.run(run())
     assert captured["headers"]["Node-RED-Deployment-Type"] == "nodes"
+
+
+class _StreamedResponse:
+    def __init__(self, chunks: list[bytes], *, content_length: str | None) -> None:
+        self.status = 200
+        self.headers = (
+            {} if content_length is None else {"Content-Length": content_length}
+        )
+        self.closed = False
+        self.chunks_read = 0
+
+        async def iter_chunked(_size: int):
+            for chunk in chunks:
+                self.chunks_read += 1
+                yield chunk
+
+        self.content = SimpleNamespace(iter_chunked=iter_chunked)
+
+
+class _ResponseContext:
+    def __init__(self, response: _StreamedResponse) -> None:
+        self.response = response
+
+    async def __aenter__(self) -> _StreamedResponse:
+        return self.response
+
+    async def __aexit__(self, *_args: object) -> None:
+        self.response.closed = True
+
+
+def _install_aiohttp_session(monkeypatch, response: _StreamedResponse) -> None:
+    session = SimpleNamespace(
+        request=lambda *_args, **_kwargs: _ResponseContext(response)
+    )
+    homeassistant = ModuleType("homeassistant")
+    helpers = ModuleType("homeassistant.helpers")
+    aiohttp_client = ModuleType("homeassistant.helpers.aiohttp_client")
+    aiohttp_client.async_get_clientsession = lambda _hass: session
+    homeassistant.helpers = helpers
+    helpers.aiohttp_client = aiohttp_client
+    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant)
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.helpers.aiohttp_client",
+        aiohttp_client,
+    )
+
+
+@pytest.mark.asyncio
+async def test_raw_request_rejects_oversized_content_length_without_reading(
+    monkeypatch,
+) -> None:
+    response = _StreamedResponse(
+        [b'{}'],
+        content_length=str(scenario_node_red.MAX_NODE_RED_RESPONSE_BYTES + 1),
+    )
+    _install_aiohttp_session(monkeypatch, response)
+    backend = NodeRedScenarioBackend(SimpleNamespace(), supervisor_token="trusted")
+
+    with pytest.raises(NodeRedBackendError, match="too large"):
+        await backend._raw_request("GET", "/flows")  # noqa: SLF001
+
+    assert response.chunks_read == 0
+    assert response.closed
+
+
+@pytest.mark.asyncio
+async def test_raw_request_bounds_unknown_length_stream_and_closes_response(
+    monkeypatch,
+) -> None:
+    limit = scenario_node_red.MAX_NODE_RED_RESPONSE_BYTES
+    response = _StreamedResponse(
+        [b"x" * limit, b"y"],
+        content_length=None,
+    )
+    _install_aiohttp_session(monkeypatch, response)
+    backend = NodeRedScenarioBackend(SimpleNamespace(), supervisor_token="trusted")
+
+    with pytest.raises(NodeRedBackendError, match="too large"):
+        await backend._raw_request("GET", "/flows")  # noqa: SLF001
+
+    assert response.chunks_read == 2
+    assert response.closed
 
 
 def test_prepare_compensation_restores_update_and_commit_clears_metadata() -> None:

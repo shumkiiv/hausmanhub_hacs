@@ -243,6 +243,63 @@ def test_restart_and_stale_presence_do_not_create_release_evidence() -> None:
     asyncio.run(exercise())
 
 
+@pytest.mark.parametrize(
+    "unsafe_attributes",
+    [{"restored": True}, {"cached": True}, {"assumed_state": True}],
+)
+def test_untrusted_same_state_presence_event_invalidates_prior_absence(
+    unsafe_attributes: dict[str, object],
+) -> None:
+    """A restored off-to-off event must revoke earlier live absence evidence."""
+
+    async def exercise() -> None:
+        now = datetime.now(timezone.utc)
+        store = _MemoryStore()
+        coordinator = ManualLightOffProtectionCoordinator(store, now=lambda: now)
+        await coordinator.async_load()
+        sensors = {
+            "binary_sensor.tambur_presence": SimpleNamespace(
+                state="off", last_changed=now, attributes={}
+            ),
+            "binary_sensor.tambur_motion": SimpleNamespace(
+                state="off", last_changed=now, attributes={}
+            ),
+        }
+        await coordinator.async_arm_release_owned_direct_off(
+            request_id="switch.sensor-boundary",
+            light_entity_ids=("light.tambur_chandelier", "switch.tambur_points"),
+            presence_sensor_entity_ids=tuple(sensors),
+            sensor_states=sensors,
+        )
+        listener = ManualLightOffProtectionEventListener(
+            coordinator, None, set(sensors)
+        )
+        now += timedelta(seconds=100)
+        await listener.async_handle(
+            SimpleNamespace(
+                data={
+                    "entity_id": "binary_sensor.tambur_motion",
+                    "old_state": sensors["binary_sensor.tambur_motion"],
+                    "new_state": SimpleNamespace(
+                        state="off",
+                        last_changed=now - timedelta(seconds=100),
+                        attributes=unsafe_attributes,
+                    ),
+                },
+                context=None,
+            )
+        )
+        now += timedelta(seconds=180)
+
+        decision = await coordinator.async_decide_entity(
+            "light.tambur_chandelier", automatic=True, dry_run=False
+        )
+        assert not decision.allowed
+        assert decision.reason == "manual_off_protection_absence_required"
+
+    asyncio.run(exercise())
+
+
 def test_configured_entities_include_only_profile_lights_and_presence_sensors() -> None:
     coordinator = SimpleNamespace(
         snapshot=lambda: {

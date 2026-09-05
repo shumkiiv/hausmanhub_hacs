@@ -213,6 +213,38 @@ class OperationJournalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("off", normalized["scenario"]["trigger"]["old_value"])
         self.assertEqual("off", normalized["scenario"]["trigger"]["new_value"])
 
+    def test_release_owned_trace_drops_unbounded_or_non_allowlisted_fields(self) -> None:
+        secret = "SECRET\nentity_id=light.private"
+        normalized = scenario_operation_receipt(
+            {
+                "run_id": "receipt.safe-1",
+                "scenario_id": "system-tambur-adaptive-controller",
+                "execution_mode": "restart",
+                "command_mode": "live",
+                "status": "skipped",
+                "confirmed": False,
+                "trigger_context": {
+                    "source": "manual",
+                    "trigger_id": secret,
+                    "recovery": False,
+                    "binding": "tambur-light-group",
+                    "typed_intent": "off",
+                    "direct_user_intent": "off",
+                    "intent_receipt_id": "r" * 129,
+                    "raw_subtype": secret,
+                    "dedup_disposition": "accepted",
+                    "correlation_id": "r" * 129,
+                },
+                "condition_results": [],
+                "receipts": [],
+            }
+        )
+
+        self.assertNotIn("trigger", normalized["scenario"])
+        serialized = json.dumps(normalized, ensure_ascii=False)
+        self.assertNotIn("SECRET", serialized)
+        self.assertNotIn("light.private", serialized)
+
     async def test_invalid_scenario_trace_fails_closed(self) -> None:
         store = MemoryStore()
         service = OperationJournalService(store)

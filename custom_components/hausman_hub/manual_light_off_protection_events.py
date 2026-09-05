@@ -7,6 +7,9 @@ from collections.abc import Collection, Mapping
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from .application.manual_light_off_protection import (
+    trusted_presence_sensor_evidence,
+)
 from .domain.manual_light_off_protection import ScenarioCommandAttribution
 
 if TYPE_CHECKING:
@@ -72,12 +75,20 @@ class ManualLightOffProtectionEventListener:
             or entity_id not in self._entity_ids
             or old_state is None
             or new_state is None
-            or getattr(old_state, "state", None)
-            == getattr(new_state, "state", None)
         ):
             return
         is_light = not entity_id.startswith(("binary_sensor.", "sensor."))
-        if is_light and not _is_fresh_light_transition(old_state, new_state):
+        state_unchanged = getattr(old_state, "state", None) == getattr(
+            new_state, "state", None
+        )
+        if is_light:
+            if state_unchanged or not _is_fresh_light_transition(
+                old_state, new_state
+            ):
+                return
+        elif state_unchanged and trusted_presence_sensor_evidence(
+            new_state, datetime.now(timezone.utc)
+        ) is not None:
             return
         attribution = None
         if self._command_contexts is not None:

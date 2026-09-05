@@ -46,14 +46,50 @@ def test_profile_override_inherits_unspecified_room_and_global_fields() -> None:
 
 
 class MemoryStore:
-    def __init__(self, payload: object | None = None) -> None:
+    def __init__(
+        self, payload: object | None = None, *, recovered_previous: bool = False
+    ) -> None:
         self.payload = payload
+        self.recovered_previous = recovered_previous
 
     async def async_load(self) -> object | None:
         return copy.deepcopy(self.payload)
 
     async def async_save(self, payload: dict[str, object]) -> None:
         self.payload = copy.deepcopy(payload)
+
+
+def test_recovered_previous_generation_keeps_protection_fail_closed() -> None:
+    """An N-1 snapshot may omit a newer manual-off block."""
+
+    async def exercise() -> None:
+        now = datetime(2026, 9, 5, 12, tzinfo=timezone.utc)
+        store = MemoryStore()
+        first = ManualLightOffProtectionCoordinator(store, now=lambda: now)
+        await first.async_load()
+        await first.async_arm_release_owned_direct_off(
+            request_id="switch.before-corruption",
+            light_entity_ids=("light.tambur_chandelier", "switch.tambur_points"),
+            presence_sensor_entity_ids=(
+                "binary_sensor.tambur_presence",
+                "binary_sensor.tambur_motion",
+            ),
+            sensor_states={},
+        )
+
+        store.recovered_previous = True
+        restarted = ManualLightOffProtectionCoordinator(store, now=lambda: now)
+        await restarted.async_load()
+
+        assert restarted.unhealthy
+        assert not restarted.ready_for_release_owned_switches
+        decision = await restarted.async_decide_entity(
+            "light.tambur_chandelier", automatic=True, dry_run=False
+        )
+        assert not decision.allowed
+        assert decision.reason == "manual_off_protection_unhealthy"
+
+    asyncio.run(exercise())
 
 
 def test_catalog_coverage_can_recover_without_clearing_runtime_failure() -> None:
@@ -130,7 +166,7 @@ def test_manual_off_lifecycle_keeps_profile_blocked_until_timer_and_absence() ->
         await coordinator.async_note_state_transition(
             "binary_sensor.tambur_presence",
             SimpleNamespace(state="on"),
-            SimpleNamespace(state="off"),
+            SimpleNamespace(state="off", attributes={}, last_updated=now),
             None,
         )
         assert coordinator.snapshot()["protections"][0]["absenceSince"] is not None
@@ -227,6 +263,58 @@ def test_release_owned_direct_off_requires_both_fresh_off_and_presence_cancels_r
             "light.tambur_chandelier", automatic=True, dry_run=False
         )
         assert not decision.allowed
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    "unsafe_attributes",
+    [
+        {"restored": True},
+        {"cached": True},
+        {"assumed_state": True},
+        {"evidence_source": "restore"},
+    ],
+)
+def test_coordinator_invalidates_untrusted_presence_evidence(
+    unsafe_attributes: dict[str, object],
+) -> None:
+    """A direct coordinator call cannot turn restored sensor data into absence."""
+
+    async def exercise() -> None:
+        now = datetime(2026, 9, 5, 12, tzinfo=timezone.utc)
+        coordinator = ManualLightOffProtectionCoordinator(MemoryStore(), now=lambda: now)
+        await coordinator.async_load()
+        sensors = {
+            "binary_sensor.tambur_presence": SimpleNamespace(
+                state="off", last_changed=now, attributes={}
+            ),
+            "binary_sensor.tambur_motion": SimpleNamespace(
+                state="off", last_changed=now, attributes={}
+            ),
+        }
+        await coordinator.async_arm_release_owned_direct_off(
+            request_id="switch.untrusted-coordinator",
+            light_entity_ids=("light.tambur_chandelier", "switch.tambur_points"),
+            presence_sensor_entity_ids=tuple(sensors),
+            sensor_states=sensors,
+        )
+        now += timedelta(seconds=100)
+        await coordinator.async_note_state_transition(
+            "binary_sensor.tambur_motion",
+            sensors["binary_sensor.tambur_motion"],
+            SimpleNamespace(
+                state="off", last_changed=now, attributes=unsafe_attributes
+            ),
+            None,
+        )
+        now += timedelta(seconds=180)
+
+        decision = await coordinator.async_decide_entity(
+            "light.tambur_chandelier", automatic=True, dry_run=False
+        )
+        assert not decision.allowed
+        assert decision.reason == "manual_off_protection_absence_required"
 
     asyncio.run(exercise())
 
@@ -439,7 +527,10 @@ def test_source_scope_and_completed_history_allow_repeated_lifecycles() -> None:
         assert (await coordinator.async_decide_entity("light.tambur_lamp", automatic=True, dry_run=False)).allowed
         now += timedelta(minutes=10)
         await coordinator.async_note_state_transition(
-            "binary_sensor.tambur_presence", SimpleNamespace(state="on"), SimpleNamespace(state="off"), None
+            "binary_sensor.tambur_presence",
+            SimpleNamespace(state="on"),
+            SimpleNamespace(state="off", attributes={}, last_updated=now),
+            None,
         )
         assert (await coordinator.async_decide_entity("light.tambur_points", automatic=True, dry_run=False)).allowed
         await coordinator.async_note_state_transition("light.tambur_points", on, off, None)
@@ -630,7 +721,10 @@ def test_source_scoped_records_and_completed_history_survive_restart_at_capacity
             await history.async_note_state_transition("light.tambur_points", on, off, None)
             now += timedelta(minutes=11)
             await history.async_note_state_transition(
-                "binary_sensor.tambur_presence", on, off, None
+                "binary_sensor.tambur_presence",
+                on,
+                SimpleNamespace(state="off", attributes={}, last_updated=now),
+                None,
             )
             assert (await history.async_decide_entity(
                 "light.tambur_points", automatic=True, dry_run=False
@@ -697,7 +791,10 @@ def test_timer_only_requires_fresh_known_evidence_for_configured_sensor() -> Non
             "light.tambur_points", automatic=True, dry_run=False
         )).allowed
         await coordinator.async_note_state_transition(
-            "binary_sensor.tambur_presence", SimpleNamespace(state="unknown"), SimpleNamespace(state="off"), None
+            "binary_sensor.tambur_presence",
+            SimpleNamespace(state="unknown"),
+            SimpleNamespace(state="off", attributes={}, last_updated=now),
+            None,
         )
         assert (await coordinator.async_decide_entity(
             "light.tambur_points", automatic=True, dry_run=False

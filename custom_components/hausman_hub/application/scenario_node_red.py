@@ -40,6 +40,7 @@ NODE_RED_STATUS_CONTRACT = "hausman-hub-scenario-node-red-status"
 NODE_RED_EXECUTION_CONTRACT = "hausman-node-red-scenario-execution"
 NODE_RED_ENDPOINT_PREFIX = "endpoint/hausman/scenarios"
 NODE_RED_TIMEOUT_SECONDS = 5
+MAX_NODE_RED_RESPONSE_BYTES = 1_048_576
 MAX_RETURNED_ACTIONS = 32
 MAX_MANAGED_SOURCE_BYTES = 65_536
 _ALLOWED_TRACE_STATUSES = frozenset({"passed", "failed", "selected", "skipped"})
@@ -646,10 +647,40 @@ class NodeRedScenarioBackend:
                 json=payload,
                 timeout=NODE_RED_TIMEOUT_SECONDS,
             ) as response:
+                declared_length = response.headers.get("Content-Length")
+                if declared_length is not None:
+                    try:
+                        parsed_length = int(declared_length)
+                    except (TypeError, ValueError) as error:
+                        raise NodeRedBackendError(
+                            "Node-RED returned an invalid content length"
+                        ) from error
+                    if parsed_length < 0:
+                        raise NodeRedBackendError(
+                            "Node-RED returned an invalid content length"
+                        )
+                    if parsed_length > MAX_NODE_RED_RESPONSE_BYTES:
+                        raise NodeRedBackendError("Node-RED response is too large")
+
+                raw_body = bytearray()
+                async for chunk in response.content.iter_chunked(64 * 1024):
+                    if not isinstance(chunk, bytes):
+                        raise NodeRedBackendError(
+                            "Node-RED returned an invalid response stream"
+                        )
+                    if len(raw_body) + len(chunk) > MAX_NODE_RED_RESPONSE_BYTES:
+                        raise NodeRedBackendError("Node-RED response is too large")
+                    raw_body.extend(chunk)
                 try:
-                    body: object = await response.json(content_type=None)
-                except Exception:  # noqa: BLE001
-                    body = await response.text()
+                    text = bytes(raw_body).decode("utf-8")
+                except UnicodeDecodeError as error:
+                    raise NodeRedBackendError(
+                        "Node-RED returned invalid response encoding"
+                    ) from error
+                try:
+                    body: object = json.loads(text)
+                except json.JSONDecodeError:
+                    body = text
                 return response.status, body
         except TimeoutError as error:
             raise NodeRedBackendError("Node-RED did not answer in time") from error
@@ -784,6 +815,7 @@ class NodeRedScenarioBackend:
             "source_hash": source_hash,
             "topology": "managed-three-node-v1",
             "topology_hash": topology_hash,
+            "revision": revision_after,
         }
 
     async def _async_flow_revision(

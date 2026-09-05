@@ -79,9 +79,16 @@ class Backend:
         }
         self.updated = []
         self.restored = []
+        self.revisions = {
+            item.scenario_id: "revision.stable" for item in MIGRATION_MANIFEST
+        }
 
     async def async_verify_managed_topology(self, scenario_id, _flow_id):
-        return {"source_hash": self.deployed[scenario_id], "topology": "managed-three-node-v1"}
+        return {
+            "source_hash": self.deployed[scenario_id],
+            "topology": "managed-three-node-v1",
+            "revision": self.revisions[scenario_id],
+        }
 
     async def async_update_source(self, scenario_id, _definition, _flow_id, source, expected, _catalog, *, validate_only):
         assert not validate_only and self.deployed[scenario_id] == expected
@@ -150,6 +157,20 @@ async def test_completed_registry_is_verified_without_any_mutation() -> None:
     assert await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST) == "completed"
     assert backend.updated == []
     assert store.saved == []
+
+
+@pytest.mark.asyncio
+async def test_final_verification_requires_one_cross_scenario_cas_snapshot() -> None:
+    migrated = {item.scenario_id for item in MIGRATION_MANIFEST}
+    backend = Backend(
+        {item.scenario_id: item.new_source_hash for item in MIGRATION_MANIFEST}
+    )
+    backend.revisions[MIGRATION_MANIFEST[-1].scenario_id] = "revision.drifted"
+    service = _service(RegistryStore(_registry(migrated=migrated)), backend)
+    await service.async_load()
+
+    with pytest.raises(ScenarioServiceError, match="snapshot changed"):
+        await service.async_verify_managed_switch_migration(MIGRATION_MANIFEST)
 
 
 @pytest.mark.asyncio

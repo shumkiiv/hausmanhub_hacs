@@ -117,11 +117,50 @@ async def test_concurrent_shower_aliases_dispatch_exactly_once() -> None:
     assert [item["dedup_disposition"] for item in dispositions] == ["deduplicated"]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("config", PASS_THROUGH_TRIGGER_CONFIGS)
+async def test_duplicate_pass_through_semantic_intent_dispatches_once(
+    config: dict[str, object],
+) -> None:
+    calls: list[dict[str, object]] = []
+    dispositions: list[dict[str, object]] = []
+    adapter = SmartSwitchTriggerAdapter(
+        SimpleNamespace(),
+        SimpleNamespace(
+            async_run_typed_intent=lambda **intent: calls.append(intent),
+            async_record_typed_intent_disposition=lambda **item: dispositions.append(item),
+        ),
+        trigger_api=SimpleNamespace(),
+        state_store=MemoryStore(),
+        wall_clock=lambda: 1000.0,
+        receipt_factory=iter(
+            (
+                f"receipt.{config['subtype']}.1",
+                f"receipt.{config['subtype']}.2",
+            )
+        ).__next__,
+    )
+    await adapter.async_load_state()
+
+    assert await adapter.async_handle_trigger(config, {})
+    assert not await adapter.async_handle_trigger(config, {})
+    assert len(calls) == 1
+    assert [item["dedup_disposition"] for item in dispositions] == ["deduplicated"]
+
+
 class MemoryStore:
-    def __init__(self, payload: object | None = None, *, fail_load: bool = False, fail_save: bool = False) -> None:
+    def __init__(
+        self,
+        payload: object | None = None,
+        *,
+        fail_load: bool = False,
+        fail_save: bool = False,
+        recovered_previous: bool = False,
+    ) -> None:
         self.payload = payload
         self.fail_load = fail_load
         self.fail_save = fail_save
+        self.recovered_previous = recovered_previous
 
     async def async_load(self) -> object | None:
         if self.fail_load:
@@ -180,6 +219,92 @@ async def test_partial_attach_failure_cleans_every_callback_once() -> None:
         await adapter.async_start()
     adapter.async_unload()
     assert removed == ["toggle_b2_down", "on_b2_down", "toggle_b2_up"]
+
+
+@pytest.mark.asyncio
+async def test_startup_readiness_failure_attaches_no_listener() -> None:
+    discovery_calls: list[str] = []
+    attach_calls: list[dict[str, object]] = []
+
+    async def get_triggers(_hass: object, device_id: str) -> list[dict[str, object]]:
+        discovery_calls.append(device_id)
+        return []
+
+    async def attach(
+        _hass: object,
+        config: dict[str, object],
+        _action: object,
+        _info: object,
+    ) -> object:
+        attach_calls.append(config)
+        return lambda: None
+
+    adapter = SmartSwitchTriggerAdapter(
+        SimpleNamespace(),
+        SimpleNamespace(),
+        trigger_api=SimpleNamespace(
+            async_get_triggers=get_triggers,
+            async_attach_trigger=attach,
+        ),
+        state_store=MemoryStore(),
+        readiness_check=lambda: False,
+    )
+
+    with pytest.raises(RuntimeError, match="readiness"):
+        await adapter.async_start()
+    assert discovery_calls == []
+    assert attach_calls == []
+
+
+@pytest.mark.asyncio
+async def test_failed_detach_after_partial_attach_leaves_callbacks_inert() -> None:
+    actions: list[object] = []
+    service_calls: list[dict[str, object]] = []
+    attempts = 0
+
+    async def get_triggers(_hass: object, device_id: str) -> list[dict[str, object]]:
+        configs = (
+            SHOWER_TRIGGER_CONFIGS
+            if device_id == SHOWER_TRIGGER_CONFIGS[0]["device_id"]
+            else PASS_THROUGH_TRIGGER_CONFIGS
+        )
+        return [dict(item) for item in configs]
+
+    async def attach(
+        _hass: object,
+        _config: dict[str, object],
+        action: object,
+        _info: object,
+    ) -> object:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 3:
+            raise RuntimeError("attach failed")
+        actions.append(action)
+        if attempts == 1:
+            def cleanup_failure() -> None:
+                raise RuntimeError("detach failed")
+
+            return cleanup_failure
+        return lambda: None
+
+    adapter = SmartSwitchTriggerAdapter(
+        SimpleNamespace(),
+        SimpleNamespace(
+            async_run_typed_intent=lambda **item: service_calls.append(item)
+        ),
+        trigger_api=SimpleNamespace(
+            async_get_triggers=get_triggers,
+            async_attach_trigger=attach,
+        ),
+        state_store=MemoryStore(),
+        receipt_factory=lambda: "receipt.inert",
+    )
+
+    with pytest.raises(RuntimeError, match="cleanup"):
+        await adapter.async_start()
+    await actions[0]({})
+    assert service_calls == []
 
 
 @pytest.mark.asyncio
@@ -268,6 +393,27 @@ async def test_storage_corruption_load_or_save_failure_never_dispatches(store: M
 
 
 @pytest.mark.asyncio
+async def test_recovered_previous_dedup_generation_blocks_dispatch() -> None:
+    calls: list[dict[str, object]] = []
+    store = MemoryStore(
+        {"version": 1, "receipts": []}, recovered_previous=True
+    )
+    adapter = SmartSwitchTriggerAdapter(
+        SimpleNamespace(),
+        SimpleNamespace(async_run_typed_intent=lambda **item: calls.append(item)),
+        trigger_api=SimpleNamespace(),
+        state_store=store,
+        wall_clock=lambda: 10.0,
+        receipt_factory=lambda: "receipt.recovered",
+    )
+
+    with pytest.raises(RuntimeError, match="previous generation"):
+        await adapter.async_load_state()
+    assert not await adapter.async_handle_trigger(SHOWER_TRIGGER_CONFIGS[0], {})
+    assert calls == []
+
+
+@pytest.mark.asyncio
 async def test_missing_persistent_store_never_dispatches() -> None:
     calls: list[dict[str, object]] = []
     adapter = SmartSwitchTriggerAdapter(
@@ -307,6 +453,9 @@ async def test_typed_intent_validates_binding_and_preserves_manual_source() -> N
     )
     service._hass = SimpleNamespace(states=SimpleNamespace(get=states.get))
     service._manual_light_off_protection = None
+    service._smart_switch_receipt_consumer = SimpleNamespace(
+        async_consume_intent_receipt=lambda **_item: True
+    )
 
     async def run(scenario_id: str, *, correlation_id: str, trigger_context: dict[str, object]) -> str:
         calls.append((scenario_id, correlation_id, trigger_context))
@@ -344,6 +493,151 @@ async def test_typed_intent_validates_binding_and_preserves_manual_source() -> N
         )
 
 
+@pytest.mark.asyncio
+async def test_forged_or_unknown_receipt_is_rejected_before_planning() -> None:
+    states = {
+        "light.tambur_chandelier": _fresh("off"),
+        "switch.tambur_points": _fresh("off"),
+        "switch.tambur_power": _fresh("on"),
+    }
+    service, calls = _typed_service(states)
+    adapter = SmartSwitchTriggerAdapter(
+        SimpleNamespace(),
+        service,
+        trigger_api=SimpleNamespace(),
+        state_store=MemoryStore(),
+        wall_clock=lambda: 10.0,
+    )
+    await adapter.async_load_state()
+    service._smart_switch_receipt_consumer = adapter  # noqa: SLF001
+
+    with pytest.raises(ValueError, match="receipt"):
+        await service.async_run_typed_intent(
+            binding="tambur-light-group",
+            action="on",
+            correlation_id="receipt.forged",
+            source="manual",
+            trigger_id="on_down",
+            intent_receipt_id="receipt.forged",
+            raw_subtype="on_down",
+            dedup_disposition="accepted",
+        )
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_adapter_receipt_is_durably_consumed_before_planning() -> None:
+    states = {
+        "light.tambur_chandelier": _fresh("off"),
+        "switch.tambur_points": _fresh("off"),
+        "switch.tambur_power": _fresh("on"),
+    }
+    service, calls = _typed_service(states)
+    store = MemoryStore()
+    adapter = SmartSwitchTriggerAdapter(
+        SimpleNamespace(),
+        service,
+        trigger_api=SimpleNamespace(),
+        state_store=store,
+        wall_clock=lambda: 10.0,
+        receipt_factory=lambda: "receipt.consumed",
+    )
+    service._smart_switch_receipt_consumer = adapter  # noqa: SLF001
+    await adapter.async_load_state()
+
+    assert await adapter.async_handle_trigger(PASS_THROUGH_TRIGGER_CONFIGS[0], {})
+    assert store.payload["receipts"][0]["lifecycle"] == "consumed"
+    assert (
+        len(calls) == 1
+        and calls[0]["scenario_id"] == "system-tambur-adaptive-controller"
+    )
+
+
+@pytest.mark.asyncio
+async def test_receipt_can_be_consumed_once_across_concurrency_and_restart() -> None:
+    captured: list[dict[str, object]] = []
+    store = MemoryStore()
+    adapter = SmartSwitchTriggerAdapter(
+        SimpleNamespace(),
+        SimpleNamespace(async_run_typed_intent=lambda **item: captured.append(item)),
+        trigger_api=SimpleNamespace(),
+        state_store=store,
+        wall_clock=lambda: 10.0,
+        receipt_factory=lambda: "receipt.concurrent-consume",
+    )
+    await adapter.async_load_state()
+    assert await adapter.async_handle_trigger(PASS_THROUGH_TRIGGER_CONFIGS[0], {})
+
+    service, calls = _typed_service(
+        {
+            "light.tambur_chandelier": _fresh("off"),
+            "switch.tambur_points": _fresh("off"),
+            "switch.tambur_power": _fresh("on"),
+        }
+    )
+    service._smart_switch_receipt_consumer = adapter  # noqa: SLF001
+    results = await asyncio.gather(
+        service.async_run_typed_intent(**captured[0]),
+        service.async_run_typed_intent(**captured[0]),
+        return_exceptions=True,
+    )
+
+    assert sum(not isinstance(item, Exception) for item in results) == 1
+    assert sum(isinstance(item, ValueError) for item in results) == 1
+    assert len(calls) == 1
+    assert store.payload["receipts"][0]["lifecycle"] == "consumed"
+
+    restarted = SmartSwitchTriggerAdapter(
+        SimpleNamespace(),
+        service,
+        trigger_api=SimpleNamespace(),
+        state_store=store,
+        wall_clock=lambda: 10.0,
+    )
+    await restarted.async_load_state()
+    service._smart_switch_receipt_consumer = restarted  # noqa: SLF001
+    with pytest.raises(ValueError, match="already consumed"):
+        await service.async_run_typed_intent(**captured[0])
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_receipt_consumption_save_failure_prevents_planning() -> None:
+    class FailSecondSaveStore(MemoryStore):
+        saves = 0
+
+        async def async_save(self, payload: dict[str, object]) -> None:
+            self.saves += 1
+            if self.saves == 2:
+                raise OSError("consumption save failed")
+            await super().async_save(payload)
+
+    service, calls = _typed_service(
+        {
+            "light.tambur_chandelier": _fresh("off"),
+            "switch.tambur_points": _fresh("off"),
+            "switch.tambur_power": _fresh("on"),
+        }
+    )
+    store = FailSecondSaveStore()
+    adapter = SmartSwitchTriggerAdapter(
+        SimpleNamespace(),
+        service,
+        trigger_api=SimpleNamespace(),
+        state_store=store,
+        wall_clock=lambda: 10.0,
+        receipt_factory=lambda: "receipt.failed-consume",
+    )
+    service._smart_switch_receipt_consumer = adapter  # noqa: SLF001
+    await adapter.async_load_state()
+
+    with pytest.raises(ValueError, match="receipt"):
+        await adapter.async_handle_trigger(PASS_THROUGH_TRIGGER_CONFIGS[0], {})
+    assert calls == []
+    assert store.payload["receipts"][0]["lifecycle"] == "accepted"
+
+
 def _typed_service(
     states: dict[str, object], *, protection: object | None = None
 ) -> tuple[ScenarioService, list[dict[str, object]]]:
@@ -363,6 +657,9 @@ def _typed_service(
     )
     service._hass = SimpleNamespace(states=SimpleNamespace(get=states.get))
     service._manual_light_off_protection = protection
+    service._smart_switch_receipt_consumer = SimpleNamespace(
+        async_consume_intent_receipt=lambda **_item: True
+    )
     calls: list[dict[str, object]] = []
 
     async def run(scenario_id: str, **options: object) -> dict[str, object]:
@@ -452,6 +749,53 @@ async def test_pass_through_on_off_toggle_matrix(
         raw_subtype=trigger, dedup_disposition="accepted",
     )
     assert calls[-1]["trigger_context"]["direct_user_intent"] == resolved
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "unsafe_target",
+    [
+        _fresh("unknown"),
+        _fresh("unavailable"),
+        _fresh("on", restored=True),
+        SimpleNamespace(
+            state="on",
+            attributes={"cached": True},
+            last_updated=datetime.now(timezone.utc),
+        ),
+        _fresh("on", age_seconds=301),
+    ],
+)
+async def test_pass_through_off_requires_both_targets_fresh_and_trusted(
+    unsafe_target: object,
+) -> None:
+    arm_calls: list[dict[str, object]] = []
+    states = {
+        "light.tambur_chandelier": unsafe_target,
+        "switch.tambur_points": _fresh("on"),
+        "switch.tambur_power": _fresh("on"),
+    }
+    service, calls = _typed_service(
+        states,
+        protection=SimpleNamespace(
+            async_arm_release_owned_direct_off=lambda **item: arm_calls.append(item)
+        ),
+    )
+
+    result = await service.async_run_typed_intent(
+        binding="tambur-light-group",
+        action="off",
+        correlation_id="receipt.off-untrusted",
+        source="manual",
+        trigger_id="off_up",
+        intent_receipt_id="receipt.off-untrusted",
+        raw_subtype="off_up",
+        dedup_disposition="accepted",
+    )
+
+    assert result["reason"] == "smart_switch_state_untrusted"
+    assert arm_calls == []
+    assert len(calls) == 1 and "recorded" in calls[0]
 
 
 @pytest.mark.asyncio

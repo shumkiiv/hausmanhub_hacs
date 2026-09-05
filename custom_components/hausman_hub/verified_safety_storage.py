@@ -38,9 +38,12 @@ class VerifiedSafetyStore:
         self._run_sync = run_sync
         self._payload_validator = payload_validator or (lambda value: True)
         self._previous_path = f"{self._backend.path}.previous"
+        self._recovery_latch_path = f"{self._backend.path}.recovery-required"
         self.recovered_previous = False
 
     async def async_load(self) -> object | None:
+        if await self._run_sync(_is_file, self._recovery_latch_path):
+            self.recovered_previous = True
         existed = bool(await self._run_sync(_is_file, self._backend.path))
         payload = await self._backend.async_load()
         if payload is not None and self._payload_validator(payload):
@@ -52,6 +55,14 @@ class VerifiedSafetyStore:
             key=self._backend.key,
         )
         if previous_payload is not None and self._payload_validator(previous_payload):
+            # Latch ambiguity before rewriting the current file. A later
+            # restart must not silently treat the N-1 generation as current
+            # execution authority.
+            await self._run_sync(
+                _write_document_atomic,
+                self._recovery_latch_path,
+                {"recoveryRequired": True},
+            )
             await self._backend.async_save(previous_payload)
             persisted = await self._run_sync(_read_document, self._backend.path)
             if _document_payload(

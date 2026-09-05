@@ -121,6 +121,16 @@ def test_corrupt_current_store_restores_verified_previous_generation() -> None:
         persisted = json.loads(path.read_text(encoding="utf-8"))
         assert persisted["data"] == {"generation": 1}
 
+        restarted_backend = FakeBackend(path)
+        restarted_backend.payload = {"generation": 1}
+        restarted = VerifiedSafetyStore(
+            restarted_backend,
+            _run_sync,
+            payload_validator=validator,
+        )
+        assert await restarted.async_load() == {"generation": 1}
+        assert restarted.recovered_previous is True
+
     with tempfile.TemporaryDirectory() as directory:
         asyncio.run(exercise(Path(directory, "store.json")))
 

@@ -405,6 +405,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         from .application.managed_switch_migration import (
             HomeAssistantManagedSwitchMigrationStore,
+            MIGRATION_MANIFEST,
             ManagedSwitchMigration,
         )
 
@@ -508,7 +509,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass,
         scenario_service,
         state_store=HomeAssistantSmartSwitchDedupStore(hass, entry.entry_id),
+        readiness_check=lambda: bool(
+            managed_switches_ready
+            and manual_light_off_protection.ready_for_release_owned_switches
+            and all(
+                scenario_service.current_catalog().device(target_id) is not None
+                for migration in MIGRATION_MANIFEST
+                for target_id in migration.input_target_ids
+            )
+        ),
     )
+    scenario_service.set_smart_switch_receipt_consumer(smart_switch_adapter)
     try:
         if not managed_switches_ready:
             raise RuntimeError("verified managed switch migration is unavailable")
