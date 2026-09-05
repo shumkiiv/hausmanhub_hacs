@@ -14,6 +14,7 @@ SOURCE = ",".join(
         "custom_components.hausman_hub.application.scenario_light_priority",
         "custom_components.hausman_hub.application.intercom_release_obligation",
         "custom_components.hausman_hub.application.scenario_service",
+        "custom_components.hausman_hub.application.managed_switch_migration",
         "custom_components.hausman_hub.application.climate_deviation_guard",
         "custom_components.hausman_hub.verified_safety_storage",
     )
