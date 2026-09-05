@@ -10,6 +10,8 @@ strict climate-call executor used by trial, managed ticks, and settings applicat
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Callable
 from datetime import timedelta
 import logging
 from typing import TYPE_CHECKING
@@ -493,7 +495,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         scenario_service,
         state_store=HomeAssistantSmartSwitchDedupStore(hass, entry.entry_id),
         readiness_check=lambda: bool(
-            managed_switch_startup.ready
+            managed_switch_startup.activation_authorized
             and manual_light_off_protection.ready_for_release_owned_switches
             and all(
                 scenario_service.current_catalog().device(target_id) is not None
@@ -504,24 +506,53 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     scenario_service.set_smart_switch_receipt_consumer(smart_switch_adapter)
 
-    async def _async_activate_managed_switch_runtime() -> None:
+    activation_unloads: list[object] = []
+
+    class _ActivationEntry:
+        def async_on_unload(self, callback: object) -> None:
+            activation_unloads.append(callback)
+
+    def _cleanup_managed_switch_runtime() -> None:
+        errors: list[Exception] = []
+        try:
+            smart_switch_adapter.async_unload()
+        except Exception as error:  # noqa: BLE001
+            errors.append(error)
+        callbacks = list(reversed(activation_unloads))
+        activation_unloads.clear()
+        for callback in callbacks:
+            try:
+                callback()
+            except Exception as error:  # noqa: BLE001
+                errors.append(error)
+        if errors:
+            raise RuntimeError("managed switch runtime cleanup failed") from errors[0]
+
+    async def _async_activate_managed_switch_runtime() -> Callable[[], None]:
         """Start every dependent runtime once after verified migration."""
 
         try:
-            await async_start_scenario_schedule(hass, entry, scenario_service)
+            staged_entry = _ActivationEntry()
+            await async_start_scenario_schedule(hass, staged_entry, scenario_service)
             await async_start_scenario_events(
                 hass,
-                entry,
+                staged_entry,
                 scenario_service,
                 scenario_command_contexts,
             )
             await smart_switch_adapter.async_start()
-        except Exception:  # noqa: BLE001
+        except asyncio.CancelledError:
+            try:
+                _cleanup_managed_switch_runtime()
+            except Exception:  # noqa: BLE001
+                _LOGGER.error("Managed switch runtime cleanup failed")
+            raise
+        except Exception as activation_error:  # noqa: BLE001
             # Device automation discovery is optional and fail-closed. Existing
             # state/event scenarios remain available when MQTT is not ready.
             cleanup_failed = False
             try:
-                smart_switch_adapter.async_unload()
+                _cleanup_managed_switch_runtime()
             except Exception:  # noqa: BLE001
                 cleanup_failed = True
                 _LOGGER.error("Smart switch device trigger cleanup failed")
@@ -533,12 +564,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     else "device_trigger_attach_failed"
                 ),
             }
-            return
-        entry.async_on_unload(smart_switch_adapter.async_unload)
+            raise RuntimeError("managed switch runtime activation failed") from activation_error
         domain_data["smart_switch_runtime"] = {
             "state": "ready",
             "adapter": smart_switch_adapter,
         }
+        return _cleanup_managed_switch_runtime
 
     def _publish_managed_switch_status(status: dict[str, str]) -> None:
         domain_data["managed_switch_migration"] = dict(status)
@@ -548,10 +579,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "reason": "verified_migration_pending",
             }
         elif status.get("state") == "blocked":
-            domain_data["smart_switch_runtime"] = {
-                "state": "unavailable",
-                "reason": status.get("reason", "verified_migration_failed"),
-            }
+            current_runtime = domain_data.get("smart_switch_runtime")
+            if not (
+                isinstance(current_runtime, dict)
+                and current_runtime.get("state") == "unavailable"
+            ):
+                domain_data["smart_switch_runtime"] = {
+                    "state": "unavailable",
+                    "reason": status.get("reason", "verified_migration_failed"),
+                }
 
     managed_switch_startup = ManagedSwitchStartupCoordinator(
         scenario_service,

@@ -821,10 +821,10 @@ class ScenarioService:
         try:
             try:
                 await save(registry)
-            except Exception as error:
+            except (Exception, asyncio.CancelledError) as error:
                 if previous is not None and previous != registry:
                     try:
-                        await save(previous)
+                        await asyncio.shield(save(previous))
                     except Exception as rollback_error:
                         self.cancel_running_scenarios()
                         _LOGGER.error(
@@ -834,6 +834,8 @@ class ScenarioService:
                         raise ScenarioServiceError(
                             "Scenario storage rollback failed", status=503
                         ) from rollback_error
+                if isinstance(error, asyncio.CancelledError):
+                    raise
                 raise ScenarioServiceError(
                     "Scenario storage write failed", status=503
                 ) from error
@@ -1270,18 +1272,34 @@ class ScenarioService:
                         scenario_ids=frozenset(required_ids),
                     )
                 )
-            except Exception:
-                try:
+            except (Exception, asyncio.CancelledError):
+                async def _async_compensate_sources() -> None:
+                    nonlocal last_uses_prepare
                     if last_uses_prepare and changed_sources:
-                        compensate = getattr(backend, "async_compensate_last_prepare", None)
+                        compensate = getattr(
+                            backend,
+                            "async_compensate_last_prepare",
+                            None,
+                        )
                         if callable(compensate):
                             await compensate()
                             changed_sources.pop()
-                    for scenario_id, flow_id, previous_source, new_hash in reversed(changed_sources):
+                        last_uses_prepare = False
+                    for (
+                        scenario_id,
+                        flow_id,
+                        previous_source,
+                        new_hash,
+                    ) in reversed(changed_sources):
                         await backend.async_restore_source(
-                            scenario_id, flow_id, previous_source,
+                            scenario_id,
+                            flow_id,
+                            previous_source,
                             expected_current_hash=new_hash,
                         )
+
+                try:
+                    await asyncio.shield(_async_compensate_sources())
                 except NodeRedBackendError as rollback_error:
                     raise ScenarioServiceError(
                         "Managed migration failed and CAS rollback was rejected.", status=503

@@ -170,7 +170,10 @@ class ManagedSwitchStartupCoordinator:
         self,
         service: object,
         migration: object,
-        activate: Callable[[], Awaitable[None]],
+        activate: Callable[
+            [],
+            Awaitable[Callable[[], None] | None],
+        ],
         *,
         status_publisher: Callable[[dict[str, str]], None] | None = None,
     ) -> None:
@@ -179,10 +182,13 @@ class ManagedSwitchStartupCoordinator:
         self._activate = activate
         self._status_publisher = status_publisher or (lambda _status: None)
         self._remove_observer: Callable[[], None] | None = None
+        self._activation_task: asyncio.Task[Callable[[], None] | None] | None = None
+        self._activation_cleanup: Callable[[], None] | None = None
         self._lock = asyncio.Lock()
         self._started = False
         self._cancelled = False
         self._terminal = False
+        self.activation_authorized = False
         self.ready = False
 
     async def async_start(self) -> None:
@@ -201,7 +207,17 @@ class ManagedSwitchStartupCoordinator:
 
     def cancel(self) -> None:
         self._cancelled = True
+        self.activation_authorized = False
+        self.ready = False
         self._unsubscribe()
+        activation_task = self._activation_task
+        if (
+            activation_task is not None
+            and not activation_task.done()
+            and activation_task is not asyncio.current_task()
+        ):
+            activation_task.cancel()
+        self._cleanup_activation()
 
     async def _async_catalog_snapshot(self, catalog: object, final: bool) -> None:
         await self._async_attempt(catalog, final=final)
@@ -230,11 +246,36 @@ class ManagedSwitchStartupCoordinator:
                 return
             if self._cancelled:
                 return
+            self.activation_authorized = True
+            activation_task = asyncio.create_task(self._activate())
+            self._activation_task = activation_task
+            try:
+                cleanup = await activation_task
+            except asyncio.CancelledError:
+                self.activation_authorized = False
+                raise
+            except Exception:  # noqa: BLE001
+                self.activation_authorized = False
+                self._terminal = True
+                self._unsubscribe()
+                self._publish("blocked", "runtime_activation_failed")
+                _LOGGER.error("Managed switch runtime activation is blocked")
+                return
+            finally:
+                if self._activation_task is activation_task:
+                    self._activation_task = None
+            if self._cancelled or not self.activation_authorized:
+                if callable(cleanup):
+                    try:
+                        cleanup()
+                    except Exception:  # noqa: BLE001
+                        _LOGGER.error("Managed switch activation cleanup failed")
+                return
+            self._activation_cleanup = cleanup if callable(cleanup) else None
             self.ready = True
             self._terminal = True
             self._unsubscribe()
             self._publish("completed")
-            await self._activate()
 
     @staticmethod
     def _catalog_has_required_targets(catalog: object) -> bool:
@@ -261,6 +302,16 @@ class ManagedSwitchStartupCoordinator:
         self._remove_observer = None
         if remove is not None:
             remove()
+
+    def _cleanup_activation(self) -> None:
+        cleanup = self._activation_cleanup
+        self._activation_cleanup = None
+        if cleanup is None:
+            return
+        try:
+            cleanup()
+        except Exception:  # noqa: BLE001
+            _LOGGER.error("Managed switch activation cleanup failed")
 
 
 class HomeAssistantManagedSwitchMigrationStore:
@@ -344,11 +395,13 @@ class ManagedSwitchMigration:
                     "scenario migration finalization is unavailable"
                 )
             await finalize(entries)
-        except Exception as error:
+        except (Exception, asyncio.CancelledError) as error:
             if not applied:
                 raise
             try:
-                await self._store.async_save(_receipt("prepared"))
+                await asyncio.shield(
+                    self._store.async_save(_receipt("prepared"))
+                )
             except Exception:  # noqa: BLE001
                 pass
             rollback = getattr(
@@ -359,7 +412,9 @@ class ManagedSwitchMigration:
             rollback_complete = False
             if callable(rollback):
                 try:
-                    rollback_complete = await rollback(entries) is True
+                    rollback_complete = await asyncio.shield(
+                        rollback(entries)
+                    ) is True
                 except Exception:  # noqa: BLE001
                     rollback_complete = False
             if not rollback_complete:

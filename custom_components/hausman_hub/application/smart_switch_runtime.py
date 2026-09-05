@@ -249,7 +249,7 @@ class SmartSwitchTriggerAdapter:
                 pending.append(cleanup)
             self._require_startup_ready()
             generation["active"] = True
-        except Exception as attach_error:
+        except (Exception, asyncio.CancelledError) as attach_error:
             generation["active"] = False
             try:
                 self._cleanup_callbacks(pending)

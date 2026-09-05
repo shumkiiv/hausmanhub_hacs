@@ -168,6 +168,36 @@ def test_completed_receipt_save_failure_rolls_back_prepared_migration() -> None:
     assert service.finalizations == 0
 
 
+def test_cancellation_after_apply_rolls_back_before_it_is_re_raised() -> None:
+    async def exercise() -> None:
+        class CancelDuringVerification(Service):
+            def __init__(self) -> None:
+                super().__init__()
+                self.verification_started = asyncio.Event()
+
+            async def async_verify_managed_switch_migration(self, entries):
+                self.verifications += 1
+                self.verification_started.set()
+                await asyncio.Event().wait()
+
+        store = Store()
+        service = CancelDuringVerification()
+        migration = asyncio.create_task(
+            ManagedSwitchMigration(service, store).async_apply()
+        )
+        await service.verification_started.wait()
+        migration.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await migration
+
+        assert store.value["state"] == "prepared"
+        assert service.rollbacks == 1
+        assert service.finalizations == 0
+
+    asyncio.run(exercise())
+
+
 def test_ambiguous_completed_receipt_write_is_reverted_to_prepared() -> None:
     class PartialWriteStore(Store):
         async def async_save(self, value):

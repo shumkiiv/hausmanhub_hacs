@@ -82,6 +82,18 @@ class _FailAfterWriteStore(_FakeStore):
             raise OSError("injected storage interruption")
 
 
+class _CancelAfterWriteStore(_FakeStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.cancel_after_write = False
+
+    async def async_save(self, registry: ScenarioRegistry) -> None:
+        self._data = registry
+        if self.cancel_after_write:
+            self.cancel_after_write = False
+            raise asyncio.CancelledError
+
+
 class _FakeExecutor:
     def __init__(self) -> None:
         self.runs: list[tuple[Any, str]] = []
@@ -394,6 +406,24 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         recovered = ScenarioService(None, store, self.catalog, _FakeExecutor())
         await recovered.async_load()
         self.assertEqual(original, await recovered.async_get_scenario("scenario_1"))
+
+    async def test_cancelled_write_restores_last_complete_registry_then_re_raises(
+        self,
+    ) -> None:
+        store = _CancelAfterWriteStore()
+        service = ScenarioService(None, store, self.catalog, self.executor)
+        await service.async_load()
+        original = await service.async_update_scenario(_valid_payload())
+
+        replacement = _valid_payload()
+        replacement["title"] = "Cancelled replacement"
+        store.cancel_after_write = True
+        with self.assertRaises(asyncio.CancelledError):
+            await service.async_update_scenario(replacement)
+
+        self.assertEqual(original, await service.async_get_scenario("scenario_1"))
+        assert store._data is not None
+        self.assertEqual(original, store._data.scenario("scenario_1"))
 
     async def test_failed_registry_rollback_stops_physical_runs(self) -> None:
         store = _FailAfterWriteStore()

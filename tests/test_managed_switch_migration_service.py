@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from functools import wraps
 import unittest
 from types import SimpleNamespace
@@ -284,6 +285,56 @@ async def test_registry_failure_compensates_sources_and_later_manual_edit_blocks
         await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
 
 
+async def test_cancellation_after_first_source_mutation_restores_exact_source() -> None:
+    class CancelAfterFirstMutation(Backend):
+        def __init__(self) -> None:
+            super().__init__()
+            self.second_update_started = asyncio.Event()
+
+        async def async_update_source(
+            self,
+            scenario_id,
+            definition,
+            flow_id,
+            source,
+            expected,
+            catalog,
+            *,
+            validate_only,
+        ):
+            if self.updated:
+                self.second_update_started.set()
+                await asyncio.Event().wait()
+            return await super().async_update_source(
+                scenario_id,
+                definition,
+                flow_id,
+                source,
+                expected,
+                catalog,
+                validate_only=validate_only,
+            )
+
+    original = _registry()
+    store = RegistryStore(original)
+    backend = CancelAfterFirstMutation()
+    service = _service(store, backend)
+    await service.async_load()
+
+    migration = asyncio.create_task(
+        service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
+    )
+    await backend.second_update_started.wait()
+    migration.cancel()
+    with unittest.TestCase().assertRaises(asyncio.CancelledError):
+        await migration
+
+    assert len(backend.updated) == 1
+    assert backend.restored == backend.updated
+    assert store.registry == original
+    assert service._managed_switch_migration_transaction is None
+
+
 async def test_final_snapshot_drift_can_restore_exact_sources_and_registry() -> None:
     original = _registry()
     store = RegistryStore(original)
@@ -387,6 +438,9 @@ class ManagedSwitchMigrationServiceTest(unittest.IsolatedAsyncioTestCase):
     test_registry_failure_compensates_sources_and_later_manual_edit_blocks_rollback = _as_unittest_case(
         test_registry_failure_compensates_sources_and_later_manual_edit_blocks_rollback
     )
+    test_cancellation_after_first_source_mutation_restores_exact_source = _as_unittest_case(
+        test_cancellation_after_first_source_mutation_restores_exact_source
+    )
     test_final_snapshot_drift_can_restore_exact_sources_and_registry = _as_unittest_case(
         test_final_snapshot_drift_can_restore_exact_sources_and_registry
     )
@@ -407,6 +461,7 @@ for _test in (
     test_topology_or_non_protected_scenario_conflict_causes_no_mutation,
     test_duplicate_manifest_entry_is_rejected_before_any_mutation,
     test_registry_failure_compensates_sources_and_later_manual_edit_blocks_rollback,
+    test_cancellation_after_first_source_mutation_restores_exact_source,
     test_final_snapshot_drift_can_restore_exact_sources_and_registry,
     test_manual_source_edit_rejects_final_rollback_without_overwrite,
     test_completed_receipt_failure_with_manual_edit_stays_prepared_and_blocked,

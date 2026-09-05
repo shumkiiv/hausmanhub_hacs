@@ -176,6 +176,52 @@ def test_unload_during_migration_prevents_late_activation() -> None:
     asyncio.run(exercise())
 
 
+def test_unload_during_activation_revokes_authority_and_removes_listeners() -> None:
+    async def exercise() -> None:
+        activation_started = asyncio.Event()
+        release_activation = asyncio.Event()
+        listeners = []
+
+        async def activate():
+            def cleanup() -> None:
+                listeners.clear()
+
+            listeners.append("scenario-schedule")
+            listeners.append("state-events")
+            activation_started.set()
+            try:
+                await release_activation.wait()
+            except asyncio.CancelledError:
+                cleanup()
+                raise
+            return cleanup
+
+        service = _Service(_Catalog(()))
+        coordinator = ManagedSwitchStartupCoordinator(
+            service,
+            _Migration(),
+            activate,
+        )
+        await coordinator.async_start()
+
+        publish = asyncio.create_task(
+            service.publish(_Catalog(_required_targets()), final=False)
+        )
+        await activation_started.wait()
+        assert coordinator.ready is False
+        assert coordinator.activation_authorized is True
+        coordinator.cancel()
+        release_activation.set()
+        await asyncio.gather(publish, return_exceptions=True)
+
+        assert coordinator.ready is False
+        assert coordinator.activation_authorized is False
+        assert listeners == []
+        assert service.observers == []
+
+    asyncio.run(exercise())
+
+
 def test_final_incomplete_snapshot_exhausts_retry_without_mutation() -> None:
     async def exercise() -> None:
         states = []

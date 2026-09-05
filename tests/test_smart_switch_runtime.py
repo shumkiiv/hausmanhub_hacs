@@ -222,6 +222,52 @@ async def test_partial_attach_failure_cleans_every_callback_once() -> None:
 
 
 @pytest.mark.asyncio
+async def test_cancellation_during_attach_cleans_every_completed_callback() -> None:
+    removed: list[str] = []
+    second_attach_started = asyncio.Event()
+
+    async def get_triggers(
+        _hass: object,
+        device_id: str,
+    ) -> list[dict[str, object]]:
+        configs = (
+            SHOWER_TRIGGER_CONFIGS
+            if device_id == SHOWER_TRIGGER_CONFIGS[0]["device_id"]
+            else PASS_THROUGH_TRIGGER_CONFIGS
+        )
+        return [dict(item) for item in configs]
+
+    async def attach(
+        _hass: object,
+        config: dict[str, object],
+        _action: object,
+        _info: object,
+    ):
+        if not removed and not second_attach_started.is_set():
+            second_attach_started.set()
+            return lambda: removed.append(str(config["subtype"]))
+        await asyncio.Event().wait()
+
+    adapter = SmartSwitchTriggerAdapter(
+        SimpleNamespace(),
+        SimpleNamespace(),
+        trigger_api=SimpleNamespace(
+            async_get_triggers=get_triggers,
+            async_attach_trigger=attach,
+        ),
+    )
+    startup = asyncio.create_task(adapter.async_start())
+    await second_attach_started.wait()
+    await asyncio.sleep(0)
+    startup.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await startup
+
+    adapter.async_unload()
+    assert removed == ["toggle_b2_down"]
+
+
+@pytest.mark.asyncio
 async def test_callback_during_attach_cannot_persist_or_dispatch_before_activation() -> None:
     actions: list[object] = []
     service_calls: list[dict[str, object]] = []
