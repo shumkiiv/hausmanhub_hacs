@@ -418,6 +418,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.async_add_executor_job
         ),
     )
+    from .application.managed_switch_binding_migration import (
+        HomeAssistantManagedSwitchBindingMigrationStore,
+        ManagedSwitchBindingMigration,
+    )
+
+    managed_switch_binding_migration = ManagedSwitchBindingMigration(
+        scenario_service,
+        HomeAssistantManagedSwitchBindingMigrationStore(hass, entry.entry_id),
+    )
 
     sensor_states: dict[str, object] = {}
     for sensor_target_id in (
@@ -593,6 +602,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         scenario_service,
         managed_switch_migration,
         _async_activate_managed_switch_runtime,
+        binding_migration=managed_switch_binding_migration,
         status_publisher=_publish_managed_switch_status,
     )
     entry.async_on_unload(managed_switch_startup.cancel)

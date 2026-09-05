@@ -307,6 +307,75 @@ def test_release_sources_are_loaded_through_executor_boundary() -> None:
     asyncio.run(exercise())
 
 
+def test_binding_phase_completes_before_runtime_activation() -> None:
+    async def exercise() -> None:
+        order = []
+
+        class OrderedMigration(_Migration):
+            def __init__(self, name: str) -> None:
+                super().__init__()
+                self.name = name
+
+            async def async_apply(self) -> str:
+                order.append(self.name)
+                return await super().async_apply()
+
+        async def activate() -> None:
+            order.append("activate")
+
+        coordinator = ManagedSwitchStartupCoordinator(
+            _Service(_Catalog(_required_targets())),
+            OrderedMigration("managed-switches"),
+            activate,
+            binding_migration=OrderedMigration("managed-switch-bindings"),
+        )
+
+        await coordinator.async_start()
+
+        assert order == [
+            "managed-switches",
+            "managed-switch-bindings",
+            "activate",
+        ]
+        assert coordinator.ready is True
+
+    asyncio.run(exercise())
+
+
+def test_binding_phase_failure_blocks_runtime_after_phase_a() -> None:
+    async def exercise() -> None:
+        states = []
+        activations = 0
+        phase_a = _Migration()
+        phase_b = _Migration(RuntimeError("binding conflict"))
+
+        async def activate() -> None:
+            nonlocal activations
+            activations += 1
+
+        coordinator = ManagedSwitchStartupCoordinator(
+            _Service(_Catalog(_required_targets())),
+            phase_a,
+            activate,
+            binding_migration=phase_b,
+            status_publisher=states.append,
+        )
+
+        await coordinator.async_start()
+
+        assert phase_a.calls == 1
+        assert phase_b.calls == 1
+        assert activations == 0
+        assert coordinator.activation_authorized is False
+        assert coordinator.ready is False
+        assert states[-1] == {
+            "state": "blocked",
+            "reason": "verified_migration_failed",
+        }
+
+    asyncio.run(exercise())
+
+
 def load_tests(
     loader: unittest.TestLoader,
     tests: unittest.TestSuite,

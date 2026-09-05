@@ -3817,7 +3817,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.217", panel.payload["integration_version"])
+        self.assertEqual("1.52.218", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -6297,6 +6297,9 @@ class LocalSummaryAccessTest(unittest.TestCase):
             ManagedSwitchMigration,
             ManagedSwitchStartupCoordinator,
         )
+        from custom_components.hausman_hub.application.managed_switch_binding_migration import (
+            ManagedSwitchBindingMigration,
+        )
         from custom_components.hausman_hub.application.smart_switch_runtime import (
             SmartSwitchTriggerAdapter,
         )
@@ -6324,6 +6327,11 @@ class LocalSummaryAccessTest(unittest.TestCase):
         with self.assertLogs("custom_components.hausman_hub", level="ERROR") as logs:
             with (
                 patch.object(ManagedSwitchMigration, "async_apply", migration_ready),
+                patch.object(
+                    ManagedSwitchBindingMigration,
+                    "async_apply",
+                    migration_ready,
+                ),
                 patch.object(
                     ManagedSwitchStartupCoordinator,
                     "_catalog_has_required_targets",

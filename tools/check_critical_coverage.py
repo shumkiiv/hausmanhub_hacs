@@ -15,6 +15,7 @@ SOURCE = ",".join(
         "custom_components.hausman_hub.application.intercom_release_obligation",
         "custom_components.hausman_hub.application.scenario_service",
         "custom_components.hausman_hub.application.managed_switch_migration",
+        "custom_components.hausman_hub.application.managed_switch_binding_migration",
         "custom_components.hausman_hub.application.climate_deviation_guard",
         "custom_components.hausman_hub.verified_safety_storage",
     )
@@ -26,6 +27,8 @@ SUITES = (
     "tests.test_intercom_release_obligation",
     "tests.test_scenario_service",
     "tests.test_managed_switch_migration_service",
+    "tests.test_managed_switch_binding_migration",
+    "tests.test_managed_switch_binding_migration_service",
     "tests.test_managed_switch_startup",
     "tests.test_climate_deviation_guard",
     "tests.test_verified_safety_storage",

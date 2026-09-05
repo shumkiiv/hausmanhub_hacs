@@ -11,6 +11,9 @@ from custom_components.hausman_hub.application.managed_switch_migration import (
     ManagedSwitchMigration,
     ManagedSwitchMigrationConflict,
 )
+from custom_components.hausman_hub.application.managed_switch_binding_migration import (
+    BINDING_MIGRATION_MANIFEST,
+)
 from custom_components.hausman_hub.application.scenario_node_red import NodeRedSourceConflict
 from custom_components.hausman_hub.application.scenario_service import (
     ScenarioRevisionConflictError,
@@ -21,6 +24,7 @@ from custom_components.hausman_hub.domain.scenarios import (
     Scenario,
     ScenarioAction,
     ScenarioActionType,
+    ScenarioComparison,
     ScenarioDefinition,
     ScenarioExecutionBackend,
     ScenarioExecutionMode,
@@ -44,10 +48,23 @@ def _registry(*, migrated: set[str] = frozenset()) -> ScenarioRegistry:
             sync_status=ScenarioNodeRedSyncStatus.SYNCED,
             input_target_ids=entry.input_target_ids if done else entry.legacy_input_target_ids,
         )
+        triggers = (
+            ScenarioTrigger(
+                "manual_chandelier_on",
+                ScenarioTriggerType.DEVICE_STATE,
+                target_id="entity_ff0244d6b760be7e",
+                target_name="Выключатель малый коридор",
+                property="state",
+                comparison=ScenarioComparison.EQUALS,
+                value="on",
+            ),
+        ) if entry.scenario_id == "system-small-corridor-light-controller" else (
+            ScenarioTrigger("manual", ScenarioTriggerType.MANUAL),
+        )
         definition = ScenarioDefinition(
             version=1, execution_mode=ScenarioExecutionMode.RESTART,
             execution_backend=ScenarioExecutionBackend.NODE_RED, node_red=metadata,
-            triggers=(ScenarioTrigger("manual", ScenarioTriggerType.MANUAL),),
+            triggers=triggers,
             conditions=(),
             actions=(ScenarioAction("notify", ScenarioActionType.NOTIFICATION, message="ok"),),
         )
@@ -140,6 +157,36 @@ async def test_batch_migration_updates_three_sources_and_registry_once() -> None
         assert scenario.definition.node_red.input_target_ids == entry.input_target_ids
     await service.async_finalize_managed_switch_migration(MIGRATION_MANIFEST)
     assert backend.commits == 1
+
+
+async def test_legacy_phase_a_then_binding_phase_b_reaches_revision_three() -> None:
+    store = RegistryStore(_registry())
+    backend = Backend()
+    service = _service(store, backend)
+    await service.async_load()
+
+    await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
+    await service.async_finalize_managed_switch_migration(MIGRATION_MANIFEST)
+    await service.async_apply_managed_switch_binding_migration(
+        BINDING_MIGRATION_MANIFEST
+    )
+    await service.async_finalize_managed_switch_binding_migration(
+        BINDING_MIGRATION_MANIFEST
+    )
+
+    small = store.registry.scenario("system-small-corridor-light-controller")
+    assert small.revision == 3
+    assert next(
+        trigger
+        for trigger in small.definition.triggers
+        if trigger.id == "manual_chandelier_on"
+    ).target_id == "entity_4be32416634e6416"
+    assert store.registry.scenario("system-shower-comfort-controller").revision == 4
+    assert store.registry.scenario("system-tambur-adaptive-controller").revision == 8
+
+    await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
+    await service.async_verify_managed_switch_migration(MIGRATION_MANIFEST)
+    await service.async_finalize_managed_switch_migration(MIGRATION_MANIFEST)
 
 
 async def test_partial_restart_reconciles_new_source_without_redeploy() -> None:
@@ -417,6 +464,9 @@ class ManagedSwitchMigrationServiceTest(unittest.IsolatedAsyncioTestCase):
     test_batch_migration_updates_three_sources_and_registry_once = _as_unittest_case(
         test_batch_migration_updates_three_sources_and_registry_once
     )
+    test_legacy_phase_a_then_binding_phase_b_reaches_revision_three = _as_unittest_case(
+        test_legacy_phase_a_then_binding_phase_b_reaches_revision_three
+    )
     test_partial_restart_reconciles_new_source_without_redeploy = _as_unittest_case(
         test_partial_restart_reconciles_new_source_without_redeploy
     )
@@ -454,6 +504,7 @@ class ManagedSwitchMigrationServiceTest(unittest.IsolatedAsyncioTestCase):
 
 for _test in (
     test_batch_migration_updates_three_sources_and_registry_once,
+    test_legacy_phase_a_then_binding_phase_b_reaches_revision_three,
     test_partial_restart_reconciles_new_source_without_redeploy,
     test_completed_registry_is_verified_without_any_mutation,
     test_final_verification_requires_one_cross_scenario_cas_snapshot,

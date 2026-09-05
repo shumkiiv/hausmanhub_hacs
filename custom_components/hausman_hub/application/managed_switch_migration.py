@@ -175,10 +175,12 @@ class ManagedSwitchStartupCoordinator:
             Awaitable[Callable[[], None] | None],
         ],
         *,
+        binding_migration: object | None = None,
         status_publisher: Callable[[dict[str, str]], None] | None = None,
     ) -> None:
         self._service = service
         self._migration = migration
+        self._binding_migration = binding_migration
         self._activate = activate
         self._status_publisher = status_publisher or (lambda _status: None)
         self._remove_observer: Callable[[], None] | None = None
@@ -236,6 +238,8 @@ class ManagedSwitchStartupCoordinator:
                 return
             try:
                 await self._migration.async_apply()
+                if self._binding_migration is not None:
+                    await self._binding_migration.async_apply()
             except asyncio.CancelledError:
                 raise
             except Exception:  # noqa: BLE001

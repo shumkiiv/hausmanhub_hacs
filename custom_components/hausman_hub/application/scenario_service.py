@@ -467,6 +467,66 @@ class _ManagedSwitchMigrationTransaction:
     scenario_ids: frozenset[str]
 
 
+@dataclass(frozen=True)
+class _ManagedSwitchBindingMigrationTransaction:
+    previous_registry: ScenarioRegistry
+    migrated_registry: ScenarioRegistry
+    scenario_id: str
+
+
+def _managed_switch_binding_trigger_matches(
+    scenario: Scenario,
+    item: object,
+    *,
+    migrated: bool,
+) -> bool:
+    matches = [
+        trigger
+        for trigger in scenario.definition.triggers
+        if trigger.id == str(getattr(item, "trigger_id", ""))
+    ]
+    if len(matches) != 1:
+        return False
+    trigger = matches[0]
+    expected_target = str(
+        getattr(item, "new_target_id" if migrated else "old_target_id", "")
+    )
+    if (
+        trigger.type is not ScenarioTriggerType.DEVICE_STATE
+        or trigger.target_id != expected_target
+        or trigger.property != "state"
+        or trigger.comparison is not ScenarioComparison.EQUALS
+        or trigger.value != "on"
+        or trigger.event_type is not None
+        or trigger.event_data is not None
+        or trigger.for_seconds != 0
+        or trigger.debounce_seconds != 0
+        or trigger.cooldown_seconds != 0
+        or trigger.ignore_recovery is not True
+    ):
+        return False
+    return not migrated or trigger.target_name == str(
+        getattr(item, "new_target_name", "")
+    )
+
+
+def _managed_switch_phase_b_state_matches(scenario: Scenario) -> bool:
+    from .managed_switch_binding_migration import (  # noqa: PLC0415
+        BINDING_MIGRATION_MANIFEST,
+    )
+
+    item = BINDING_MIGRATION_MANIFEST[0]
+    return (
+        scenario.id == item.scenario_id
+        and scenario.revision == item.expected_revision + 1
+        and _managed_switch_binding_trigger_matches(
+            scenario,
+            item,
+            migrated=True,
+        )
+    )
+
+
 class ScenarioService:
     """Coordinate scenario persistence, validation and execution."""
 
@@ -519,6 +579,9 @@ class ScenarioService:
         self._smart_switch_receipt_consumer: object | None = None
         self._managed_switch_migration_transaction: (
             _ManagedSwitchMigrationTransaction | None
+        ) = None
+        self._managed_switch_binding_migration_transaction: (
+            _ManagedSwitchBindingMigrationTransaction | None
         ) = None
         self._path_metrics = ScenarioPathMetrics()
         self._scenario_content_revision_key: tuple[tuple[str, int], ...] | None = None
@@ -1188,7 +1251,10 @@ class ScenarioService:
                     and metadata.input_target_ids == legacy_inputs
                 )
                 migrated_registry = (
-                    scenario.revision == legacy_revision + 1
+                    (
+                        scenario.revision == legacy_revision + 1
+                        or _managed_switch_phase_b_state_matches(scenario)
+                    )
                     and metadata.source_hash == new_hash
                     and metadata.input_target_ids == new_inputs
                     and metadata.generated_by is ScenarioNodeRedGeneratedBy.HAUSMAN
@@ -1443,7 +1509,10 @@ class ScenarioService:
             expected_hash = str(getattr(item, "new_source_hash"))
             expected_inputs = tuple(getattr(item, "input_target_ids"))
             if (
-                scenario.revision != expected_revision
+                (
+                    scenario.revision != expected_revision
+                    and not _managed_switch_phase_b_state_matches(scenario)
+                )
                 or scenario.definition.execution_backend
                 is not ScenarioExecutionBackend.NODE_RED
                 or metadata is None
@@ -1489,6 +1558,274 @@ class ScenarioService:
                 "Protected scenario cross-scenario snapshot changed.", status=409
             )
         return next(iter(revisions))
+
+    async def async_apply_managed_switch_binding_migration(
+        self, entries: tuple[object, ...]
+    ) -> str:
+        """CAS-update only the small-corridor manual trigger binding."""
+
+        from .managed_switch_binding_migration import (  # noqa: PLC0415
+            BINDING_MIGRATION_MANIFEST,
+        )
+
+        self._require_running()
+        async with self._lock:
+            if tuple(entries) != BINDING_MIGRATION_MANIFEST:
+                raise ScenarioServiceError(
+                    "Managed switch binding manifest is invalid.", status=500
+                )
+            if self._managed_switch_binding_migration_transaction is not None:
+                raise ScenarioServiceError(
+                    "Managed switch binding recovery is required.", status=409
+                )
+            registry = self._ensure_loaded()
+            item = entries[0]
+            scenario = registry.scenario(str(getattr(item, "scenario_id")))
+            if scenario is None:
+                raise ScenarioNotFoundError(str(getattr(item, "scenario_id")))
+            if not scenario.protected:
+                raise ScenarioProtectedError(scenario.id)
+            await self._async_verify_managed_switch_binding_base_locked(
+                scenario,
+                item,
+            )
+
+            old_state = (
+                scenario.revision == int(getattr(item, "expected_revision"))
+                and _managed_switch_binding_trigger_matches(
+                    scenario,
+                    item,
+                    migrated=False,
+                )
+            )
+            migrated_state = (
+                scenario.revision == int(getattr(item, "expected_revision")) + 1
+                and _managed_switch_binding_trigger_matches(
+                    scenario,
+                    item,
+                    migrated=True,
+                )
+            )
+            if not old_state and not migrated_state:
+                raise ScenarioRevisionConflictError(
+                    scenario.id,
+                    expected_revision=int(getattr(item, "expected_revision")),
+                    current_revision=scenario.revision,
+                    changed_fields=("definition.triggers",),
+                    current_room_ids=scenario.room_ids,
+                    current_action_ids=tuple(
+                        action.id for action in scenario.definition.actions
+                    ),
+                )
+
+            if migrated_state:
+                migrated_registry = registry
+            else:
+                trigger_id = str(getattr(item, "trigger_id"))
+                triggers = tuple(
+                    replace(
+                        trigger,
+                        target_id=str(getattr(item, "new_target_id")),
+                        target_name=str(getattr(item, "new_target_name")),
+                    )
+                    if trigger.id == trigger_id
+                    else trigger
+                    for trigger in scenario.definition.triggers
+                )
+                migrated = replace(
+                    scenario,
+                    definition=replace(scenario.definition, triggers=triggers),
+                    revision=scenario.revision + 1,
+                    updated_at=int(time.time() * 1000),
+                )
+                migrated_registry = ScenarioRegistry(
+                    scenarios=tuple(
+                        migrated if current.id == scenario.id else current
+                        for current in registry.scenarios
+                    )
+                )
+                await self.async_save(migrated_registry)
+                self._registry = migrated_registry
+                self._scenario_content_revision_key = None
+                self._scenario_content_revision = None
+
+            self._managed_switch_binding_migration_transaction = (
+                _ManagedSwitchBindingMigrationTransaction(
+                    previous_registry=registry,
+                    migrated_registry=migrated_registry,
+                    scenario_id=scenario.id,
+                )
+            )
+            return "completed"
+
+    async def async_verify_managed_switch_binding_migration(
+        self, entries: tuple[object, ...]
+    ) -> str:
+        """Verify the registry and Node-RED evidence after binding phase B."""
+
+        from .managed_switch_binding_migration import (  # noqa: PLC0415
+            BINDING_MIGRATION_MANIFEST,
+        )
+
+        self._require_running()
+        async with self._lock:
+            if tuple(entries) != BINDING_MIGRATION_MANIFEST:
+                raise ScenarioServiceError(
+                    "Managed switch binding manifest is invalid.", status=500
+                )
+            item = entries[0]
+            scenario = self._ensure_loaded().scenario(
+                str(getattr(item, "scenario_id"))
+            )
+            if scenario is None:
+                raise ScenarioNotFoundError(str(getattr(item, "scenario_id")))
+            revision = await self._async_verify_managed_switch_binding_base_locked(
+                scenario,
+                item,
+            )
+            if (
+                scenario.revision != int(getattr(item, "expected_revision")) + 1
+                or not _managed_switch_binding_trigger_matches(
+                    scenario,
+                    item,
+                    migrated=True,
+                )
+            ):
+                raise ScenarioRevisionConflictError(
+                    scenario.id,
+                    expected_revision=int(getattr(item, "expected_revision")) + 1,
+                    current_revision=scenario.revision,
+                    changed_fields=("definition.triggers",),
+                    current_room_ids=scenario.room_ids,
+                    current_action_ids=tuple(
+                        action.id for action in scenario.definition.actions
+                    ),
+                )
+            return revision
+
+    async def _async_verify_managed_switch_binding_base_locked(
+        self,
+        scenario: Scenario,
+        item: object,
+    ) -> str:
+        metadata = scenario.definition.node_red
+        if (
+            scenario.definition.execution_backend is not ScenarioExecutionBackend.NODE_RED
+            or metadata is None
+            or not metadata.flow_id
+            or metadata.source_hash != str(getattr(item, "source_hash"))
+            or metadata.input_target_ids
+            != tuple(getattr(item, "input_target_ids"))
+            or metadata.generated_by is not ScenarioNodeRedGeneratedBy.HAUSMAN
+            or metadata.sync_status is not ScenarioNodeRedSyncStatus.SYNCED
+        ):
+            raise ScenarioRevisionConflictError(
+                scenario.id,
+                expected_revision=int(getattr(item, "expected_revision")),
+                current_revision=scenario.revision,
+                changed_fields=("definition.nodeRed",),
+                current_room_ids=scenario.room_ids,
+                current_action_ids=tuple(
+                    action.id for action in scenario.definition.actions
+                ),
+            )
+        target_id = str(getattr(item, "new_target_id"))
+        device = self._catalog.device(target_id)
+        if device is None or getattr(device, "target_id", None) != target_id:
+            raise ScenarioServiceError(
+                "Managed switch binding target is missing.", status=409
+            )
+        backend = self._node_red_backend
+        if backend is None:
+            raise ScenarioServiceError("Node-RED backend is unavailable.", status=503)
+        evidence = await backend.async_verify_managed_topology(
+            scenario.id,
+            metadata.flow_id,
+        )
+        revision = evidence.get("revision")
+        if (
+            evidence.get("source_hash") != str(getattr(item, "source_hash"))
+            or evidence.get("topology") != str(getattr(item, "topology"))
+            or not isinstance(revision, str)
+            or not revision
+        ):
+            raise ScenarioServiceError(
+                "Protected scenario binding CAS evidence changed.", status=409
+            )
+        return revision
+
+    async def async_finalize_managed_switch_binding_migration(
+        self, entries: tuple[object, ...]
+    ) -> None:
+        """Commit phase B only after its completed receipt is durable."""
+
+        self._require_running()
+        async with self._lock:
+            transaction = self._managed_switch_binding_migration_transaction
+            if transaction is None:
+                raise ScenarioServiceError(
+                    "Managed switch binding transaction is unavailable.", status=409
+                )
+            if (
+                len(entries) != 1
+                or str(getattr(entries[0], "scenario_id", ""))
+                != transaction.scenario_id
+                or self._ensure_loaded() != transaction.migrated_registry
+            ):
+                raise ScenarioServiceError(
+                    "Protected scenario binding CAS evidence changed.", status=409
+                )
+            item = entries[0]
+            scenario = transaction.migrated_registry.scenario(transaction.scenario_id)
+            if scenario is None:
+                raise ScenarioNotFoundError(transaction.scenario_id)
+            await self._async_verify_managed_switch_binding_base_locked(
+                scenario,
+                item,
+            )
+            if not _managed_switch_binding_trigger_matches(
+                scenario,
+                item,
+                migrated=True,
+            ):
+                raise ScenarioServiceError(
+                    "Protected scenario binding CAS evidence changed.", status=409
+                )
+            self._managed_switch_binding_migration_transaction = None
+
+    async def async_rollback_managed_switch_binding_migration(
+        self, entries: tuple[object, ...]
+    ) -> bool:
+        """Restore phase B only while the exact migrated snapshot still owns CAS."""
+
+        self._require_running()
+        async with self._lock:
+            transaction = self._managed_switch_binding_migration_transaction
+            if (
+                transaction is None
+                or len(entries) != 1
+                or str(getattr(entries[0], "scenario_id", ""))
+                != transaction.scenario_id
+                or self._ensure_loaded() != transaction.migrated_registry
+            ):
+                return False
+            scenario = transaction.migrated_registry.scenario(transaction.scenario_id)
+            if scenario is None:
+                return False
+            try:
+                await self._async_verify_managed_switch_binding_base_locked(
+                    scenario,
+                    entries[0],
+                )
+                if transaction.previous_registry != transaction.migrated_registry:
+                    await self.async_save(transaction.previous_registry)
+                    self._registry = transaction.previous_registry
+                    self._scenario_content_revision_key = None
+                    self._scenario_content_revision = None
+            except ScenarioServiceError:
+                return False
+            self._managed_switch_binding_migration_transaction = None
+            return True
 
     @property
     def performance_metrics(self) -> dict[str, dict[str, float | int | str]]:
