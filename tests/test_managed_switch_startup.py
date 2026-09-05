@@ -9,6 +9,7 @@ from custom_components.hausman_hub.application.managed_switch_migration import (
     ManagedSwitchStartupCoordinator,
     async_load_managed_switch_migration_entries,
 )
+from custom_components.hausman_hub.application.activation_latch import ActivationLatch
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,13 @@ class _Migration:
         if self.error is not None:
             raise self.error
         return "completed"
+
+
+@dataclass(frozen=True)
+class _Activation:
+    cleanup: object
+    commit: object
+    revoke: object
 
 
 def _required_targets() -> tuple[str, ...]:
@@ -219,6 +227,135 @@ def test_unload_during_activation_revokes_authority_and_removes_listeners() -> N
         assert coordinator.activation_authorized is False
         assert listeners == []
         assert service.observers == []
+
+    asyncio.run(exercise())
+
+
+def test_activation_commit_gates_all_runtime_callbacks_and_cleanup_once() -> None:
+    """One coordinator commit authorizes all runtime callback families together."""
+
+    async def exercise() -> None:
+        latch = ActivationLatch()
+        scenario_runs: list[str] = []
+        journal_writes: list[str] = []
+        command_calls: list[str] = []
+        cleaned: list[str] = []
+        callbacks: dict[str, object] = {}
+        prepared = asyncio.Event()
+        finish_late_attach = asyncio.Event()
+
+        async def schedule_callback() -> None:
+            if latch.is_open:
+                scenario_runs.append("schedule")
+
+        async def state_callback() -> None:
+            if latch.is_open:
+                scenario_runs.append("state")
+
+        async def custom_callback() -> None:
+            if latch.is_open:
+                scenario_runs.append("custom")
+
+        async def smart_callback() -> None:
+            if latch.is_open:
+                journal_writes.append("smart")
+                command_calls.append("smart")
+
+        async def delayed_state_callback() -> None:
+            await asyncio.sleep(0)
+            if latch.is_open:
+                scenario_runs.append("delayed-state")
+
+        def cleanup() -> None:
+            cleaned.append("cleanup")
+
+        def revoke() -> None:
+            latch.close()
+
+        async def late_attach_failure() -> _Activation:
+            callbacks.update(
+                schedule=schedule_callback,
+                state=state_callback,
+                custom=custom_callback,
+                smart=smart_callback,
+                delayed_state=delayed_state_callback,
+            )
+            prepared.set()
+            await finish_late_attach.wait()
+            raise RuntimeError("late adapter attach failed")
+
+        failed = ManagedSwitchStartupCoordinator(
+            _Service(_Catalog(_required_targets())), _Migration(), late_attach_failure
+        )
+        startup = asyncio.create_task(failed.async_start())
+        await prepared.wait()
+        await asyncio.gather(
+            *(callback() for callback in callbacks.values()),
+        )
+        assert scenario_runs == []
+        assert journal_writes == []
+        assert command_calls == []
+        finish_late_attach.set()
+        await startup
+        assert latch.is_open is False
+        assert cleaned == []
+
+        async def activate() -> _Activation:
+            return _Activation(cleanup, latch.open, revoke)
+
+        coordinator = ManagedSwitchStartupCoordinator(
+            _Service(_Catalog(_required_targets())), _Migration(), activate
+        )
+        await coordinator.async_start()
+        assert coordinator.ready is True
+        assert latch.is_open is True
+        await asyncio.gather(
+            *(callback() for name, callback in callbacks.items() if name != "delayed_state"),
+        )
+        assert scenario_runs == ["schedule", "state", "custom"]
+        assert journal_writes == ["smart"]
+        assert command_calls == ["smart"]
+
+        delayed_state = callbacks["delayed_state"]
+        assert callable(delayed_state)
+        delayed = asyncio.create_task(delayed_state())
+        coordinator.cancel()
+        assert latch.is_open is False
+        await delayed
+        await asyncio.gather(
+            *(callback() for callback in callbacks.values()),
+        )
+        assert scenario_runs == ["schedule", "state", "custom"]
+        assert journal_writes == ["smart"]
+        assert command_calls == ["smart"]
+        assert cleaned == ["cleanup"]
+
+        pre_cleanup_latch = ActivationLatch()
+        pre_cleanup_order: list[str] = []
+        completed: ManagedSwitchStartupCoordinator
+
+        def pre_cleanup() -> None:
+            pre_cleanup_order.append("cleanup")
+
+        def pre_cleanup_revoke() -> None:
+            pre_cleanup_order.append("revoke")
+            pre_cleanup_latch.close()
+
+        async def completed_activation() -> _Activation:
+            asyncio.get_running_loop().call_soon(completed.cancel)
+            return _Activation(
+                pre_cleanup,
+                pre_cleanup_latch.open,
+                pre_cleanup_revoke,
+            )
+
+        completed = ManagedSwitchStartupCoordinator(
+            _Service(_Catalog(_required_targets())), _Migration(), completed_activation
+        )
+        await completed.async_start()
+        assert completed.ready is False
+        assert pre_cleanup_latch.is_open is False
+        assert pre_cleanup_order == ["revoke", "cleanup"]
 
     asyncio.run(exercise())
 

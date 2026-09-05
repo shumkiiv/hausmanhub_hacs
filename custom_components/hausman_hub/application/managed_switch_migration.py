@@ -93,6 +93,15 @@ class ManagedSwitchMigrationConflict(RuntimeError):
     """The durable receipt or live CAS evidence does not match the manifest."""
 
 
+@dataclass(frozen=True, slots=True)
+class ManagedSwitchActivation:
+    """Prepared runtime callbacks and their coordinator-owned activation gate."""
+
+    cleanup: Callable[[], None]
+    commit: Callable[[], None]
+    revoke: Callable[[], None]
+
+
 def _manifest_hash() -> str:
     payload = [
         {
@@ -170,10 +179,7 @@ class ManagedSwitchStartupCoordinator:
         self,
         service: object,
         migration: object,
-        activate: Callable[
-            [],
-            Awaitable[Callable[[], None] | None],
-        ],
+        activate: Callable[[], Awaitable[object]],
         *,
         binding_migration: object | None = None,
         status_publisher: Callable[[dict[str, str]], None] | None = None,
@@ -184,8 +190,10 @@ class ManagedSwitchStartupCoordinator:
         self._activate = activate
         self._status_publisher = status_publisher or (lambda _status: None)
         self._remove_observer: Callable[[], None] | None = None
-        self._activation_task: asyncio.Task[Callable[[], None] | None] | None = None
+        self._activation_task: asyncio.Task[object] | None = None
         self._activation_cleanup: Callable[[], None] | None = None
+        self._activation_commit: Callable[[], None] | None = None
+        self._activation_revoke: Callable[[], None] | None = None
         self._lock = asyncio.Lock()
         self._started = False
         self._cancelled = False
@@ -213,12 +221,14 @@ class ManagedSwitchStartupCoordinator:
         self.ready = False
         self._unsubscribe()
         activation_task = self._activation_task
+        self._adopt_completed_activation(activation_task)
         if (
             activation_task is not None
             and not activation_task.done()
             and activation_task is not asyncio.current_task()
         ):
             activation_task.cancel()
+        self._revoke_activation()
         self._cleanup_activation()
 
     async def _async_catalog_snapshot(self, catalog: object, final: bool) -> None:
@@ -254,12 +264,16 @@ class ManagedSwitchStartupCoordinator:
             activation_task = asyncio.create_task(self._activate())
             self._activation_task = activation_task
             try:
-                cleanup = await activation_task
+                activation = self._activation_from_result(await activation_task)
             except asyncio.CancelledError:
                 self.activation_authorized = False
+                self._revoke_activation()
+                self._cleanup_activation()
                 raise
             except Exception:  # noqa: BLE001
                 self.activation_authorized = False
+                self._revoke_activation()
+                self._cleanup_activation()
                 self._terminal = True
                 self._unsubscribe()
                 self._publish("blocked", "runtime_activation_failed")
@@ -269,13 +283,21 @@ class ManagedSwitchStartupCoordinator:
                 if self._activation_task is activation_task:
                     self._activation_task = None
             if self._cancelled or not self.activation_authorized:
-                if callable(cleanup):
-                    try:
-                        cleanup()
-                    except Exception:  # noqa: BLE001
-                        _LOGGER.error("Managed switch activation cleanup failed")
+                self._revoke_activation()
+                self._cleanup_activation()
                 return
-            self._activation_cleanup = cleanup if callable(cleanup) else None
+            self._set_activation(activation)
+            try:
+                self._commit_activation()
+            except Exception:  # noqa: BLE001
+                self.activation_authorized = False
+                self._revoke_activation()
+                self._cleanup_activation()
+                self._terminal = True
+                self._unsubscribe()
+                self._publish("blocked", "runtime_activation_failed")
+                _LOGGER.error("Managed switch runtime activation is blocked")
+                return
             self.ready = True
             self._terminal = True
             self._unsubscribe()
@@ -316,6 +338,52 @@ class ManagedSwitchStartupCoordinator:
             cleanup()
         except Exception:  # noqa: BLE001
             _LOGGER.error("Managed switch activation cleanup failed")
+
+    @staticmethod
+    def _activation_from_result(result: object) -> ManagedSwitchActivation:
+        if isinstance(result, ManagedSwitchActivation):
+            return result
+        if callable(result):
+            return ManagedSwitchActivation(result, lambda: None, lambda: None)
+        cleanup = getattr(result, "cleanup", None)
+        commit = getattr(result, "commit", None)
+        revoke = getattr(result, "revoke", None)
+        if all(callable(item) for item in (cleanup, commit, revoke)):
+            return ManagedSwitchActivation(cleanup, commit, revoke)
+        if result is None:
+            return ManagedSwitchActivation(lambda: None, lambda: None, lambda: None)
+        raise TypeError("managed switch activation returned an invalid handle")
+
+    def _adopt_completed_activation(self, task: asyncio.Task[object] | None) -> None:
+        if task is None or not task.done() or self._activation_cleanup is not None:
+            return
+        try:
+            activation = self._activation_from_result(task.result())
+        except (asyncio.CancelledError, Exception):
+            return
+        self._set_activation(activation)
+
+    def _set_activation(self, activation: ManagedSwitchActivation) -> None:
+        self._activation_cleanup = activation.cleanup
+        self._activation_commit = activation.commit
+        self._activation_revoke = activation.revoke
+
+    def _commit_activation(self) -> None:
+        commit = self._activation_commit
+        self._activation_commit = None
+        if commit is None:
+            raise RuntimeError("managed switch activation was not prepared")
+        commit()
+
+    def _revoke_activation(self) -> None:
+        revoke = self._activation_revoke
+        self._activation_revoke = None
+        if revoke is None:
+            return
+        try:
+            revoke()
+        except Exception:  # noqa: BLE001
+            _LOGGER.error("Managed switch activation revoke failed")
 
 
 class HomeAssistantManagedSwitchMigrationStore:

@@ -406,6 +406,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .application.managed_switch_migration import (
         HomeAssistantManagedSwitchMigrationStore,
         MIGRATION_MANIFEST,
+        ManagedSwitchActivation,
         ManagedSwitchMigration,
         ManagedSwitchStartupCoordinator,
         async_load_managed_switch_migration_entries,
@@ -541,7 +542,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if errors:
             raise RuntimeError("managed switch runtime cleanup failed") from errors[0]
 
-    async def _async_activate_managed_switch_runtime() -> Callable[[], None]:
+    async def _async_activate_managed_switch_runtime() -> ManagedSwitchActivation:
         """Start every dependent runtime once after verified migration."""
 
         try:
@@ -557,9 +558,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 activation_latch,
             )
             await smart_switch_adapter.async_start()
-            # No await follows this synchronous commit. Every subscription is
-            # prepared before callbacks become capable of running scenarios.
-            activation_latch.open()
         except asyncio.CancelledError:
             try:
                 _cleanup_managed_switch_runtime()
@@ -584,11 +582,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 ),
             }
             raise RuntimeError("managed switch runtime activation failed") from activation_error
-        domain_data["smart_switch_runtime"] = {
-            "state": "ready",
-            "adapter": smart_switch_adapter,
-        }
-        return _cleanup_managed_switch_runtime
+        def _commit_managed_switch_runtime() -> None:
+            # The coordinator installs cleanup before this synchronous commit.
+            # No await follows it, so no callback can observe a half-owned
+            # runtime with an open latch.
+            activation_latch.open()
+            domain_data["smart_switch_runtime"] = {
+                "state": "ready",
+                "adapter": smart_switch_adapter,
+            }
+
+        return ManagedSwitchActivation(
+            _cleanup_managed_switch_runtime,
+            _commit_managed_switch_runtime,
+            activation_latch.close,
+        )
 
     def _publish_managed_switch_status(status: dict[str, str]) -> None:
         domain_data["managed_switch_migration"] = dict(status)
