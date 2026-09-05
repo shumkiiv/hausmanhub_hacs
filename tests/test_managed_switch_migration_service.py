@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from functools import wraps
 import unittest
 from types import SimpleNamespace
 
 
 from custom_components.hausman_hub.application.managed_switch_migration import (
+    MANIFEST_HASH,
     MIGRATION_MANIFEST,
     ManagedSwitchMigration,
     ManagedSwitchMigrationConflict,
@@ -141,6 +143,57 @@ def _service(store, backend, *, missing=None):
     return ScenarioService(None, store, catalog, node_red_backend=backend)
 
 
+def _registry_with_inputs(
+    registry: ScenarioRegistry,
+    scenario_id: str,
+    input_target_ids: tuple[str, ...],
+) -> ScenarioRegistry:
+    scenario = registry.scenario(scenario_id)
+    assert scenario is not None and scenario.definition.node_red is not None
+    replacement = replace(
+        scenario,
+        definition=replace(
+            scenario.definition,
+            node_red=replace(
+                scenario.definition.node_red,
+                input_target_ids=input_target_ids,
+            ),
+        ),
+    )
+    return ScenarioRegistry(
+        scenarios=tuple(
+            replacement if item.id == scenario_id else item
+            for item in registry.scenarios
+        )
+    )
+
+
+class MigrationReceiptStore:
+    def __init__(self, value):
+        self.value = value
+        self.saved = []
+
+    async def async_load(self):
+        return self.value
+
+    async def async_save(self, value):
+        self.saved.append(value)
+        self.value = value
+
+
+_PRODUCTION_TAMBUR_INPUTS = (
+    "entity_10b78187426f8485",
+    "entity_156050daca86aa6c",
+    "entity_170c7a4e2505b803",
+    "entity_5f3b4436fb7b6f2b",
+    "entity_6b9ccdab9bb484b2",
+    "entity_71859313239a14e4",
+    "entity_b47991988cc6b9f3",
+    "entity_cd0098e5ff95da46",
+    "entity_fbdf27871edb89bf",
+)
+
+
 async def test_batch_migration_updates_three_sources_and_registry_once() -> None:
     store = RegistryStore(_registry())
     backend = Backend()
@@ -157,6 +210,96 @@ async def test_batch_migration_updates_three_sources_and_registry_once() -> None
         assert scenario.definition.node_red.input_target_ids == entry.input_target_ids
     await service.async_finalize_managed_switch_migration(MIGRATION_MANIFEST)
     assert backend.commits == 1
+
+
+async def test_prepared_restart_normalizes_permuted_legacy_inputs() -> None:
+    tambur = next(
+        item
+        for item in MIGRATION_MANIFEST
+        if item.scenario_id == "system-tambur-adaptive-controller"
+    )
+    permuted_inputs = _PRODUCTION_TAMBUR_INPUTS
+    registry_store = RegistryStore(
+        _registry_with_inputs(_registry(), tambur.scenario_id, permuted_inputs)
+    )
+    backend = Backend()
+    service = _service(registry_store, backend)
+    await service.async_load()
+    receipt_store = MigrationReceiptStore(
+        {
+            "migrationId": "managed-switches",
+            "version": 2,
+            "state": "prepared",
+            "manifestHash": MANIFEST_HASH,
+        }
+    )
+
+    assert await ManagedSwitchMigration(service, receipt_store).async_apply() == "completed"
+
+    migrated = registry_store.registry.scenario(tambur.scenario_id)
+    assert migrated is not None and migrated.definition.node_red is not None
+    assert migrated.revision == 8
+    assert migrated.definition.node_red.input_target_ids == tambur.input_target_ids
+    assert receipt_store.saved == [
+        {
+            "migrationId": "managed-switches",
+            "version": 2,
+            "state": "completed",
+            "manifestHash": MANIFEST_HASH,
+        }
+    ]
+
+
+async def test_permuted_legacy_inputs_with_wrong_member_fail_before_mutation() -> None:
+    tambur = next(
+        item
+        for item in MIGRATION_MANIFEST
+        if item.scenario_id == "system-tambur-adaptive-controller"
+    )
+    wrong_inputs = (
+        "entity_not_in_release_manifest",
+        *tambur.legacy_input_target_ids[:-1],
+    )
+    registry_store = RegistryStore(
+        _registry_with_inputs(_registry(), tambur.scenario_id, wrong_inputs)
+    )
+    backend = Backend()
+    service = _service(registry_store, backend)
+    await service.async_load()
+
+    with unittest.TestCase().assertRaises(ScenarioRevisionConflictError):
+        await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
+
+    assert backend.updated == []
+    assert registry_store.saved == []
+
+
+async def test_permuted_migrated_inputs_remain_a_strict_conflict() -> None:
+    migrated_ids = {item.scenario_id for item in MIGRATION_MANIFEST}
+    tambur = next(
+        item
+        for item in MIGRATION_MANIFEST
+        if item.scenario_id == "system-tambur-adaptive-controller"
+    )
+    permuted_inputs = (tambur.input_target_ids[-1], *tambur.input_target_ids[:-1])
+    registry_store = RegistryStore(
+        _registry_with_inputs(
+            _registry(migrated=migrated_ids),
+            tambur.scenario_id,
+            permuted_inputs,
+        )
+    )
+    backend = Backend(
+        {item.scenario_id: item.new_source_hash for item in MIGRATION_MANIFEST}
+    )
+    service = _service(registry_store, backend)
+    await service.async_load()
+
+    with unittest.TestCase().assertRaises(ScenarioRevisionConflictError):
+        await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
+
+    assert backend.updated == []
+    assert registry_store.saved == []
 
 
 async def test_legacy_phase_a_then_binding_phase_b_reaches_revision_three() -> None:
@@ -463,6 +606,15 @@ class ManagedSwitchMigrationServiceTest(unittest.IsolatedAsyncioTestCase):
 
     test_batch_migration_updates_three_sources_and_registry_once = _as_unittest_case(
         test_batch_migration_updates_three_sources_and_registry_once
+    )
+    test_prepared_restart_normalizes_permuted_legacy_inputs = _as_unittest_case(
+        test_prepared_restart_normalizes_permuted_legacy_inputs
+    )
+    test_permuted_legacy_inputs_with_wrong_member_fail_before_mutation = _as_unittest_case(
+        test_permuted_legacy_inputs_with_wrong_member_fail_before_mutation
+    )
+    test_permuted_migrated_inputs_remain_a_strict_conflict = _as_unittest_case(
+        test_permuted_migrated_inputs_remain_a_strict_conflict
     )
     test_legacy_phase_a_then_binding_phase_b_reaches_revision_three = _as_unittest_case(
         test_legacy_phase_a_then_binding_phase_b_reaches_revision_three

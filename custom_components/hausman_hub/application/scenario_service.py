@@ -474,6 +474,15 @@ class _ManagedSwitchBindingMigrationTransaction:
     scenario_id: str
 
 
+def _legacy_input_target_ids_match(
+    actual: tuple[str, ...],
+    expected: tuple[str, ...],
+) -> bool:
+    """Accept a legacy serialization permutation without weakening membership."""
+
+    return len(actual) == len(expected) and set(actual) == set(expected)
+
+
 def _managed_switch_binding_trigger_matches(
     scenario: Scenario,
     item: object,
@@ -1248,7 +1257,10 @@ class ScenarioService:
                 legacy_registry = (
                     scenario.revision == legacy_revision
                     and metadata.source_hash == legacy_hash
-                    and metadata.input_target_ids == legacy_inputs
+                    and _legacy_input_target_ids_match(
+                        metadata.input_target_ids,
+                        legacy_inputs,
+                    )
                 )
                 migrated_registry = (
                     (
