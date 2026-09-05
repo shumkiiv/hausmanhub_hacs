@@ -257,12 +257,12 @@ class SmartSwitchTriggerAdapter:
         pending: list[Callable[[], None]] = []
         generation = {"active": False}
         try:
-            for expected in _ALL_CONFIGS:
+            for index, expected in enumerate(_ALL_CONFIGS):
                 cleanup = await attach(
                     self._hass,
                     dict(expected),
                     self._make_action(expected, generation),
-                    self._trigger_info(expected),
+                    self._trigger_info(expected, index),
                 )
                 if not callable(cleanup):
                     raise RuntimeError("device trigger attach did not return cleanup callback")
@@ -309,16 +309,21 @@ class SmartSwitchTriggerAdapter:
         return action
 
     @staticmethod
-    def _trigger_info(config: Mapping[str, object]) -> dict[str, object]:
+    def _trigger_info(config: Mapping[str, object], index: int) -> dict[str, object]:
         """Return the complete HA 2026.9 TriggerInfo boundary object."""
 
+        binding = (
+            "shower-cabinet"
+            if config["device_id"] == SHOWER_DEVICE_ID
+            else "tambur-light-group"
+        )
         return {
-            "domain": "mqtt",
-            "name": "HausmanHub smart switch",
+            "domain": "hausman_hub",
+            "name": "managed-smart-switch-runtime",
             "variables": {},
             "trigger_data": {
-                "id": str(config["subtype"]),
-                "idx": 0,
+                "id": f"{binding}-{config['subtype']}",
+                "idx": str(index),
                 "alias": None,
             },
         }

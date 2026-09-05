@@ -30,6 +30,7 @@ async def test_attach_uses_ha_2026_9_trigger_info_and_callback_boundary() -> Non
     """HA 2026.9 indexes TriggerInfo and invokes actions with variables/context."""
     actions: list[object] = []
     calls: list[dict[str, object]] = []
+    infos: list[dict[str, object]] = []
 
     async def get_triggers(_hass: object, device_id: str) -> list[dict[str, object]]:
         configs = (
@@ -45,16 +46,7 @@ async def test_attach_uses_ha_2026_9_trigger_info_and_callback_boundary() -> Non
         action: object,
         info: dict[str, object],
     ) -> object:
-        assert info == {
-            "domain": "mqtt",
-            "name": "HausmanHub smart switch",
-            "variables": {},
-            "trigger_data": {
-                "id": str(config["subtype"]),
-                "idx": 0,
-                "alias": None,
-            },
-        }
+        infos.append(info)
         actions.append(action)
         return lambda: None
 
@@ -73,6 +65,20 @@ async def test_attach_uses_ha_2026_9_trigger_info_and_callback_boundary() -> Non
     await actions[0]({"config": {"subtype": "off_up"}}, SimpleNamespace(id="context"))
     assert calls[0]["binding"] == "shower-cabinet"
     assert calls[0]["action"] == "toggle"
+    assert len(infos) == 6
+    assert {info["domain"] for info in infos} == {"hausman_hub"}
+    assert {info["name"] for info in infos} == {"managed-smart-switch-runtime"}
+    assert all(type(info) is dict for info in infos)
+    assert all(set(info) == {"domain", "name", "variables", "trigger_data"} for info in infos)
+    assert all(type(info["variables"]) is dict and info["variables"] == {} for info in infos)
+    trigger_data = [info["trigger_data"] for info in infos]
+    assert all(type(item) is dict for item in trigger_data)
+    assert all(set(item) == {"id", "idx", "alias"} for item in trigger_data)
+    assert all(type(item["id"]) is str for item in trigger_data)
+    assert all(type(item["idx"]) is str for item in trigger_data)
+    assert all(item["alias"] is None for item in trigger_data)
+    assert len({item["id"] for item in trigger_data}) == 6
+    assert {item["idx"] for item in trigger_data} == {str(index) for index in range(6)}
 
 
 @pytest.mark.parametrize("expected", [*SHOWER_TRIGGER_CONFIGS, *PASS_THROUGH_TRIGGER_CONFIGS])
