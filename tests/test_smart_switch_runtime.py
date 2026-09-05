@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from types import MappingProxyType
+from collections import UserDict
 
 import pytest
 
@@ -43,6 +45,26 @@ def test_exact_trigger_validation_rejects_non_identity_discovery_fields(
 ) -> None:
     expected = SHOWER_TRIGGER_CONFIGS[0]
     assert not validate_exact_device_trigger({**expected, **extra}, expected)
+
+
+@pytest.mark.parametrize("metadata", [UserDict(), MappingProxyType({})])
+def test_exact_trigger_validation_rejects_empty_non_dict_metadata(metadata: object) -> None:
+    expected = SHOWER_TRIGGER_CONFIGS[0]
+
+    assert not validate_exact_device_trigger({**expected, "metadata": metadata}, expected)
+
+
+class _EmptyMetadataEqualitySpoof:
+    def __eq__(self, other: object) -> bool:
+        return other == {}
+
+
+def test_exact_trigger_validation_rejects_metadata_equality_spoof() -> None:
+    expected = SHOWER_TRIGGER_CONFIGS[0]
+
+    assert not validate_exact_device_trigger(
+        {**expected, "metadata": _EmptyMetadataEqualitySpoof()}, expected
+    )
 
 
 def test_adapter_attaches_only_allowlisted_configs_and_unloads() -> None:

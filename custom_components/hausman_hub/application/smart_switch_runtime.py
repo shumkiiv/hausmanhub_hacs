@@ -112,7 +112,8 @@ def validate_exact_device_trigger(
     if actual_fields == _TRIGGER_IDENTITY_FIELDS:
         return all(actual[field] == expected[field] for field in _TRIGGER_IDENTITY_FIELDS)
     if actual_fields == _TRIGGER_IDENTITY_FIELDS | {"metadata"}:
-        return actual.get("metadata") == {} and all(
+        metadata = actual.get("metadata")
+        return type(metadata) is dict and not metadata and all(
             actual[field] == expected[field] for field in _TRIGGER_IDENTITY_FIELDS
         )
     return False
