@@ -3817,7 +3817,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.215", panel.payload["integration_version"])
+        self.assertEqual("1.52.216", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -6295,6 +6295,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
     def test_setup_keeps_switch_runtime_unavailable_when_attach_cleanup_fails(self) -> None:
         from custom_components.hausman_hub.application.managed_switch_migration import (
             ManagedSwitchMigration,
+            ManagedSwitchStartupCoordinator,
         )
         from custom_components.hausman_hub.application.smart_switch_runtime import (
             SmartSwitchTriggerAdapter,
@@ -6323,6 +6324,11 @@ class LocalSummaryAccessTest(unittest.TestCase):
         with self.assertLogs("custom_components.hausman_hub", level="ERROR") as logs:
             with (
                 patch.object(ManagedSwitchMigration, "async_apply", migration_ready),
+                patch.object(
+                    ManagedSwitchStartupCoordinator,
+                    "_catalog_has_required_targets",
+                    return_value=True,
+                ),
                 patch.object(SmartSwitchTriggerAdapter, "async_start", attach_failure),
                 patch.object(SmartSwitchTriggerAdapter, "async_unload", cleanup_failure),
             ):
@@ -6338,6 +6344,29 @@ class LocalSummaryAccessTest(unittest.TestCase):
         rendered_logs = "\n".join(logs.output)
         self.assertIn("Smart switch device trigger cleanup failed", rendered_logs)
         self.assertNotIn("private details", rendered_logs)
+
+    def test_setup_waits_for_late_switch_catalog_without_starting_runtime(self) -> None:
+        hass = FakeHomeAssistant()
+        entry = FakeEntry(
+            {
+                "mode": "read-only",
+                "direct_execution_status": "direct_execution_blocked",
+            },
+            {},
+            "synthetic-switch-catalog-warmup",
+        )
+        hass.config_entries.entries = [entry]
+
+        self.assertTrue(asyncio.run(self.integration.async_setup_entry(hass, entry)))
+
+        self.assertEqual(
+            {"state": "waiting", "reason": "catalog_warmup"},
+            hass.data["hausman_hub"]["managed_switch_migration"],
+        )
+        self.assertEqual(
+            {"state": "waiting", "reason": "verified_migration_pending"},
+            hass.data["hausman_hub"]["smart_switch_runtime"],
+        )
 
     def test_setup_rejects_an_unsafe_entry_before_registering_the_view(self) -> None:
         """A rejected entry must not open even the local count-only path."""

@@ -1,7 +1,7 @@
 /* Confirmed bulk scenario updates and their preview controls. */
 
-import { applyScenarioRoomIds, scenarioRoomOptions } from "./hausman-hub-scenario-rooms.js?v=1.52.215";
-import { normalizedScenario, scenarioPayload } from "./hausman-hub-scenario-state.js?v=1.52.215";
+import { applyScenarioRoomIds, scenarioRoomOptions } from "./hausman-hub-scenario-rooms.js?v=1.52.216";
+import { normalizedScenario, scenarioPayload } from "./hausman-hub-scenario-state.js?v=1.52.216";
 
 export async function bulkSaveScenarios(panel, deps, scenarios, successText) {
   if (panel._busy || !scenarios.length) return false;

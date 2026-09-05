@@ -1737,6 +1737,66 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
             },
         )
 
+    async def test_catalog_warmup_publishes_each_snapshot_and_final_attempt(self) -> None:
+        snapshots: list[tuple[int, bool]] = []
+        refreshes = 0
+
+        async def skip_delay(_: float) -> None:
+            return None
+
+        async def load_catalog() -> ScenarioCatalog:
+            nonlocal refreshes
+            refreshes += 1
+            return ScenarioCatalog(
+                devices={
+                    **self.catalog.devices,
+                    f"late_{refreshes}": next(iter(self.catalog.devices.values())),
+                },
+                scenarios={},
+            )
+
+        service = ScenarioService(
+            None,
+            self.store,
+            ScenarioCatalog(devices={}, scenarios={}),
+            self.executor,
+            catalog_loader=load_catalog,
+            sleep=skip_delay,
+        )
+        remove = service.add_catalog_warmup_observer(
+            lambda catalog, final: snapshots.append((len(catalog.devices), final))
+        )
+
+        await service._async_catalog_warmup()
+        remove()
+
+        self.assertEqual([(2, False), (2, False), (2, True)], snapshots)
+
+    async def test_catalog_warmup_failure_still_publishes_final_snapshot(self) -> None:
+        snapshots: list[tuple[int, bool]] = []
+
+        async def skip_delay(_: float) -> None:
+            return None
+
+        async def fail_catalog() -> ScenarioCatalog:
+            raise RuntimeError("late integration unavailable")
+
+        service = ScenarioService(
+            None,
+            self.store,
+            self.catalog,
+            self.executor,
+            catalog_loader=fail_catalog,
+            sleep=skip_delay,
+        )
+        service.add_catalog_warmup_observer(
+            lambda catalog, final: snapshots.append((len(catalog.devices), final))
+        )
+
+        await service._async_catalog_warmup()
+
+        self.assertEqual([(1, True)], snapshots)
+
     async def test_catalog_warmup_exhaustion_is_degraded(self) -> None:
         refreshes = 0
 

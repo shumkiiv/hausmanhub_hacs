@@ -1,9 +1,12 @@
 """Verified, restart-safe migration for release-owned switch scenarios."""
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 import hashlib
 import json
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Mapping
 
@@ -13,6 +16,8 @@ if TYPE_CHECKING:
 MIGRATION_ID = "managed-switches"
 MIGRATION_VERSION = 2
 MANAGED_TOPOLOGY = "managed-three-node-v1"
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +152,117 @@ def _entries_with_sources() -> tuple[ManagedSwitchMigrationEntry, ...]:
     return tuple(entries)
 
 
+async def async_load_managed_switch_migration_entries(
+    add_executor_job: Callable[..., Awaitable[object]],
+) -> tuple[ManagedSwitchMigrationEntry, ...]:
+    entries = await add_executor_job(_entries_with_sources)
+    if not isinstance(entries, tuple) or not all(
+        isinstance(item, ManagedSwitchMigrationEntry) for item in entries
+    ):
+        raise ManagedSwitchMigrationConflict(
+            "release-owned source loading returned invalid data"
+        )
+    return entries
+
+
+class ManagedSwitchStartupCoordinator:
+    def __init__(
+        self,
+        service: object,
+        migration: object,
+        activate: Callable[[], Awaitable[None]],
+        *,
+        status_publisher: Callable[[dict[str, str]], None] | None = None,
+    ) -> None:
+        self._service = service
+        self._migration = migration
+        self._activate = activate
+        self._status_publisher = status_publisher or (lambda _status: None)
+        self._remove_observer: Callable[[], None] | None = None
+        self._lock = asyncio.Lock()
+        self._started = False
+        self._cancelled = False
+        self._terminal = False
+        self.ready = False
+
+    async def async_start(self) -> None:
+        if self._started or self._cancelled:
+            return
+        self._started = True
+        add_observer = getattr(
+            self._service, "add_catalog_warmup_observer", None
+        )
+        if not callable(add_observer):
+            self._terminal = True
+            self._publish("blocked", "catalog_warmup_unavailable")
+            return
+        self._remove_observer = add_observer(self._async_catalog_snapshot)
+        await self._async_attempt(self._service.current_catalog(), final=False)
+
+    def cancel(self) -> None:
+        self._cancelled = True
+        self._unsubscribe()
+
+    async def _async_catalog_snapshot(self, catalog: object, final: bool) -> None:
+        await self._async_attempt(catalog, final=final)
+
+    async def _async_attempt(self, catalog: object, *, final: bool) -> None:
+        async with self._lock:
+            if self._cancelled or self._terminal or self.ready:
+                return
+            if not self._catalog_has_required_targets(catalog):
+                if final:
+                    self._terminal = True
+                    self._unsubscribe()
+                    self._publish("blocked", "catalog_retry_exhausted")
+                else:
+                    self._publish("waiting", "catalog_warmup")
+                return
+            try:
+                await self._migration.async_apply()
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                self._terminal = True
+                self._unsubscribe()
+                self._publish("blocked", "verified_migration_failed")
+                _LOGGER.error("Release-owned managed switch migration is blocked")
+                return
+            if self._cancelled:
+                return
+            self.ready = True
+            self._terminal = True
+            self._unsubscribe()
+            self._publish("completed")
+            await self._activate()
+
+    @staticmethod
+    def _catalog_has_required_targets(catalog: object) -> bool:
+        resolve = getattr(catalog, "device", None)
+        if not callable(resolve):
+            return False
+        return all(
+            getattr(resolve(target_id), "target_id", None) == target_id
+            for target_id in dict.fromkeys(
+                target_id
+                for entry in MIGRATION_MANIFEST
+                for target_id in entry.input_target_ids
+            )
+        )
+
+    def _publish(self, state: str, reason: str | None = None) -> None:
+        payload = {"state": state}
+        if reason is not None:
+            payload["reason"] = reason
+        self._status_publisher(payload)
+
+    def _unsubscribe(self) -> None:
+        remove = self._remove_observer
+        self._remove_observer = None
+        if remove is not None:
+            remove()
+
+
 class HomeAssistantManagedSwitchMigrationStore:
     """Verified atomic HA storage for the migration receipt."""
 
@@ -170,9 +286,19 @@ class HomeAssistantManagedSwitchMigrationStore:
 
 
 class ManagedSwitchMigration:
-    def __init__(self, service: object, store: object) -> None:
+    def __init__(
+        self,
+        service: object,
+        store: object,
+        *,
+        source_loader: Callable[
+            [], Awaitable[tuple[ManagedSwitchMigrationEntry, ...]]
+        ]
+        | None = None,
+    ) -> None:
         self._service = service
         self._store = store
+        self._source_loader = source_loader
 
     async def async_apply(self) -> str:
         loaded = await self._store.async_load()
@@ -184,7 +310,11 @@ class ManagedSwitchMigration:
         apply = getattr(self._service, "async_apply_managed_switch_migration", None)
         if not callable(apply):
             raise ManagedSwitchMigrationConflict("scenario migration CAS is unavailable")
-        entries = _entries_with_sources()
+        entries = (
+            await self._source_loader()
+            if self._source_loader is not None
+            else _entries_with_sources()
+        )
         applied = False
         try:
             await apply(entries)

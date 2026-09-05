@@ -537,6 +537,9 @@ class ScenarioService:
         self._queue_waiters: dict[str, int] = {}
         self._catalog_refresh_lock = asyncio.Lock()
         self._catalog_warmup_task: asyncio.Task[None] | None = None
+        self._catalog_warmup_observers: list[
+            Callable[[ScenarioCatalog, bool], object]
+        ] = []
         # Внутреннее состояние прогрева; публикация в dashboard-снапшот -
         # отдельное изменение контракта, в этот релиз не входит.
         initial_catalog_status = "warming" if catalog_loader is not None else "ready"
@@ -1504,6 +1507,20 @@ class ScenarioService:
                 self._catalog_warmup_task = asyncio.create_task(coroutine)
         return self.cancel_catalog_warmup
 
+    def add_catalog_warmup_observer(
+        self,
+        observer: Callable[[ScenarioCatalog, bool], object],
+    ) -> Callable[[], None]:
+        """Observe only bounded late-catalog snapshots until explicitly removed."""
+
+        self._catalog_warmup_observers.append(observer)
+
+        def remove() -> None:
+            if observer in self._catalog_warmup_observers:
+                self._catalog_warmup_observers.remove(observer)
+
+        return remove
+
     def cancel_catalog_warmup(self) -> None:
         """Cancel only the pending HausmanHub catalog warm-up task."""
 
@@ -1854,6 +1871,11 @@ class ScenarioService:
                         else "initial_scan"
                     ),
                 }
+                if attempt == CATALOG_WARMUP_MAX_ATTEMPTS:
+                    await self._async_notify_catalog_warmup_observers(
+                        self._catalog,
+                        final=True,
+                    )
                 continue
             self._catalog_readiness = {
                 "status": (
@@ -1869,6 +1891,10 @@ class ScenarioService:
                     else "initial_scan"
                 ),
             }
+            await self._async_notify_catalog_warmup_observers(
+                catalog,
+                final=attempt == CATALOG_WARMUP_MAX_ATTEMPTS,
+            )
         final_count = len(self._catalog.devices)
         if final_count == 0:
             # После всех попыток каталог пуст: device_state триггеры молчат,
@@ -1887,6 +1913,24 @@ class ScenarioService:
         await self._async_seed_system_scenarios_guarded()
         await self._sleep(SYSTEM_SEED_RETRY_DELAY_SECONDS)
         await self._async_seed_system_scenarios_guarded()
+
+    async def _async_notify_catalog_warmup_observers(
+        self,
+        catalog: ScenarioCatalog,
+        *,
+        final: bool,
+    ) -> None:
+        """Notify lifecycle observers without letting one break catalog warm-up."""
+
+        for observer in tuple(self._catalog_warmup_observers):
+            try:
+                result = observer(catalog, final)
+                if inspect.isawaitable(result):
+                    await result
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                _LOGGER.error("HausmanHub catalog warm-up observer failed")
 
     async def _async_seed_system_scenarios_guarded(self) -> None:
         """Seed missing system scenarios, logging instead of failing warm-up."""

@@ -1922,6 +1922,70 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         await restarted.async_execute(request_c)
         self.assertGreater(len(executor.batches), 2)
 
+    async def test_mixed_confirmed_and_deferred_home_target_finishes_without_ttl_or_resend(self) -> None:
+        """A confirmed sibling plus offline owners is a terminal saved partial."""
+        runtime, store, _contour_store, executor = native_home_target_runtime(
+            include_humidifier=False,
+        )
+        for entity_id in (
+            "climate.living_air_conditioner",
+            "climate.living_radiator",
+        ):
+            current = executor._state_view.states[entity_id]
+            executor._state_view.states[entity_id] = replace(
+                current,
+                state="unavailable",
+                attributes={},
+            )
+        await runtime.async_start()
+        service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await service.async_load()
+        request = {
+            "contract": {
+                "name": "hausman-hub-climate-action-request",
+                "version": 1,
+            },
+            "request_id": "tablet.climate.mixed-terminal-partial",
+            "correlation_id": "corr.mixed-terminal-partial",
+            "expected_state_revision": 0,
+            "expected_control_revision": 0,
+            "reliability_profile": "climate_reliability_v1",
+            "action": "set_home_targets",
+            "room_id": None,
+            "parameters": {"target_temperature": 25.5},
+        }
+
+        with patch.object(
+            climate_runtime_module.asyncio,
+            "sleep",
+            new_callable=AsyncMock,
+        ) as readback_sleep:
+            receipt = await service.async_execute(request)
+        dispatch_count = len(executor.batches)
+        duplicate = await service.async_execute(request)
+
+        readback_sleep.assert_not_awaited()
+        self.assertEqual("partial", receipt["status"], receipt)
+        self.assertTrue(receipt["accepted"])
+        self.assertTrue(receipt["final"])
+        self.assertEqual(0, receipt["unfinished_device_count"])
+        self.assertEqual("saved_deferred_offline", receipt["intent"]["status"])
+        self.assertEqual(1, dispatch_count)
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(dispatch_count, len(executor.batches))
+        leaves = receipt["outcomes"]["rooms"]["living"]["devices"]
+        self.assertEqual("confirmed", leaves["living_floor"]["status"])
+        self.assertEqual(
+            {"deferred"},
+            {
+                leaves[device_id]["status"]
+                for device_id in (
+                    "living_air_conditioner",
+                    "living_radiator",
+                )
+            },
+        )
+
     async def test_reserved_home_target_skips_real_manual_owner_but_rejects_missing_owner(self) -> None:
         """Manual memory excludes a valid owner, never hides a broken binding."""
         runtime, store, contour_store, executor = native_home_target_runtime(
