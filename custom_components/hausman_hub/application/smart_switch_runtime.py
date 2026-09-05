@@ -262,7 +262,7 @@ class SmartSwitchTriggerAdapter:
                     self._hass,
                     dict(expected),
                     self._make_action(expected, generation),
-                    {"source": "hausman_hub"},
+                    self._trigger_info(expected),
                 )
                 if not callable(cleanup):
                     raise RuntimeError("device trigger attach did not return cleanup callback")
@@ -291,15 +291,37 @@ class SmartSwitchTriggerAdapter:
         self,
         config: Mapping[str, object],
         generation: dict[str, bool],
-    ) -> Callable[[Mapping[str, object]], Awaitable[None]]:
-        async def action(trigger_data: Mapping[str, object] | None = None) -> None:
+    ) -> Callable[[Mapping[str, object] | None, object | None], Awaitable[None]]:
+        async def action(
+            run_variables: Mapping[str, object] | None = None,
+            context: object | None = None,
+        ) -> None:
+            # HA supplies runtime variables and an execution context here. The
+            # allow-listed config is the only source of switch identity; never
+            # let callback payloads select a binding or action.
+            del run_variables, context
             if generation.get("active") is True:
                 await self.async_handle_trigger(
                     config,
-                    trigger_data or {},
+                    {},
                     _generation=generation,
                 )
         return action
+
+    @staticmethod
+    def _trigger_info(config: Mapping[str, object]) -> dict[str, object]:
+        """Return the complete HA 2026.9 TriggerInfo boundary object."""
+
+        return {
+            "domain": "mqtt",
+            "name": "HausmanHub smart switch",
+            "variables": {},
+            "trigger_data": {
+                "id": str(config["subtype"]),
+                "idx": 0,
+                "alias": None,
+            },
+        }
 
     async def async_handle_trigger(
         self,

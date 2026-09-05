@@ -25,6 +25,56 @@ def test_exact_trigger_validation_rejects_wrong_device_or_subtype() -> None:
     assert not validate_exact_device_trigger({**expected, "device_id": "other"}, expected)
 
 
+@pytest.mark.asyncio
+async def test_attach_uses_ha_2026_9_trigger_info_and_callback_boundary() -> None:
+    """HA 2026.9 indexes TriggerInfo and invokes actions with variables/context."""
+    actions: list[object] = []
+    calls: list[dict[str, object]] = []
+
+    async def get_triggers(_hass: object, device_id: str) -> list[dict[str, object]]:
+        configs = (
+            SHOWER_TRIGGER_CONFIGS
+            if device_id == SHOWER_TRIGGER_CONFIGS[0]["device_id"]
+            else PASS_THROUGH_TRIGGER_CONFIGS
+        )
+        return [{**item, "metadata": {}} for item in configs]
+
+    async def attach(
+        _hass: object,
+        config: dict[str, object],
+        action: object,
+        info: dict[str, object],
+    ) -> object:
+        assert info == {
+            "domain": "mqtt",
+            "name": "HausmanHub smart switch",
+            "variables": {},
+            "trigger_data": {
+                "id": str(config["subtype"]),
+                "idx": 0,
+                "alias": None,
+            },
+        }
+        actions.append(action)
+        return lambda: None
+
+    adapter = SmartSwitchTriggerAdapter(
+        SimpleNamespace(),
+        SimpleNamespace(async_run_typed_intent=lambda **item: calls.append(item)),
+        trigger_api=SimpleNamespace(
+            async_get_triggers=get_triggers,
+            async_attach_trigger=attach,
+        ),
+        state_store=MemoryStore(),
+        receipt_factory=lambda: "receipt.trigger-info",
+    )
+
+    await adapter.async_start()
+    await actions[0]({"config": {"subtype": "off_up"}}, SimpleNamespace(id="context"))
+    assert calls[0]["binding"] == "shower-cabinet"
+    assert calls[0]["action"] == "toggle"
+
+
 @pytest.mark.parametrize("expected", [*SHOWER_TRIGGER_CONFIGS, *PASS_THROUGH_TRIGGER_CONFIGS])
 def test_exact_trigger_validation_accepts_ha_2026_9_empty_metadata(expected: dict[str, object]) -> None:
     assert validate_exact_device_trigger({**expected, "metadata": {}}, expected)
