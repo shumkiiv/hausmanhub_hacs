@@ -2434,31 +2434,64 @@ class HausmanHubPanel extends HTMLElement {
         detail: plan.reason || "Нет безопасной команды для проверки.",
       };
     }
+    const sendAction = async (value, idPrefix) => {
+      const request = fullDeviceActionRequest({
+        targetId: plan.targetId,
+        actionId: plan.actionId,
+        value,
+      }, requestId(idPrefix));
+      return this._hass.callApi(
+        "POST",
+        DEVICE_ACTIONS_API,
+        withCorrelationId(DEVICE_ACTIONS_API, request.payload),
+        request.headers,
+      );
+    };
+    let probe;
     try {
-      const probe = await this._hass.callApi("POST", DEVICE_ACTIONS_API, {
-        targetId: plan.targetId,
-        actionId: plan.actionId,
-        value: plan.probeValue,
-      });
-      const restored = await this._hass.callApi("POST", DEVICE_ACTIONS_API, {
-        targetId: plan.targetId,
-        actionId: plan.actionId,
-        value: plan.value,
-      });
+      probe = await sendAction(plan.probeValue, "channel-probe");
+    } catch (error) {
+      const policy = resolveApiError(error);
+      const dispatchUnknown = policy.details?.state === "dispatch_unknown";
+      if (dispatchUnknown || policy.recoveryAction === "refresh") {
+        try {
+          await this._load();
+        } catch {
+        }
+      }
+      return {
+        status: "failed",
+        title: dispatchUnknown ? "Результат проверки неизвестен" : "Проверка не выполнена",
+        detail: dispatchUnknown
+          ? "Пробная команда могла быть отправлена. Состояние обновлено. Возврат не отправлялся: проверьте значение и запустите новое действие вручную."
+          : `${policy.safeMessage} Возврат не отправлялся, потому что пробная команда не была подтверждена.`,
+      };
+    }
+    const probeConfirmed = probe?.confirmed === true
+      || ["confirmed", "up_to_date"].includes(probe?.status);
+    if (!probeConfirmed) {
+      return {
+        status: "pending",
+        title: "Результат проверки ещё неизвестен",
+        detail: "Пробная команда не подтверждена. Команда возврата не отправлена: обновите состояние и проверьте значение перед новым действием.",
+      };
+    }
+    try {
+      const restored = await sendAction(plan.value, "channel-restore");
       return summarizeControlChannelReceipts(probe, restored);
     } catch (error) {
+      const policy = resolveApiError(error);
+      const dispatchUnknown = policy.details?.state === "dispatch_unknown";
       try {
-        await this._hass.callApi("POST", DEVICE_ACTIONS_API, {
-          targetId: plan.targetId,
-          actionId: plan.actionId,
-          value: plan.value,
-        });
+        await this._load();
       } catch {
       }
       return {
         status: "failed",
-        title: "Проверка не выполнена",
-        detail: "Не удалось завершить тест. Проверьте текущее заданное значение устройства перед повтором.",
+        title: dispatchUnknown ? "Результат возврата неизвестен" : "Возврат не подтверждён",
+        detail: dispatchUnknown
+          ? "Команда возврата могла быть отправлена. Состояние обновлено. Автоматический повтор не выполнялся: проверьте значение и запустите новое действие вручную."
+          : `${policy.safeMessage} Автоматический повтор команды возврата не выполнялся. Проверьте текущее значение устройства.`,
       };
     }
   }

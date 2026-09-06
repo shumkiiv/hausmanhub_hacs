@@ -3174,6 +3174,26 @@ class ScenarioExecutor:
             ):
                 if state in {None, "unknown", "unavailable"}:
                     return "power_source_unavailable", precondition, upstream_sources
+                if self._command_guard is None:
+                    return (
+                        "power_source_guard_unavailable",
+                        precondition,
+                        upstream_sources,
+                    )
+                try:
+                    guard_error = self._command_guard(
+                        source_entity_id,
+                        "turn_on",
+                        True,
+                    )
+                except Exception:  # noqa: BLE001
+                    return (
+                        "power_source_guard_unavailable",
+                        precondition,
+                        upstream_sources,
+                    )
+                if guard_error is not None:
+                    return guard_error, precondition, upstream_sources
                 domain = source_entity_id.split(".", 1)[0]
                 previous_revision = _state_revision(source_state_object)
                 source_command_sent_at = int(time.time() * 1000)

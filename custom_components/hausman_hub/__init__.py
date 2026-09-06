@@ -415,6 +415,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         scenario_change_publisher=_publish_scenario_change,
         intercom_release_obligation=intercom_release_obligation,
         manual_light_off_protection=manual_light_off_protection,
+        electrical_breaker_device_ids_resolver=(
+            lambda: energy_meter_service.source_device_ids
+        ),
     )
     await scenario_service.async_load()
     from .application.managed_switch_migration import (

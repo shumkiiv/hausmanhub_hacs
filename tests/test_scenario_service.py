@@ -2462,6 +2462,132 @@ class ScenarioServiceIntercomReleaseTest(unittest.IsolatedAsyncioTestCase):
             service.is_external_cover_action("garage_gate", "turn_off")
         )
 
+    async def test_configured_energy_breaker_actions_are_contextually_dangerous(
+        self,
+    ) -> None:
+        switch_actions = tuple(
+            ScenarioDeviceAction(
+                action_id=action_id,
+                title=action_id,
+                domain="switch",
+                service=action_id,
+                allowed_fields=frozenset(),
+            )
+            for action_id in ("turn_on", "turn_off", "toggle")
+        )
+        service = ScenarioService(
+            self.hass,
+            _FakeStore(),
+            ScenarioCatalog(
+                devices={
+                    "main_breaker": ScenarioDeviceEntry(
+                        target_id="main_breaker",
+                        name="Вводной автомат · Реле",
+                        entity_id="switch.main_breaker",
+                        actions=switch_actions,
+                        physical_id="device_1111111111111111",
+                        physical_name="Вводной автомат",
+                        device_type="switch",
+                    ),
+                    "selected_socket": ScenarioDeviceEntry(
+                        target_id="selected_socket",
+                        name="Розетка бойлера",
+                        entity_id="switch.boiler_socket",
+                        actions=switch_actions,
+                        physical_id="device_2222222222222222",
+                        physical_name="Розетка бойлера",
+                        device_type="outlet",
+                    ),
+                    "unselected_breaker": ScenarioDeviceEntry(
+                        target_id="unselected_breaker",
+                        name="Автомат гаража",
+                        entity_id="switch.garage_breaker",
+                        actions=switch_actions,
+                        physical_id="device_3333333333333333",
+                        physical_name="Автомат гаража",
+                        device_type="switch",
+                    ),
+                },
+                scenarios={},
+            ),
+            electrical_breaker_device_ids_resolver=lambda: (
+                "device_1111111111111111",
+                "device_2222222222222222",
+            ),
+        )
+
+        for action_id in ("turn_on", "turn_off", "toggle"):
+            with self.subTest(action_id=action_id):
+                self.assertTrue(
+                    service.is_contextually_dangerous_action(
+                        "main_breaker", action_id
+                    )
+                )
+        self.assertFalse(
+            service.is_contextually_dangerous_action("main_breaker", "press")
+        )
+        self.assertFalse(
+            service.is_contextually_dangerous_action(
+                "selected_socket", "turn_off"
+            )
+        )
+        self.assertFalse(
+            service.is_contextually_dangerous_action(
+                "unselected_breaker", "turn_off"
+            )
+        )
+
+    async def test_energy_breaker_classification_rechecks_refreshed_catalog(
+        self,
+    ) -> None:
+        action = ScenarioDeviceAction(
+            action_id="turn_off",
+            title="turn_off",
+            domain="switch",
+            service="turn_off",
+            allowed_fields=frozenset(),
+        )
+        physical_id = "device_4444444444444444"
+
+        def catalog(physical_name: str, device_type: str) -> ScenarioCatalog:
+            return ScenarioCatalog(
+                devices={
+                    "line_control": ScenarioDeviceEntry(
+                        target_id="line_control",
+                        name=physical_name,
+                        entity_id="switch.line_control",
+                        actions=(action,),
+                        physical_id=physical_id,
+                        physical_name=physical_name,
+                        device_type=device_type,
+                    )
+                },
+                scenarios={},
+            )
+
+        async def refreshed_catalog() -> ScenarioCatalog:
+            return catalog("Автомат кухни", "switch")
+
+        service = ScenarioService(
+            self.hass,
+            _FakeStore(),
+            catalog("Розетка кофемашины", "outlet"),
+            catalog_loader=refreshed_catalog,
+            electrical_breaker_device_ids_resolver=lambda: (physical_id,),
+        )
+
+        self.assertFalse(
+            service.is_contextually_dangerous_action(
+                "line_control", "turn_off"
+            )
+        )
+        await service.async_refresh_catalog()
+        self.assertTrue(
+            service.is_contextually_dangerous_action(
+                "line_control", "turn_off"
+            )
+        )
+
     async def test_release_skips_unrelated_target(self) -> None:
         self.assertIsNone(
             await self.service.async_schedule_intercom_release("device_abc", "turn_on")

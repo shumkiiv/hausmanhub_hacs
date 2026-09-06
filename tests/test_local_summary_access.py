@@ -7288,6 +7288,143 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual(409, stale.status)
         self.assertEqual(0, executions)
 
+    def test_energy_breaker_requires_full_confirmation_and_replays_durably(self) -> None:
+        from custom_components.hausman_hub.application.scenarios import (
+            ScenarioCatalog,
+            ScenarioDeviceAction,
+            ScenarioDeviceEntry,
+        )
+
+        path = "/api/hausman_hub/v1/device-actions"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        tablet = reader_user("system-users")
+        physical_id = "device_5555555555555555"
+        action = ScenarioDeviceAction(
+            action_id="turn_on",
+            title="Включить",
+            domain="switch",
+            service="turn_on",
+            allowed_fields=frozenset(),
+        )
+        service._catalog = ScenarioCatalog(
+            devices={
+                "main_breaker": ScenarioDeviceEntry(
+                    target_id="main_breaker",
+                    name="Вводной автомат · Реле",
+                    entity_id="switch.main_breaker",
+                    actions=(action,),
+                    physical_id=physical_id,
+                    physical_name="Вводной автомат",
+                    device_type="switch",
+                )
+            },
+            scenarios={},
+        )
+        service._electrical_breaker_device_ids_resolver = lambda: (physical_id,)
+        self.hass.states.values["switch.main_breaker"] = SimpleNamespace(
+            state="on",
+            attributes={},
+            last_updated=datetime.now(timezone.utc),
+        )
+        executions = 0
+
+        async def resolve_context(_target_id: str, _action_id: str):
+            return "switch.main_breaker", "switch", ("turn_on",), "turn_on"
+
+        async def is_intercom(_target_id: str, _action_id: str) -> bool:
+            return False
+
+        async def execute_action(
+            target_id: str,
+            action_id: str,
+            _value: object,
+            *,
+            correlation_id: str,
+            request_id: str,
+            dispatch_marker,
+            **_options: object,
+        ) -> dict[str, object]:
+            nonlocal executions
+            executions += 1
+            dispatch_marker()
+            self.hass.states.values["switch.main_breaker"] = SimpleNamespace(
+                state="on",
+                attributes={},
+                last_updated=datetime.now(timezone.utc),
+            )
+            return {
+                "correlationId": correlation_id,
+                "requestId": request_id,
+                "targetId": target_id,
+                "actionId": action_id,
+                "accepted": True,
+                "confirmed": True,
+                "status": "confirmed",
+            }
+
+        service.async_resolve_device_action_context = resolve_context
+        service.async_is_intercom_action = is_intercom
+        service.async_execute_device_action = execute_action
+
+        legacy = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    tablet,
+                    path,
+                    {"targetId": "main_breaker", "actionId": "turn_on"},
+                )
+            )
+        )
+        self.assertEqual(403, legacy.status)
+
+        base = {
+            "contract": {
+                "name": "hausman-hub-device-action-request",
+                "version": 1,
+            },
+            "correlationId": "breaker.on.1",
+            "requestId": "breaker.on.request.1",
+            "targetId": "main_breaker",
+            "actionId": "turn_on",
+            "idempotencyKey": "breaker.on.key.1",
+        }
+
+        def send(payload: dict[str, object]) -> FakeResponse:
+            return asyncio.run(
+                view.post(
+                    FakeJsonRequest(
+                        "192.168.1.20",
+                        tablet,
+                        path,
+                        payload,
+                        content_type="application/vnd.hausmanhub.device-action-request.full+json",
+                        accept="application/vnd.hausmanhub.device-action-receipt.full+json",
+                    )
+                )
+            )
+
+        unconfirmed = send(copy.deepcopy(base))
+        self.assertEqual(409, unconfirmed.status)
+        self.assertEqual(0, executions)
+
+        confirmed_payload = {**base, "confirmedByUser": True}
+        confirmed = send(confirmed_payload)
+        self.assertIn(
+            "breaker.on.key.1",
+            self.hass.data["hausman_hub"]["device_action_idempotency"]._records,
+        )
+        self.assertTrue(
+            service.is_contextually_dangerous_action(
+                "main_breaker", "turn_on"
+            )
+        )
+        replay = send(copy.deepcopy(confirmed_payload))
+        self.assertEqual(200, confirmed.status)
+        self.assertEqual(confirmed.payload, replay.payload)
+        self.assertEqual(1, executions)
+
     def test_full_ordinary_action_replays_without_dispatch(self) -> None:
         views = {view.url: view for view in self.hass.http.views}
         path = "/api/hausman_hub/v1/device-actions"

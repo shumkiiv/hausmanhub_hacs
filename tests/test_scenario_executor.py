@@ -3215,6 +3215,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             power_dependency_resolver=lambda: _power_link(
                 policy="auto_turn_on", warmup_seconds=2
             ),
+            command_guard=lambda _entity_id, _action_id, _automatic: None,
         )
 
         with patch(
@@ -3246,6 +3247,122 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual("on", states["switch.wall"].state)
         sleep.assert_awaited_once_with(2.0)
+
+    async def test_auto_dependency_checks_source_with_automatic_command_guard(
+        self,
+    ) -> None:
+        states = {
+            "light.living_room": SimpleNamespace(state="off", attributes={}),
+            "switch.wall": SimpleNamespace(state="off", attributes={}),
+        }
+        self.hass.states = SimpleNamespace(get=states.get)
+        guard_calls: list[tuple[str, str, bool]] = []
+
+        def command_guard(entity_id: str, action_id: str, automatic: bool) -> None:
+            guard_calls.append((entity_id, action_id, automatic))
+
+        async def apply_service(
+            _domain: str,
+            service: str,
+            data: dict[str, object],
+            *,
+            blocking: bool,
+        ) -> None:
+            self.assertTrue(blocking)
+            if service == "turn_on":
+                states[str(data["entity_id"])] = SimpleNamespace(
+                    state="on", attributes={}
+                )
+
+        self.hass.services.async_call.side_effect = apply_service
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            readback_window_seconds=0.02,
+            readback_interval_seconds=0.01,
+            power_dependency_resolver=lambda: _power_link(policy="auto_turn_on"),
+            command_guard=command_guard,
+        )
+
+        receipt = await executor.async_execute_device_action("device_1", "turn_on")
+
+        self.assertTrue(receipt["accepted"])
+        self.assertIn(("switch.wall", "turn_on", True), guard_calls)
+        self.assertEqual(
+            ["switch.wall", "light.living_room"],
+            [
+                call_item.args[2]["entity_id"]
+                for call_item in self.hass.services.async_call.await_args_list
+            ],
+        )
+
+    async def test_auto_dependency_water_actuator_is_blocked_before_dispatch(
+        self,
+    ) -> None:
+        self.hass.states = SimpleNamespace(
+            get={
+                "light.living_room": SimpleNamespace(state="off", attributes={}),
+                "switch.wall": SimpleNamespace(state="off", attributes={}),
+            }.get
+        )
+
+        def command_guard(entity_id: str, action_id: str, automatic: bool) -> str | None:
+            if (entity_id, action_id, automatic) == (
+                "switch.wall",
+                "turn_on",
+                True,
+            ):
+                return "automatic_water_open_forbidden"
+            return None
+
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            power_dependency_resolver=lambda: _power_link(policy="auto_turn_on"),
+            command_guard=command_guard,
+        )
+
+        receipt = await executor.async_execute_device_action("device_1", "turn_on")
+
+        self.assertFalse(receipt["accepted"])
+        self.assertEqual("automatic_water_open_forbidden", receipt["error"])
+        self.hass.services.async_call.assert_not_awaited()
+
+    async def test_auto_dependency_fails_closed_without_command_guard(self) -> None:
+        states = {
+            "light.living_room": SimpleNamespace(state="off", attributes={}),
+            "switch.wall": SimpleNamespace(state="off", attributes={}),
+        }
+        self.hass.states = SimpleNamespace(get=states.get)
+
+        async def apply_service(
+            _domain: str,
+            service: str,
+            data: dict[str, object],
+            *,
+            blocking: bool,
+        ) -> None:
+            self.assertTrue(blocking)
+            if service == "turn_on":
+                states[str(data["entity_id"])] = SimpleNamespace(
+                    state="on", attributes={}
+                )
+
+        self.hass.services.async_call.side_effect = apply_service
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            power_dependency_resolver=lambda: _power_link(policy="auto_turn_on"),
+        )
+
+        receipt = await executor.async_execute_device_action("device_1", "turn_on")
+
+        self.assertFalse(receipt["accepted"])
+        self.assertEqual("power_source_guard_unavailable", receipt["error"])
+        self.hass.services.async_call.assert_not_awaited()
 
     async def test_effective_power_off_clears_manual_claim_on_first_auto_run(
         self,
@@ -3300,6 +3417,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             ),
             readback_window_seconds=0.02,
             readback_interval_seconds=0.01,
+            command_guard=lambda _entity_id, _action_id, _automatic: None,
         )
 
         result = await executor.async_execute(
@@ -3372,6 +3490,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             power_dependency_resolver=lambda: _power_link(
                 policy="auto_turn_on", warmup_seconds=0
             ),
+            command_guard=lambda _entity_id, _action_id, _automatic: None,
         )
 
         receipt = await executor.async_execute_device_action("device_1", "turn_on")
@@ -3428,6 +3547,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             power_dependency_resolver=lambda: _power_link(
                 policy="auto_turn_on", warmup_seconds=0
             ),
+            command_guard=lambda _entity_id, _action_id, _automatic: None,
         )
 
         receipt = await executor.async_execute_device_action("device_1", "turn_on")
@@ -3512,6 +3632,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             power_dependency_resolver=lambda: _power_link(
                 policy="auto_turn_on", warmup_seconds=0
             ),
+            command_guard=lambda _entity_id, _action_id, _automatic: None,
         )
 
         receipt = await executor.async_execute_device_action("device_1", "turn_on")
@@ -3545,6 +3666,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             self.catalog,
             self.executor._run_callback,
             power_dependency_resolver=lambda: dependencies,
+            command_guard=lambda _entity_id, _action_id, _automatic: None,
         )
         markers: list[str] = []
 
@@ -3579,6 +3701,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             readback_window_seconds=0.01,
             readback_interval_seconds=0.01,
             power_dependency_resolver=lambda: _power_link(policy="auto_turn_on"),
+            command_guard=lambda _entity_id, _action_id, _automatic: None,
         )
         markers: list[str] = []
 
@@ -3642,6 +3765,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             readback_window_seconds=0.02,
             readback_interval_seconds=0.01,
             power_dependency_resolver=lambda: dependencies,
+            command_guard=lambda _entity_id, _action_id, _automatic: None,
         )
         markers: list[str] = []
 
@@ -3709,6 +3833,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             readback_window_seconds=0.02,
             readback_interval_seconds=0.01,
             power_dependency_resolver=lambda: dependencies,
+            command_guard=lambda _entity_id, _action_id, _automatic: None,
         )
 
         with self.assertRaises(PowerSourceDispatchUncertain):
@@ -3757,6 +3882,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             readback_window_seconds=0.02,
             readback_interval_seconds=0.01,
             power_dependency_resolver=lambda: dependencies,
+            command_guard=lambda _entity_id, _action_id, _automatic: None,
         )
 
         with self.assertRaises(PowerSourceDispatchUncertain):

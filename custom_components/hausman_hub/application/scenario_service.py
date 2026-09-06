@@ -9,7 +9,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -66,6 +66,11 @@ _RESTART_ONLY_SYSTEM_SCENARIOS = frozenset(
         "system-tambur-adaptive-controller",
         "system-small-corridor-light-controller",
     }
+)
+_ELECTRICAL_BREAKER_IDENTITY = re.compile(
+    r"(?:^|[\s._/:-])(?:автомат(?:а|у|ом|е|ы|ов|ам|ами|ах)?|"
+    r"circuit[\s._/:-]*breaker|breaker|mcb)(?:$|[\s._/:-])",
+    re.IGNORECASE,
 )
 
 _HEALTH_RECOMMENDATIONS = {
@@ -566,6 +571,9 @@ class ScenarioService:
         monotonic: Callable[[], float] = time.monotonic,
         intercom_release_obligation: IntercomReleaseObligation | None = None,
         manual_light_off_protection: object | None = None,
+        electrical_breaker_device_ids_resolver: (
+            Callable[[], Iterable[str]] | None
+        ) = None,
     ):
         self._hass = hass
         self._store = store
@@ -585,6 +593,9 @@ class ScenarioService:
         self._monotonic = monotonic
         self._intercom_release_obligation = intercom_release_obligation
         self._manual_light_off_protection = manual_light_off_protection
+        self._electrical_breaker_device_ids_resolver = (
+            electrical_breaker_device_ids_resolver
+        )
         self._smart_switch_receipt_consumer: object | None = None
         self._managed_switch_migration_transaction: (
             _ManagedSwitchMigrationTransaction | None
@@ -3822,6 +3833,43 @@ class ScenarioService:
             )
         )
 
+    def is_electrical_breaker_action(
+        self, target_id: str, action_id: str
+    ) -> bool:
+        """Recognize only configured meter devices with breaker identity."""
+
+        if action_id not in {"turn_on", "turn_off", "toggle"}:
+            return False
+        device = self._catalog.device(target_id)
+        action = device.action(action_id) if device is not None else None
+        if device is None or action is None or action.domain != "switch":
+            return False
+        resolver = getattr(
+            self,
+            "_electrical_breaker_device_ids_resolver",
+            None,
+        )
+        if not callable(resolver):
+            return False
+        try:
+            configured_ids = {
+                value for value in resolver() if isinstance(value, str)
+            }
+        except Exception:  # noqa: BLE001
+            return False
+        if device.physical_id not in configured_ids:
+            return False
+        identity = " ".join(
+            str(value or "")
+            for value in (
+                device.physical_name,
+                device.name,
+                device.entity_id,
+                device.device_type,
+            )
+        )
+        return _ELECTRICAL_BREAKER_IDENTITY.search(identity) is not None
+
     def is_contextually_dangerous_action(
         self, target_id: str, action_id: str
     ) -> bool:
@@ -3830,6 +3878,8 @@ class ScenarioService:
         return self._is_intercom_action(
             target_id, action_id
         ) or self.is_external_cover_action(
+            target_id, action_id
+        ) or self.is_electrical_breaker_action(
             target_id, action_id
         )
 

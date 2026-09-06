@@ -227,6 +227,47 @@ def get_payloads(
     }
 
 
+def control_channel_payloads() -> dict:
+    options = copy.deepcopy(DRAFT_OPTIONS)
+    air_conditioner = next(
+        candidate
+        for candidate in options["devices"]
+        if candidate["candidate_id"] == "candidate_ac"
+    )
+    air_conditioner["device_group_id"] = "device_air_conditioner"
+    payloads = get_payloads(options=options)
+    payloads["hausman_hub/v1/dashboard"] = {
+        "devices": [
+            {
+                "id": "device_air_conditioner",
+                "physicalId": "device_air_conditioner",
+                "entityId": "climate.living_room",
+                "name": "Кондиционер",
+                "attributes": {"temperature": 25.0},
+                "details": [],
+            }
+        ]
+    }
+    payloads["hausman_hub/v1/admin/scenarios"] = {"scenarios": []}
+    payloads["hausman_hub/v1/admin/scenarios/catalog"] = {
+        "devices": [
+            {
+                "target_id": "entity_air_conditioner",
+                "entity_id": "climate.living_room",
+                "name": "Кондиционер",
+                "actions": [
+                    {
+                        "action_id": "set_temperature",
+                        "title": "Температура",
+                        "allowed_fields": ["value"],
+                    }
+                ],
+            }
+        ]
+    }
+    return payloads
+
+
 def universal_ir_setup() -> dict:
     setup = copy.deepcopy(NOT_CONFIGURED_SETUP)
     setup["rooms"] = [
@@ -496,8 +537,8 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
       const postIndexes = {{}};
       const calls = [];
       const hass = {{
-        callApi: (method, path, payload) => {{
-          calls.push({{ method, path, payload }});
+        callApi: (method, path, payload, headers) => {{
+          calls.push({{ method, path, payload, headers }});
           if (method === "GET") {{
             if (!(path in getTable)) return Promise.reject(new Error("unexpected GET " + path));
             const result = getTable[path];
@@ -769,45 +810,8 @@ class PanelContourWizardTest(unittest.TestCase):
         self.assertEqual(0, completed.returncode, completed.stderr)
 
     def test_control_channel_is_explained_recommended_and_safely_confirmed(self) -> None:
-        options = copy.deepcopy(DRAFT_OPTIONS)
-        air_conditioner = next(
-            candidate
-            for candidate in options["devices"]
-            if candidate["candidate_id"] == "candidate_ac"
-        )
-        air_conditioner["device_group_id"] = "device_air_conditioner"
-        payloads = get_payloads(options=options)
-        payloads["hausman_hub/v1/dashboard"] = {
-            "devices": [
-                {
-                    "id": "device_air_conditioner",
-                    "physicalId": "device_air_conditioner",
-                    "entityId": "climate.living_room",
-                    "name": "Кондиционер",
-                    "attributes": {"temperature": 25.0},
-                    "details": [],
-                }
-            ]
-        }
-        payloads["hausman_hub/v1/admin/scenarios"] = {"scenarios": []}
-        payloads["hausman_hub/v1/admin/scenarios/catalog"] = {
-            "devices": [
-                {
-                    "target_id": "entity_air_conditioner",
-                    "entity_id": "climate.living_room",
-                    "name": "Кондиционер",
-                    "actions": [
-                        {
-                            "action_id": "set_temperature",
-                            "title": "Температура",
-                            "allowed_fields": ["value"],
-                        }
-                    ],
-                }
-            ]
-        }
         script = panel_script(
-            payloads,
+            control_channel_payloads(),
             {
                 "hausman_hub/v1/device-actions": {
                     "accepted": True,
@@ -862,6 +866,22 @@ class PanelContourWizardTest(unittest.TestCase):
           || commands[0].payload.value !== 25.5 || commands[1].payload.value !== 25) {
           throw new Error("reversible channel test did not probe and restore the setpoint");
         }
+        const fullContentType = "application/vnd.hausmanhub.device-action-request.full+json";
+        const fullAccept = "application/vnd.hausmanhub.device-action-receipt.full+json";
+        if (commands.some((command) => (
+          command.headers?.["Content-Type"] !== fullContentType
+          || command.headers?.Accept !== fullAccept
+          || command.payload.contract?.name !== "hausman-hub-device-action-request"
+          || command.payload.contract?.version !== 1
+          || typeof command.payload.requestId !== "string"
+          || command.payload.idempotencyKey !== `confirmed.${command.payload.requestId}`
+          || typeof command.payload.correlationId !== "string"))) {
+          throw new Error("reversible channel test did not use the full physical-action protocol");
+        }
+        if (commands[0].payload.requestId === commands[1].payload.requestId
+          || commands[0].payload.idempotencyKey === commands[1].payload.idempotencyKey) {
+          throw new Error("probe and restore reused durable request identity");
+        }
         if (!textOf(assistant).includes("Канал работает")
           || !textOf(assistant).includes("возврат исходной")) {
           throw new Error("confirmed read-back was not shown honestly");
@@ -892,6 +912,167 @@ class PanelContourWizardTest(unittest.TestCase):
           || !reviewText.includes("подтвердите физическую реакцию")
           || reviewText.includes("0 из 1 подтверждено")) {
           throw new Error("room review presented a one-way IR channel as automatically testable");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_control_channel_does_not_restore_an_unconfirmed_probe(self) -> None:
+        script = panel_script(
+            control_channel_payloads(),
+            {
+                "hausman_hub/v1/device-actions": {
+                    "accepted": True,
+                    "confirmed": False,
+                    "status": "pending",
+                }
+            },
+            """
+        const choice = {
+          candidate: { device_group_id: "device_air_conditioner" },
+          device: { channel: "direct_wifi" },
+          type: "air_conditioner",
+        };
+        const result = await panel._testFirstRunControlChannel(choice);
+        const commands = calls.filter((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/device-actions");
+        if (commands.length !== 1) {
+          throw new Error("an unconfirmed probe triggered a compensating command");
+        }
+        if (result.status !== "pending" || !result.detail.includes("не отправлена")) {
+          throw new Error("uncertain probe outcome was not explained safely: "
+            + JSON.stringify(result));
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_control_channel_probe_error_never_sends_restore(self) -> None:
+        script = panel_script(
+            control_channel_payloads(),
+            {"hausman_hub/v1/device-actions": {"__fail": 503}},
+            """
+        const choice = {
+          candidate: { device_group_id: "device_air_conditioner" },
+          device: { channel: "direct_wifi" },
+          type: "air_conditioner",
+        };
+        const result = await panel._testFirstRunControlChannel(choice);
+        const commands = calls.filter((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/device-actions");
+        if (commands.length !== 1) {
+          throw new Error("a pre-dispatch probe error triggered restore or retry");
+        }
+        if (result.status !== "failed" || !result.detail.includes("Возврат не отправлялся")) {
+          throw new Error("probe failure did not explain that restore was skipped: "
+            + JSON.stringify(result));
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_control_channel_dispatch_unknown_restore_is_read_only_refreshed(self) -> None:
+        script = panel_script(
+            control_channel_payloads(),
+            {
+                "hausman_hub/v1/device-actions": {
+                    "accepted": True,
+                    "confirmed": True,
+                    "status": "confirmed",
+                }
+            },
+            """
+        const choice = {
+          candidate: { device_group_id: "device_air_conditioner" },
+          device: { channel: "direct_wifi" },
+          type: "air_conditioner",
+        };
+        const originalCallApi = panel._hass.callApi;
+        let actionAttempts = 0;
+        let refreshes = 0;
+        panel._load = async () => { refreshes += 1; };
+        panel._hass.callApi = async (method, path, payload, headers) => {
+          if (method === "POST" && path === "hausman_hub/v1/device-actions") {
+            actionAttempts += 1;
+            if (actionAttempts === 2) {
+              await originalCallApi(method, path, payload, headers);
+              const error = new Error("restore result unknown");
+              error.status = 409;
+              error.body = {
+                contract: { name: "hausman-hub-error", version: 1 },
+                code: "conflict",
+                details: {
+                  detailCode: "idempotency_in_progress",
+                  state: "dispatch_unknown",
+                  automaticRetryAllowed: false,
+                },
+              };
+              throw error;
+            }
+          }
+          return originalCallApi(method, path, payload, headers);
+        };
+        const result = await panel._testFirstRunControlChannel(choice);
+        const commands = calls.filter((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/device-actions");
+        if (commands.length !== 2 || actionAttempts !== 2) {
+          throw new Error("dispatch_unknown restore was posted more than once");
+        }
+        if (refreshes !== 1) throw new Error("dispatch_unknown did not trigger read refresh");
+        if (result.status !== "failed" || !result.detail.includes("новое действие")) {
+          throw new Error("dispatch_unknown did not require a new user action: "
+            + JSON.stringify(result));
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_control_channel_restore_error_policy_does_not_retry_physical_post(self) -> None:
+        script = panel_script(
+            control_channel_payloads(),
+            {
+                "hausman_hub/v1/device-actions": {
+                    "accepted": True,
+                    "confirmed": True,
+                    "status": "confirmed",
+                }
+            },
+            """
+        const choice = {
+          candidate: { device_group_id: "device_air_conditioner" },
+          device: { channel: "direct_wifi" },
+          type: "air_conditioner",
+        };
+        const originalCallApi = panel._hass.callApi;
+        let actionAttempts = 0;
+        let refreshes = 0;
+        panel._load = async () => { refreshes += 1; };
+        panel._hass.callApi = async (method, path, payload, headers) => {
+          if (method === "POST" && path === "hausman_hub/v1/device-actions") {
+            actionAttempts += 1;
+            if (actionAttempts === 2) {
+              await originalCallApi(method, path, payload, headers);
+              const error = new Error("restore unavailable before dispatch");
+              error.status = 503;
+              throw error;
+            }
+          }
+          return originalCallApi(method, path, payload, headers);
+        };
+        const result = await panel._testFirstRunControlChannel(choice);
+        const commands = calls.filter((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/device-actions");
+        if (commands.length !== 2 || actionAttempts !== 2) {
+          throw new Error("restore error policy retried a physical POST");
+        }
+        if (refreshes !== 1) throw new Error("restore error did not refresh device state");
+        if (result.status !== "failed" || !result.detail.includes("Автоматический повтор")) {
+          throw new Error("restore error did not explain the no-retry policy: "
+            + JSON.stringify(result));
         }
             """,
         )
