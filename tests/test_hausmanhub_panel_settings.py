@@ -62,6 +62,7 @@ WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
 MEDIA_DEVICE_JS = PANEL_JS.with_name("hausman-hub-media-device.js")
 DEVICE_CARD_JS = PANEL_JS.with_name("hausman-hub-device-card.js")
 DEVICE_CONTROLS_JS = PANEL_JS.with_name("hausman-hub-device-controls.js")
+DEVICE_ACTIONS_JS = PANEL_JS.with_name("hausman-hub-device-actions.js")
 SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
 SCENARIO_AI_JS = PANEL_JS.with_name("hausman-hub-scenario-ai.js")
 SCENARIO_CATALOG_JS = PANEL_JS.with_name("hausman-hub-scenario-catalog.js")
@@ -774,6 +775,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(CORRELATION_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(CORRELATION_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(DEVICE_ACTIONS_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(DEVICE_ACTIONS_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(PAGINATION_JS)!r}, "utf8").replace(/export /g, ""),
@@ -1743,9 +1748,13 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         panel._scenarios.catalog = { devices: [{
           entity_id: "switch.kitchen_breaker",
           target_id: "target-kitchen-breaker",
+          physical_id: "device_0123456789abcdef",
+          physical_name: "Автомат кухни",
+          name: "Автомат кухни",
+          device_type: "switch",
           actions: [
-            { action_id: "turn_on", title: "Включить", allowed_fields: [] },
-            { action_id: "turn_off", title: "Выключить", allowed_fields: [] },
+            { action_id: "turn_on", title: "Включить", domain: "switch", service: "turn_on", allowed_fields: [] },
+            { action_id: "turn_off", title: "Выключить", domain: "switch", service: "turn_off", allowed_fields: [] },
           ],
         }] };
         panel._renderEnergySection(panel._shell.homeSections.energy);
@@ -1783,6 +1792,210 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
             """,
             before_panel='setWindowLocation("https://homeassistant.local/hausman-hub?hh_section=energy");',
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_energy_breaker_power_actions_use_confirmed_full_protocol(self) -> None:
+        script = panel_script(
+            dict(GET_PATHS),
+            {"hausman_hub/v1/device-actions": {"status": "confirmed"}},
+            """
+        const physicalId = "device_breaker_232";
+        const source = {
+          id: physicalId,
+          deviceId: physicalId,
+          name: "Линия кухни",
+          available: true,
+          powered: true,
+        };
+        panel._homeDashboard = {
+          devices: [{
+            id: physicalId,
+            physicalId,
+            entityId: "switch.kitchen_line",
+            name: "Линия кухни",
+            domain: "switch",
+            model: "Smart relay",
+            details: [],
+          }],
+          energy: {
+            selectedSourceIds: [physicalId],
+            sources: [source],
+          },
+        };
+        panel._scenarios.catalog = { devices: [{
+          target_id: "target-breaker-232",
+          entity_id: "switch.kitchen_line",
+          physical_id: physicalId,
+          physical_name: "Автомат 232",
+          name: "Канал питания",
+          device_type: "switch",
+          actions: ["turn_on", "turn_off", "toggle"].map((actionId) => ({
+            action_id: actionId,
+            title: actionId,
+            domain: "switch",
+            service: actionId,
+            allowed_fields: [],
+          })),
+        }] };
+        panel._load = async () => {};
+        const confirmations = [];
+        window.confirm = (message) => { confirmations.push(message); return true; };
+        const before = calls.length;
+        for (const actionId of ["turn_on", "turn_off", "toggle"]) {
+          await runEnergyPowerAction(panel, source, actionId);
+        }
+        const commands = calls.slice(before).filter((call) =>
+          call.method === "POST" && call.path === "hausman_hub/v1/device-actions");
+        if (confirmations.length !== 3
+          || !confirmations.some((message) => message.includes("будет подано"))
+          || !confirmations.some((message) => message.includes("будет снято"))
+          || !confirmations.some((message) => message.includes("изменится"))) {
+          throw new Error("every breaker power action needs a clear confirmation: "
+            + JSON.stringify(confirmations));
+        }
+        if (commands.length !== 3) {
+          throw new Error("confirmed breaker actions mismatch: " + commands.length);
+        }
+        for (const [index, actionId] of ["turn_on", "turn_off", "toggle"].entries()) {
+          const command = commands[index];
+          if (command.payload.targetId !== "target-breaker-232"
+            || command.payload.actionId !== actionId
+            || command.payload.confirmedByUser !== true
+            || command.payload.contract?.name !== "hausman-hub-device-action-request"
+            || command.payload.contract?.version !== 1
+            || typeof command.payload.requestId !== "string"
+            || command.payload.idempotencyKey !== `confirmed.${command.payload.requestId}`
+            || command.headers?.["Content-Type"]
+              !== "application/vnd.hausmanhub.device-action-request.full+json"
+            || command.headers?.Accept
+              !== "application/vnd.hausmanhub.device-action-receipt.full+json") {
+            throw new Error("breaker command did not use confirmed full protocol: "
+              + JSON.stringify(command));
+          }
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_cancelled_energy_breaker_actions_send_no_post(self) -> None:
+        script = panel_script(
+            dict(GET_PATHS),
+            {"hausman_hub/v1/device-actions": {"status": "confirmed"}},
+            """
+        const physicalId = "device_breaker_233";
+        const source = {
+          id: physicalId,
+          deviceId: physicalId,
+          name: "Ввод кухни",
+          available: true,
+          powered: true,
+        };
+        panel._homeDashboard = {
+          devices: [{
+            id: physicalId,
+            physicalId,
+            entityId: "switch.kitchen_input",
+            name: "Ввод кухни",
+            domain: "switch",
+            model: "Smart relay",
+            details: [],
+          }],
+          energy: {
+            selectedSourceIds: [physicalId],
+            sources: [source],
+          },
+        };
+        panel._scenarios.catalog = { devices: [{
+          target_id: "target-breaker-233",
+          entity_id: "switch.kitchen_input",
+          physical_id: physicalId,
+          physical_name: "Автомат 233",
+          name: "Канал питания",
+          device_type: "switch",
+          actions: ["turn_on", "turn_off", "toggle"].map((actionId) => ({
+            action_id: actionId,
+            title: actionId,
+            domain: "switch",
+            service: actionId,
+            allowed_fields: [],
+          })),
+        }] };
+        const confirmations = [];
+        window.confirm = (message) => { confirmations.push(message); return false; };
+        const before = calls.length;
+        for (const actionId of ["turn_on", "turn_off", "toggle"]) {
+          runEnergyPowerAction(panel, source, actionId);
+          await tick();
+        }
+        const commands = calls.slice(before).filter((call) =>
+          call.method === "POST" && call.path === "hausman_hub/v1/device-actions");
+        if (confirmations.length !== 3 || commands.length !== 0) {
+          throw new Error("cancelled breaker actions must not reach the API: "
+            + JSON.stringify({ confirmations, commands }));
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_energy_breaker_identity_comes_from_server_catalog(self) -> None:
+        script = panel_script(
+            dict(GET_PATHS),
+            {"hausman_hub/v1/device-actions": {"status": "confirmed"}},
+            """
+        const physicalId = "device_regular_socket";
+        const source = {
+          id: physicalId,
+          deviceId: physicalId,
+          name: "Автомат на стойке",
+          available: true,
+          powered: true,
+        };
+        panel._homeDashboard = {
+          devices: [{
+            id: physicalId,
+            physicalId,
+            entityId: "switch.coffee_socket",
+            name: "Автомат на стойке",
+            domain: "switch",
+            model: "DIN RCBO styled socket",
+            details: [],
+          }],
+          energy: {
+            selectedSourceIds: [physicalId],
+            sources: [source],
+          },
+        };
+        panel._scenarios.catalog = { devices: [{
+          target_id: "target-regular-socket",
+          entity_id: "switch.coffee_socket",
+          physical_id: physicalId,
+          physical_name: "Розетка кофемашины",
+          name: "Розетка кофемашины",
+          device_type: "outlet",
+          actions: [{
+            action_id: "turn_off",
+            title: "Выключить",
+            domain: "switch",
+            service: "turn_off",
+            allowed_fields: [],
+          }],
+        }] };
+        let confirmations = 0;
+        window.confirm = () => { confirmations += 1; return false; };
+        const before = calls.length;
+        runEnergyPowerAction(panel, source, "turn_off");
+        await tick(10);
+        const command = calls.slice(before).find((call) =>
+          call.method === "POST" && call.path === "hausman_hub/v1/device-actions");
+        if (confirmations !== 0 || !command || command.payload.confirmedByUser === true) {
+          throw new Error("dashboard text must not promote a catalog socket to breaker: "
+            + JSON.stringify({ confirmations, command }));
+        }
+            """,
         )
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)

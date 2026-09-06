@@ -72,6 +72,7 @@ WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
 MEDIA_DEVICE_JS = PANEL_JS.with_name("hausman-hub-media-device.js")
 DEVICE_CARD_JS = PANEL_JS.with_name("hausman-hub-device-card.js")
 DEVICE_CONTROLS_JS = PANEL_JS.with_name("hausman-hub-device-controls.js")
+DEVICE_ACTIONS_JS = PANEL_JS.with_name("hausman-hub-device-actions.js")
 DEVICE_CONTROLS_CSS = PANEL_JS.with_name("hausman-hub-device-controls.css")
 DEVICE_CARD_CSS = PANEL_JS.with_name("hausman-hub-device-card.css")
 SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
@@ -228,6 +229,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         media_device = MEDIA_DEVICE_JS.read_text(encoding="utf-8")
         device_card = DEVICE_CARD_JS.read_text(encoding="utf-8")
         device_controls = DEVICE_CONTROLS_JS.read_text(encoding="utf-8")
+        device_actions = DEVICE_ACTIONS_JS.read_text(encoding="utf-8")
         device_controls_css = DEVICE_CONTROLS_CSS.read_text(encoding="utf-8")
         device_card_css = DEVICE_CARD_CSS.read_text(encoding="utf-8")
         scenarios = SCENARIOS_JS.read_text(encoding="utf-8")
@@ -291,6 +293,8 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         )
         self.assertLessEqual(len(device_card.encode("utf-8")), 24 * 1024)
         self.assertLessEqual(len(device_controls.encode("utf-8")), 12 * 1024)
+        self.assertLessEqual(len(device_actions.encode("utf-8")), 8 * 1024)
+        self.assertIn("hausman-hub-device-actions.js?v=1.52.225", content)
         self.assertLessEqual(len(device_controls_css.encode("utf-8")), 6 * 1024)
         self.assertLessEqual(len(device_card_css.encode("utf-8")), 14 * 1024)
         self.assertLessEqual(len(scenarios.encode("utf-8")), MAX_SCENARIOS_JS_BYTES)
@@ -1019,10 +1023,12 @@ class PanelJavaScriptContractTest(unittest.TestCase):
 
         self.assertEqual(0, completed.returncode, completed.stderr)
         panel = PANEL_JS.read_text(encoding="utf-8")
+        device_actions = DEVICE_ACTIONS_JS.read_text(encoding="utf-8")
         correlation = CORRELATION_JS.read_text(encoding="utf-8")
-        self.assertIn('globalThis.confirm("Открыть дверь домофона?")', panel)
-        self.assertIn("payload.confirmedByUser = true", panel)
-        self.assertIn("fullDeviceActionRequest(payload", panel)
+        self.assertIn('globalThis.confirm("Открыть дверь домофона?")', device_actions)
+        self.assertIn("payload.confirmedByUser = true", device_actions)
+        self.assertIn("fullDeviceActionRequest(payload", device_actions)
+        self.assertIn("return executeDeviceAction(this", panel)
         self.assertIn("hausmanhub.device-action-request.full+json", correlation)
         self.assertIn("hausmanhub.device-action-receipt.full+json", correlation)
 
@@ -1207,7 +1213,10 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             rooms_styles,
         )
         self.assertIn("почасовые значения", ENERGY_JS.read_text(encoding="utf-8"))
-        self.assertIn("Питание подключённой линии будет снято", ENERGY_JS.read_text(encoding="utf-8"))
+        self.assertIn(
+            "Питание подключённой линии будет снято",
+            DEVICE_ACTIONS_JS.read_text(encoding="utf-8"),
+        )
         self.assertIn("Фактические данные Recorder Home Assistant", ENERGY_JS.read_text(encoding="utf-8"))
         self.assertIn("подтверждение|ожида", FEEDBACK_JS.read_text(encoding="utf-8"))
         self.assertIn("&& !this._deviceBindings.error", content)
@@ -1699,6 +1708,10 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             {{ filename: {str(CORRELATION_JS)!r} }}
           );
           vm.runInThisContext(
+            fs.readFileSync({str(DEVICE_ACTIONS_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
+            {{ filename: {str(DEVICE_ACTIONS_JS)!r} }}
+          );
+          vm.runInThisContext(
             fs.readFileSync({str(PAGINATION_JS)!r}, "utf8").replace(/export /g, ""),
             {{ filename: {str(PAGINATION_JS)!r} }}
           );
@@ -1885,6 +1898,10 @@ THEME_TEST_HARNESS = """
     { filename: __CORRELATION_JS__ }
   );
   vm.runInThisContext(
+    fs.readFileSync(__DEVICE_ACTIONS_JS__, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
+    { filename: __DEVICE_ACTIONS_JS__ }
+  );
+  vm.runInThisContext(
     fs.readFileSync(__PAGINATION_JS__, "utf8").replace(/export /g, ""),
     { filename: __PAGINATION_JS__ }
   );
@@ -1965,6 +1982,7 @@ class PanelThemeSwitcherTest(unittest.TestCase):
         script = script.replace("__FEEDBACK_JS__", repr(str(FEEDBACK_JS)))
         script = script.replace("__COMMAND_FEEDBACK_JS__", repr(str(COMMAND_FEEDBACK_JS)))
         script = script.replace("__CORRELATION_JS__", repr(str(CORRELATION_JS)))
+        script = script.replace("__DEVICE_ACTIONS_JS__", repr(str(DEVICE_ACTIONS_JS)))
         script = script.replace("__PAGINATION_JS__", repr(str(PAGINATION_JS)))
         return subprocess.run(
             ("node", "--input-type=commonjs", "--eval", script),

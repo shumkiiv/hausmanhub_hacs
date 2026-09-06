@@ -44,6 +44,7 @@ TECHNICAL_LOG_JS = PANEL_JS.with_name("hausman-hub-technical-log.js")
 FEEDBACK_JS = PANEL_JS.with_name("hausman-hub-feedback.js")
 COMMAND_FEEDBACK_JS = PANEL_JS.with_name("hausman-hub-command-feedback.js")
 DEVICE_CONTROLS_JS = PANEL_JS.with_name("hausman-hub-device-controls.js")
+DEVICE_ACTIONS_JS = PANEL_JS.with_name("hausman-hub-device-actions.js")
 ERROR_TAXONOMY_JS = PANEL_JS.with_name("hausman-hub-error-taxonomy.js")
 UI_STATE_JS = PANEL_JS.with_name("hausman-hub-ui-state.js")
 DEVICE_FEATURES_JS = PANEL_JS.with_name("hausman-hub-device-features.js")
@@ -515,6 +516,10 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
       vm.runInThisContext(
         fs.readFileSync({str(CORRELATION_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(CORRELATION_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(DEVICE_ACTIONS_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(DEVICE_ACTIONS_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(PAGINATION_JS)!r}, "utf8").replace(/export /g, ""),

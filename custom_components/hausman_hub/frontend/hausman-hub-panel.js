@@ -28,12 +28,13 @@ import { formatUpcomingCountdown, renderOverviewContent, renderOverviewHero } fr
 import { renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.225";
 import { applyIntents } from "./hausman-hub-harness-intents.js?v=1.52.225";
 import { deviceActionInitialValue } from "./hausman-hub-device-controls.js?v=1.52.225";
+import { catalogTargets, deviceActionReceiptText, executeDeviceAction } from "./hausman-hub-device-actions.js?v=1.52.225";
 import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.225";
 import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.225";
 import { applyCommandActivity, applyCommandTarget, captureCommandIntent } from "./hausman-hub-command-feedback.js?v=1.52.225";
 import { apiErrorMessage, resolveApiError } from "./hausman-hub-error-taxonomy.js?v=1.52.225";
 import { canExecuteCommand, loadingUiState, offlineUiState, staleUiState } from "./hausman-hub-ui-state.js?v=1.52.225";
-import { filterCatalogActions, loadDeviceFeatureMatrix } from "./hausman-hub-device-features.js?v=1.52.225";
+import { loadDeviceFeatureMatrix } from "./hausman-hub-device-features.js?v=1.52.225";
 import { fullDeviceActionRequest, withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.225";
 import { createEventStreamClient, createFetchEventSource, EVENT_STREAM_PATH, recordActivityEvent, resolveEventStreamToken } from "./hausman-hub-pagination.js?v=1.52.225";
 import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.225";
@@ -1005,19 +1006,7 @@ class HausmanHubPanel extends HTMLElement {
     await this._load();
   }
 
-  _receiptText(receipt) {
-    const statuses = {
-      confirmed: "Применено и подтверждено наблюдением.",
-      pending: "Команды отправлены, подтверждение ещё проверяется.",
-      partial: "Применено частично.",
-      unavailable: "Состояние климатического контура недоступно.",
-      up_to_date: "Состояние уже соответствует сохранённому.",
-      denied: "Действие отклонено защитой.",
-      failed: "Действие не выполнено.",
-    };
-    const status = receipt && typeof receipt.status === "string" ? receipt.status : "";
-    return statuses[status] || `Статус операции: ${status || "неизвестен"}.`;
-  }
+  _receiptText(receipt) { return deviceActionReceiptText(receipt); }
 
   _names(section, code) {
     const names = this._data && this._data.snapshot && this._data.snapshot.display_names;
@@ -5941,20 +5930,7 @@ class HausmanHubPanel extends HTMLElement {
   }
 
   _catalogTargets(device) {
-    const catalog = this._scenarios.catalog && Array.isArray(this._scenarios.catalog.devices)
-      ? this._scenarios.catalog.devices : [];
-    const entityIds = new Set([device.entityId].concat(
-      Array.isArray(device.details) ? device.details.map((item) => item.entityId) : []
-    ).filter(Boolean));
-    const matrix = this._deviceFeatures && this._deviceFeatures.matrix;
-    const deviceType = String(device && device.domain
-      || String(device && device.entityId || "").split(".")[0] || "");
-    return catalog.filter((target) => entityIds.has(target.entity_id))
-      .map((target) => ({
-        ...target,
-        actions: filterCatalogActions(matrix, deviceType, target.actions),
-      }))
-      .filter((target) => target.actions.length);
+    return catalogTargets(this, device);
   }
 
   _renderHomeSection(sectionId, container) {
@@ -6090,50 +6066,7 @@ class HausmanHubPanel extends HTMLElement {
   }
 
   async _executeDeviceAction(targetId, actionId, value, options = {}) {
-    if (this._busy || !this._hass) return;
-    const configuredIntercom = this._tabletProfile?.settings?.intercom?.deviceId;
-    const catalog = this._scenarios.catalog && Array.isArray(this._scenarios.catalog.devices)
-      ? this._scenarios.catalog.devices : [];
-    const intercom = configuredIntercom
-      ? resolveIntercomQuickAction(this._homeDevices("devices"), catalog, configuredIntercom)
-      : null;
-    const isIntercom = intercom?.targetId === targetId && intercom?.actionId === actionId;
-    if (isIntercom && options.confirmedByUser !== true && options.dryRun !== true) {
-      if (typeof globalThis.confirm !== "function"
-          || !globalThis.confirm("Открыть дверь домофона?")) {
-        this._notice = "Открытие домофона отменено.";
-        this._render();
-        return;
-      }
-      options = { ...options, confirmedByUser: true };
-    }
-    this._busy = true;
-    this._notice = "";
-    this._render();
-    try {
-      let payload = { targetId, actionId };
-      if (value !== null && value !== undefined) payload.value = value;
-      if (options.confirmedByUser === true) payload.confirmedByUser = true;
-      if (options.dryRun === true) payload.dryRun = true;
-      let headers;
-      if (options.dryRun !== true) {
-        ({ payload, headers } = fullDeviceActionRequest(payload, requestId("device-action")));
-      }
-      const receipt = await this._hass.callApi(
-        "POST",
-        DEVICE_ACTIONS_API,
-        withCorrelationId(DEVICE_ACTIONS_API, payload),
-        headers,
-      );
-      this._notice = this._receiptText(receipt);
-      this._error = false;
-    } catch (error) {
-      this._notice = apiErrorMessage(error);
-      this._error = false;
-    } finally {
-      this._busy = false;
-      await this._load();
-    }
+    return executeDeviceAction(this, targetId, actionId, value, options);
   }
 
   _renderScenarios(container) {

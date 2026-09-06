@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = ROOT / "custom_components" / "hausman_hub" / "frontend"
 CORRELATION_JS = FRONTEND_DIR / "hausman-hub-correlation.js"
 PANEL_JS = FRONTEND_DIR / "hausman-hub-panel.js"
+DEVICE_ACTIONS_JS = FRONTEND_DIR / "hausman-hub-device-actions.js"
 CLIMATE_OVERVIEW_JS = FRONTEND_DIR / "hausman-hub-climate-overview.js"
 DEVICE_INVENTORY_JS = FRONTEND_DIR / "hausman-hub-device-inventory.js"
 DEVICE_DISCOVERY_JS = FRONTEND_DIR / "hausman-hub-device-discovery.js"
@@ -386,13 +387,20 @@ class FrontendCorrelationSurfacesTest(unittest.TestCase):
 
     def test_panel_wiring_uses_correlation_module(self) -> None:
         panel_source = PANEL_JS.read_text(encoding="utf-8")
+        device_actions_source = DEVICE_ACTIONS_JS.read_text(encoding="utf-8")
         climate_source = CLIMATE_OVERVIEW_JS.read_text(encoding="utf-8")
         inventory_source = DEVICE_INVENTORY_JS.read_text(encoding="utf-8")
         discovery_source = DEVICE_DISCOVERY_JS.read_text(encoding="utf-8")
 
         self.assertIn('from "./hausman-hub-correlation.js?v=', panel_source)
         self.assertIn("withCorrelationId(path, payload)", panel_source)
-        self.assertIn("withCorrelationId(DEVICE_ACTIONS_API, payload)", panel_source)
+        self.assertIn(
+            'from "./hausman-hub-correlation.js?v=', device_actions_source
+        )
+        self.assertIn(
+            "withCorrelationId(DEVICE_ACTION_EXECUTOR_API, payload)",
+            device_actions_source,
+        )
         self.assertIn('from "./hausman-hub-correlation.js?v=', climate_source)
         self.assertEqual(4, climate_source.count("withCorrelationId(CLIMATE_ACTION_API"))
         self.assertIn('from "./hausman-hub-correlation.js?v=', inventory_source)

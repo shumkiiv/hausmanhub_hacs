@@ -3,6 +3,7 @@ import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.225";
 import { energySettingsDraft, energySettingsSaveDisabled, loadEnergyMeter, meterConfigured, meterNumber, renderEnergyAnomalyFields, renderEnergyMeterCard } from "./hausman-hub-energy-meter.js?v=1.52.225";
 import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.225";
 import { mergeEnergyHistoryResponses, splitEnergyWindows } from "./hausman-hub-pagination.js?v=1.52.225";
+import { breakerConfirmation, configuredElectricalBreaker } from "./hausman-hub-device-actions.js?v=1.52.225";
 
 const number = (value, digits = 1) => Number.isFinite(Number(value))
   ? new Intl.NumberFormat("ru-RU", { maximumFractionDigits: digits }).format(Number(value))
@@ -121,11 +122,10 @@ function energyPowerAction(panel, source, actionId) {
 function runEnergyPowerAction(panel, source, actionId) {
   const item = energyPowerAction(panel, source, actionId);
   if (!item || !source.available || panel._busy) return;
-  const device = sourceDevice(panel, source);
-  const breaker = /автомат|breaker|rcbo|mcb|din/i.test(`${source.name} ${device && device.model || ""}`);
-  if (actionId === "turn_off" && breaker
-      && !window.confirm(`Отключить «${source.name}»? Питание подключённой линии будет снято.`)) return;
-  panel._executeDeviceAction(item.target.target_id, actionId, null);
+  const breaker = configuredElectricalBreaker(panel, source, item);
+  if (breaker && !window.confirm(breakerConfirmation(source, actionId))) return;
+  return panel._executeDeviceAction(item.target.target_id, actionId, null,
+    breaker ? { confirmedByUser: true } : {});
 }
 
 function openEnergyDetails(panel, view = "overview", sourceId = null) {
@@ -309,7 +309,7 @@ function renderDeviceDetail(panel, container, body, source, deps) {
     : "Управление недоступно, пока устройство не вернётся в сеть."));
   const controls = el("div", "energy-power-actions");
   let controlCount = 0;
-  [["turn_on", "Включить"], ["turn_off", "Отключить"]].forEach(([actionId, label]) => {
+  [["turn_on", "Включить"], ["turn_off", "Отключить"], ["toggle", "Переключить"]].forEach(([actionId, label]) => {
     const item = energyPowerAction(panel, source, actionId);
     if (!item) return;
     const button = el("button", actionId === "turn_off" ? "secondary is-danger" : "secondary", label);
@@ -442,7 +442,7 @@ function renderEnergyDevices(panel, container, sources, deps) {
       quick.type="button";
       quick.disabled=panel._busy||!source.available;
       quick.dataset.harnessKey=`device:${action.target.target_id}:${actionId}`;
-      quick.dataset.harnessIntent=actionId==="turn_off"&&/автомат|breaker|rcbo|mcb|din/i.test(`${source.name} ${device&&device.model||""}`)?"blocked":"command";
+      quick.dataset.harnessIntent=configuredElectricalBreaker(panel,source,action)?"blocked":"command";
       setAttr(quick, "aria-label", `${actionId === "turn_off" ? "Отключить" : "Включить"} ${source.name}`);
       quick.addEventListener("click", () => runEnergyPowerAction(panel, source, actionId));
       row.appendChild(quick);

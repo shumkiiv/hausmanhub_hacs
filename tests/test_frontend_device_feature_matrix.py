@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = ROOT / "custom_components" / "hausman_hub" / "frontend"
 DEVICE_FEATURES_JS = FRONTEND_DIR / "hausman-hub-device-features.js"
 PANEL_JS = FRONTEND_DIR / "hausman-hub-panel.js"
+DEVICE_ACTIONS_JS = FRONTEND_DIR / "hausman-hub-device-actions.js"
 FIXTURE_JSON = (
     ROOT
     / "fixtures"
@@ -383,10 +384,14 @@ class FrontendDeviceFeatureMatrixTest(unittest.TestCase):
 
     def test_panel_wiring_uses_device_features_module(self) -> None:
         panel_source = PANEL_JS.read_text(encoding="utf-8")
+        device_actions_source = DEVICE_ACTIONS_JS.read_text(encoding="utf-8")
 
         self.assertIn('from "./hausman-hub-device-features.js?v=', panel_source)
         self.assertIn("loadDeviceFeatureMatrix(", panel_source)
-        self.assertIn("filterCatalogActions(", panel_source)
+        self.assertIn(
+            'from "./hausman-hub-device-features.js?v=', device_actions_source
+        )
+        self.assertIn("filterCatalogActions(", device_actions_source)
         self.assertIn('"hausman_hub/v1/capabilities"', panel_source)
 
 
