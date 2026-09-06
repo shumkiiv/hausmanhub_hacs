@@ -629,6 +629,8 @@ class DeviceActionView(HomeAssistantView):
                 execute_options["expected_service"] = allowed_service
             if direct_idempotent_allowed and not dry_run:
                 execute_options["idempotent_actions"] = True
+            if contextual_dangerous_action:
+                execute_options["contextually_dangerous"] = True
             if intercom_action and not dry_run:
                 execute_options["intercom_release_required"] = True
             if not dry_run and _supports_keyword(

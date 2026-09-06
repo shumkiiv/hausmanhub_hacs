@@ -3245,6 +3245,7 @@ class ScenarioService:
         intercom_release_required: bool = False,
         dispatch_marker: Callable[[], None] | None = None,
         idempotent_actions: bool = False,
+        contextually_dangerous: bool = False,
     ) -> dict[str, Any]:
         """Execute one catalog action through the shared strict executor."""
 
@@ -3292,9 +3293,11 @@ class ScenarioService:
         if expected_service is not None:
             options["expected_service"] = expected_service
         current_intercom_action = self._is_intercom_action(target_id, action_id)
-        current_contextual_action = self.is_contextually_dangerous_action(
-            target_id, action_id
-        )
+        try:
+            current_contextual_action = self.is_contextually_dangerous_action(target_id, action_id)
+        except Exception as error:
+            raise ScenarioServiceError("Contextual danger classification failed", status=503) from error
+        current_contextual_action = bool(contextually_dangerous or current_contextual_action)
         if intercom_release_required and (
             not dangerous_authorized
             or not current_intercom_action
@@ -3304,7 +3307,7 @@ class ScenarioService:
             raise ScenarioServiceError(
                 "Intercom release dispatch descriptor changed", status=409
             )
-        if dangerous_authorized and current_contextual_action:
+        if current_contextual_action:
             options["contextually_dangerous"] = True
 
         if intercom_release_required or (
