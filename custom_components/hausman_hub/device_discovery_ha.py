@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 
 from .application.dashboard_snapshot import stable_public_id
@@ -147,11 +147,19 @@ def assign_device_area(hass: HomeAssistant, device_id: str, area_id: str) -> Non
 
 def _values(registry: object, collection: str) -> tuple[object, ...]:
     raw = getattr(registry, collection, None)
-    values = getattr(raw, "values", None)
-    if callable(values):
-        return tuple(values())
+    if isinstance(raw, Iterable):
+        return tuple(raw)
+    entries_method = getattr(registry, "async_entries", None)
+    if callable(entries_method):
+        return tuple(entries_method())
     list_method = getattr(registry, f"async_list_{collection}", None)
-    return tuple(list_method()) if callable(list_method) else ()
+    if callable(list_method):
+        return tuple(list_method())
+    # Compatibility for pre-2026 registries.  Indexing avoids the deprecated
+    # mapping ``.values()`` API while preserving insertion order.
+    if isinstance(raw, Mapping):
+        return tuple(raw[key] for key in raw)
+    return ()
 
 
 def _text(value: object) -> str | None:

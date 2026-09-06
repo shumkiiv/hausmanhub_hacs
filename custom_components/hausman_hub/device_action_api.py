@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from http import HTTPStatus
+import logging
 import time
 from typing import TYPE_CHECKING, Any
 import uuid
@@ -37,7 +38,7 @@ from .application.device_action_receipts import (
     full_action_receipt,
 )
 from .application.scenario_light_priority import _state_is_fresh
-from .application.scenario_service import ScenarioService
+from .application.scenario_service import ScenarioService, ScenarioServiceError
 from .climate_api import (
     DOMAIN,
     NO_STORE_HEADERS,
@@ -50,6 +51,8 @@ from .climate_api import (
 from .correlation import CorrelationIdError, resolve_correlation_id
 from .error_taxonomy import api_error_payload, api_error_status
 from .realtime_api import publish_command_receipt
+
+_LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -233,6 +236,7 @@ class DeviceActionView(HomeAssistantView):
         coordination_key: str | None = None
         dispatch_request_id: str | None = None
         intercom_release_prepared = False
+        dispatch_crossed = False
         if full_request and not dry_run:
             if context is None or not isinstance(
                 idempotency, DangerousActionIdempotency
@@ -357,20 +361,34 @@ class DeviceActionView(HomeAssistantView):
                 execute_options["expected_service"] = allowed_service
             if intercom_action and not dry_run:
                 execute_options["intercom_release_required"] = True
+            dispatch_crossed = True
             result = await service.async_execute_device_action(
                 target_id,
                 action_id,
                 payload.get("value"),
                 **execute_options,
             )
-        except Exception:
-            if intercom_release_prepared:
+        except (ScenarioServiceError, RuntimeError, TimeoutError):
+            _LOGGER.warning("HausmanHub device action execution failed", exc_info=True)
+            if intercom_release_prepared and not dispatch_crossed:
                 await service.async_cancel_intercom_release(
                     target_id,
                     expected_entity_id=entity_id,
                     expected_request_id=f"{dispatch_request_id}.release",
                 )
-            raise
+            failure = _execution_failure_response(
+                target_id=target_id,
+                action_id=action_id,
+                request_id=dispatch_request_id or str(payload.get("requestId")),
+                correlation_id=correlation_id,
+                target_type=target_type,
+                dispatch_crossed=dispatch_crossed,
+            )
+            return self.json(
+                failure["payload"],
+                status_code=failure["status"],
+                headers=NO_STORE_HEADERS,
+            )
         if result.get("accepted") is True and climate_entity_id is not None:
             climate_mode_change = await mode_writer(climate_entity_id, "automatic")
             result = {
@@ -775,12 +793,18 @@ class DeviceActionBatchView(HomeAssistantView):
                 if intercom_flags[index]
             )
         try:
+            dispatch_crossed = True
             receipts = await service.async_execute_device_action_batch(
                 normalized,
                 **batch_options,
             )
-        except Exception:
-            if intercom_release_prepared and intercom_release_index is not None:
+        except (ScenarioServiceError, RuntimeError, TimeoutError):
+            _LOGGER.warning("HausmanHub device action batch execution failed", exc_info=True)
+            if (
+                intercom_release_prepared
+                and intercom_release_index is not None
+                and not dispatch_crossed
+            ):
                 await service.async_cancel_intercom_release(
                     str(normalized[intercom_release_index]["targetId"]),
                     expected_entity_id=contexts[intercom_release_index][0],
@@ -788,7 +812,39 @@ class DeviceActionBatchView(HomeAssistantView):
                         f"{dispatch_request_ids[intercom_release_index]}.release"
                     ),
                 )
-            raise
+            failure = _execution_failure_response(
+                target_id=(
+                    str(normalized[intercom_release_index]["targetId"])
+                    if intercom_release_index is not None
+                    else str(normalized[0]["targetId"])
+                ),
+                action_id=(
+                    str(normalized[intercom_release_index]["actionId"])
+                    if intercom_release_index is not None
+                    else str(normalized[0]["actionId"])
+                ),
+                request_id=(
+                    dispatch_request_ids[intercom_release_index]
+                    if dispatch_request_ids is not None
+                    and intercom_release_index is not None
+                    else str(payload.get("requestId"))
+                ),
+                correlation_id=correlation_id,
+                target_type=(
+                    contexts[intercom_release_index][1]
+                    if (
+                        intercom_release_index is not None
+                        and contexts[intercom_release_index] is not None
+                    )
+                    else "sensor"
+                ),
+                dispatch_crossed=dispatch_crossed,
+            )
+            return self.json(
+                failure["payload"],
+                status_code=failure["status"],
+                headers=NO_STORE_HEADERS,
+            )
         if intercom_release_prepared and intercom_release_index is not None:
             release_receipt = receipts[intercom_release_index]
             if release_receipt.get("accepted") is not True:
@@ -912,6 +968,37 @@ def _not_acceptable(view: HomeAssistantView) -> Any:
         status_code=HTTPStatus.NOT_ACCEPTABLE,
         headers=NO_STORE_HEADERS,
     )
+
+
+def _execution_failure_response(
+    *,
+    target_id: str,
+    action_id: str,
+    request_id: str,
+    correlation_id: str,
+    target_type: str,
+    dispatch_crossed: bool,
+) -> dict[str, object]:
+    """Translate expected executor failures without inventing physical outcome."""
+
+    del target_id, action_id, correlation_id, target_type
+    if dispatch_crossed:
+        payload = api_error_payload(
+            "conflict",
+            request_id=request_id,
+            details={
+                "detailCode": "idempotency_in_progress",
+                "state": "dispatch_unknown",
+                "recoveryRequired": True,
+                "operatorRecoveryRequired": True,
+                "automaticRetryAllowed": False,
+                "newUserActionRequired": False,
+                "freshConfirmationRequired": False,
+            },
+        )
+        return {"status": HTTPStatus.CONFLICT, "payload": payload}
+    payload = api_error_payload("unavailable", request_id=request_id)
+    return {"status": HTTPStatus.SERVICE_UNAVAILABLE, "payload": payload}
 
 
 def _legacy_dangerous_forbidden(view: HomeAssistantView) -> Any:

@@ -3330,23 +3330,16 @@ class ScenarioService:
             options["before_dispatch"] = (
                 arm_intercom_release
             )
-        try:
-            return await self._executor.async_execute_device_action(
-                target_id,
-                action_id,
-                value,
-                **options,
-            )
-        except Exception:
-            if intercom_release_required:
-                await self.async_cancel_intercom_release(
-                    target_id,
-                    expected_entity_id=expected_entity_id,
-                    expected_request_id=(
-                        f"{request_id}.release" if request_id is not None else None
-                    ),
-                )
-            raise
+        # The release obligation is intentionally left armed after the
+        # executor crosses its dispatch callback.  An exception from the HA
+        # service leaves the physical result unknown, so cancelling here could
+        # strand an intercom relay that did receive the pulse.
+        return await self._executor.async_execute_device_action(
+            target_id,
+            action_id,
+            value,
+            **options,
+        )
 
     async def async_execute_device_action_batch(
         self,
