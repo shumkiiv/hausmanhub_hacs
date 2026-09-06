@@ -21,12 +21,18 @@ _BREAKER_IDENTITY = re.compile(
     r")(?:$|[^\w])",
     re.IGNORECASE,
 )
+_BREAKER_SEPARATORS = re.compile(r"[_./:\-]+")
 
 
 def is_electrical_breaker_identity(*values: object) -> bool:
     """Match bounded real-world breaker names without substring promotion."""
 
-    identity = " ".join(str(value or "") for value in values)
+    # HA entity identifiers conventionally use underscores (for example,
+    # ``switch.kitchen_rcbo``).  ``\w`` treats underscore as part of a word,
+    # so normalize identifier separators before applying the bounded matcher.
+    identity = _BREAKER_SEPARATORS.sub(
+        " ", " ".join(str(value or "") for value in values)
+    )
     return _BREAKER_IDENTITY.search(identity) is not None
 
 

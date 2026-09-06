@@ -2615,6 +2615,61 @@ class ScenarioServiceIntercomReleaseTest(unittest.IsolatedAsyncioTestCase):
                     service.current_catalog().device(f"target_{index}").device_type,
                 )
 
+    async def test_breaker_identity_uses_entity_id_separators_with_neutral_names(
+        self,
+    ) -> None:
+        switch_actions = tuple(
+            ScenarioDeviceAction(
+                action_id=action_id,
+                title=action_id,
+                domain="switch",
+                service=action_id,
+                allowed_fields=frozenset(),
+            )
+            for action_id in ("turn_on", "turn_off", "toggle")
+        )
+        devices = {
+            "rcbo": ScenarioDeviceEntry(
+                target_id="rcbo",
+                name="Щитовая линия",
+                entity_id="switch.kitchen_rcbo",
+                actions=switch_actions,
+                physical_id="physical_rcbo",
+                physical_name="Щитовая линия",
+                device_type="switch",
+            ),
+            "main": ScenarioDeviceEntry(
+                target_id="main",
+                name="Питание дома",
+                entity_id="switch.main_breaker",
+                actions=switch_actions,
+                physical_id="physical_main",
+                physical_name="Питание дома",
+                device_type="switch",
+            ),
+        }
+        service = ScenarioService(
+            self.hass,
+            _FakeStore(),
+            ScenarioCatalog(devices=devices, scenarios={}),
+            electrical_breaker_device_ids_resolver=lambda: tuple(
+                device.physical_id for device in devices.values()
+            ),
+        )
+
+        for target_id in devices:
+            with self.subTest(target_id=target_id):
+                self.assertEqual(
+                    "electrical_breaker",
+                    service.current_catalog().device(target_id).device_type,
+                )
+                self.assertIsNone(
+                    service.current_catalog().device(target_id).action("toggle")
+                )
+                self.assertTrue(
+                    service.is_electrical_breaker_action(target_id, "toggle")
+                )
+
     async def test_breaker_toggle_is_rejected_after_catalog_filtering(self) -> None:
         switch_actions = tuple(
             ScenarioDeviceAction(
