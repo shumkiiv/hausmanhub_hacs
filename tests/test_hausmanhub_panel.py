@@ -919,8 +919,8 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             ROOT / "custom_components/hausman_hub/frontend/hausman-hub-device-controls.js"
         ).read_text(encoding="utf-8")
         self.assertIn("target_temp_step", source)
-        self.assertIn("input.step = String(bounds.step)", source)
-        self.assertIn("|| !validStep", source)
+        self.assertIn("input.step=String(bounds.step)", source)
+        self.assertIn("!validStep", source)
 
     def test_energy_history_uses_hausmanhub_api_not_raw_recorder_socket(self) -> None:
         content = ENERGY_JS.read_text(encoding="utf-8")

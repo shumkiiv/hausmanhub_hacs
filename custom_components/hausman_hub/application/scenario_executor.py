@@ -2465,15 +2465,14 @@ class ScenarioExecutor:
                     "isNewEvidence": False,
                 }
             return receipt
-        is_contextually_dangerous = bool(
-            force_contextually_dangerous
-            or (
-                self._contextual_dangerous_resolver is not None
-                and self._contextual_dangerous_resolver(
-                    action.target_id, action.action_id
-                )
+        try:
+            is_contextually_dangerous = bool(
+                force_contextually_dangerous
+                or (self._contextual_dangerous_resolver is not None
+                    and self._contextually_dangerous_resolver(action.target_id, action.action_id))
             )
-        )
+        except Exception:  # noqa: BLE001
+            return {**base, "status": "failed", "error": "contextual_dangerous_resolution_failed"}
         is_dangerous = (
             action.action_id in DANGEROUS_ACTION_IDS or is_contextually_dangerous
         )
@@ -3897,27 +3896,28 @@ def _range_error_for_action(
     if action_id == "set_value":
         return _number_range_error(device, value)
     required = {
-        "set_temperature": ("min_temp", "max_temp", "target_temp_step"),
-        "set_humidity": ("min_humidity", "max_humidity", "target_humidity_step"),
+        "set_temperature": ("min_temp", "max_temp"),
+        "set_humidity": ("min_humidity", "max_humidity", None),
     }.get(action_id)
     if required is None:
         return None
     attrs = getattr(state, "attributes", {})
     if not isinstance(attrs, Mapping):
         return "device range is unavailable"
-    values = [attrs.get(name) for name in required]
-    if action_id == "set_temperature":
-        values[2] = attrs.get("target_temp_step", attrs.get("target_temperature_step"))
+    values = [attrs.get(name) for name in required if name is not None]
+    step = attrs.get("target_temp_step", attrs.get("target_temperature_step")) if action_id == "set_temperature" else attrs.get("target_humidity_step")
     if not all(isinstance(item, (int, float)) and not isinstance(item, bool) for item in values):
         return "device range is unavailable"
-    minimum, maximum, step = (float(item) for item in values)
-    if not all(math.isfinite(item) for item in (minimum, maximum, step)) or minimum >= maximum or step <= 0:
+    minimum, maximum = (float(item) for item in values)
+    if not all(math.isfinite(item) for item in (minimum, maximum)) or minimum >= maximum:
         return "device range is unavailable"
     numeric = float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else math.nan
     if not math.isfinite(numeric):
         return "value must be a number"
     if numeric < minimum or numeric > maximum:
         return "value is outside the allowed range"
-    if abs((numeric - minimum) / step - round((numeric - minimum) / step)) > 1e-6:
+    if step is not None and isinstance(step, (int, float)) and not isinstance(step, bool) and math.isfinite(float(step)) and float(step) > 0 and abs((numeric - minimum) / float(step) - round((numeric - minimum) / float(step))) > 1e-6:
+        return "value does not match the allowed step"
+    if action_id == "set_humidity" and abs(numeric - round(numeric)) > 1e-6:
         return "value does not match the allowed step"
     return None
