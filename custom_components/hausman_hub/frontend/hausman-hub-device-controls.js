@@ -1,23 +1,18 @@
-/* Capability-first controls for the shared physical-device sheet. */
-
 const ON_STATES = new Set(["on", "open", "opening", "playing", "heat", "heating", "cool", "cooling"]);
 const OFF_STATES = new Set(["off", "closed", "closing", "idle", "paused", "standby"]);
-
-function normalized(value) {
-  return String(value == null ? "" : value).trim().toLocaleLowerCase("ru");
+function normalized(value){
+  return String(value ?? "").trim().toLocaleLowerCase("ru");
 }
-
 function targetDetail(device, target) {
   return (Array.isArray(device && device.details) ? device.details : [])
     .find((detail) => detail && detail.entityId === target.entity_id) || null;
 }
 
 function targetState(device, target) {
-  const detail = targetDetail(device, target);
-  const state = normalized(detail && detail.state
-    || (device && device.entityId === target.entity_id ? device.state : ""));
-  const supplied = String(detail && detail.value || "").trim();
-  if (device && device.unavailable) return { state: "unavailable", label: "Нет связи" };
+  const detail = targetDetail(device, target), state = normalized(detail?.state
+    || (device?.entityId === target.entity_id ? device.state : ""));
+  const supplied = String(detail?.value || "").trim();
+  if (device?.unavailable) return { state: "unavailable", label: "Нет связи" };
   const labels = {
     on: "Включено", off: "Выключено", open: "Открыто", closed: "Закрыто",
     locked: "Закрыт", unlocked: "Открыт", playing: "Воспроизведение", paused: "Пауза",
@@ -43,11 +38,8 @@ export function deviceActionInitialValue(device, target, action) {
   const detail = targetDetail(device, target);
   const attributes = device && device.entityId === target.entity_id && device.attributes
     ? device.attributes : {};
-  const numeric = (...values) => {
-    const value = values.find((candidate) => candidate !== null && candidate !== undefined
-      && candidate !== "" && Number.isFinite(Number(candidate)));
-    return value === undefined ? null : Number(value);
-  };
+  const numeric = (...values) => { const value = values.find((item) => item != null && item !== ""
+    && Number.isFinite(+item)); return value==null ? null : +value; };
   if (action.action_id === "set_temperature") {
     return numeric(attributes.temperature, device && device.primaryValue, detail && detail.state);
   }
@@ -64,13 +56,13 @@ export function deviceActionInitialValue(device, target, action) {
 }
 
 export function deviceActionNumericBounds(device, target, action) {
-  const attributes = device && device.entityId === target.entity_id && device.attributes
-    ? device.attributes : {};
+  const attributes = device?.entityId === target.entity_id && device.attributes || {};
   if (action.action_id === "set_temperature") {
     const step = Number(attributes.target_temp_step ?? attributes.target_temperature_step);
+    const number = (value) => Number.isFinite(+value) ? +value : null;
     return {
-      min: Number.isFinite(Number(attributes.min_temp)) ? Number(attributes.min_temp) : 10,
-      max: Number.isFinite(Number(attributes.max_temp)) ? Number(attributes.max_temp) : 35,
+      min: number(attributes.min_temp) ?? 10,
+      max: number(attributes.max_temp) ?? 35,
       step: Number.isFinite(step) && step > 0 ? step : 0.5,
     };
   }
