@@ -1986,6 +1986,17 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             executor._action_confirmation_window_seconds("climate_1", "set_temperature"),
         )
 
+    async def test_contextually_dangerous_action_keeps_strict_window(self) -> None:
+        executor = ScenarioExecutor(
+            self.hass, self.catalog, self.executor._run_callback,
+            readback_window_seconds=8, readback_interval_seconds=0.01,
+            contextual_dangerous_resolver=lambda *_args: True,
+        )
+        self.assertEqual(
+            8,
+            executor._action_confirmation_window_seconds("climate_1", "set_temperature"),
+        )
+
     async def test_repeated_correlation_keeps_physical_action_idempotent(self) -> None:
         light = SimpleNamespace(state="off", attributes={})
         self.hass.states = SimpleNamespace(

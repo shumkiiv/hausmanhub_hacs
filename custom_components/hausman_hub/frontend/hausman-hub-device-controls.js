@@ -63,6 +63,22 @@ export function deviceActionInitialValue(device, target, action) {
   return null;
 }
 
+export function deviceActionNumericBounds(device, target, action) {
+  const attributes = device && device.entityId === target.entity_id && device.attributes
+    ? device.attributes : {};
+  if (action.action_id === "set_temperature") {
+    const step = Number(attributes.target_temp_step ?? attributes.target_temperature_step);
+    return {
+      min: Number.isFinite(Number(attributes.min_temp)) ? Number(attributes.min_temp) : 10,
+      max: Number.isFinite(Number(attributes.max_temp)) ? Number(attributes.max_temp) : 35,
+      step: Number.isFinite(step) && step > 0 ? step : 0.5,
+    };
+  }
+  if (action.action_id === "set_brightness") return { min: 0, max: 255, step: 1 };
+  if (action.action_id === "set_position") return { min: 0, max: 100, step: 1 };
+  return null;
+}
+
 function conciseActions(target, state) {
   const actions = Array.isArray(target && target.actions) ? target.actions : [];
   const simple = actions.filter((action) => !(Array.isArray(action.allowed_fields)
@@ -211,11 +227,12 @@ export function renderDeviceTargetControls(owner, target, device, deps) {
     valueRow.appendChild(el("span", null, label));
     const input = el("input");
     const numeric = ["set_temperature", "set_brightness", "set_position"].includes(action.action_id);
+    const bounds = numeric ? deviceActionNumericBounds(device, target, action) : null;
     input.type = numeric ? "number" : "text";
     if (numeric) {
-      input.min = action.action_id === "set_temperature" ? "10" : "0";
-      input.max = action.action_id === "set_brightness" ? "255" : (action.action_id === "set_temperature" ? "35" : "100");
-      input.step = action.action_id === "set_temperature" ? "0.5" : "1";
+      input.min = String(bounds.min);
+      input.max = String(bounds.max);
+      input.step = String(bounds.step);
     }
     const initial = deviceActionInitialValue(device, target, action);
     input.value = initial === null ? "" : String(initial);
@@ -224,8 +241,13 @@ export function renderDeviceTargetControls(owner, target, device, deps) {
     const apply = el("button", "secondary", "Применить");
     apply.type = "button";
     const sync = () => {
+      const validStep = !numeric || !bounds || Math.abs(
+        (Number(input.value) - bounds.min) / bounds.step
+        - Math.round((Number(input.value) - bounds.min) / bounds.step)
+      ) < 1e-9;
       apply.disabled = owner._busy || (numeric
-        ? !Number.isFinite(Number(input.value)) || input.value === "" : !String(input.value || "").trim());
+        ? !Number.isFinite(Number(input.value)) || input.value === "" || !validStep
+        : !String(input.value || "").trim());
     };
     sync(); input.addEventListener("input", sync);
     apply.addEventListener("click", (event) => {
