@@ -48,11 +48,7 @@ class _EntriesOnlyRegistry:
 class DeviceActionBoundary152225Tests(unittest.TestCase):
     def test_post_dispatch_failure_is_structured_unknown_without_false_not_sent(self) -> None:
         response = _execution_failure_response(
-            target_id="entity_intercom",
-            action_id="turn_on",
             request_id="dispatch.intercom.1",
-            correlation_id="corr.intercom.1",
-            target_type="switch",
             dispatch_crossed=True,
         )
 
@@ -65,11 +61,7 @@ class DeviceActionBoundary152225Tests(unittest.TestCase):
 
     def test_pre_dispatch_failure_is_retryable_and_does_not_claim_dispatch(self) -> None:
         response = _execution_failure_response(
-            target_id="entity_intercom",
-            action_id="turn_on",
             request_id="dispatch.intercom.2",
-            correlation_id="corr.intercom.2",
-            target_type="switch",
             dispatch_crossed=False,
         )
 

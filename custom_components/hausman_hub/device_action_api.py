@@ -391,11 +391,7 @@ class DeviceActionView(HomeAssistantView):
             ):
                 await idempotency.async_abandon_pre_dispatch(coordination_key)
             failure = _execution_failure_response(
-                target_id=target_id,
-                action_id=action_id,
                 request_id=dispatch_request_id or str(payload.get("requestId")),
-                correlation_id=correlation_id,
-                target_type=target_type,
                 dispatch_crossed=dispatch_crossed,
             )
             return _negotiated_json(
@@ -841,30 +837,11 @@ class DeviceActionBatchView(HomeAssistantView):
             ):
                 await idempotency.async_abandon_pre_dispatch(idempotency_key)
             failure = _execution_failure_response(
-                target_id=(
-                    str(normalized[intercom_release_index]["targetId"])
-                    if intercom_release_index is not None
-                    else str(normalized[0]["targetId"])
-                ),
-                action_id=(
-                    str(normalized[intercom_release_index]["actionId"])
-                    if intercom_release_index is not None
-                    else str(normalized[0]["actionId"])
-                ),
                 request_id=(
                     dispatch_request_ids[intercom_release_index]
                     if dispatch_request_ids is not None
                     and intercom_release_index is not None
                     else str(payload.get("requestId"))
-                ),
-                correlation_id=correlation_id,
-                target_type=(
-                    contexts[intercom_release_index][1]
-                    if (
-                        intercom_release_index is not None
-                        and contexts[intercom_release_index] is not None
-                    )
-                    else "sensor"
                 ),
                 dispatch_crossed=dispatch_crossed,
             )
@@ -1001,16 +978,11 @@ def _not_acceptable(view: HomeAssistantView) -> Any:
 
 def _execution_failure_response(
     *,
-    target_id: str,
-    action_id: str,
     request_id: str,
-    correlation_id: str,
-    target_type: str,
     dispatch_crossed: bool,
 ) -> dict[str, object]:
     """Translate expected executor failures without inventing physical outcome."""
 
-    del target_id, action_id, correlation_id, target_type
     if dispatch_crossed:
         payload = api_error_payload(
             "conflict",
