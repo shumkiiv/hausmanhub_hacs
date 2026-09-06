@@ -5199,10 +5199,12 @@ class LocalSummaryAccessTest(unittest.TestCase):
         ) -> dict[str, object]:
             execution_calls.append(target_id)
             if execution_failure is not None:
-                if execution_failure == "post_dispatch":
+                if execution_failure.startswith("post_"):
                     dispatch_marker = options.get("dispatch_marker")
                     self.assertTrue(callable(dispatch_marker))
                     dispatch_marker()
+                if execution_failure.endswith("timeout"):
+                    raise asyncio.TimeoutError("synthetic executor timeout")
                 raise RuntimeError("synthetic executor failure")
             return {
                 "correlationId": correlation_id,
@@ -5243,6 +5245,58 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 },
                 "application/json",
                 "application/json",
+                409,
+                "application/json",
+            ),
+            (
+                "legacy-pre-dispatch-exception",
+                "pre_dispatch",
+                {
+                    "correlationId": "legacy.pre.exception.1",
+                    "targetId": "response_target",
+                    "actionId": "turn_on",
+                },
+                "application/json",
+                None,
+                503,
+                "application/json",
+            ),
+            (
+                "legacy-post-dispatch-exception",
+                "post_dispatch",
+                {
+                    "correlationId": "legacy.post.exception.1",
+                    "targetId": "response_target",
+                    "actionId": "turn_on",
+                },
+                "application/json",
+                None,
+                409,
+                "application/json",
+            ),
+            (
+                "legacy-pre-dispatch-timeout",
+                "pre_timeout",
+                {
+                    "correlationId": "legacy.pre.timeout.1",
+                    "targetId": "response_target",
+                    "actionId": "turn_on",
+                },
+                "application/json",
+                None,
+                503,
+                "application/json",
+            ),
+            (
+                "legacy-post-dispatch-timeout",
+                "post_timeout",
+                {
+                    "correlationId": "legacy.post.timeout.1",
+                    "targetId": "response_target",
+                    "actionId": "turn_on",
+                },
+                "application/json",
+                None,
                 409,
                 "application/json",
             ),
@@ -5355,6 +5409,177 @@ class LocalSummaryAccessTest(unittest.TestCase):
                         "unavailable" if expected_status == 503 else "conflict",
                         response.payload["code"],
                     )
+                    if expected_status == 409:
+                        self.assertEqual(
+                            "dispatch_unknown", response.payload["details"]["state"]
+                        )
+                        self.assertFalse(
+                            response.payload["details"]["automaticRetryAllowed"]
+                        )
+
+    def test_legacy_single_and_batch_failures_use_dispatch_marker(self) -> None:
+        """Legacy clients receive a safe unknown result only after physical send."""
+
+        views = {view.url: view for view in self.hass.http.views}
+        single_path = "/api/hausman_hub/v1/device-actions"
+        batch_path = "/api/hausman_hub/v1/device-actions/batch"
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        tablet = reader_user("system-users")
+        mode = "safe_negative"
+
+        async def resolve_context(target_id: str, _action_id: str):
+            return f"switch.synthetic_{target_id}", "switch", ("turn_on",), "turn_on"
+
+        async def execute_single(
+            target_id: str,
+            action_id: str,
+            _value: object,
+            **options: object,
+        ) -> object:
+            self.assertNotIn("dangerous_authorized", options)
+            if mode.startswith("crossed_"):
+                marker = options.get("dispatch_marker")
+                self.assertTrue(callable(marker))
+                marker()
+            if mode.endswith("timeout"):
+                raise asyncio.TimeoutError("synthetic legacy single timeout")
+            if mode.endswith("exception"):
+                raise RuntimeError("synthetic legacy single failure")
+            if mode.endswith("malformed"):
+                return []
+            return {
+                "correlationId": options.get("correlation_id"),
+                "requestId": "legacy.single.receipt",
+                "targetId": target_id,
+                "actionId": action_id,
+                "accepted": False,
+                "confirmed": False,
+                "status": "failed",
+            }
+
+        async def execute_batch(
+            actions: list[dict[str, object]],
+            **options: object,
+        ) -> list[dict[str, object]]:
+            self.assertNotIn("dangerous_authorized", options)
+            if mode.startswith("crossed_"):
+                markers = options.get("dispatch_markers")
+                self.assertIsInstance(markers, tuple)
+                markers[0]()
+            if mode.endswith("timeout"):
+                raise asyncio.TimeoutError("synthetic legacy batch timeout")
+            if mode.endswith("exception"):
+                raise RuntimeError("synthetic legacy batch failure")
+            if mode.endswith("malformed"):
+                return []
+            if mode == "crossed_other_negative":
+                return [
+                    {
+                        "correlationId": options.get("correlation_id"),
+                        "requestId": "legacy.batch.receipt.accepted",
+                        "targetId": actions[0]["targetId"],
+                        "actionId": actions[0]["actionId"],
+                        "accepted": True,
+                        "confirmed": True,
+                        "status": "confirmed",
+                    },
+                    {
+                        "correlationId": options.get("correlation_id"),
+                        "requestId": "legacy.batch.receipt.failed",
+                        "targetId": actions[1]["targetId"],
+                        "actionId": actions[1]["actionId"],
+                        "accepted": False,
+                        "confirmed": False,
+                        "status": "failed",
+                    },
+                ]
+            item = actions[0]
+            return [{
+                "correlationId": options.get("correlation_id"),
+                "requestId": "legacy.batch.receipt",
+                "targetId": item["targetId"],
+                "actionId": item["actionId"],
+                "accepted": False,
+                "confirmed": False,
+                "status": "failed",
+            }]
+
+        service.async_resolve_device_action_context = resolve_context
+        service.async_execute_device_action = execute_single
+        service.async_execute_device_action_batch = execute_batch
+
+        def send_single(suffix: str) -> FakeResponse:
+            return asyncio.run(
+                views[single_path].post(
+                    FakeJsonRequest(
+                        "192.168.1.20",
+                        tablet,
+                        single_path,
+                        {
+                            "correlationId": f"legacy.single.{suffix}",
+                            "targetId": "single_target",
+                            "actionId": "turn_on",
+                        },
+                    )
+                )
+            )
+
+        def send_batch(suffix: str, *, two_items: bool = False) -> FakeResponse:
+            actions = [{"targetId": "batch_target", "actionId": "turn_on"}]
+            if two_items:
+                actions.append(
+                    {"targetId": "batch_target_2", "actionId": "turn_on"}
+                )
+            return asyncio.run(
+                views[batch_path].post(
+                    FakeJsonRequest(
+                        "192.168.1.20",
+                        tablet,
+                        batch_path,
+                        {
+                            "contract": {
+                                "name": "hausman-hub-device-action-batch-request",
+                                "version": 1,
+                            },
+                            "correlationId": f"legacy.batch.{suffix}",
+                            "actions": actions,
+                        },
+                    )
+                )
+            )
+
+        for receipt_kind in ("negative", "malformed", "timeout", "exception"):
+            with self.subTest(receipt_kind=receipt_kind, boundary="before"):
+                mode = f"safe_{receipt_kind}"
+                safe_single = send_single(mode)
+                safe_batch = send_batch(mode)
+                if receipt_kind == "negative":
+                    self.assertEqual(409, safe_single.status)
+                    self.assertFalse(safe_single.payload["accepted"])
+                    self.assertEqual(200, safe_batch.status)
+                    self.assertEqual("failed", safe_batch.payload["status"])
+                elif receipt_kind in {"malformed", "timeout", "exception"}:
+                    self.assertEqual(503, safe_single.status)
+                    self.assertEqual(503, safe_batch.status)
+
+            with self.subTest(receipt_kind=receipt_kind, boundary="after"):
+                mode = f"crossed_{receipt_kind}"
+                for response in (send_single(mode), send_batch(mode)):
+                    self.assertEqual(409, response.status)
+                    self.assertEqual(
+                        "dispatch_unknown", response.payload["details"]["state"]
+                    )
+                    self.assertFalse(
+                        response.payload["details"]["automaticRetryAllowed"]
+                    )
+
+        mode = "crossed_other_negative"
+        mixed_batch = send_batch(mode, two_items=True)
+        self.assertEqual(409, mixed_batch.status)
+        self.assertEqual(
+            "dispatch_unknown", mixed_batch.payload["details"]["state"]
+        )
+        self.assertFalse(mixed_batch.payload["details"]["automaticRetryAllowed"])
 
     def test_full_batch_execution_exceptions_keep_negotiated_media_type(self) -> None:
         views = {view.url: view for view in self.hass.http.views}

@@ -834,8 +834,8 @@ def panel_script(
           }},
         }},
         user: {{ is_admin: true }},
-        callApi: (method, path, payload) => {{
-          calls.push({{ method, path, payload }});
+        callApi: (method, path, payload, headers) => {{
+          calls.push({{ method, path, payload, headers }});
           if (method === "GET") {{
             if (path.startsWith("hausman_hub/v1/energy/history?") && "__energy_history__" in getTable) {{
               return Promise.resolve(getTable.__energy_history__);
@@ -4664,6 +4664,33 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (panel._error) throw new Error("device failure hid the otherwise available panel");
         if (panel._notice !== "HausmanHub временно недоступен. Проверьте подключение и повторите позже.") {
           throw new Error("device failure explanation missing");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_physical_device_action_uses_full_retry_safe_protocol(self) -> None:
+        script = panel_script(
+            dict(GET_PATHS),
+            {"hausman_hub/v1/device-actions": {"accepted": True}},
+            """
+        const before = calls.length;
+        await panel._executeDeviceAction("target-living-main", "turn_on", null);
+        const command = calls.slice(before).find((call) =>
+          call.method === "POST" && call.path === "hausman_hub/v1/device-actions");
+        if (!command) throw new Error("physical command was not sent");
+        if (command.payload.contract?.name !== "hausman-hub-device-action-request"
+          || command.payload.contract?.version !== 1
+          || typeof command.payload.requestId !== "string"
+          || command.payload.idempotencyKey !== `confirmed.${command.payload.requestId}`) {
+          throw new Error("physical command did not use the full request contract");
+        }
+        if (command.headers?.["Content-Type"]
+            !== "application/vnd.hausmanhub.device-action-request.full+json"
+          || command.headers?.Accept
+            !== "application/vnd.hausmanhub.device-action-receipt.full+json") {
+          throw new Error("physical command did not negotiate the full receipt contract");
         }
             """,
         )

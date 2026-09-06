@@ -11,6 +11,10 @@ import unittest
 from custom_components.hausman_hub.verified_safety_storage import (
     VerifiedSafetyStore,
 )
+from custom_components.hausman_hub.application.device_action_idempotency import (
+    DangerousActionIdempotency,
+    valid_device_action_idempotency_payload,
+)
 from custom_components.hausman_hub.application.manual_light_off_protection import (
     valid_manual_light_off_protection_payload,
 )
@@ -185,6 +189,74 @@ def test_manual_light_protection_corruption_does_not_restore_an_invalid_payload(
 
     with tempfile.TemporaryDirectory() as directory:
         asyncio.run(exercise(Path(directory, "store.json")))
+
+
+def test_device_action_n_minus_one_recovery_keeps_pending_command_blocked() -> None:
+    """A recovered pending generation must never become dispatch authority again."""
+
+    async def exercise(path: Path) -> None:
+        backend = FakeBackend(path)
+        verified = VerifiedSafetyStore(
+            backend,
+            _run_sync,
+            payload_validator=valid_device_action_idempotency_payload,
+        )
+        coordinator = DangerousActionIdempotency(verified)
+        await coordinator.async_load()
+        binding = {
+            "actionIndex": 0,
+            "targetId": "hall-light",
+            "targetType": "light",
+            "actionId": "turn_on",
+            "correlationId": "recovery.pending.1",
+            "requestId": "dispatch.recovery.pending.1",
+        }
+        await coordinator.async_reserve(
+            key="recovery.pending.1",
+            fingerprint="a" * 64,
+            dispatch_id="recovery-pending-1",
+            bindings=[binding],
+        )
+        await coordinator.async_mark_pending("recovery.pending.1")
+        await coordinator.async_mark_dispatching("recovery.pending.1")
+
+        path.write_text("{broken", encoding="utf-8")
+        backend.payload = None
+        recovered_store = VerifiedSafetyStore(
+            backend,
+            _run_sync,
+            payload_validator=valid_device_action_idempotency_payload,
+        )
+        recovered = DangerousActionIdempotency(recovered_store)
+        await recovered.async_load()
+        replay = await recovered.async_reserve(
+            key="recovery.pending.1",
+            fingerprint="a" * 64,
+            dispatch_id="must-not-dispatch",
+            bindings=[binding],
+        )
+
+        assert recovered_store.recovered_previous is True
+        assert replay.outcome == "in_progress"
+        assert replay.state == "dispatch_unknown"
+        persisted = json.loads(path.read_text(encoding="utf-8"))["data"]
+        assert persisted["records"][0]["state"] == "dispatch_unknown"
+        assert persisted["records"][0]["dispatchPhase"] == "dispatching"
+
+    with tempfile.TemporaryDirectory() as directory:
+        asyncio.run(exercise(Path(directory, "store.json")))
+
+
+def test_device_action_safety_payload_validator_rejects_partial_records() -> None:
+    assert valid_device_action_idempotency_payload(
+        {"version": 1, "records": []}
+    )
+    assert not valid_device_action_idempotency_payload(
+        {"version": 1, "records": [{"state": "completed"}]}
+    )
+    assert not valid_device_action_idempotency_payload(
+        {"version": 1, "records": [], "unexpected": True}
+    )
 
 
 def load_tests(

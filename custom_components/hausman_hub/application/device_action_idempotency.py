@@ -31,6 +31,8 @@ _RECEIPT_CONTRACTS = frozenset(
 
 
 class DeviceActionIdempotencyStore(Protocol):
+    recovered_previous: bool
+
     async def async_load(self) -> object | None: ...
 
     async def async_save(self, payload: dict[str, object]) -> None: ...
@@ -72,12 +74,22 @@ class DangerousActionIdempotency:
             return
         normalized: dict[str, dict[str, object]] = {}
         changed = False
+        recovered_previous = bool(
+            getattr(self._store, "recovered_previous", False)
+        )
         for item in records:
             record = _validated_record(item)
             if record is None:
                 self._load_error = True
                 return
-            if (
+            if recovered_previous and record["state"] != "completed":
+                # N-1 may predate a physical dispatch that was durably recorded
+                # only in the unreadable current generation.  Keep every
+                # unfinished key blocked, including pending/not_started.
+                record["state"] = "dispatch_unknown"
+                record["dispatchPhase"] = "dispatching"
+                changed = True
+            elif (
                 record["state"] in {"reserved", "pending"}
                 and record["dispatchPhase"] == "not_started"
             ):
@@ -275,6 +287,23 @@ class DangerousActionIdempotency:
             "version": 1,
             "records": [copy.deepcopy(dict(item)) for item in selected.values()],
         }
+
+
+def valid_device_action_idempotency_payload(value: object) -> bool:
+    """Validate a complete persisted journal before safety-store recovery."""
+
+    if not isinstance(value, Mapping) or set(value) != {"version", "records"}:
+        return False
+    if value.get("version") != 1 or not isinstance(value.get("records"), list):
+        return False
+    records = value["records"]
+    if len(records) > MAX_DANGEROUS_IDEMPOTENCY_RECORDS:
+        return False
+    validated = [_validated_record(item) for item in records]
+    if any(item is None for item in validated):
+        return False
+    keys = [str(item["key"]) for item in validated if item is not None]
+    return len(keys) == len(set(keys))
 
 
 def _validated_record(value: object) -> dict[str, object] | None:

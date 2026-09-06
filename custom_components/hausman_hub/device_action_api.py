@@ -187,6 +187,7 @@ async def _async_action_failure(
     *,
     request_id: str,
     response_media_type: str,
+    dispatch_crossed: bool = False,
 ) -> Any:
     """Return one negotiated failure with lifecycle cleanup when it exists."""
 
@@ -194,7 +195,7 @@ async def _async_action_failure(
         return await lifecycle.async_failure()
     failure = _execution_failure_response(
         request_id=request_id,
-        dispatch_crossed=False,
+        dispatch_crossed=dispatch_crossed,
     )
     return _negotiated_json(
         view,
@@ -535,6 +536,13 @@ class DeviceActionView(HomeAssistantView):
                 return await lifecycle.async_failure()
 
         climate_runtime = self._hass.data.get(DOMAIN, {}).get("climate_runtime")
+        dispatch_state = {"crossed": False}
+
+        def mark_dispatch_crossed() -> None:
+            dispatch_state["crossed"] = True
+            if lifecycle is not None:
+                lifecycle.mark_dispatch_crossed()
+
         try:
             mode_writer = getattr(
                 climate_runtime, "async_set_device_mode_for_entity", None
@@ -578,10 +586,10 @@ class DeviceActionView(HomeAssistantView):
                 execute_options["expected_service"] = allowed_service
             if intercom_action and not dry_run:
                 execute_options["intercom_release_required"] = True
-            if lifecycle is not None and _supports_keyword(
+            if not dry_run and _supports_keyword(
                 service.async_execute_device_action, "dispatch_marker"
             ):
-                execute_options["dispatch_marker"] = lifecycle.mark_dispatch_crossed
+                execute_options["dispatch_marker"] = mark_dispatch_crossed
             result = await service.async_execute_device_action(
                 target_id,
                 action_id,
@@ -593,7 +601,8 @@ class DeviceActionView(HomeAssistantView):
             if lifecycle is not None:
                 return await lifecycle.async_failure()
             failure = _execution_failure_response(
-                request_id=str(payload.get("requestId")), dispatch_crossed=False
+                request_id=str(payload.get("requestId")),
+                dispatch_crossed=dispatch_state["crossed"],
             )
             return _negotiated_json(
                 self, failure["payload"], status_code=failure["status"],
@@ -610,13 +619,16 @@ class DeviceActionView(HomeAssistantView):
                 lifecycle,
                 request_id=str(payload.get("requestId")),
                 response_media_type=response_media_type,
+                dispatch_crossed=dispatch_state["crossed"],
             )
-        if (
-            lifecycle is not None
-            and result.get("accepted") is not True
-            and lifecycle.dispatch_crossed
-        ):
-            return await lifecycle.async_failure()
+        if result.get("accepted") is not True and dispatch_state["crossed"]:
+            return await _async_action_failure(
+                self,
+                lifecycle,
+                request_id=str(payload.get("requestId")),
+                response_media_type=response_media_type,
+                dispatch_crossed=True,
+            )
         if result.get("accepted") is True and climate_entity_id is not None:
             try:
                 climate_mode_change = await mode_writer(
@@ -700,6 +712,7 @@ class DeviceActionView(HomeAssistantView):
                     lifecycle,
                     request_id=str(payload.get("requestId")),
                     response_media_type=response_media_type,
+                    dispatch_crossed=dispatch_state["crossed"],
                 )
         if release_seconds is not None:
             response["autoReleaseSeconds"] = release_seconds
@@ -849,9 +862,10 @@ class DeviceActionBatchView(HomeAssistantView):
             for index in range(len(normalized))
         ):
             return _stale_critical_evidence(self)
-        physical_full = full_request and any(
+        physical_actions = any(
             item.get("dryRun") is not True for item in normalized
         )
+        physical_full = full_request and physical_actions
         decision_at = time.time_ns() // 1_000_000
         pre_evidence = [
             (
@@ -1123,26 +1137,28 @@ class DeviceActionBatchView(HomeAssistantView):
                 if intercom_flags[index]
             )
         try:
-            if lifecycle is not None and _supports_keyword(
+            if physical_actions and _supports_keyword(
                 service.async_execute_device_action_batch, "dispatch_marker"
             ):
                 def mark_unattributed_dispatch() -> None:
                     unattributed_dispatch_state["crossed"] = True
-                    lifecycle.mark_dispatch_crossed()
+                    if lifecycle is not None:
+                        lifecycle.mark_dispatch_crossed()
 
                 batch_options["dispatch_marker"] = mark_unattributed_dispatch
             per_item_markers_supported = bool(
-                lifecycle is not None
+                physical_actions
                 and _supports_keyword(
                     service.async_execute_device_action_batch, "dispatch_markers"
                 )
             )
             if per_item_markers_supported:
-                assert lifecycle is not None
-
                 def item_marker(index: int) -> None:
+                    if normalized[index].get("dryRun") is True:
+                        return
                     item_dispatch_crossed[index] = True
-                    lifecycle.mark_dispatch_crossed()
+                    if lifecycle is not None:
+                        lifecycle.mark_dispatch_crossed()
 
                 batch_options["dispatch_markers"] = tuple(
                     (lambda index=index: item_marker(index))
@@ -1156,8 +1172,13 @@ class DeviceActionBatchView(HomeAssistantView):
             _LOGGER.warning("HausmanHub device action batch execution failed", exc_info=True)
             if lifecycle is not None:
                 return await lifecycle.async_failure()
+            dispatch_crossed = bool(
+                unattributed_dispatch_state["crossed"]
+                or any(item_dispatch_crossed)
+            )
             failure = _execution_failure_response(
-                request_id=str(payload.get("requestId")), dispatch_crossed=False
+                request_id=str(payload.get("requestId")),
+                dispatch_crossed=dispatch_crossed,
             )
             return _negotiated_json(
                 self, failure["payload"], status_code=failure["status"],
@@ -1178,18 +1199,34 @@ class DeviceActionBatchView(HomeAssistantView):
                 lifecycle,
                 request_id=str(payload.get("requestId")),
                 response_media_type=response_media_type,
+                dispatch_crossed=(
+                    unattributed_dispatch_state["crossed"]
+                    or any(item_dispatch_crossed)
+                ),
             )
         rejected_indexes = [
             index
             for index, receipt in enumerate(receipts)
             if receipt.get("accepted") is not True
         ]
-        if lifecycle is not None and rejected_indexes and (
+        rejection_after_dispatch = bool(rejected_indexes) and (
             any(item_dispatch_crossed[index] for index in rejected_indexes)
             or unattributed_dispatch_state["crossed"]
-            or not per_item_markers_supported and lifecycle.dispatch_crossed
-        ):
-            return await lifecycle.async_failure()
+            or (lifecycle is None and any(item_dispatch_crossed))
+            or (
+                lifecycle is not None
+                and not per_item_markers_supported
+                and lifecycle.dispatch_crossed
+            )
+        )
+        if rejection_after_dispatch:
+            return await _async_action_failure(
+                self,
+                lifecycle,
+                request_id=str(payload.get("requestId")),
+                response_media_type=response_media_type,
+                dispatch_crossed=True,
+            )
         if lifecycle is not None and intercom_release_index is not None:
             release_receipt = receipts[intercom_release_index]
             if release_receipt.get("accepted") is not True:
@@ -1229,6 +1266,10 @@ class DeviceActionBatchView(HomeAssistantView):
                     lifecycle,
                     request_id=str(payload.get("requestId")),
                     response_media_type=response_media_type,
+                    dispatch_crossed=(
+                        unattributed_dispatch_state["crossed"]
+                        or any(item_dispatch_crossed)
+                    ),
                 )
         else:
             wrapped = [

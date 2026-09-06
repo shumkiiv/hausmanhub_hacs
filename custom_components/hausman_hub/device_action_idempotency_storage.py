@@ -6,6 +6,9 @@ from typing import TYPE_CHECKING
 
 from homeassistant.helpers.storage import Store
 
+from .application.device_action_idempotency import (
+    valid_device_action_idempotency_payload,
+)
 from .verified_safety_storage import VerifiedSafetyStore
 
 if TYPE_CHECKING:
@@ -22,7 +25,15 @@ class HomeAssistantDeviceActionIdempotencyStore:
             f"hausman_hub.device_action_idempotency.{entry_id}",
             atomic_writes=True,
         )
-        self._store = VerifiedSafetyStore(store, hass.async_add_executor_job)
+        self._store = VerifiedSafetyStore(
+            store,
+            hass.async_add_executor_job,
+            payload_validator=valid_device_action_idempotency_payload,
+        )
+
+    @property
+    def recovered_previous(self) -> bool:
+        return self._store.recovered_previous
 
     async def async_load(self) -> object | None:
         return await self._store.async_load()

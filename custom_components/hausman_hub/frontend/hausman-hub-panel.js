@@ -6083,7 +6083,7 @@ class HausmanHubPanel extends HTMLElement {
       if (options.confirmedByUser === true) payload.confirmedByUser = true;
       if (options.dryRun === true) payload.dryRun = true;
       let headers;
-      if (isIntercom && options.dryRun !== true) {
+      if (options.dryRun !== true) {
         ({ payload, headers } = fullDeviceActionRequest(payload, requestId("device-action")));
       }
       const receipt = await this._hass.callApi(
