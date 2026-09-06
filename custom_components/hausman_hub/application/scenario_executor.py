@@ -633,6 +633,7 @@ class ScenarioExecutor:
         automatic_reassert: bool = False,
         reassert_claim_id: str | None = None,
         before_dispatch: Callable[[], Awaitable[None]] | None = None,
+        dispatch_marker: Callable[[], None] | None = None,
         request_id: str | None = None,
         expected_evidence_revision: str | None = None,
         expected_evidence_sequence: int | None = None,
@@ -688,6 +689,7 @@ class ScenarioExecutor:
                 force_new_readback=force_new_readback,
                 automatic=automatic_reassert,
                 before_dispatch=_async_before_dispatch,
+                dispatch_marker=dispatch_marker,
                 reassert_claim_id=reassert_claim_id,
                 authority_lock_held=not dry_run and is_lighting,
                 expected_entity_id=expected_entity_id,
@@ -2153,6 +2155,7 @@ class ScenarioExecutor:
         manual_off_protection_decision: Any | None = None,
         lighting_scenario_text: str = "",
         power_dependencies: Mapping[str, DevicePowerDependency] | None = None,
+        dispatch_marker: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         base = {
             "action_id": action.id,
@@ -2188,6 +2191,7 @@ class ScenarioExecutor:
                     manual_off_protection_decision=manual_off_protection_decision,
                     lighting_scenario_text=lighting_scenario_text,
                     power_dependencies=power_dependencies,
+                    dispatch_marker=dispatch_marker,
                 )
             if action.type == ScenarioActionType.DELAY:
                 if not dry_run:
@@ -2272,6 +2276,7 @@ class ScenarioExecutor:
         manual_off_protection_decision: Any | None = None,
         lighting_scenario_text: str = "",
         power_dependencies: Mapping[str, DevicePowerDependency] | None = None,
+        dispatch_marker: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         if action.target_id is None or action.action_id is None:
             return {
@@ -2803,6 +2808,8 @@ class ScenarioExecutor:
                         device.entity_id,
                         "on" if dispatch_service == "turn_on" else "off",
                     )
+                if dispatch_marker is not None:
+                    dispatch_marker()
                 base["_physical_attempted"] = True
                 await self._call_service(
                     allowed.domain,

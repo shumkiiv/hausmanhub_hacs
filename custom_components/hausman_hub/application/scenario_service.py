@@ -3234,6 +3234,7 @@ class ScenarioService:
         expected_domain: str | None = None,
         expected_service: str | None = None,
         intercom_release_required: bool = False,
+        dispatch_marker: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         """Execute one catalog action through the shared strict executor."""
 
@@ -3330,6 +3331,8 @@ class ScenarioService:
             options["before_dispatch"] = (
                 arm_intercom_release
             )
+        if dispatch_marker is not None:
+            options["dispatch_marker"] = dispatch_marker
         # The release obligation is intentionally left armed after the
         # executor crosses its dispatch callback.  An exception from the HA
         # service leaves the physical result unknown, so cancelling here could
@@ -3352,6 +3355,7 @@ class ScenarioService:
         dispatch_contexts: (
             tuple[tuple[str, str, tuple[str, ...], str] | None, ...] | None
         ) = None,
+        dispatch_marker: Callable[[], None] | None = None,
     ) -> list[dict[str, Any]]:
         """Run one bounded ordered batch and preserve every target receipt."""
 
@@ -3438,6 +3442,8 @@ class ScenarioService:
                 options["expected_service"] = context[3]
             if request_ids is not None:
                 options["request_id"] = request_ids[index]
+            if dispatch_marker is not None:
+                options["dispatch_marker"] = dispatch_marker
             if dry_run:
                 options["dry_run"] = True
             release_required = (

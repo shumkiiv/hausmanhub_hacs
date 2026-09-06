@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import inspect
 from http import HTTPStatus
 import logging
 import time
@@ -10,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 import uuid
 
 from homeassistant.components.http import HomeAssistantView
+from homeassistant.exceptions import HomeAssistantError
 
 from .application.api_capabilities import (
     DEVICE_ACTIONS_BATCH_PATH,
@@ -236,7 +238,10 @@ class DeviceActionView(HomeAssistantView):
         coordination_key: str | None = None
         dispatch_request_id: str | None = None
         intercom_release_prepared = False
-        dispatch_crossed = False
+        dispatch_state = {"crossed": False}
+
+        def mark_dispatch_crossed() -> None:
+            dispatch_state["crossed"] = True
         if full_request and not dry_run:
             if context is None or not isinstance(
                 idempotency, DangerousActionIdempotency
@@ -361,15 +366,25 @@ class DeviceActionView(HomeAssistantView):
                 execute_options["expected_service"] = allowed_service
             if intercom_action and not dry_run:
                 execute_options["intercom_release_required"] = True
-            dispatch_crossed = True
+            if _supports_keyword(
+                service.async_execute_device_action, "dispatch_marker"
+            ):
+                execute_options["dispatch_marker"] = mark_dispatch_crossed
             result = await service.async_execute_device_action(
                 target_id,
                 action_id,
                 payload.get("value"),
                 **execute_options,
             )
-        except (ScenarioServiceError, RuntimeError, TimeoutError):
+        except (
+            HomeAssistantError,
+            ScenarioServiceError,
+            RuntimeError,
+            TimeoutError,
+            ValueError,
+        ):
             _LOGGER.warning("HausmanHub device action execution failed", exc_info=True)
+            dispatch_crossed = dispatch_state["crossed"]
             if intercom_release_prepared and not dispatch_crossed:
                 await service.async_cancel_intercom_release(
                     target_id,
@@ -658,6 +673,10 @@ class DeviceActionBatchView(HomeAssistantView):
         dispatch_request_ids: tuple[str, ...] | None = None
         intercom_release_index: int | None = None
         intercom_release_prepared = False
+        dispatch_state = {"crossed": False}
+
+        def mark_dispatch_crossed() -> None:
+            dispatch_state["crossed"] = True
         coordinated_index = (
             dangerous_indexes[0]
             if dangerous_indexes
@@ -793,13 +812,23 @@ class DeviceActionBatchView(HomeAssistantView):
                 if intercom_flags[index]
             )
         try:
-            dispatch_crossed = True
+            if _supports_keyword(
+                service.async_execute_device_action_batch, "dispatch_marker"
+            ):
+                batch_options["dispatch_marker"] = mark_dispatch_crossed
             receipts = await service.async_execute_device_action_batch(
                 normalized,
                 **batch_options,
             )
-        except (ScenarioServiceError, RuntimeError, TimeoutError):
+        except (
+            HomeAssistantError,
+            ScenarioServiceError,
+            RuntimeError,
+            TimeoutError,
+            ValueError,
+        ):
             _LOGGER.warning("HausmanHub device action batch execution failed", exc_info=True)
+            dispatch_crossed = dispatch_state["crossed"]
             if (
                 intercom_release_prepared
                 and intercom_release_index is not None
@@ -999,6 +1028,20 @@ def _execution_failure_response(
         return {"status": HTTPStatus.CONFLICT, "payload": payload}
     payload = api_error_payload("unavailable", request_id=request_id)
     return {"status": HTTPStatus.SERVICE_UNAVAILABLE, "payload": payload}
+
+
+def _supports_keyword(callable_object: object, keyword: str) -> bool:
+    """Keep test doubles and older service adapters source-compatible."""
+
+    try:
+        parameters = inspect.signature(callable_object).parameters.values()
+    except (TypeError, ValueError):
+        return True
+    return any(
+        parameter.name == keyword
+        or parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )
 
 
 def _legacy_dangerous_forbidden(view: HomeAssistantView) -> Any:
