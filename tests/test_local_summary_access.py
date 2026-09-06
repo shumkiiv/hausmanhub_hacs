@@ -5170,6 +5170,8 @@ class LocalSummaryAccessTest(unittest.TestCase):
         service = self.hass.data["hausman_hub"]["scenario_service"]
         tablet = reader_user("system-users")
         execution_accepts = True
+        execution_failure: str | None = None
+        execution_calls: list[str] = []
 
         def strict_ha_json(
             payload: object,
@@ -5195,6 +5197,13 @@ class LocalSummaryAccessTest(unittest.TestCase):
             correlation_id: str | None = None,
             **options: object,
         ) -> dict[str, object]:
+            execution_calls.append(target_id)
+            if execution_failure is not None:
+                if execution_failure == "post_dispatch":
+                    dispatch_marker = options.get("dispatch_marker")
+                    self.assertTrue(callable(dispatch_marker))
+                    dispatch_marker()
+                raise RuntimeError("synthetic executor failure")
             return {
                 "correlationId": correlation_id,
                 "requestId": options.get("request_id", "legacy.response.request"),
@@ -5273,10 +5282,46 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 409,
                 "application/vnd.hausmanhub.device-action-receipt.full+json",
             ),
+            (
+                "full-pre-dispatch-exception",
+                "pre_dispatch",
+                {
+                    "contract": {
+                        "name": "hausman-hub-device-action-request",
+                        "version": 1,
+                    },
+                    "correlationId": "full.pre.exception.1",
+                    "requestId": "full.pre.exception.request.1",
+                    "targetId": "response_target",
+                    "actionId": "turn_on",
+                },
+                "application/vnd.hausmanhub.device-action-request.full+json",
+                "application/vnd.hausmanhub.device-action-receipt.full+json",
+                503,
+                "application/vnd.hausmanhub.device-action-receipt.full+json",
+            ),
+            (
+                "full-post-dispatch-exception",
+                "post_dispatch",
+                {
+                    "contract": {
+                        "name": "hausman-hub-device-action-request",
+                        "version": 1,
+                    },
+                    "correlationId": "full.post.exception.1",
+                    "requestId": "full.post.exception.request.1",
+                    "targetId": "response_target",
+                    "actionId": "turn_on",
+                },
+                "application/vnd.hausmanhub.device-action-request.full+json",
+                "application/vnd.hausmanhub.device-action-receipt.full+json",
+                409,
+                "application/vnd.hausmanhub.device-action-receipt.full+json",
+            ),
         )
         for (
             label,
-            accepted,
+            outcome,
             payload,
             content_type,
             accept,
@@ -5284,7 +5329,11 @@ class LocalSummaryAccessTest(unittest.TestCase):
             expected_media_type,
         ) in cases:
             with self.subTest(label=label):
-                execution_accepts = accepted
+                execution_failure = (
+                    outcome if isinstance(outcome, str) else None
+                )
+                execution_accepts = outcome is True
+                before_calls = len(execution_calls)
                 response = asyncio.run(
                     view.post(
                         FakeJsonRequest(
@@ -5300,6 +5349,71 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertEqual(expected_status, response.status)
                 self.assertEqual(expected_media_type, response.headers["Content-Type"])
                 self.assertEqual("no-store", response.headers["Cache-Control"])
+                if execution_failure is not None:
+                    self.assertEqual(before_calls + 1, len(execution_calls))
+                    self.assertEqual(
+                        "unavailable" if expected_status == 503 else "conflict",
+                        response.payload["code"],
+                    )
+
+    def test_full_batch_execution_exceptions_keep_negotiated_media_type(self) -> None:
+        views = {view.url: view for view in self.hass.http.views}
+        path = "/api/hausman_hub/v1/device-actions/batch"
+        view = views[path]
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        tablet = reader_user("system-users")
+        calls: list[list[dict[str, object]]] = []
+        dispatch_crossed = False
+
+        async def resolve_context(_target_id: str, _action_id: str):
+            return "switch.synthetic_response", "switch", ("turn_on",), "turn_on"
+
+        async def execute_batch(
+            actions: list[dict[str, object]], **options: object
+        ) -> list[dict[str, object]]:
+            calls.append(actions)
+            if dispatch_crossed:
+                marker = options.get("dispatch_marker")
+                self.assertTrue(callable(marker))
+                marker()
+            raise RuntimeError("synthetic batch executor failure")
+
+        service.async_resolve_device_action_context = resolve_context
+        service.async_execute_device_action_batch = execute_batch
+        for index, (crossed, status, code) in enumerate(
+            ((False, 503, "unavailable"), (True, 409, "conflict"))
+        ):
+            with self.subTest(dispatch_crossed=crossed):
+                dispatch_crossed = crossed
+                response = asyncio.run(
+                    view.post(
+                        FakeJsonRequest(
+                            "192.168.1.20",
+                            tablet,
+                            path,
+                            {
+                                "contract": {
+                                    "name": "hausman-hub-device-action-batch-request",
+                                    "version": 1,
+                                },
+                                "correlationId": f"full.batch.exception.{index}",
+                                "requestId": f"full.batch.exception.request.{index}",
+                                "actions": [
+                                    {"targetId": "response_target", "actionId": "turn_on"}
+                                ],
+                            },
+                            content_type="application/vnd.hausmanhub.device-action-batch-request.full+json",
+                            accept="application/vnd.hausmanhub.device-action-batch-receipt.full+json",
+                        )
+                    )
+                )
+                self.assertEqual(status, response.status)
+                self.assertEqual(code, response.payload["code"])
+                self.assertEqual(
+                    "application/vnd.hausmanhub.device-action-batch-receipt.full+json",
+                    response.headers["Content-Type"],
+                )
+                self.assertEqual(index + 1, len(calls))
 
     def test_setup_persists_pending_power_source_before_entity_registration(self) -> None:
         from custom_components.hausman_hub import device_power_dependency_storage

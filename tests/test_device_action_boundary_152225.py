@@ -87,3 +87,8 @@ class DeviceActionBoundary152225Tests(unittest.TestCase):
     def test_discovery_accepts_supported_async_entries_registry_api(self) -> None:
         entries = (object(), object())
         self.assertEqual(entries, _values(_EntriesOnlyRegistry(entries), "devices"))
+
+    def test_discovery_returns_mapping_values_not_legacy_registry_keys(self) -> None:
+        entries = {"device-one": object(), "device-two": object()}
+        registry = type("Registry", (), {"devices": entries})()
+        self.assertEqual(tuple(entries.values()), _values(registry, "devices"))

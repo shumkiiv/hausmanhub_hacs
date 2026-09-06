@@ -147,6 +147,10 @@ def assign_device_area(hass: HomeAssistant, device_id: str, area_id: str) -> Non
 
 def _values(registry: object, collection: str) -> tuple[object, ...]:
     raw = getattr(registry, collection, None)
+    # Compatibility for pre-2026 registries. Indexing avoids the deprecated
+    # mapping ``.values()`` API while preserving insertion order.
+    if isinstance(raw, Mapping):
+        return tuple(raw[key] for key in raw)
     if isinstance(raw, Iterable):
         return tuple(raw)
     entries_method = getattr(registry, "async_entries", None)
@@ -155,10 +159,6 @@ def _values(registry: object, collection: str) -> tuple[object, ...]:
     list_method = getattr(registry, f"async_list_{collection}", None)
     if callable(list_method):
         return tuple(list_method())
-    # Compatibility for pre-2026 registries.  Indexing avoids the deprecated
-    # mapping ``.values()`` API while preserving insertion order.
-    if isinstance(raw, Mapping):
-        return tuple(raw[key] for key in raw)
     return ()
 
 

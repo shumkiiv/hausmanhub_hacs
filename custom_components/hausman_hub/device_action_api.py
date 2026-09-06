@@ -399,10 +399,11 @@ class DeviceActionView(HomeAssistantView):
                 target_type=target_type,
                 dispatch_crossed=dispatch_crossed,
             )
-            return self.json(
+            return _negotiated_json(
+                self,
                 failure["payload"],
                 status_code=failure["status"],
-                headers=NO_STORE_HEADERS,
+                media_type=response_media_type,
             )
         if result.get("accepted") is True and climate_entity_id is not None:
             climate_mode_change = await mode_writer(climate_entity_id, "automatic")
@@ -869,10 +870,11 @@ class DeviceActionBatchView(HomeAssistantView):
                 ),
                 dispatch_crossed=dispatch_crossed,
             )
-            return self.json(
+            return _negotiated_json(
+                self,
                 failure["payload"],
                 status_code=failure["status"],
-                headers=NO_STORE_HEADERS,
+                media_type=response_media_type,
             )
         if intercom_release_prepared and intercom_release_index is not None:
             release_receipt = receipts[intercom_release_index]
