@@ -267,14 +267,14 @@ def _normalize_action_value(param: str, value: object) -> object:
             if value.endswith("%"):
                 value = value[:-1].strip()
             try:
-                numeric = int(value)
+                numeric = float(value)
             except ValueError as error:
                 raise ValueError(f"{param} must be an integer") from error
         elif isinstance(value, (int, float)) and not isinstance(value, bool):
-            numeric = int(value)
+            numeric = float(value)
         else:
             raise ValueError(f"{param} must be an integer")
-        if float(numeric) != int(numeric):
+        if not math.isfinite(numeric) or numeric != round(numeric):
             raise ValueError(f"{param} must be an integer")
         numeric = int(numeric)
         return numeric
@@ -282,14 +282,14 @@ def _normalize_action_value(param: str, value: object) -> object:
         if isinstance(value, str):
             value = value.strip()
             try:
-                kelvin = int(value)
+                kelvin = float(value)
             except ValueError as error:
                 raise ValueError(f"{param} must be an integer") from error
         elif isinstance(value, (int, float)) and not isinstance(value, bool):
-            kelvin = int(value)
+            kelvin = float(value)
         else:
             raise ValueError(f"{param} must be an integer")
-        if float(kelvin) != int(kelvin):
+        if not math.isfinite(kelvin) or kelvin != round(kelvin):
             raise ValueError(f"{param} must be an integer")
         return int(kelvin)
     if param in ("temperature", "value"):
@@ -3911,6 +3911,13 @@ def _range_error_for_action(
             numeric = float(value) if isinstance(value, (int, float)) else math.nan
             if not math.isfinite(numeric) or numeric < minimum or numeric > maximum:
                 return "value is outside the allowed range"
+        else:
+            return "device range is unavailable"
+        return None
+    if action_id in {"set_position", "set_brightness", "set_brightness_percent", "set_night_light"}:
+        minimum, maximum = (1, 30) if action_id == "set_night_light" else (0, 255) if action_id == "set_brightness" else (0, 100) if action_id == "set_brightness_percent" else (0, 100)
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)) or float(value) < minimum or float(value) > maximum or float(value) != round(float(value)):
+            return "value is outside the allowed range"
         return None
     if required is None:
         return None
