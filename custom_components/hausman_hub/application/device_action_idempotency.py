@@ -179,6 +179,18 @@ class DangerousActionIdempotency:
             await self._store.async_save(self._payload(next_records))
             self._records = next_records
 
+    async def async_abandon_pre_dispatch(self, key: str) -> None:
+        """Release a reservation only when no physical dispatch was observed."""
+
+        async with self._lock:
+            record = self._required(key)
+            if record["dispatchPhase"] == "dispatched":
+                return
+            next_records = copy.deepcopy(self._records)
+            del next_records[key]
+            await self._store.async_save(self._payload(next_records))
+            self._records = next_records
+
     async def async_complete(
         self,
         key: str,

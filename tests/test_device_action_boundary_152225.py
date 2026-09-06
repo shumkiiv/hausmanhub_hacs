@@ -92,3 +92,22 @@ class DeviceActionBoundary152225Tests(unittest.TestCase):
         entries = {"device-one": object(), "device-two": object()}
         registry = type("Registry", (), {"devices": entries})()
         self.assertEqual(tuple(entries.values()), _values(registry, "devices"))
+
+    def test_discovery_does_not_consume_async_or_parameterized_accessors(self) -> None:
+        async def asynchronous_entries() -> list[object]:
+            return [object()]
+
+        class Registry:
+            devices = None
+            async_entries = staticmethod(asynchronous_entries)
+
+        self.assertEqual((), _values(Registry(), "devices"))
+
+        class ParameterizedRegistry:
+            devices = None
+
+            @staticmethod
+            def async_entries(domain: str) -> list[object]:
+                raise AssertionError(domain)
+
+        self.assertEqual((), _values(ParameterizedRegistry(), "devices"))

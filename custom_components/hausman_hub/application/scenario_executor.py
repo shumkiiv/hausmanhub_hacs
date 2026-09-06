@@ -2637,6 +2637,7 @@ class ScenarioExecutor:
                 powered_sources=powered_sources or {},
                 dry_run=dry_run,
                 request_id=command_request_id or str(base.get("correlation_id") or action.id),
+                dispatch_marker=dispatch_marker,
             )
         )
         if power_error is not None:
@@ -2889,6 +2890,7 @@ class ScenarioExecutor:
         source_state: object | None,
         *,
         request_id: str,
+        dispatch_marker: Callable[[], None] | None = None,
         source_command_sent_at: int | None,
         source_read_back_at: int | None,
         ready_at: int | None,
@@ -2987,6 +2989,7 @@ class ScenarioExecutor:
         powered_sources: Mapping[str, float],
         dry_run: bool,
         request_id: str,
+        dispatch_marker: Callable[[], None] | None = None,
         visiting: frozenset[str] = frozenset(),
     ) -> tuple[str | None, dict[str, object] | None, frozenset[str]]:
         """Ensure an automatic upstream source is on before a device command."""
@@ -3006,6 +3009,7 @@ class ScenarioExecutor:
             powered_sources=powered_sources,
             dry_run=dry_run,
             request_id=request_id,
+            dispatch_marker=dispatch_marker,
             visiting=visiting | {entity_id},
         )
         precondition: dict[str, object] = {
@@ -3143,6 +3147,8 @@ class ScenarioExecutor:
                     else None
                 )
                 try:
+                    if dispatch_marker is not None:
+                        dispatch_marker()
                     await self._call_service(
                         domain,
                         "turn_on",

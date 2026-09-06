@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+import inspect
 from typing import TYPE_CHECKING
 
 from .application.dashboard_snapshot import stable_public_id
@@ -154,12 +155,38 @@ def _values(registry: object, collection: str) -> tuple[object, ...]:
     if isinstance(raw, Iterable):
         return tuple(raw)
     entries_method = getattr(registry, "async_entries", None)
-    if callable(entries_method):
-        return tuple(entries_method())
+    if callable(entries_method) and _accepts_no_arguments(entries_method):
+        entries = entries_method()
+        if inspect.isawaitable(entries):
+            entries.close() if hasattr(entries, "close") else None
+            return ()
+        if isinstance(entries, Iterable):
+            return tuple(entries)
     list_method = getattr(registry, f"async_list_{collection}", None)
-    if callable(list_method):
-        return tuple(list_method())
+    if callable(list_method) and _accepts_no_arguments(list_method):
+        entries = list_method()
+        if inspect.isawaitable(entries):
+            entries.close() if hasattr(entries, "close") else None
+            return ()
+        if isinstance(entries, Iterable):
+            return tuple(entries)
     return ()
+
+
+def _accepts_no_arguments(method: object) -> bool:
+    """Use synchronous registry accessors only when their signature is safe."""
+
+    try:
+        signature = inspect.signature(method)
+    except (TypeError, ValueError):
+        return False
+    return not any(
+        parameter.default is inspect.Parameter.empty
+        and parameter.kind
+        in {inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY}
+        for parameter in signature.parameters.values()
+    )
 
 
 def _text(value: object) -> str | None:

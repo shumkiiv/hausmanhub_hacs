@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any
 import uuid
 
 from homeassistant.components.http import HomeAssistantView
-from homeassistant.exceptions import HomeAssistantError
 
 from .application.api_capabilities import (
     DEVICE_ACTIONS_BATCH_PATH,
@@ -40,7 +39,7 @@ from .application.device_action_receipts import (
     full_action_receipt,
 )
 from .application.scenario_light_priority import _state_is_fresh
-from .application.scenario_service import ScenarioService, ScenarioServiceError
+from .application.scenario_service import ScenarioService
 from .climate_api import (
     DOMAIN,
     NO_STORE_HEADERS,
@@ -376,13 +375,7 @@ class DeviceActionView(HomeAssistantView):
                 payload.get("value"),
                 **execute_options,
             )
-        except (
-            HomeAssistantError,
-            ScenarioServiceError,
-            RuntimeError,
-            TimeoutError,
-            ValueError,
-        ):
+        except Exception:
             _LOGGER.warning("HausmanHub device action execution failed", exc_info=True)
             dispatch_crossed = dispatch_state["crossed"]
             if intercom_release_prepared and not dispatch_crossed:
@@ -391,6 +384,12 @@ class DeviceActionView(HomeAssistantView):
                     expected_entity_id=entity_id,
                     expected_request_id=f"{dispatch_request_id}.release",
                 )
+            if (
+                not dispatch_crossed
+                and coordination_key is not None
+                and isinstance(idempotency, DangerousActionIdempotency)
+            ):
+                await idempotency.async_abandon_pre_dispatch(coordination_key)
             failure = _execution_failure_response(
                 target_id=target_id,
                 action_id=action_id,
@@ -821,19 +820,12 @@ class DeviceActionBatchView(HomeAssistantView):
                 normalized,
                 **batch_options,
             )
-        except (
-            HomeAssistantError,
-            ScenarioServiceError,
-            RuntimeError,
-            TimeoutError,
-            ValueError,
-        ):
+        except Exception:
             _LOGGER.warning("HausmanHub device action batch execution failed", exc_info=True)
             dispatch_crossed = dispatch_state["crossed"]
             if (
                 intercom_release_prepared
                 and intercom_release_index is not None
-                and not dispatch_crossed
             ):
                 await service.async_cancel_intercom_release(
                     str(normalized[intercom_release_index]["targetId"]),
@@ -842,6 +834,12 @@ class DeviceActionBatchView(HomeAssistantView):
                         f"{dispatch_request_ids[intercom_release_index]}.release"
                     ),
                 )
+            if (
+                not dispatch_crossed
+                and idempotency_key is not None
+                and isinstance(idempotency, DangerousActionIdempotency)
+            ):
+                await idempotency.async_abandon_pre_dispatch(idempotency_key)
             failure = _execution_failure_response(
                 target_id=(
                     str(normalized[intercom_release_index]["targetId"])
