@@ -27,6 +27,7 @@ from check_staged_release_version import ReleaseVersionCheckError, parse_release
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 INTEGRATION_DIRECTORY = PurePosixPath("custom_components/hausman_hub")
 HACS_METADATA_PATH = PurePosixPath("hacs.json")
+LOCAL_QUALITY_WORKFLOW_PATH = PurePosixPath(".github/workflows/local-quality.yml")
 MANIFEST_PATH = INTEGRATION_DIRECTORY / "manifest.json"
 BRAND_IMAGE_DIMENSIONS = {
     INTEGRATION_DIRECTORY / "brand/icon.png": (256, 256),
@@ -160,6 +161,7 @@ EXPECTED_HACS_METADATA = {
     "name": EXPECTED_NAME,
     "homeassistant": EXPECTED_HOME_ASSISTANT,
 }
+REQUIRED_CI_TEST_REQUIREMENT = "cryptography==48.0.0"
 EXPECTED_MANIFEST_VALUES = {
     "domain": EXPECTED_DOMAIN,
     "name": EXPECTED_NAME,
@@ -170,7 +172,7 @@ EXPECTED_MANIFEST_VALUES = {
     "integration_type": "hub",
     "single_config_entry": True,
     "after_dependencies": ["recorder", "weather"],
-    "requirements": ["cryptography==48.0.0"],
+    "requirements": [],
 }
 EXPECTED_MANIFEST_KEYS = frozenset((*EXPECTED_MANIFEST_VALUES, "version"))
 REGULAR_FILE_MODE = "100644"
@@ -231,6 +233,20 @@ def find_hacs_package_violations(
     manifest = read_json_object(indexed_files, MANIFEST_PATH, findings)
     if manifest is not None:
         add_manifest_findings(manifest, findings)
+
+    local_quality_workflow = read_utf8_text(
+        indexed_files,
+        LOCAL_QUALITY_WORKFLOW_PATH,
+        findings,
+    )
+    if (
+        local_quality_workflow is None
+        or REQUIRED_CI_TEST_REQUIREMENT not in local_quality_workflow.split()
+    ):
+        findings.append(
+            f"{LOCAL_QUALITY_WORKFLOW_PATH}: clean CI must install "
+            f"{REQUIRED_CI_TEST_REQUIREMENT} for tests"
+        )
 
     translations = [
         read_json_object(indexed_files, translation_path, findings)
@@ -344,6 +360,16 @@ def add_manifest_findings(manifest: dict[str, object], findings: list[str]) -> N
             findings.append(
                 f"{MANIFEST_PATH}: {key} must be {expected_value!r}"
             )
+
+    requirements = manifest.get("requirements")
+    if isinstance(requirements, list) and any(
+        isinstance(requirement, str)
+        and requirement.strip().lower().startswith("cryptography")
+        for requirement in requirements
+    ):
+        findings.append(
+            f"{MANIFEST_PATH}: cryptography must be provided by Home Assistant Core"
+        )
 
     version = manifest.get("version")
     if not isinstance(version, str):

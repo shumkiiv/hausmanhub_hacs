@@ -1,14 +1,14 @@
-import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.222";
-import { scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.222";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.222";
-import { scenarioCapabilityLabel, scenarioDeviceButton, scenarioDeviceFields, scenarioGroupForTarget, scenarioPhysicalGroups } from "./hausman-hub-scenario-device-picker.js?v=1.52.222";
-import { groupScenarios, renderScenarioCatalog, scenarioActivationKind, scenarioDisplayGroup, scenarioDisplayText } from "./hausman-hub-scenario-catalog.js?v=1.52.222";
-import { renderScenarioRoomPicker, scenarioAffectedDeviceCount, scenarioRoomLabels } from "./hausman-hub-scenario-rooms.js?v=1.52.222";
-import { defaultScenarioDraft, duplicateScenarioDraft, normalizedScenario, scenarioActionDetail, scenarioHasDynamicNodeRedPlan, scenarioPayload, scenarioReviewSummary } from "./hausman-hub-scenario-state.js?v=1.52.222";
-import { bulkSaveScenarios } from "./hausman-hub-scenario-bulk.js?v=1.52.222";
-import { openScenarioAiComposer, renderScenarioAiComposer } from "./hausman-hub-scenario-ai.js?v=1.52.222";
-import { captureScenarioEditorScroll, restoreScenarioEditorScroll } from "./hausman-hub-scenario-editor-scroll.js?v=1.52.222";
-import { closeManagedSourceEditor, openManagedSourceEditor, renderDynamicNodeRedActions, renderManagedSourceEditor, renderNodeRedInputPicker } from "./hausman-hub-scenario-node-red.js?v=1.52.222";
+import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.223";
+import { scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.223";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.223";
+import { scenarioCapabilityLabel, scenarioDeviceButton, scenarioDeviceFields, scenarioGroupForTarget, scenarioPhysicalGroups } from "./hausman-hub-scenario-device-picker.js?v=1.52.223";
+import { groupScenarios, renderScenarioCatalog, scenarioActivationKind, scenarioDisplayGroup, scenarioDisplayText } from "./hausman-hub-scenario-catalog.js?v=1.52.223";
+import { renderScenarioRoomPicker, scenarioAffectedDeviceCount, scenarioRoomLabels } from "./hausman-hub-scenario-rooms.js?v=1.52.223";
+import { defaultScenarioDraft, duplicateScenarioDraft, normalizedScenario, scenarioActionDetail, scenarioHasDynamicNodeRedPlan, scenarioPayload, scenarioReviewSummary } from "./hausman-hub-scenario-state.js?v=1.52.223";
+import { bulkSaveScenarios } from "./hausman-hub-scenario-bulk.js?v=1.52.223";
+import { openScenarioAiComposer, renderScenarioAiComposer } from "./hausman-hub-scenario-ai.js?v=1.52.223";
+import { captureScenarioEditorScroll, restoreScenarioEditorScroll } from "./hausman-hub-scenario-editor-scroll.js?v=1.52.223";
+import { closeManagedSourceEditor, openManagedSourceEditor, renderDynamicNodeRedActions, renderManagedSourceEditor, renderNodeRedInputPicker } from "./hausman-hub-scenario-node-red.js?v=1.52.223";
 
 const TRIGGER_TYPES = [
   ["manual", "Ручной запуск"], ["time", "По времени"],

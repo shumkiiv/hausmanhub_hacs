@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
+WORKFLOW_PATH = PurePosixPath(".github/workflows/local-quality.yml")
 sys.path.insert(0, str(ROOT / "tools"))
 
 import check_hacs_package as package  # noqa: E402
@@ -29,7 +30,7 @@ class HacsPackageCheckTest(unittest.TestCase):
     def test_current_prepared_git_package_passes(self) -> None:
         manifest = json.loads(file_content(self.files, package.MANIFEST_PATH))
 
-        self.assertEqual(["cryptography==48.0.0"], manifest.get("requirements"))
+        self.assertEqual([], manifest.get("requirements"))
         self.assertEqual(
             (),
             package.find_hacs_package_violations(self.files, self.file_modes),
@@ -88,12 +89,11 @@ class HacsPackageCheckTest(unittest.TestCase):
             self.file_modes,
         )
         self.assertIn(
-            f"{package.MANIFEST_PATH}: requirements must be "
-            "['cryptography==48.0.0']",
+            f"{package.MANIFEST_PATH}: requirements must be []",
             manifest_findings,
         )
 
-    def test_manifest_accepts_only_the_home_assistant_cryptography_pin(self) -> None:
+    def test_manifest_rejects_a_runtime_cryptography_pin(self) -> None:
         manifest = json.loads(file_content(self.files, package.MANIFEST_PATH))
         manifest["requirements"] = ["cryptography==48.0.0"]
         pinned_files = replace_file(
@@ -104,8 +104,26 @@ class HacsPackageCheckTest(unittest.TestCase):
 
         findings = package.find_hacs_package_violations(pinned_files, self.file_modes)
 
-        self.assertNotIn(
-            f"{package.MANIFEST_PATH}: must keep the approved manifest fields",
+        self.assertIn(
+            f"{package.MANIFEST_PATH}: cryptography must be provided by Home Assistant Core",
+            findings,
+        )
+
+    def test_clean_ci_environment_must_install_the_test_cryptography_pin(self) -> None:
+        workflow = file_content(self.files, WORKFLOW_PATH)
+        changed_workflow = replace_file(
+            self.files,
+            WORKFLOW_PATH,
+            workflow.replace(" cryptography==48.0.0", "").encode("utf-8"),
+        )
+
+        findings = package.find_hacs_package_violations(
+            changed_workflow,
+            self.file_modes,
+        )
+
+        self.assertIn(
+            f"{WORKFLOW_PATH}: clean CI must install cryptography==48.0.0 for tests",
             findings,
         )
 

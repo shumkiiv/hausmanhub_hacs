@@ -13,7 +13,7 @@ WORKFLOW = ROOT / ".github" / "workflows" / "local-quality.yml"
 class GitHubLocalQualityWorkflowTest(unittest.TestCase):
     """Keep the GitHub check limited to the fixed local publication command."""
 
-    def test_workflow_uses_read_only_access_and_local_checks(self) -> None:
+    def test_clean_ci_environment_installs_all_local_test_dependencies(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
 
         self.assertIn("permissions:\n  contents: read", workflow)
