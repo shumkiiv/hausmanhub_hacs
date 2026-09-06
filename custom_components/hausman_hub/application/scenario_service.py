@@ -3244,6 +3244,7 @@ class ScenarioService:
         expected_service: str | None = None,
         intercom_release_required: bool = False,
         dispatch_marker: Callable[[], None] | None = None,
+        idempotent_actions: bool = False,
     ) -> dict[str, Any]:
         """Execute one catalog action through the shared strict executor."""
 
@@ -3342,6 +3343,8 @@ class ScenarioService:
             )
         if dispatch_marker is not None:
             options["dispatch_marker"] = dispatch_marker
+        if idempotent_actions:
+            options["idempotent_actions"] = True
         # The release obligation is intentionally left armed after the
         # executor crosses its dispatch callback.  An exception from the HA
         # service leaves the physical result unknown, so cancelling here could

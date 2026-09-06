@@ -14,6 +14,7 @@ sys.modules.update(_FAKE_HOME_ASSISTANT_MODULES)
 
 from custom_components.hausman_hub.device_action_api import (
     _execution_failure_response,
+    _direct_idempotent_allowed,
 )
 from custom_components.hausman_hub.device_discovery_ha import _values
 
@@ -46,6 +47,18 @@ class _EntriesOnlyRegistry:
 
 
 class DeviceActionBoundary152225Tests(unittest.TestCase):
+    def test_direct_preflight_is_limited_to_fresh_safe_actions(self) -> None:
+        state = type("State", (), {"state": "on", "last_updated": __import__("datetime").datetime.now(__import__("datetime").timezone.utc)})()
+        self.assertTrue(_direct_idempotent_allowed(
+            action_id="turn_on", target_type="light", entity_id="light.x",
+            state=state, dangerous=False, external_cover=False, reassert_key=None,
+        ))
+        for action_id, target_type in (("toggle", "light"), ("turn_on", "cover"), ("turn_on", "breaker")):
+            with self.subTest(action_id=action_id, target_type=target_type):
+                self.assertFalse(_direct_idempotent_allowed(
+                    action_id=action_id, target_type=target_type, entity_id="x.x",
+                    state=state, dangerous=False, external_cover=False, reassert_key=None,
+                ))
     def test_post_dispatch_failure_is_structured_unknown_without_false_not_sent(self) -> None:
         response = _execution_failure_response(
             request_id="dispatch.intercom.1",

@@ -89,6 +89,32 @@ def test_confirmed_manual_light_full_receipt_matches_contract() -> None:
     _validator("v1/device-action-receipt.schema.json", "full").validate(receipt)
 
 
+def test_unconfirmed_command_remains_accepted_in_full_receipt() -> None:
+    receipt = full_action_receipt(
+        payload={"targetId": "climate_demo", "actionId": "set_temperature", "value": 24},
+        result={
+            "correlationId": "climate.1",
+            "requestId": "climate.request.1",
+            "accepted": True,
+            "confirmed": False,
+            "status": "accepted",
+            "message": "Команда принята, состояние ещё не подтверждено",
+            "appliedAt": 1788000000000,
+            "confirmationWindowMs": 1000,
+            "readBack": {"attempted": True, "matched": False, "observedAt": None, "observedState": None, "attempts": 4},
+        },
+        target_type="climate",
+        state=SimpleNamespace(state="cool", attributes={"temperature": 23}),
+        allowed_actions=("set_temperature",),
+        pre_command_evidence={},
+        decision_at=1788000000000,
+    )
+    assert receipt["accepted"] is True
+    assert receipt["confirmed"] is False
+    assert receipt["status"] == "accepted"
+    assert receipt["message"] == "Команда принята, состояние ещё не подтверждено"
+
+
 def test_stale_on_evidence_exposes_one_light_reassert_budget() -> None:
     evidence = evidence_snapshot(
         target_id="light_demo",

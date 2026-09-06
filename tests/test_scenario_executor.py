@@ -121,6 +121,16 @@ class _FakeHass:
         self.states = SimpleNamespace(get=self.state_values.get)
 
 
+class _SmartIrHass(_FakeHass):
+    def __init__(self) -> None:
+        super().__init__()
+        self.entity_registry = SimpleNamespace(
+            entities={
+                "climate.living_room": SimpleNamespace(platform="smartir"),
+            }
+        )
+
+
 class _FakeCatalog:
     def __init__(self) -> None:
         self._devices = {
@@ -1953,6 +1963,28 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("already_in_target_state", result["receipts"][0]["reason"])
         self.assertTrue(result["receipts"][0]["skipped"])
         self.hass.services.async_call.assert_not_awaited()
+
+    async def test_direct_idempotent_safe_action_skips_fresh_target(self) -> None:
+        result = await self.executor.async_execute_device_action(
+            "climate_1", "set_temperature", 22, idempotent_actions=True
+        )
+
+        self.assertTrue(result["accepted"])
+        self.assertTrue(result["confirmed"])
+        self.assertTrue(result["skipped"])
+        self.assertEqual("already_in_target_state", result["reason"])
+        self.assertFalse(result["readBack"]["attempted"])
+        self.hass.services.async_call.assert_not_awaited()
+
+    async def test_smartir_confirmation_window_is_one_second(self) -> None:
+        executor = ScenarioExecutor(
+            _SmartIrHass(), self.catalog, self.executor._run_callback,
+            readback_window_seconds=8, readback_interval_seconds=0.01,
+        )
+        self.assertEqual(
+            1.0,
+            executor._action_confirmation_window_seconds("climate_1", "set_temperature"),
+        )
 
     async def test_repeated_correlation_keeps_physical_action_idempotent(self) -> None:
         light = SimpleNamespace(state="off", attributes={})

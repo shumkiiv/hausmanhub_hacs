@@ -647,6 +647,7 @@ class ScenarioExecutor:
         expected_domain: str | None = None,
         expected_service: str | None = None,
         contextually_dangerous: bool = False,
+        idempotent_actions: bool = False,
     ) -> dict[str, Any]:
         """Execute one allowlisted device action and confirm its HA read-back."""
 
@@ -704,6 +705,7 @@ class ScenarioExecutor:
                 expected_evidence_revision=expected_evidence_revision,
                 expected_evidence_sequence=expected_evidence_sequence,
                 force_contextually_dangerous=contextually_dangerous,
+                idempotent_actions=idempotent_actions,
                 command_request_id=request_id,
                 protection_trigger_context=None,
                 power_dependencies=(
@@ -831,7 +833,10 @@ class ScenarioExecutor:
                 if confirmed
                 else f"{device_name}: команда принята, состояние ещё не подтверждено."
             ),
-            "confirmationWindowMs": self._confirmation_window_ms,
+            "confirmationWindowMs": int(
+                receipt.get("confirmation_window_ms")
+                or self._confirmation_window_ms
+            ),
             "readBack": read_back,
             "reason": receipt.get("reason")
             if skipped
@@ -860,6 +865,35 @@ class ScenarioExecutor:
     def _confirmation_window_ms(self) -> int:
         return int(self._readback_window_seconds * 1000)
 
+    def _entity_registry_platform(self, entity_id: str) -> str | None:
+        registry = getattr(self._hass, "entity_registry", None)
+        if registry is None:
+            try:
+                from homeassistant.helpers import entity_registry as er
+
+                registry = er.async_get(self._hass)
+            except Exception:  # noqa: BLE001
+                return None
+        entries = getattr(registry, "entities", None)
+        entry = entries.get(entity_id) if isinstance(entries, Mapping) else None
+        platform = getattr(entry, "platform", None)
+        return platform if isinstance(platform, str) else None
+
+    def _action_confirmation_window_seconds(
+        self, target_id: str, action_id: str
+    ) -> float:
+        device = self._catalog.device(target_id)
+        allowed = device.action(action_id) if device is not None else None
+        if device is None or allowed is None:
+            return self._readback_window_seconds
+        if action_id in DANGEROUS_ACTION_IDS or allowed.domain in _CRITICAL_ACTION_DOMAINS:
+            return self._readback_window_seconds
+        if allowed.domain == "climate" and self._entity_registry_platform(device.entity_id) == "smartir":
+            return 1.0
+        if allowed.domain == "humidifier":
+            return 2.0
+        return min(self._readback_window_seconds, 1.5)
+
     async def _read_back_device(
         self,
         entity_id: object,
@@ -868,6 +902,7 @@ class ScenarioExecutor:
         *,
         after_revision: str | None = None,
         require_new_evidence: bool = False,
+        window_seconds: float | None = None,
     ) -> dict[str, object]:
         """Poll one bounded HA state window and return explicit evidence."""
 
@@ -880,7 +915,9 @@ class ScenarioExecutor:
                 "attempts": 0,
             }
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + self._readback_window_seconds
+        deadline = loop.time() + (
+            self._readback_window_seconds if window_seconds is None else window_seconds
+        )
         attempts = 0
         observed_at: int | None = None
         observed_state: str | None = None
@@ -2674,6 +2711,44 @@ class ScenarioExecutor:
                     "error": "stale_reassert_evidence",
                 }
 
+        # Direct safe actions may stop at one fresh server-owned preflight.
+        # Keep this before power preparation so a satisfied target has no
+        # physical side effect.
+        dependencies = (
+            self._power_dependency_resolver() if self._power_dependency_resolver else {}
+        )
+        if (
+            idempotent_actions
+            and not dry_run
+            and not dependencies.get(device.entity_id)
+            and not stale_automatic_turn_on
+            and current is not None
+            and _state_is_fresh(current)
+            and not _state_is_restored_or_cached(current)
+            and _device_action_confirmed(current, confirmation_action_id, confirmation_value)
+        ):
+            observed_state = str(getattr(current, "state", "unknown"))
+            return {
+                **base,
+                "status": "completed",
+                "target_id": action.target_id,
+                "domain": allowed.domain,
+                "service": allowed.service,
+                "entity_id": device.entity_id,
+                "confirmed": True,
+                "skipped": True,
+                "reason": "already_in_target_state",
+                "read_back": {
+                    "attempted": False,
+                    "matched": True,
+                    "observedAt": int(time.time() * 1000),
+                    "observedState": observed_state,
+                    "attempts": 0,
+                    "isNewEvidence": False,
+                },
+                "effective_state": observed_state,
+            }
+
         try:
             power_error, power_precondition, _prepared_sources = (
                 await self._prepare_power_dependency(
@@ -2920,12 +2995,20 @@ class ScenarioExecutor:
                     pre_command_revision if require_new_readback else None
                 ),
                 require_new_evidence=require_new_readback,
+                window_seconds=self._action_confirmation_window_seconds(
+                    action.target_id, action.action_id
+                ),
             )
             receipt["confirmed"] = read_back["matched"] is True
             receipt["read_back"] = read_back
             receipt["effective_state"] = read_back.get("observedState")
             receipt["reason"] = (
                 None if read_back["matched"] is True else "state_not_confirmed"
+            )
+            receipt["confirmation_window_ms"] = int(
+                self._action_confirmation_window_seconds(
+                    action.target_id, action.action_id
+                ) * 1000
             )
         if adaptive_minimum is not None:
             receipt["adaptive_brightness"] = {
@@ -3406,6 +3489,9 @@ class ScenarioExecutor:
                             after_revision if isinstance(after_revision, str) else None
                         ),
                         require_new_evidence=require_new,
+                        window_seconds=self._batch_confirmation_window_seconds(
+                            receipt, action_id
+                        ),
                     ),
                 )
             )
@@ -3432,6 +3518,24 @@ class ScenarioExecutor:
             receipt["read_back"] = read_back
             receipt["effective_state"] = read_back.get("observedState")
             receipt["reason"] = None if confirmed else "state_not_confirmed"
+
+    def _batch_confirmation_window_seconds(
+        self, receipt: Mapping[str, Any], action_id: str
+    ) -> float:
+        """Keep safe batch confirmations within one common two-second budget."""
+
+        target_id = receipt.get("target_id")
+        if not isinstance(target_id, str):
+            return self._readback_window_seconds
+        device = self._catalog.device(target_id)
+        allowed = device.action(action_id) if device is not None else None
+        if (
+            action_id in DANGEROUS_ACTION_IDS
+            or allowed is None
+            or allowed.domain in _CRITICAL_ACTION_DOMAINS
+        ):
+            return self._readback_window_seconds
+        return min(2.0, self._action_confirmation_window_seconds(target_id, action_id))
 
     async def _async_resolve_light_off_obligations(
         self,

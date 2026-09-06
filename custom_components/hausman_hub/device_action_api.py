@@ -55,6 +55,40 @@ from .realtime_api import publish_command_receipt
 
 _LOGGER = logging.getLogger(__name__)
 
+_DIRECT_IDEMPOTENT_ACTIONS = frozenset(
+    {
+        "turn_on", "turn_off", "set_temperature", "set_hvac_mode",
+        "set_fan_mode", "set_brightness", "set_brightness_percent",
+        "set_color_temperature", "set_rgb_color", "set_humidity",
+        "set_operation_mode", "set_value",
+    }
+)
+_DIRECT_IDEMPOTENT_BLOCKED_TYPES = frozenset(
+    {"cover", "lock", "valve", "water", "breaker", "electrical_breaker", "button", "intercom"}
+)
+
+
+def _direct_idempotent_allowed(
+    *, action_id: str, target_type: str, entity_id: str | None,
+    state: object | None, dangerous: bool, external_cover: bool,
+    reassert_key: object,
+) -> bool:
+    """Allow only fresh, non-dangerous direct actions to use preflight."""
+
+    if action_id not in _DIRECT_IDEMPOTENT_ACTIONS or dangerous or external_cover:
+        return False
+    if action_id == "toggle" or any(
+        marker in target_type.lower() for marker in _DIRECT_IDEMPOTENT_BLOCKED_TYPES
+    ):
+        return False
+    if reassert_key is not None or state is None or not _state_is_fresh(state):
+        return False
+    # The executor additionally excludes configured power dependencies and
+    # stale light ownership. Keep direct API policy conservative here too.
+    if target_type == "light" and entity_id is None:
+        return False
+    return True
+
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
@@ -316,6 +350,15 @@ class DeviceActionView(HomeAssistantView):
         )
         dangerous_action = (
             action_id in DANGEROUS_ACTION_IDS or contextual_dangerous_action
+        )
+        direct_idempotent_allowed = _direct_idempotent_allowed(
+            action_id=action_id,
+            target_type=target_type,
+            entity_id=entity_id,
+            state=state,
+            dangerous=dangerous_action,
+            external_cover=external_cover_action,
+            reassert_key=reassert_key,
         )
         if dangerous_action and not dry_run:
             if not full_request:
@@ -584,6 +627,8 @@ class DeviceActionView(HomeAssistantView):
                 execute_options["expected_entity_id"] = entity_id
                 execute_options["expected_domain"] = target_type
                 execute_options["expected_service"] = allowed_service
+            if direct_idempotent_allowed and not dry_run:
+                execute_options["idempotent_actions"] = True
             if intercom_action and not dry_run:
                 execute_options["intercom_release_required"] = True
             if not dry_run and _supports_keyword(

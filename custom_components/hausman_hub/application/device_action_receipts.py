@@ -280,8 +280,6 @@ def full_action_receipt(
         "status": (
             "confirmed"
             if confirmed
-            else "failed"
-            if command_sent and not dry_run
             else "accepted"
             if accepted
             else "failed"
@@ -290,7 +288,7 @@ def full_action_receipt(
             "Выполнено"
             if confirmed
             else "Проверяется"
-            if accepted and not command_sent
+            if accepted
             else "Не выполнено"
         ),
         "targetId": target_id,
@@ -304,6 +302,8 @@ def full_action_receipt(
         "reason": result.get("reason"),
         "error": result.get("error"),
     }
+    if accepted and not confirmed and not receipt["message"]:
+        receipt["message"] = "Команда принята, состояние ещё не подтверждено"
     if "value" in payload:
         receipt["actionValue"] = payload["value"]
     if action_index is not None:
