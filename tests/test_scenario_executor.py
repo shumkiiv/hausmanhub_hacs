@@ -1998,6 +1998,32 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             executor._action_confirmation_window_seconds("climate_1", "set_temperature"),
         )
 
+    async def test_contextual_resolver_is_called_once_and_window_is_immutable(self) -> None:
+        calls = 0
+        def resolver(*_args: object) -> bool:
+            nonlocal calls
+            calls += 1
+            return True
+        executor = ScenarioExecutor(
+            self.hass, self.catalog, self.executor._run_callback,
+            readback_window_seconds=8, readback_interval_seconds=0.01,
+            contextual_dangerous_resolver=resolver,
+        )
+        result = await executor.async_execute_device_action("climate_1", "set_temperature", 24, dangerous_authorized=True)
+        self.assertEqual(1, calls)
+        self.assertEqual(1, self.hass.services.async_call.await_count)
+        self.assertEqual(8000, result["confirmationWindowMs"])
+
+    async def test_contextual_resolver_failure_fails_closed_without_dispatch(self) -> None:
+        executor = ScenarioExecutor(
+            self.hass, self.catalog, self.executor._run_callback,
+            contextual_dangerous_resolver=lambda *_args: (_ for _ in ()).throw(RuntimeError("secret")),
+        )
+        result = await executor.async_execute_device_action("climate_1", "set_temperature", 24, dangerous_authorized=True)
+        self.assertFalse(result["accepted"])
+        self.assertEqual("contextual_dangerous_resolution_failed", result["error"])
+        self.hass.services.async_call.assert_not_awaited()
+
     async def test_repeated_correlation_keeps_physical_action_idempotent(self) -> None:
         light = SimpleNamespace(state="off", attributes={})
         self.hass.states = SimpleNamespace(
