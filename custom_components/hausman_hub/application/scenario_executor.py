@@ -886,7 +886,13 @@ class ScenarioExecutor:
         allowed = device.action(action_id) if device is not None else None
         if device is None or allowed is None:
             return self._readback_window_seconds
-        if action_id in DANGEROUS_ACTION_IDS or allowed.domain in _CRITICAL_ACTION_DOMAINS:
+        contextual = False
+        if self._contextual_dangerous_resolver is not None:
+            try:
+                contextual = bool(self._contextual_dangerous_resolver(target_id, action_id))
+            except Exception:  # noqa: BLE001
+                contextual = True
+        if action_id in DANGEROUS_ACTION_IDS or contextual or allowed.domain in _CRITICAL_ACTION_DOMAINS:
             return self._readback_window_seconds
         if allowed.domain == "climate" and self._entity_registry_platform(device.entity_id) == "smartir":
             return 1.0
