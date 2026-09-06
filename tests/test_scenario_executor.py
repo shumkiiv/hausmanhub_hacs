@@ -11,6 +11,7 @@ from typing import Any
 from unittest.mock import AsyncMock, call, patch
 
 from custom_components.hausman_hub.application.scenario_executor import (
+    PowerSourceDispatchUncertain,
     ScenarioExecutor,
     _device_action_confirmed,
     _display_device_name,
@@ -3517,6 +3518,78 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(receipt["accepted"])
         self.assertEqual("power_source_unavailable", receipt["error"])
+        self.hass.services.async_call.assert_awaited_once_with(
+            "switch",
+            "turn_on",
+            {"entity_id": "switch.wall"},
+            blocking=True,
+        )
+
+    async def test_auto_dependency_dispatch_failure_propagates_after_marker(
+        self,
+    ) -> None:
+        self.hass.states = SimpleNamespace(
+            get={
+                "light.living_room": SimpleNamespace(state="off", attributes={}),
+                "switch.wall": SimpleNamespace(state="off", attributes={}),
+                "switch.upstream": SimpleNamespace(state="off", attributes={}),
+            }.get
+        )
+        self.hass.services.async_call.side_effect = OSError("source unavailable")
+        dependencies = _power_link(policy="auto_turn_on")
+        dependencies["switch.wall"] = DevicePowerDependency(
+            "switch.wall", "switch.upstream", "auto_turn_on", 0
+        )
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            power_dependency_resolver=lambda: dependencies,
+        )
+        markers: list[str] = []
+
+        with self.assertRaises(PowerSourceDispatchUncertain):
+            await executor.async_execute_device_action(
+                "device_1",
+                "turn_on",
+                dispatch_marker=lambda: markers.append("crossed"),
+            )
+
+        self.assertEqual(["crossed"], markers)
+        self.hass.services.async_call.assert_awaited_once_with(
+            "switch",
+            "turn_on",
+            {"entity_id": "switch.upstream"},
+            blocking=True,
+        )
+
+    async def test_auto_dependency_confirmation_timeout_propagates_after_marker(
+        self,
+    ) -> None:
+        self.hass.states = SimpleNamespace(
+            get={
+                "light.living_room": SimpleNamespace(state="off", attributes={}),
+                "switch.wall": SimpleNamespace(state="off", attributes={}),
+            }.get
+        )
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            readback_window_seconds=0.01,
+            readback_interval_seconds=0.01,
+            power_dependency_resolver=lambda: _power_link(policy="auto_turn_on"),
+        )
+        markers: list[str] = []
+
+        with self.assertRaises(PowerSourceDispatchUncertain):
+            await executor.async_execute_device_action(
+                "device_1",
+                "turn_on",
+                dispatch_marker=lambda: markers.append("crossed"),
+            )
+
+        self.assertEqual(["crossed"], markers)
         self.hass.services.async_call.assert_awaited_once_with(
             "switch",
             "turn_on",

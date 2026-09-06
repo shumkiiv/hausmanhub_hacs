@@ -116,6 +116,10 @@ class ReassertEvidenceChanged(RuntimeError):
     """The stale-light authority changed before physical dispatch."""
 
 
+class PowerSourceDispatchUncertain(RuntimeError):
+    """A power-source command crossed dispatch without confirmed completion."""
+
+
 @asynccontextmanager
 async def _authority_lock_scope(lock: asyncio.Lock, *, already_held: bool):
     """Use the shared light lock without recursively acquiring it."""
@@ -2890,7 +2894,6 @@ class ScenarioExecutor:
         source_state: object | None,
         *,
         request_id: str,
-        dispatch_marker: Callable[[], None] | None = None,
         source_command_sent_at: int | None,
         source_read_back_at: int | None,
         ready_at: int | None,
@@ -3155,9 +3158,13 @@ class ScenarioExecutor:
                         {"entity_id": source_entity_id},
                         context=service_context,
                     )
-                except Exception:  # source failure must not reach the target command
+                except Exception as err:
                     if self._command_contexts is not None:
                         self._command_contexts.discard(service_context)
+                    if dispatch_marker is not None:
+                        raise PowerSourceDispatchUncertain(
+                            "power source command outcome is unknown"
+                        ) from err
                     return "power_source_unavailable", precondition, upstream_sources
                 source_turned_on = True
                 if not await self._wait_for_entity_state(
@@ -3168,6 +3175,10 @@ class ScenarioExecutor:
                 ):
                     if self._command_contexts is not None:
                         self._command_contexts.discard(service_context)
+                    if dispatch_marker is not None:
+                        raise PowerSourceDispatchUncertain(
+                            "power source confirmation timed out"
+                        )
                     return "power_source_unavailable", precondition, upstream_sources
             wait_seconds = float(dependency.warmup_seconds) if source_turned_on else 0.0
             if wait_seconds > 0:
@@ -3181,6 +3192,10 @@ class ScenarioExecutor:
                 or not _state_is_fresh(confirmed_source)
                 or _state_is_restored_or_cached(confirmed_source)
             ):
+                if source_turned_on and dispatch_marker is not None:
+                    raise PowerSourceDispatchUncertain(
+                        "power source confirmation is no longer trustworthy"
+                    )
                 return "power_source_unavailable", precondition, upstream_sources
             precondition["sourceEvidenceRevision"] = _state_revision(
                 confirmed_source

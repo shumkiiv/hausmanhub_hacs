@@ -5415,6 +5415,110 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 )
                 self.assertEqual(index + 1, len(calls))
 
+    def test_full_power_source_dispatch_unknown_is_not_replayed(self) -> None:
+        """A source command that crossed dispatch keeps both journals pending."""
+
+        views = {view.url: view for view in self.hass.http.views}
+        tablet = reader_user("system-users")
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        single_calls = 0
+        batch_calls = 0
+
+        async def resolve_context(_target_id: str, _action_id: str):
+            return "switch.synthetic_power_source", "switch", ("turn_on",), "turn_on"
+
+        async def is_intercom(_target_id: str, _action_id: str) -> bool:
+            return True
+
+        async def prepare_release(*_args: object, **_options: object) -> int:
+            return 5
+
+        async def cancel_release(*_args: object, **_options: object) -> bool:
+            return True
+
+        async def execute_single(*_args: object, **options: object) -> dict[str, object]:
+            nonlocal single_calls
+            single_calls += 1
+            marker = options.get("dispatch_marker")
+            self.assertTrue(callable(marker))
+            marker()
+            raise RuntimeError("power source command outcome is unknown")
+
+        async def execute_batch(*_args: object, **options: object) -> list[dict[str, object]]:
+            nonlocal batch_calls
+            batch_calls += 1
+            marker = options.get("dispatch_marker")
+            self.assertTrue(callable(marker))
+            marker()
+            raise RuntimeError("power source confirmation timed out")
+
+        service.async_resolve_device_action_context = resolve_context
+        service.async_is_intercom_action = is_intercom
+        service.async_prepare_intercom_release = prepare_release
+        service.async_cancel_intercom_release = cancel_release
+        service.async_execute_device_action = execute_single
+        service.async_execute_device_action_batch = execute_batch
+
+        def send(path: str, payload: dict[str, object]) -> FakeResponse:
+            media = (
+                "application/vnd.hausmanhub.device-action-receipt.full+json"
+                if path.endswith("device-actions")
+                else "application/vnd.hausmanhub.device-action-batch-receipt.full+json"
+            )
+            request_media = media.replace("receipt", "request")
+            return asyncio.run(
+                views[path].post(
+                    FakeJsonRequest(
+                        "192.168.1.20", tablet, path, payload,
+                        content_type=request_media, accept=media,
+                    )
+                )
+            )
+
+        single_path = "/api/hausman_hub/v1/device-actions"
+        single_payload = {
+            "contract": {"name": "hausman-hub-device-action-request", "version": 1},
+            "correlationId": "power.source.single.1",
+            "requestId": "power.source.single.request.1",
+            "targetId": "power_source_single",
+            "actionId": "turn_on",
+            "confirmedByUser": True,
+            "idempotencyKey": "power.source.single.key.1",
+        }
+        first_single = send(single_path, single_payload)
+        replay_single = send(single_path, copy.deepcopy(single_payload))
+        self.assertEqual(409, first_single.status)
+        self.assertEqual(409, replay_single.status)
+        self.assertEqual("dispatch_unknown", replay_single.payload["details"]["state"])
+        self.assertEqual(1, single_calls)
+        self.assertEqual(
+            "application/vnd.hausmanhub.device-action-receipt.full+json",
+            first_single.headers["Content-Type"],
+        )
+
+        batch_path = "/api/hausman_hub/v1/device-actions/batch"
+        batch_payload = {
+            "contract": {"name": "hausman-hub-device-action-batch-request", "version": 1},
+            "correlationId": "power.source.batch.1",
+            "requestId": "power.source.batch.request.1",
+            "actions": [{
+                "targetId": "power_source_batch",
+                "actionId": "turn_on",
+                "confirmedByUser": True,
+                "idempotencyKey": "power.source.batch.key.1",
+            }],
+        }
+        first_batch = send(batch_path, batch_payload)
+        replay_batch = send(batch_path, copy.deepcopy(batch_payload))
+        self.assertEqual(409, first_batch.status)
+        self.assertEqual(409, replay_batch.status)
+        self.assertEqual("dispatch_unknown", replay_batch.payload["details"]["state"])
+        self.assertEqual(1, batch_calls)
+        self.assertEqual(
+            "application/vnd.hausmanhub.device-action-batch-receipt.full+json",
+            first_batch.headers["Content-Type"],
+        )
+
     def test_setup_persists_pending_power_source_before_entity_registration(self) -> None:
         from custom_components.hausman_hub import device_power_dependency_storage
 
