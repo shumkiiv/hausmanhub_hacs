@@ -28,6 +28,9 @@ from custom_components.hausman_hub.application.scenario_service import (
 from custom_components.hausman_hub.application.intercom_release_obligation import (
     IntercomReleaseObligation,
 )
+from custom_components.hausman_hub.application.electrical_breakers import (
+    configured_source_device_ids,
+)
 from custom_components.hausman_hub.application.scenarios import (
     ScenarioCatalog,
     ScenarioDeviceAction,
@@ -2669,6 +2672,18 @@ class ScenarioServiceIntercomReleaseTest(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(
                     service.is_electrical_breaker_action(target_id, "toggle")
                 )
+
+    def test_configured_source_device_ids_includes_additional_meters(self) -> None:
+        self.assertEqual(
+            ("primary", "secondary"),
+            configured_source_device_ids(
+                {
+                    "meter_main": ["primary"],
+                    "meter_workshop": ["secondary", "primary"],
+                }
+            ),
+        )
+        self.assertEqual((), configured_source_device_ids(None))
 
     async def test_breaker_toggle_is_rejected_after_catalog_filtering(self) -> None:
         switch_actions = tuple(

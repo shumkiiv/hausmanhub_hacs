@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import replace
 
 from .scenarios import ScenarioCatalog, ScenarioDeviceEntry
@@ -22,6 +22,23 @@ _BREAKER_IDENTITY = re.compile(
     re.IGNORECASE,
 )
 _BREAKER_SEPARATORS = re.compile(r"[_./:\-]+")
+
+
+def configured_source_device_ids(source_bindings: object) -> tuple[str, ...]:
+    """Flatten all meter bindings, including additional meters, safely."""
+
+    if not isinstance(source_bindings, Mapping):
+        return ()
+    result: list[str] = []
+    seen: set[str] = set()
+    for source_ids in source_bindings.values():
+        if not isinstance(source_ids, (list, tuple, set, frozenset)):
+            continue
+        for source_id in source_ids:
+            if isinstance(source_id, str) and source_id not in seen:
+                seen.add(source_id)
+                result.append(source_id)
+    return tuple(result)
 
 
 def is_electrical_breaker_identity(*values: object) -> bool:

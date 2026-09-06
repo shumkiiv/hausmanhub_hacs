@@ -325,6 +325,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ScenarioCatalog,
         async_build_scenario_catalog,
     )
+    from .application.electrical_breakers import configured_source_device_ids
     from .application.scenario_executor import ScenarioExecutor
     from .application.scenario_service import ScenarioService
     from .scenario_schedule import async_start_scenario_schedule
@@ -416,7 +417,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         intercom_release_obligation=intercom_release_obligation,
         manual_light_off_protection=manual_light_off_protection,
         electrical_breaker_device_ids_resolver=(
-            lambda: energy_meter_service.source_device_ids
+            lambda: configured_source_device_ids(
+                energy_meters_service.source_bindings
+            )
         ),
     )
     device_power_dependency_service.set_electrical_breaker_resolver(
