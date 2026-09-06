@@ -3818,7 +3818,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.223", panel.payload["integration_version"])
+        self.assertEqual("1.52.224", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -5149,6 +5149,229 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual(
             "application/vnd.hausmanhub.device-action-receipt.full+json",
             response.headers["Content-Type"],
+        )
+
+    def test_device_action_response_sets_negotiated_type_after_ha_json_creation(self) -> None:
+        """HA must receive no Content-Type header while it creates JSON."""
+
+        views = {view.url: view for view in self.hass.http.views}
+        path = "/api/hausman_hub/v1/device-actions"
+        view = views[path]
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        tablet = reader_user("system-users")
+        execution_accepts = True
+
+        def strict_ha_json(
+            payload: object,
+            status_code: int = 200,
+            headers: dict[str, str] | None = None,
+        ) -> FakeResponse:
+            response_headers = dict(headers or {})
+            if any(name.casefold() == "content-type" for name in response_headers):
+                raise ValueError(
+                    "passing both Content-Type header and content_type or charset params is forbidden"
+                )
+            response_headers["Content-Type"] = "application/json; charset=utf-8"
+            return FakeResponse(payload, int(status_code), response_headers)
+
+        async def resolve_context(_target_id: str, _action_id: str):
+            return "switch.synthetic_response", "switch", ("turn_on",), "turn_on"
+
+        async def execute_action(
+            target_id: str,
+            action_id: str,
+            _value: object,
+            *,
+            correlation_id: str | None = None,
+            **options: object,
+        ) -> dict[str, object]:
+            return {
+                "correlationId": correlation_id,
+                "requestId": options.get("request_id", "legacy.response.request"),
+                "targetId": target_id,
+                "actionId": action_id,
+                "accepted": execution_accepts,
+                "confirmed": execution_accepts,
+                "status": "confirmed" if execution_accepts else "failed",
+                "reason": None if execution_accepts else "device_unavailable",
+            }
+
+        view.json = strict_ha_json
+        service.async_resolve_device_action_context = resolve_context
+        service.async_execute_device_action = execute_action
+
+        cases = (
+            (
+                "legacy-confirmed",
+                True,
+                {
+                    "correlationId": "legacy.confirmed.1",
+                    "targetId": "response_target",
+                    "actionId": "turn_on",
+                },
+                "application/json",
+                None,
+                200,
+                "application/json",
+            ),
+            (
+                "legacy-failed",
+                False,
+                {
+                    "correlationId": "legacy.failed.1",
+                    "targetId": "response_target",
+                    "actionId": "turn_on",
+                },
+                "application/json",
+                "application/json",
+                409,
+                "application/json",
+            ),
+            (
+                "full-confirmed",
+                True,
+                {
+                    "contract": {
+                        "name": "hausman-hub-device-action-request",
+                        "version": 1,
+                    },
+                    "correlationId": "full.confirmed.1",
+                    "requestId": "full.confirmed.request.1",
+                    "targetId": "response_target",
+                    "actionId": "turn_on",
+                },
+                "application/vnd.hausmanhub.device-action-request.full+json",
+                "application/vnd.hausmanhub.device-action-receipt.full+json",
+                200,
+                "application/vnd.hausmanhub.device-action-receipt.full+json",
+            ),
+            (
+                "full-failed",
+                False,
+                {
+                    "contract": {
+                        "name": "hausman-hub-device-action-request",
+                        "version": 1,
+                    },
+                    "correlationId": "full.failed.1",
+                    "requestId": "full.failed.request.1",
+                    "targetId": "response_target",
+                    "actionId": "turn_on",
+                },
+                "application/vnd.hausmanhub.device-action-request.full+json",
+                "application/vnd.hausmanhub.device-action-receipt.full+json",
+                409,
+                "application/vnd.hausmanhub.device-action-receipt.full+json",
+            ),
+        )
+        for (
+            label,
+            accepted,
+            payload,
+            content_type,
+            accept,
+            expected_status,
+            expected_media_type,
+        ) in cases:
+            with self.subTest(label=label):
+                execution_accepts = accepted
+                response = asyncio.run(
+                    view.post(
+                        FakeJsonRequest(
+                            "192.168.1.20",
+                            tablet,
+                            path,
+                            payload,
+                            content_type=content_type,
+                            accept=accept,
+                        )
+                    )
+                )
+                self.assertEqual(expected_status, response.status)
+                self.assertEqual(expected_media_type, response.headers["Content-Type"])
+                self.assertEqual("no-store", response.headers["Cache-Control"])
+
+    def test_setup_migrates_only_the_obsolete_small_corridor_power_source(self) -> None:
+        from custom_components.hausman_hub import device_power_dependency_storage
+
+        dependent = "light.0xa4c138d69d102803"
+        old_source = "switch.0x603d61fffe75c334_1"
+        new_source = "switch.0x603d61fffe759363_1"
+        stored = {
+            "revision": 12,
+            "updatedAt": "2026-09-06T06:00:00Z",
+            "dependencies": [
+                {
+                    "dependentEntityId": dependent,
+                    "powerSourceEntityId": old_source,
+                    "policy": "requires_on",
+                },
+                {
+                    "dependentEntityId": "light.owner_selected",
+                    "powerSourceEntityId": "switch.owner_selected",
+                    "policy": "auto_turn_on",
+                    "warmupSeconds": 4,
+                },
+            ],
+        }
+
+        class PowerStore:
+            def __init__(self) -> None:
+                self.value = copy.deepcopy(stored)
+                self.saved: list[dict[str, object]] = []
+
+            async def async_load(self) -> dict[str, object]:
+                return copy.deepcopy(self.value)
+
+            async def async_save(self, value: dict[str, object]) -> None:
+                self.value = copy.deepcopy(value)
+                self.saved.append(copy.deepcopy(value))
+
+        power_store = PowerStore()
+        hass = FakeHomeAssistant()
+        hass.states.values[dependent] = SimpleNamespace(state="off", attributes={})
+        hass.states.values[new_source] = SimpleNamespace(state="off", attributes={})
+        entry = FakeEntry(
+            {
+                "mode": "read-only",
+                "direct_execution_status": "direct_execution_blocked",
+            },
+            {},
+            entry_id="power-source-migration-entry",
+        )
+        hass.config_entries.entries = [entry]
+
+        with patch.object(
+            device_power_dependency_storage,
+            "HomeAssistantDevicePowerDependencyStore",
+            lambda _hass, _entry_id: power_store,
+        ):
+            self.assertTrue(asyncio.run(self.integration.async_setup_entry(hass, entry)))
+
+        document = hass.data["hausman_hub"][
+            "device_power_dependency_service"
+        ].document
+        self.assertEqual(13, document["revision"])
+        self.assertEqual(
+            [
+                {
+                    "dependentEntityId": dependent,
+                    "powerSourceEntityId": new_source,
+                    "policy": "requires_on",
+                },
+                stored["dependencies"][1],
+            ],
+            document["dependencies"],
+        )
+        self.assertEqual(
+            [
+                {
+                    "revision": 13,
+                    "updatedAt": document["updatedAt"],
+                    "dependencies": document["dependencies"],
+                }
+            ],
+            power_store.saved,
         )
 
     def test_external_gate_requires_full_confirmation_and_fresh_state(self) -> None:

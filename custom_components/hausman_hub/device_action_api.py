@@ -213,9 +213,10 @@ class DeviceActionView(HomeAssistantView):
                 existing_reassert.outcome == "replay"
                 and existing_reassert.receipt is not None
             ):
-                return self.json(
+                return _negotiated_json(
+                    self,
                     existing_reassert.receipt,
-                    headers=_response_headers(
+                    media_type=(
                         existing_reassert.response_media_type or response_media_type
                     ),
                 )
@@ -281,9 +282,10 @@ class DeviceActionView(HomeAssistantView):
             if reservation.outcome == "in_progress":
                 return _idempotency_in_progress(self, reservation.state)
             if reservation.outcome == "replay" and reservation.receipt is not None:
-                return self.json(
+                return _negotiated_json(
+                    self,
                     reservation.receipt,
-                    headers=_response_headers(
+                    media_type=(
                         reservation.response_media_type or response_media_type
                     ),
                 )
@@ -434,14 +436,15 @@ class DeviceActionView(HomeAssistantView):
         ):
             await idempotency.async_complete(coordination_key, response)
         publish_command_receipt(self._hass, response, operation="device_action")
-        return self.json(
+        return _negotiated_json(
+            self,
             response,
             status_code=(
                 HTTPStatus.OK
                 if result.get("accepted") is True
                 else HTTPStatus.CONFLICT
             ),
-            headers=_response_headers(response_media_type),
+            media_type=response_media_type,
         )
 
 class DeviceActionBatchView(HomeAssistantView):
@@ -614,9 +617,10 @@ class DeviceActionBatchView(HomeAssistantView):
                 existing_reassert.outcome == "replay"
                 and existing_reassert.receipt is not None
             ):
-                return self.json(
+                return _negotiated_json(
+                    self,
                     existing_reassert.receipt,
-                    headers=_response_headers(
+                    media_type=(
                         existing_reassert.response_media_type or response_media_type
                     ),
                 )
@@ -705,9 +709,10 @@ class DeviceActionBatchView(HomeAssistantView):
             if reservation.outcome == "in_progress":
                 return _idempotency_in_progress(self, reservation.state)
             if reservation.outcome == "replay" and reservation.receipt is not None:
-                return self.json(
+                return _negotiated_json(
+                    self,
                     reservation.receipt,
-                    headers=_response_headers(
+                    media_type=(
                         reservation.response_media_type or response_media_type
                     ),
                 )
@@ -867,14 +872,29 @@ class DeviceActionBatchView(HomeAssistantView):
                 response,
                 item_journal=[dict(item) for item in wrapped],
             )
-        return self.json(
+        return _negotiated_json(
+            self,
             response,
-            headers=_response_headers(response_media_type),
+            media_type=response_media_type,
         )
 
 
-def _response_headers(media_type: str) -> dict[str, str]:
-    return {**NO_STORE_HEADERS, "Content-Type": media_type}
+def _negotiated_json(
+    view: HomeAssistantView,
+    payload: object,
+    *,
+    media_type: str,
+    status_code: int = HTTPStatus.OK,
+) -> Any:
+    """Let Home Assistant create JSON before replacing its response media type."""
+
+    response = view.json(
+        payload,
+        status_code=status_code,
+        headers=NO_STORE_HEADERS,
+    )
+    response.headers["Content-Type"] = media_type
+    return response
 
 
 def _not_acceptable(view: HomeAssistantView) -> Any:

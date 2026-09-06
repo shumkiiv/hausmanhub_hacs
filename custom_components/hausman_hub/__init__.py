@@ -109,7 +109,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .application.tablet_preferences import TabletPreferencesService
     from .settings_storage import HomeAssistantSettingsStore
     from .tablet_preferences_storage import HomeAssistantTabletPreferencesStore
-    from .application.device_power_dependencies import DevicePowerDependencyService
+    from .application.device_power_dependencies import (
+        DevicePowerDependencyService,
+        async_migrate_obsolete_small_corridor_power_source,
+    )
     from .device_power_dependency_storage import (
         HomeAssistantDevicePowerDependencyStore,
     )
@@ -152,6 +155,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ),
     )
     await device_power_dependency_service.async_load()
+    await async_migrate_obsolete_small_corridor_power_source(
+        device_power_dependency_service
+    )
     energy_meter_service = EnergyMeterService(
         HomeAssistantEnergyMeterStore(hass, entry.entry_id),
         local_today=lambda: dt_util.now().date(),

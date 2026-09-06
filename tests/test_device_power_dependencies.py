@@ -133,6 +133,147 @@ class DevicePowerDependencyDomainTest(unittest.TestCase):
 
 
 class DevicePowerDependencyServiceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_exact_source_migration_is_cas_safe_and_survives_restart(self) -> None:
+        old_source = "switch.0x603d61fffe75c334_1"
+        new_source = "switch.0x603d61fffe759363_1"
+        dependent = "light.0xa4c138d69d102803"
+        untouched = _dependency(
+            "light.user_configured",
+            "switch.user_configured",
+            policy="auto_turn_on",
+            warmup_seconds=7,
+        )
+        store = _Store(
+            {
+                "revision": 4,
+                "updatedAt": "2026-09-06T06:00:00Z",
+                "dependencies": [
+                    _dependency(dependent, old_source),
+                    untouched,
+                ],
+            }
+        )
+        validated_pairs: list[tuple[str, str]] = []
+
+        def validate_pair(current_dependent: str, current_source: str) -> bool:
+            validated_pairs.append((current_dependent, current_source))
+            return (current_dependent, current_source) == (dependent, new_source)
+
+        service = DevicePowerDependencyService(
+            store,
+            entity_pair_validator=validate_pair,
+            now=lambda: datetime(2026, 9, 6, 6, 5, tzinfo=timezone.utc),
+        )
+        await service.async_load()
+
+        migrated = await service.async_migrate_exact_source(
+            4,
+            dependent_entity_id=dependent,
+            old_source_entity_id=old_source,
+            new_source_entity_id=new_source,
+        )
+
+        self.assertTrue(migrated)
+        self.assertEqual([(dependent, new_source)], validated_pairs)
+        self.assertEqual(5, service.document["revision"])
+        self.assertEqual(
+            [
+                _dependency(dependent, new_source),
+                untouched,
+            ],
+            service.document["dependencies"],
+        )
+        self.assertEqual(
+            [
+                {
+                    "revision": 5,
+                    "updatedAt": "2026-09-06T06:05:00Z",
+                    "dependencies": [
+                        _dependency(dependent, new_source),
+                        untouched,
+                    ],
+                }
+            ],
+            store.saved,
+        )
+
+        restarted_store = _Store(store.saved[-1])
+        restarted = DevicePowerDependencyService(
+            restarted_store,
+            entity_pair_validator=validate_pair,
+        )
+        await restarted.async_load()
+        migrated_again = await restarted.async_migrate_exact_source(
+            5,
+            dependent_entity_id=dependent,
+            old_source_entity_id=old_source,
+            new_source_entity_id=new_source,
+        )
+
+        self.assertFalse(migrated_again)
+        self.assertEqual(5, restarted.document["revision"])
+        self.assertEqual([], restarted_store.saved)
+        self.assertEqual(service.document, restarted.document)
+
+    async def test_exact_source_migration_never_overwrites_a_different_mapping(self) -> None:
+        dependent = "light.0xa4c138d69d102803"
+        configured_source = "switch.owner_selected"
+        store = _Store(
+            {
+                "revision": 9,
+                "updatedAt": "2026-09-06T06:00:00Z",
+                "dependencies": [_dependency(dependent, configured_source)],
+            }
+        )
+        service = DevicePowerDependencyService(
+            store,
+            entity_pair_validator=lambda *_pair: True,
+        )
+        await service.async_load()
+
+        migrated = await service.async_migrate_exact_source(
+            9,
+            dependent_entity_id=dependent,
+            old_source_entity_id="switch.0x603d61fffe75c334_1",
+            new_source_entity_id="switch.0x603d61fffe759363_1",
+        )
+
+        self.assertFalse(migrated)
+        self.assertEqual(9, service.document["revision"])
+        self.assertEqual(
+            [_dependency(dependent, configured_source)],
+            service.document["dependencies"],
+        )
+        self.assertEqual([], store.saved)
+
+    async def test_exact_source_migration_rejects_a_stale_revision(self) -> None:
+        service = DevicePowerDependencyService(
+            _Store(
+                {
+                    "revision": 4,
+                    "updatedAt": "2026-09-06T06:00:00Z",
+                    "dependencies": [
+                        _dependency(
+                            "light.0xa4c138d69d102803",
+                            "switch.0x603d61fffe75c334_1",
+                        )
+                    ],
+                }
+            ),
+            entity_pair_validator=lambda *_pair: True,
+        )
+        await service.async_load()
+
+        with self.assertRaises(DevicePowerDependencyServiceViolation) as raised:
+            await service.async_migrate_exact_source(
+                3,
+                dependent_entity_id="light.0xa4c138d69d102803",
+                old_source_entity_id="switch.0x603d61fffe75c334_1",
+                new_source_entity_id="switch.0x603d61fffe759363_1",
+            )
+
+        self.assertTrue(raised.exception.stale)
+
     async def test_replace_is_durable_and_optimistically_locked(self) -> None:
         store = _Store()
         service = DevicePowerDependencyService(

@@ -17,6 +17,9 @@ from ..domain.device_power_dependencies import (
 
 
 DEVICE_POWER_DEPENDENCY_CONTRACT = "hausman-hub-device-power-dependencies"
+SMALL_CORRIDOR_CHANDELIER_ENTITY_ID = "light.0xa4c138d69d102803"
+OBSOLETE_SMALL_CORRIDOR_POWER_SOURCE_ENTITY_ID = "switch.0x603d61fffe75c334_1"
+SMALL_CORRIDOR_POWER_SOURCE_ENTITY_ID = "switch.0x603d61fffe759363_1"
 
 
 class DevicePowerDependencyServiceViolation(ValueError):
@@ -136,6 +139,75 @@ class DevicePowerDependencyService:
             self._dependencies = validated
         return self.document
 
+    async def async_migrate_exact_source(
+        self,
+        expected_revision: object,
+        *,
+        dependent_entity_id: str,
+        old_source_entity_id: str,
+        new_source_entity_id: str,
+    ) -> bool:
+        """CAS-replace one exact obsolete source without touching other links."""
+
+        self._require_loaded()
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise DevicePowerDependencyServiceViolation(
+                "expected dependency revision is invalid"
+            )
+        try:
+            DevicePowerDependency(dependent_entity_id, old_source_entity_id)
+        except DevicePowerDependencyViolation as error:
+            raise DevicePowerDependencyServiceViolation(str(error)) from error
+        async with self._lock:
+            if expected_revision != self._revision:
+                raise DevicePowerDependencyServiceViolation(
+                    "device power dependency revision is stale", stale=True
+                )
+            current = next(
+                (
+                    item
+                    for item in self._dependencies
+                    if item.dependent_entity_id == dependent_entity_id
+                ),
+                None,
+            )
+            if (
+                current is None
+                or current.power_source_entity_id != old_source_entity_id
+            ):
+                return False
+            try:
+                replacement = DevicePowerDependency(
+                    dependent_entity_id=dependent_entity_id,
+                    power_source_entity_id=new_source_entity_id,
+                    policy=current.policy,
+                    warmup_seconds=current.warmup_seconds,
+                )
+            except DevicePowerDependencyViolation as error:
+                raise DevicePowerDependencyServiceViolation(str(error)) from error
+            if self._entity_pair_validator is not None and not self._entity_pair_validator(
+                dependent_entity_id, new_source_entity_id
+            ):
+                raise DevicePowerDependencyServiceViolation(
+                    "device power dependency references an unavailable entity"
+                )
+            migrated = tuple(
+                replacement if item is current else item
+                for item in self._dependencies
+            )
+            next_revision = self._revision + 1
+            updated_at = self._timestamp()
+            stored = {
+                "revision": next_revision,
+                "updatedAt": updated_at,
+                "dependencies": device_power_dependencies_to_payload(migrated),
+            }
+            await self._store.async_save(stored)
+            self._revision = next_revision
+            self._updated_at = updated_at
+            self._dependencies = migrated
+        return True
+
     async def async_reset(self) -> dict[str, object]:
         """Remove every Hausman-owned power link using the same atomic write."""
 
@@ -152,3 +224,17 @@ class DevicePowerDependencyService:
             raise DevicePowerDependencyServiceViolation(
                 "device power dependency service is not loaded"
             )
+
+
+async def async_migrate_obsolete_small_corridor_power_source(
+    service: DevicePowerDependencyService,
+) -> bool:
+    """Move only the release-owned obsolete small-corridor source binding."""
+
+    revision = service.document["revision"]
+    return await service.async_migrate_exact_source(
+        revision,
+        dependent_entity_id=SMALL_CORRIDOR_CHANDELIER_ENTITY_ID,
+        old_source_entity_id=OBSOLETE_SMALL_CORRIDOR_POWER_SOURCE_ENTITY_ID,
+        new_source_entity_id=SMALL_CORRIDOR_POWER_SOURCE_ENTITY_ID,
+    )
