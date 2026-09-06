@@ -1,11 +1,31 @@
 from __future__ import annotations
 
+import sys
 import unittest
+
+from tests.test_local_summary_access import fake_home_assistant_modules
+
+
+_FAKE_HOME_ASSISTANT_MODULES = fake_home_assistant_modules()
+_PREVIOUS_HOME_ASSISTANT_MODULES = {
+    name: sys.modules.get(name) for name in _FAKE_HOME_ASSISTANT_MODULES
+}
+sys.modules.update(_FAKE_HOME_ASSISTANT_MODULES)
 
 from custom_components.hausman_hub.device_action_api import (
     _execution_failure_response,
 )
 from custom_components.hausman_hub.device_discovery_ha import _values
+
+for _module_name in _FAKE_HOME_ASSISTANT_MODULES:
+    sys.modules.pop(_module_name, None)
+sys.modules.update(
+    {
+        _module_name: _module
+        for _module_name, _module in _PREVIOUS_HOME_ASSISTANT_MODULES.items()
+        if _module is not None
+    }
+)
 
 
 class _SupportedRegistry:

@@ -32,6 +32,7 @@ FAKE_MODULE_NAMES = (
     "homeassistant.components.panel_custom",
     "homeassistant.const",
     "homeassistant.core",
+    "homeassistant.exceptions",
     "homeassistant.helpers",
     "homeassistant.helpers.area_registry",
     "homeassistant.helpers.device_registry",
@@ -411,6 +412,13 @@ def fake_home_assistant_modules() -> dict[str, ModuleType]:
     core = ModuleType("homeassistant.core")
     core.HomeAssistant = FakeHomeAssistant  # type: ignore[attr-defined]
 
+    exceptions = ModuleType("homeassistant.exceptions")
+
+    class FakeHomeAssistantError(Exception):
+        """Match Home Assistant's base integration exception."""
+
+    exceptions.HomeAssistantError = FakeHomeAssistantError  # type: ignore[attr-defined]
+
     def callback(function: object) -> object:
         """Mark a synthetic callback as safe for the Home Assistant loop."""
 
@@ -531,6 +539,7 @@ def fake_home_assistant_modules() -> dict[str, ModuleType]:
     homeassistant.components = components  # type: ignore[attr-defined]
     homeassistant.const = const  # type: ignore[attr-defined]
     homeassistant.core = core  # type: ignore[attr-defined]
+    homeassistant.exceptions = exceptions  # type: ignore[attr-defined]
     homeassistant.helpers = helpers  # type: ignore[attr-defined]
     auth.const = auth_const  # type: ignore[attr-defined]
     components.http = http  # type: ignore[attr-defined]
@@ -555,6 +564,7 @@ def fake_home_assistant_modules() -> dict[str, ModuleType]:
         "homeassistant.components.panel_custom": panel_custom,
         "homeassistant.const": const,
         "homeassistant.core": core,
+        "homeassistant.exceptions": exceptions,
         "homeassistant.helpers": helpers,
         "homeassistant.helpers.area_registry": area_registry,
         "homeassistant.helpers.device_registry": device_registry,
