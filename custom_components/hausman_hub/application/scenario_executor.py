@@ -2282,6 +2282,24 @@ class ScenarioExecutor:
         power_dependencies: Mapping[str, DevicePowerDependency] | None = None,
         dispatch_marker: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
+        external_dispatch_marker = dispatch_marker
+        physical_dispatch_state = {"crossed": False}
+
+        def mark_physical_dispatch() -> None:
+            physical_dispatch_state["crossed"] = True
+            if external_dispatch_marker is not None:
+                external_dispatch_marker()
+
+        def failed_after_power_dispatch(receipt: dict[str, Any]) -> dict[str, Any]:
+            if (
+                external_dispatch_marker is not None
+                and physical_dispatch_state["crossed"]
+            ):
+                raise PowerSourceDispatchUncertain(
+                    "a power-source command preceded a later action failure"
+                )
+            return receipt
+
         if action.target_id is None or action.action_id is None:
             return {
                 **base,
@@ -2635,26 +2653,42 @@ class ScenarioExecutor:
                     "error": "stale_reassert_evidence",
                 }
 
-        power_error, power_precondition, _prepared_sources = (
-            await self._prepare_power_dependency(
-                device.entity_id,
-                powered_sources=powered_sources or {},
-                dry_run=dry_run,
-                request_id=command_request_id or str(base.get("correlation_id") or action.id),
-                dispatch_marker=dispatch_marker,
+        try:
+            power_error, power_precondition, _prepared_sources = (
+                await self._prepare_power_dependency(
+                    device.entity_id,
+                    powered_sources=powered_sources or {},
+                    dry_run=dry_run,
+                    request_id=command_request_id
+                    or str(base.get("correlation_id") or action.id),
+                    dispatch_marker=(
+                        mark_physical_dispatch
+                        if external_dispatch_marker is not None
+                        else None
+                    ),
+                )
             )
-        )
+        except Exception as error:  # noqa: BLE001
+            if (
+                external_dispatch_marker is not None
+                and physical_dispatch_state["crossed"]
+                and not isinstance(error, PowerSourceDispatchUncertain)
+            ):
+                raise PowerSourceDispatchUncertain(
+                    "power dependency failed after a source dispatch"
+                ) from error
+            raise
         if power_error is not None:
-            return {
+            return failed_after_power_dispatch({
                 **base,
                 "status": "failed",
                 "error": power_error,
                 **(
                     {"power_precondition": power_precondition}
                     if power_precondition is not None
-                else {}
+                    else {}
                 ),
-            }
+            })
         if stale_automatic_turn_on:
             assert reassert_identity is not None
             if not await self._light_priority.async_validate_reassert(
@@ -2664,11 +2698,11 @@ class ScenarioExecutor:
                 expected_revision=reassert_identity[0],
                 expected_sequence=reassert_identity[1],
             ):
-                return {
+                return failed_after_power_dispatch({
                     **base,
                     "status": "failed",
                     "error": "stale_reassert_evidence",
-                }
+                })
         source_was_turned_on = bool(
             power_precondition
             and power_precondition.get("sourceTurnedOn") is True
@@ -2734,11 +2768,11 @@ class ScenarioExecutor:
                 or current_allowed.domain != allowed.domain
                 or current_allowed.service != allowed.service
             ):
-                return {
+                return failed_after_power_dispatch({
                     **base,
                     "status": "failed",
                     "error": "dispatch_descriptor_changed",
-                }
+                })
             if before_dispatch is not None:
                 await before_dispatch()
                 current_device = self._catalog.device(action.target_id)
@@ -2754,11 +2788,11 @@ class ScenarioExecutor:
                     or current_allowed.domain != allowed.domain
                     or current_allowed.service != allowed.service
                 ):
-                    return {
+                    return failed_after_power_dispatch({
                         **base,
                         "status": "failed",
                         "error": "dispatch_descriptor_changed",
-                    }
+                    })
             if stale_automatic_turn_on:
                 assert reassert_identity is not None
                 if not await self._light_priority.async_validate_reassert(
@@ -2768,11 +2802,11 @@ class ScenarioExecutor:
                     expected_revision=reassert_identity[0],
                     expected_sequence=reassert_identity[1],
                 ):
-                    return {
+                    return failed_after_power_dispatch({
                         **base,
                         "status": "failed",
                         "error": "stale_reassert_evidence",
-                    }
+                    })
             manual_token: Mapping[str, object] | None = None
             service_context = None
             try:
@@ -2813,8 +2847,7 @@ class ScenarioExecutor:
                         device.entity_id,
                         "on" if dispatch_service == "turn_on" else "off",
                     )
-                if dispatch_marker is not None:
-                    dispatch_marker()
+                mark_physical_dispatch()
                 base["_physical_attempted"] = True
                 await self._call_service(
                     allowed.domain,

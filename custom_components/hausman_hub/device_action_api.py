@@ -59,6 +59,151 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 
+class _DeviceActionLifecycle:
+    """Own one full-request reservation from reserve through durable completion."""
+
+    def __init__(
+        self,
+        *,
+        view: HomeAssistantView,
+        service: ScenarioService,
+        idempotency: DangerousActionIdempotency,
+        key: str,
+        request_id: str,
+        response_media_type: str,
+    ) -> None:
+        self._view = view
+        self._service = service
+        self._idempotency = idempotency
+        self._key = key
+        self._request_id = request_id
+        self._response_media_type = response_media_type
+        self._reservation_owned = False
+        self._terminal_persisted = False
+        self._dispatch_crossed = False
+        self._intercom_cleanup: tuple[str, str | None, str] | None = None
+        self._intercom_cleanup_attempted = False
+
+    @property
+    def dispatch_crossed(self) -> bool:
+        return self._dispatch_crossed
+
+    def mark_reservation_owned(self) -> None:
+        self._reservation_owned = True
+
+    def mark_dispatch_crossed(self) -> None:
+        self._dispatch_crossed = True
+
+    def note_intercom_prepare_attempt(
+        self,
+        target_id: str,
+        *,
+        expected_entity_id: str | None,
+        expected_request_id: str,
+    ) -> None:
+        self._intercom_cleanup = (
+            target_id,
+            expected_entity_id,
+            expected_request_id,
+        )
+
+    async def async_cancel_unarmed_intercom(self) -> bool:
+        cleanup = self._intercom_cleanup
+        if cleanup is None or self._intercom_cleanup_attempted:
+            return True
+        self._intercom_cleanup_attempted = True
+        target_id, expected_entity_id, expected_request_id = cleanup
+        try:
+            cancelled = await self._service.async_cancel_intercom_release(
+                target_id,
+                expected_entity_id=expected_entity_id,
+                expected_request_id=expected_request_id,
+                unarmed_only=True,
+            )
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning(
+                "HausmanHub unarmed intercom release cleanup failed",
+                exc_info=True,
+            )
+            return False
+        if cancelled is not True:
+            _LOGGER.debug(
+                "HausmanHub intercom release cleanup found no matching unarmed obligation"
+            )
+        return cancelled is True
+
+    async def async_failure(self) -> Any:
+        """Attempt independent cleanup and return a negotiated safe failure."""
+
+        await self.async_cancel_unarmed_intercom()
+        if (
+            not self._dispatch_crossed
+            and self._reservation_owned
+            and not self._terminal_persisted
+        ):
+            try:
+                await self._idempotency.async_abandon_pre_dispatch(self._key)
+            except Exception:  # noqa: BLE001
+                _LOGGER.warning(
+                    "HausmanHub pre-dispatch reservation cleanup failed",
+                    exc_info=True,
+                )
+        failure = _execution_failure_response(
+            request_id=self._request_id,
+            dispatch_crossed=self._dispatch_crossed,
+        )
+        return _negotiated_json(
+            self._view,
+            failure["payload"],
+            status_code=failure["status"],
+            media_type=self._response_media_type,
+        )
+
+    async def async_complete(
+        self,
+        response: Mapping[str, object],
+        *,
+        item_journal: list[dict[str, object]] | None = None,
+    ) -> Any | None:
+        try:
+            await self._idempotency.async_complete(
+                self._key,
+                response,
+                item_journal=item_journal,
+            )
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning(
+                "HausmanHub device action completion persistence failed",
+                exc_info=True,
+            )
+            return await self.async_failure()
+        self._terminal_persisted = True
+        return None
+
+
+async def _async_action_failure(
+    view: HomeAssistantView,
+    lifecycle: _DeviceActionLifecycle | None,
+    *,
+    request_id: str,
+    response_media_type: str,
+) -> Any:
+    """Return one negotiated failure with lifecycle cleanup when it exists."""
+
+    if lifecycle is not None:
+        return await lifecycle.async_failure()
+    failure = _execution_failure_response(
+        request_id=request_id,
+        dispatch_crossed=False,
+    )
+    return _negotiated_json(
+        view,
+        failure["payload"],
+        status_code=failure["status"],
+        media_type=response_media_type,
+    )
+
+
 class DeviceFeatureMatrixView(HomeAssistantView):
     """Expose the authenticated, read-only device control upper bound."""
 
@@ -201,18 +346,37 @@ class DeviceActionView(HomeAssistantView):
                 existing_reassert = await idempotency.async_lookup(
                     key=_reassert_coordination_key(payload), fingerprint=fingerprint
                 )
-            except RuntimeError as error:
-                if str(error) == "dangerous action idempotency store is full":
-                    return _idempotency_journal_full(self)
-                return _coordinator_unavailable(self)
+            except Exception as error:  # noqa: BLE001
+                if (
+                    isinstance(error, RuntimeError)
+                    and str(error) == "dangerous action idempotency store is full"
+                ):
+                    return _idempotency_journal_full(
+                        self, media_type=response_media_type
+                    )
+                failure = _execution_failure_response(
+                    request_id=str(payload.get("requestId")),
+                    dispatch_crossed=False,
+                )
+                return _negotiated_json(
+                    self,
+                    failure["payload"],
+                    status_code=failure["status"],
+                    media_type=response_media_type,
+                )
             if existing_reassert.outcome == "conflict":
                 return _idempotency_conflict(
                     self,
                     expected_hash=existing_reassert.existing_fingerprint,
                     request_hash=fingerprint,
+                    media_type=response_media_type,
                 )
             if existing_reassert.outcome == "in_progress":
-                return _idempotency_in_progress(self, existing_reassert.state)
+                return _idempotency_in_progress(
+                    self,
+                    existing_reassert.state,
+                    media_type=response_media_type,
+                )
             if (
                 existing_reassert.outcome == "replay"
                 and existing_reassert.receipt is not None
@@ -220,6 +384,7 @@ class DeviceActionView(HomeAssistantView):
                 return _negotiated_json(
                     self,
                     existing_reassert.receipt,
+                    status_code=_replay_status(existing_reassert.receipt),
                     media_type=(
                         existing_reassert.response_media_type or response_media_type
                     ),
@@ -236,11 +401,7 @@ class DeviceActionView(HomeAssistantView):
                 return _stale_reassert_evidence(self)
         coordination_key: str | None = None
         dispatch_request_id: str | None = None
-        intercom_release_prepared = False
-        dispatch_state = {"crossed": False}
-
-        def mark_dispatch_crossed() -> None:
-            dispatch_state["crossed"] = True
+        lifecycle: _DeviceActionLifecycle | None = None
         if full_request and not dry_run:
             if context is None or not isinstance(
                 idempotency, DangerousActionIdempotency
@@ -260,6 +421,14 @@ class DeviceActionView(HomeAssistantView):
             coordination_key = idempotency_key
             dispatch_id = uuid.uuid4().hex
             dispatch_request_id = f"dispatch.{dispatch_id}"
+            lifecycle = _DeviceActionLifecycle(
+                view=self,
+                service=service,
+                idempotency=idempotency,
+                key=idempotency_key,
+                request_id=dispatch_request_id,
+                response_media_type=response_media_type,
+            )
             try:
                 reservation = await idempotency.async_reserve(
                     key=idempotency_key,
@@ -277,61 +446,105 @@ class DeviceActionView(HomeAssistantView):
                     ],
                     response_media_type=response_media_type,
                 )
-            except RuntimeError as error:
-                if str(error) == "dangerous action idempotency store is full":
-                    return _idempotency_journal_full(self)
-                return _coordinator_unavailable(self)
+            except Exception as error:  # noqa: BLE001
+                if (
+                    isinstance(error, RuntimeError)
+                    and str(error) == "dangerous action idempotency store is full"
+                ):
+                    return _idempotency_journal_full(
+                        self, media_type=response_media_type
+                    )
+                failure = _execution_failure_response(
+                    request_id=str(payload.get("requestId")),
+                    dispatch_crossed=False,
+                )
+                return _negotiated_json(
+                    self,
+                    failure["payload"],
+                    status_code=failure["status"],
+                    media_type=response_media_type,
+                )
             if reservation.outcome == "conflict":
                 return _idempotency_conflict(
                     self,
                     expected_hash=reservation.existing_fingerprint,
                     request_hash=fingerprint,
+                    media_type=response_media_type,
                 )
             if reservation.outcome == "in_progress":
-                return _idempotency_in_progress(self, reservation.state)
+                return _idempotency_in_progress(
+                    self,
+                    reservation.state,
+                    media_type=response_media_type,
+                )
             if reservation.outcome == "replay" and reservation.receipt is not None:
                 return _negotiated_json(
                     self,
                     reservation.receipt,
+                    status_code=_replay_status(reservation.receipt),
                     media_type=(
                         reservation.response_media_type or response_media_type
                     ),
                 )
-            await idempotency.async_mark_pending(idempotency_key)
+            lifecycle.mark_reservation_owned()
+            try:
+                await idempotency.async_mark_pending(idempotency_key)
+            except Exception:  # noqa: BLE001
+                _LOGGER.warning(
+                    "HausmanHub device action pending persistence failed",
+                    exc_info=True,
+                )
+                return await lifecycle.async_failure()
 
         release_seconds = None
         if intercom_action and not dry_run:
+            assert lifecycle is not None
+            release_request_id = f"{dispatch_request_id}.release"
+            lifecycle.note_intercom_prepare_attempt(
+                target_id,
+                expected_entity_id=entity_id,
+                expected_request_id=release_request_id,
+            )
             try:
                 release_seconds = await service.async_prepare_intercom_release(
                     target_id,
                     action_id,
                     correlation_id=correlation_id,
-                    request_id=f"{dispatch_request_id}.release",
+                    request_id=release_request_id,
                     expected_entity_id=entity_id,
                 )
-            except Exception:
-                return _coordinator_unavailable(self)
+            except Exception:  # noqa: BLE001
+                _LOGGER.warning(
+                    "HausmanHub intercom release preparation failed",
+                    exc_info=True,
+                )
+                return await lifecycle.async_failure()
             if release_seconds is None:
-                return _coordinator_unavailable(self)
-            intercom_release_prepared = True
+                return await lifecycle.async_failure()
         if coordination_key is not None and isinstance(
             idempotency, DangerousActionIdempotency
         ):
             try:
                 await idempotency.async_mark_dispatching(coordination_key)
-            except Exception:
-                if intercom_release_prepared:
-                    await service.async_cancel_intercom_release(
-                        target_id,
-                        expected_entity_id=entity_id,
-                        expected_request_id=f"{dispatch_request_id}.release",
-                    )
-                return _coordinator_unavailable(self)
+            except Exception:  # noqa: BLE001
+                _LOGGER.warning(
+                    "HausmanHub device action dispatch fence persistence failed",
+                    exc_info=True,
+                )
+                assert lifecycle is not None
+                return await lifecycle.async_failure()
 
         climate_runtime = self._hass.data.get(DOMAIN, {}).get("climate_runtime")
-        mode_writer = getattr(
-            climate_runtime, "async_set_device_mode_for_entity", None
-        )
+        try:
+            mode_writer = getattr(
+                climate_runtime, "async_set_device_mode_for_entity", None
+            )
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning(
+                "HausmanHub climate mode writer lookup failed",
+                exc_info=True,
+            )
+            mode_writer = None
         try:
             climate_entity_id = None
             if not dry_run and action_id == "turn_off" and callable(mode_writer):
@@ -365,10 +578,10 @@ class DeviceActionView(HomeAssistantView):
                 execute_options["expected_service"] = allowed_service
             if intercom_action and not dry_run:
                 execute_options["intercom_release_required"] = True
-            if _supports_keyword(
+            if lifecycle is not None and _supports_keyword(
                 service.async_execute_device_action, "dispatch_marker"
             ):
-                execute_options["dispatch_marker"] = mark_dispatch_crossed
+                execute_options["dispatch_marker"] = lifecycle.mark_dispatch_crossed
             result = await service.async_execute_device_action(
                 target_id,
                 action_id,
@@ -377,47 +590,59 @@ class DeviceActionView(HomeAssistantView):
             )
         except Exception:
             _LOGGER.warning("HausmanHub device action execution failed", exc_info=True)
-            dispatch_crossed = dispatch_state["crossed"]
-            if intercom_release_prepared and not dispatch_crossed:
-                await service.async_cancel_intercom_release(
-                    target_id,
-                    expected_entity_id=entity_id,
-                    expected_request_id=f"{dispatch_request_id}.release",
-                )
-            if (
-                not dispatch_crossed
-                and coordination_key is not None
-                and isinstance(idempotency, DangerousActionIdempotency)
-            ):
-                await idempotency.async_abandon_pre_dispatch(coordination_key)
+            if lifecycle is not None:
+                return await lifecycle.async_failure()
             failure = _execution_failure_response(
-                request_id=dispatch_request_id or str(payload.get("requestId")),
-                dispatch_crossed=dispatch_crossed,
+                request_id=str(payload.get("requestId")), dispatch_crossed=False
             )
             return _negotiated_json(
-                self,
-                failure["payload"],
-                status_code=failure["status"],
+                self, failure["payload"], status_code=failure["status"],
                 media_type=response_media_type,
             )
+        try:
+            if not isinstance(result, Mapping):
+                raise TypeError("device action receipt is not a mapping")
+            result = dict(result)
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("HausmanHub device action returned a malformed receipt")
+            return await _async_action_failure(
+                self,
+                lifecycle,
+                request_id=str(payload.get("requestId")),
+                response_media_type=response_media_type,
+            )
+        if (
+            lifecycle is not None
+            and result.get("accepted") is not True
+            and lifecycle.dispatch_crossed
+        ):
+            return await lifecycle.async_failure()
         if result.get("accepted") is True and climate_entity_id is not None:
-            climate_mode_change = await mode_writer(climate_entity_id, "automatic")
-            result = {
-                **result,
-                "climateMode": climate_mode_change["mode"],
-                "climateModeName": "Автоматический режим",
-            }
-        if intercom_release_prepared and result.get("accepted") is not True:
+            try:
+                climate_mode_change = await mode_writer(
+                    climate_entity_id, "automatic"
+                )
+                result = {
+                    **result,
+                    "climateMode": climate_mode_change["mode"],
+                    "climateModeName": "Автоматический режим",
+                }
+            except Exception:  # noqa: BLE001
+                _LOGGER.warning(
+                    "HausmanHub climate mode postprocessing failed after device action",
+                    exc_info=True,
+                )
+        if (
+            lifecycle is not None
+            and intercom_action
+            and result.get("accepted") is not True
+        ):
             # Prepare is durable before dispatch. A normal failed receipt means
             # the executor did not cross the physical dispatch boundary, so
             # the unarmed obligation must not block the next command.
-            await service.async_cancel_intercom_release(
-                target_id,
-                expected_entity_id=entity_id,
-                expected_request_id=f"{dispatch_request_id}.release",
-            )
+            if not await lifecycle.async_cancel_unarmed_intercom():
+                return await lifecycle.async_failure()
             release_seconds = None
-            intercom_release_prepared = False
         if result.get("accepted") is True:
             if dry_run and intercom_action:
                 service.publish_intercom_dry_run(
@@ -426,12 +651,21 @@ class DeviceActionView(HomeAssistantView):
                     request_id=str(result.get("requestId")),
                 )
             elif intercom_action and release_seconds is None:
-                release_seconds = await service.async_schedule_intercom_release(
-                    target_id,
-                    action_id,
-                    correlation_id=correlation_id,
-                    request_id=str(result.get("requestId")),
-                )
+                try:
+                    release_seconds = await service.async_schedule_intercom_release(
+                        target_id,
+                        action_id,
+                        correlation_id=correlation_id,
+                        request_id=str(result.get("requestId")),
+                    )
+                except Exception:  # noqa: BLE001
+                    _LOGGER.warning(
+                        "HausmanHub intercom release scheduling failed",
+                        exc_info=True,
+                    )
+                    if lifecycle is not None:
+                        return await lifecycle.async_failure()
+                    raise
         response: dict[str, object] = {
             "contract": {
                 "name": "hausman-hub-device-action-receipt",
@@ -441,30 +675,48 @@ class DeviceActionView(HomeAssistantView):
             "targetType": target_type,
         }
         if full_response:
-            final_state = (
-                self._hass.states.get(entity_id)
-                if isinstance(entity_id, str)
-                else None
-            )
-            response = full_action_receipt(
-                payload=payload,
-                result=result,
-                target_type=target_type,
-                state=final_state,
-                allowed_actions=allowed_actions,
-                pre_command_evidence=pre_command_evidence,
-                decision_at=decision_at,
-            )
+            try:
+                final_state = (
+                    self._hass.states.get(entity_id)
+                    if isinstance(entity_id, str)
+                    else None
+                )
+                response = full_action_receipt(
+                    payload=payload,
+                    result=result,
+                    target_type=target_type,
+                    state=final_state,
+                    allowed_actions=allowed_actions,
+                    pre_command_evidence=pre_command_evidence,
+                    decision_at=decision_at,
+                )
+            except Exception:  # noqa: BLE001
+                _LOGGER.warning(
+                    "HausmanHub device action receipt construction failed",
+                    exc_info=True,
+                )
+                return await _async_action_failure(
+                    self,
+                    lifecycle,
+                    request_id=str(payload.get("requestId")),
+                    response_media_type=response_media_type,
+                )
         if release_seconds is not None:
             response["autoReleaseSeconds"] = release_seconds
             response["releaseReceiptPending"] = True
         if dry_run:
             response["dryRun"] = True
-        if coordination_key is not None and isinstance(
-            idempotency, DangerousActionIdempotency
-        ):
-            await idempotency.async_complete(coordination_key, response)
-        publish_command_receipt(self._hass, response, operation="device_action")
+        if lifecycle is not None:
+            completion_failure = await lifecycle.async_complete(response)
+            if completion_failure is not None:
+                return completion_failure
+        try:
+            publish_command_receipt(self._hass, response, operation="device_action")
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning(
+                "HausmanHub device action receipt publication failed",
+                exc_info=True,
+            )
         return _negotiated_json(
             self,
             response,
@@ -630,18 +882,37 @@ class DeviceActionBatchView(HomeAssistantView):
                     key=_reassert_coordination_key(item),
                     fingerprint=fingerprint,
                 )
-            except RuntimeError as error:
-                if str(error) == "dangerous action idempotency store is full":
-                    return _idempotency_journal_full(self)
-                return _coordinator_unavailable(self)
+            except Exception as error:  # noqa: BLE001
+                if (
+                    isinstance(error, RuntimeError)
+                    and str(error) == "dangerous action idempotency store is full"
+                ):
+                    return _idempotency_journal_full(
+                        self, media_type=response_media_type
+                    )
+                failure = _execution_failure_response(
+                    request_id=str(payload.get("requestId")),
+                    dispatch_crossed=False,
+                )
+                return _negotiated_json(
+                    self,
+                    failure["payload"],
+                    status_code=failure["status"],
+                    media_type=response_media_type,
+                )
             if existing_reassert.outcome == "conflict":
                 return _idempotency_conflict(
                     self,
                     expected_hash=existing_reassert.existing_fingerprint,
                     request_hash=fingerprint,
+                    media_type=response_media_type,
                 )
             if existing_reassert.outcome == "in_progress":
-                return _idempotency_in_progress(self, existing_reassert.state)
+                return _idempotency_in_progress(
+                    self,
+                    existing_reassert.state,
+                    media_type=response_media_type,
+                )
             if (
                 existing_reassert.outcome == "replay"
                 and existing_reassert.receipt is not None
@@ -649,6 +920,7 @@ class DeviceActionBatchView(HomeAssistantView):
                 return _negotiated_json(
                     self,
                     existing_reassert.receipt,
+                    status_code=_replay_status(existing_reassert.receipt),
                     media_type=(
                         existing_reassert.response_media_type or response_media_type
                     ),
@@ -668,11 +940,9 @@ class DeviceActionBatchView(HomeAssistantView):
         idempotency_key: str | None = None
         dispatch_request_ids: tuple[str, ...] | None = None
         intercom_release_index: int | None = None
-        intercom_release_prepared = False
-        dispatch_state = {"crossed": False}
-
-        def mark_dispatch_crossed() -> None:
-            dispatch_state["crossed"] = True
+        lifecycle: _DeviceActionLifecycle | None = None
+        item_dispatch_crossed = [False for _item in normalized]
+        unattributed_dispatch_state = {"crossed": False}
         coordinated_index = (
             dangerous_indexes[0]
             if dangerous_indexes
@@ -707,6 +977,14 @@ class DeviceActionBatchView(HomeAssistantView):
                 f"dispatch.{dispatch_id}.{index}"
                 for index in range(len(normalized))
             )
+            lifecycle = _DeviceActionLifecycle(
+                view=self,
+                service=service,
+                idempotency=idempotency,
+                key=idempotency_key,
+                request_id=str(payload.get("requestId")),
+                response_media_type=response_media_type,
+            )
             try:
                 reservation = await idempotency.async_reserve(
                     key=idempotency_key,
@@ -729,63 +1007,100 @@ class DeviceActionBatchView(HomeAssistantView):
                     ],
                     response_media_type=response_media_type,
                 )
-            except RuntimeError as error:
-                if str(error) == "dangerous action idempotency store is full":
-                    return _idempotency_journal_full(self)
-                return _coordinator_unavailable(self)
+            except Exception as error:  # noqa: BLE001
+                if (
+                    isinstance(error, RuntimeError)
+                    and str(error) == "dangerous action idempotency store is full"
+                ):
+                    return _idempotency_journal_full(
+                        self, media_type=response_media_type
+                    )
+                failure = _execution_failure_response(
+                    request_id=str(payload.get("requestId")),
+                    dispatch_crossed=False,
+                )
+                return _negotiated_json(
+                    self,
+                    failure["payload"],
+                    status_code=failure["status"],
+                    media_type=response_media_type,
+                )
             if reservation.outcome == "conflict":
                 return _idempotency_conflict(
                     self,
                     expected_hash=reservation.existing_fingerprint,
                     request_hash=fingerprint,
+                    media_type=response_media_type,
                 )
             if reservation.outcome == "in_progress":
-                return _idempotency_in_progress(self, reservation.state)
+                return _idempotency_in_progress(
+                    self,
+                    reservation.state,
+                    media_type=response_media_type,
+                )
             if reservation.outcome == "replay" and reservation.receipt is not None:
                 return _negotiated_json(
                     self,
                     reservation.receipt,
+                    status_code=_replay_status(reservation.receipt),
                     media_type=(
                         reservation.response_media_type or response_media_type
                     ),
                 )
-            await idempotency.async_mark_pending(idempotency_key)
+            lifecycle.mark_reservation_owned()
+            try:
+                await idempotency.async_mark_pending(idempotency_key)
+            except Exception:  # noqa: BLE001
+                _LOGGER.warning(
+                    "HausmanHub device action batch pending persistence failed",
+                    exc_info=True,
+                )
+                return await lifecycle.async_failure()
 
         if dangerous_indexes:
             index = dangerous_indexes[0]
             if intercom_flags[index]:
                 intercom_release_index = index
                 item = normalized[index]
+                assert lifecycle is not None
+                release_request_id = f"{dispatch_request_ids[index]}.release"
+                lifecycle.note_intercom_prepare_attempt(
+                    str(item["targetId"]),
+                    expected_entity_id=(
+                        contexts[index][0] if contexts[index] is not None else None
+                    ),
+                    expected_request_id=release_request_id,
+                )
                 try:
                     prepared = await service.async_prepare_intercom_release(
                         str(item["targetId"]),
                         str(item["actionId"]),
                         correlation_id=correlation_id,
-                        request_id=f"{dispatch_request_ids[index]}.release",
+                        request_id=release_request_id,
                         expected_entity_id=(
                             contexts[index][0] if contexts[index] is not None else None
                         ),
                     )
-                except Exception:
-                    return _coordinator_unavailable(self)
+                except Exception:  # noqa: BLE001
+                    _LOGGER.warning(
+                        "HausmanHub intercom batch release preparation failed",
+                        exc_info=True,
+                    )
+                    return await lifecycle.async_failure()
                 if prepared is None:
-                    return _coordinator_unavailable(self)
-                intercom_release_prepared = True
+                    return await lifecycle.async_failure()
         if idempotency_key is not None and isinstance(
             idempotency, DangerousActionIdempotency
         ):
             try:
                 await idempotency.async_mark_dispatching(idempotency_key)
-            except Exception:
-                if intercom_release_prepared and intercom_release_index is not None:
-                    await service.async_cancel_intercom_release(
-                        str(normalized[intercom_release_index]["targetId"]),
-                        expected_entity_id=contexts[intercom_release_index][0],
-                        expected_request_id=(
-                            f"{dispatch_request_ids[intercom_release_index]}.release"
-                        ),
-                    )
-                return _coordinator_unavailable(self)
+            except Exception:  # noqa: BLE001
+                _LOGGER.warning(
+                    "HausmanHub device action batch dispatch fence persistence failed",
+                    exc_info=True,
+                )
+                assert lifecycle is not None
+                return await lifecycle.async_failure()
 
         batch_options: dict[str, object] = {"correlation_id": correlation_id}
         if dispatch_request_ids is not None:
@@ -808,80 +1123,113 @@ class DeviceActionBatchView(HomeAssistantView):
                 if intercom_flags[index]
             )
         try:
-            if _supports_keyword(
+            if lifecycle is not None and _supports_keyword(
                 service.async_execute_device_action_batch, "dispatch_marker"
             ):
-                batch_options["dispatch_marker"] = mark_dispatch_crossed
+                def mark_unattributed_dispatch() -> None:
+                    unattributed_dispatch_state["crossed"] = True
+                    lifecycle.mark_dispatch_crossed()
+
+                batch_options["dispatch_marker"] = mark_unattributed_dispatch
+            per_item_markers_supported = bool(
+                lifecycle is not None
+                and _supports_keyword(
+                    service.async_execute_device_action_batch, "dispatch_markers"
+                )
+            )
+            if per_item_markers_supported:
+                assert lifecycle is not None
+
+                def item_marker(index: int) -> None:
+                    item_dispatch_crossed[index] = True
+                    lifecycle.mark_dispatch_crossed()
+
+                batch_options["dispatch_markers"] = tuple(
+                    (lambda index=index: item_marker(index))
+                    for index in range(len(normalized))
+                )
             receipts = await service.async_execute_device_action_batch(
                 normalized,
                 **batch_options,
             )
-        except Exception:
+        except Exception:  # noqa: BLE001
             _LOGGER.warning("HausmanHub device action batch execution failed", exc_info=True)
-            dispatch_crossed = dispatch_state["crossed"]
-            if (
-                intercom_release_prepared
-                and intercom_release_index is not None
-            ):
-                await service.async_cancel_intercom_release(
-                    str(normalized[intercom_release_index]["targetId"]),
-                    expected_entity_id=contexts[intercom_release_index][0],
-                    expected_request_id=(
-                        f"{dispatch_request_ids[intercom_release_index]}.release"
-                    ),
-                )
-            if (
-                not dispatch_crossed
-                and idempotency_key is not None
-                and isinstance(idempotency, DangerousActionIdempotency)
-            ):
-                await idempotency.async_abandon_pre_dispatch(idempotency_key)
+            if lifecycle is not None:
+                return await lifecycle.async_failure()
             failure = _execution_failure_response(
-                request_id=(
-                    dispatch_request_ids[intercom_release_index]
-                    if dispatch_request_ids is not None
-                    and intercom_release_index is not None
-                    else str(payload.get("requestId"))
-                ),
-                dispatch_crossed=dispatch_crossed,
+                request_id=str(payload.get("requestId")), dispatch_crossed=False
             )
             return _negotiated_json(
-                self,
-                failure["payload"],
-                status_code=failure["status"],
+                self, failure["payload"], status_code=failure["status"],
                 media_type=response_media_type,
             )
-        if intercom_release_prepared and intercom_release_index is not None:
+        try:
+            if (
+                not isinstance(receipts, list)
+                or len(receipts) != len(normalized)
+                or not all(isinstance(receipt, Mapping) for receipt in receipts)
+            ):
+                raise TypeError("device action batch receipts are malformed")
+            receipts = [dict(receipt) for receipt in receipts]
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("HausmanHub device action batch returned malformed receipts")
+            return await _async_action_failure(
+                self,
+                lifecycle,
+                request_id=str(payload.get("requestId")),
+                response_media_type=response_media_type,
+            )
+        rejected_indexes = [
+            index
+            for index, receipt in enumerate(receipts)
+            if receipt.get("accepted") is not True
+        ]
+        if lifecycle is not None and rejected_indexes and (
+            any(item_dispatch_crossed[index] for index in rejected_indexes)
+            or unattributed_dispatch_state["crossed"]
+            or not per_item_markers_supported and lifecycle.dispatch_crossed
+        ):
+            return await lifecycle.async_failure()
+        if lifecycle is not None and intercom_release_index is not None:
             release_receipt = receipts[intercom_release_index]
             if release_receipt.get("accepted") is not True:
-                await service.async_cancel_intercom_release(
-                    str(normalized[intercom_release_index]["targetId"]),
-                    expected_entity_id=contexts[intercom_release_index][0],
-                    expected_request_id=(
-                        f"{dispatch_request_ids[intercom_release_index]}.release"
-                    ),
-                )
-                intercom_release_prepared = False
+                if not await lifecycle.async_cancel_unarmed_intercom():
+                    return await lifecycle.async_failure()
         if full_response:
-            wrapped = [
-                full_action_receipt(
-                    payload=action,
-                    result=receipt,
-                    target_type=context[1] if context is not None else "sensor",
-                    state=(
-                        self._hass.states.get(context[0])
-                        if context is not None
-                        else None
-                    ),
-                    allowed_actions=context[2] if context is not None else (),
-                    pre_command_evidence=pre,
-                    decision_at=decision_at + index,
-                    action_index=index,
+            try:
+                wrapped = [
+                    full_action_receipt(
+                        payload=action,
+                        result=receipt,
+                        target_type=context[1] if context is not None else "sensor",
+                        state=(
+                            self._hass.states.get(context[0])
+                            if context is not None
+                            else None
+                        ),
+                        allowed_actions=context[2] if context is not None else (),
+                        pre_command_evidence=pre,
+                        decision_at=decision_at + index,
+                        action_index=index,
+                    )
+                    for index, (action, receipt, context, pre) in enumerate(
+                        zip(normalized, receipts, contexts, pre_evidence, strict=True)
+                    )
+                ]
+                if not all(isinstance(receipt, Mapping) for receipt in wrapped):
+                    raise TypeError("device action batch full receipt is malformed")
+                wrapped = [dict(receipt) for receipt in wrapped]
+            except Exception:  # noqa: BLE001
+                _LOGGER.warning(
+                    "HausmanHub device action batch receipt construction failed",
+                    exc_info=True,
                 )
-                for index, (action, receipt, context, pre) in enumerate(
-                    zip(normalized, receipts, contexts, pre_evidence, strict=True)
+                return await _async_action_failure(
+                    self,
+                    lifecycle,
+                    request_id=str(payload.get("requestId")),
+                    response_media_type=response_media_type,
                 )
-            ]
         else:
             wrapped = [
                 {
@@ -899,8 +1247,6 @@ class DeviceActionBatchView(HomeAssistantView):
                 }
                 for index, item in enumerate(receipts)
             ]
-        for receipt in wrapped:
-            publish_command_receipt(self._hass, receipt, operation="device_action")
         accepted = sum(item.get("accepted") is True for item in wrapped)
         confirmed = sum(item.get("confirmed") is True for item in wrapped)
         failed = sum(item.get("status") == "failed" for item in wrapped)
@@ -926,14 +1272,23 @@ class DeviceActionBatchView(HomeAssistantView):
                 "failedCount": failed,
                 "receipts": wrapped,
             }
-        if idempotency_key is not None and isinstance(
-            idempotency, DangerousActionIdempotency
-        ):
-            await idempotency.async_complete(
-                idempotency_key,
+        if lifecycle is not None:
+            completion_failure = await lifecycle.async_complete(
                 response,
                 item_journal=[dict(item) for item in wrapped],
             )
+            if completion_failure is not None:
+                return completion_failure
+        for receipt in wrapped:
+            try:
+                publish_command_receipt(
+                    self._hass, receipt, operation="device_action"
+                )
+            except Exception:  # noqa: BLE001
+                _LOGGER.warning(
+                    "HausmanHub device action batch receipt publication failed",
+                    exc_info=True,
+                )
         return _negotiated_json(
             self,
             response,
@@ -957,6 +1312,19 @@ def _negotiated_json(
     )
     response.headers["Content-Type"] = media_type
     return response
+
+
+def _replay_status(receipt: Mapping[str, object]) -> int:
+    """Replay the original single-action success or conflict semantics."""
+
+    contract = receipt.get("contract")
+    if (
+        isinstance(contract, Mapping)
+        and contract.get("name") == "hausman-hub-device-action-receipt"
+        and receipt.get("accepted") is not True
+    ):
+        return HTTPStatus.CONFLICT
+    return HTTPStatus.OK
 
 
 def _not_acceptable(view: HomeAssistantView) -> Any:
@@ -1107,8 +1475,14 @@ def _coordinator_unavailable(view: HomeAssistantView) -> Any:
     )
 
 
-def _idempotency_in_progress(view: HomeAssistantView, state: str) -> Any:
-    return view.json(
+def _idempotency_in_progress(
+    view: HomeAssistantView,
+    state: str,
+    *,
+    media_type: str,
+) -> Any:
+    return _negotiated_json(
+        view,
         {
             "contract": {"name": "hausman-hub-error", "version": 1},
             "code": "conflict",
@@ -1128,19 +1502,24 @@ def _idempotency_in_progress(view: HomeAssistantView, state: str) -> Any:
             },
         },
         status_code=HTTPStatus.CONFLICT,
-        headers=NO_STORE_HEADERS,
+        media_type=media_type,
     )
 
 
-def _idempotency_journal_full(view: HomeAssistantView) -> Any:
+def _idempotency_journal_full(
+    view: HomeAssistantView,
+    *,
+    media_type: str,
+) -> Any:
     """Fail before dispatch while retained dangerous replays fill the journal."""
 
-    return view.json(
+    return _negotiated_json(
+        view,
         api_error_payload(
             "unavailable", request_id=f"request-idempotency-full-{uuid.uuid4().hex[:16]}"
         ),
         status_code=api_error_status("unavailable"),
-        headers=NO_STORE_HEADERS,
+        media_type=media_type,
     )
 
 
@@ -1149,8 +1528,10 @@ def _idempotency_conflict(
     *,
     expected_hash: str | None,
     request_hash: str,
+    media_type: str,
 ) -> Any:
-    return view.json(
+    return _negotiated_json(
+        view,
         {
             "contract": {"name": "hausman-hub-error", "version": 1},
             "code": "conflict",
@@ -1170,5 +1551,5 @@ def _idempotency_conflict(
             },
         },
         status_code=HTTPStatus.CONFLICT,
-        headers=NO_STORE_HEADERS,
+        media_type=media_type,
     )

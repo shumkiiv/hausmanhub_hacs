@@ -78,6 +78,16 @@ class DangerousActionIdempotency:
                 self._load_error = True
                 return
             if (
+                record["state"] in {"reserved", "pending"}
+                and record["dispatchPhase"] == "not_started"
+            ):
+                # A persisted record that never crossed the durable dispatch
+                # boundary owns no physical side effect.  Releasing it on
+                # startup prevents a failed prepare/save from wedging the key
+                # forever while still keeping every uncertain dispatch.
+                changed = True
+                continue
+            if (
                 record["state"] == "pending"
                 and record["dispatchPhase"] in {"dispatching", "dispatched"}
             ):

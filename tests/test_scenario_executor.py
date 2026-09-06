@@ -3597,6 +3597,181 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             blocking=True,
         )
 
+    async def test_depth_three_source_dispatch_then_outer_requires_on_failure_is_unknown(
+        self,
+    ) -> None:
+        """A deeper successful source command makes every later failed return uncertain."""
+
+        states = {
+            "light.living_room": SimpleNamespace(state="off", attributes={}),
+            "switch.wall": SimpleNamespace(state="off", attributes={}),
+            "switch.middle": SimpleNamespace(state="off", attributes={}),
+            "switch.upstream": SimpleNamespace(state="off", attributes={}),
+        }
+        self.hass.states = SimpleNamespace(get=states.get)
+
+        async def call_service(
+            _domain: str,
+            _service: str,
+            data: dict[str, object],
+            **_options: object,
+        ) -> None:
+            entity_id = str(data["entity_id"])
+            states[entity_id] = SimpleNamespace(
+                state="on",
+                attributes={},
+                last_updated=datetime.now(timezone.utc),
+            )
+
+        self.hass.services.async_call.side_effect = call_service
+        dependencies = {
+            "light.living_room": DevicePowerDependency(
+                "light.living_room", "switch.wall", "requires_on", 0
+            ),
+            "switch.wall": DevicePowerDependency(
+                "switch.wall", "switch.middle", "auto_turn_on", 0
+            ),
+            "switch.middle": DevicePowerDependency(
+                "switch.middle", "switch.upstream", "auto_turn_on", 0
+            ),
+        }
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            readback_window_seconds=0.02,
+            readback_interval_seconds=0.01,
+            power_dependency_resolver=lambda: dependencies,
+        )
+        markers: list[str] = []
+
+        with self.assertRaises(PowerSourceDispatchUncertain):
+            await executor.async_execute_device_action(
+                "device_1",
+                "turn_on",
+                dispatch_marker=lambda: markers.append("crossed"),
+            )
+
+        self.assertEqual(["crossed", "crossed"], markers)
+        self.assertEqual(
+            ["switch.upstream", "switch.middle"],
+            [
+                call.args[2]["entity_id"]
+                for call in self.hass.services.async_call.await_args_list
+            ],
+        )
+
+    async def test_depth_three_source_dispatch_then_stale_outer_source_is_unknown(
+        self,
+    ) -> None:
+        """A stale outer source after a deeper dispatch must not become a safe failure."""
+
+        stale = datetime.now(timezone.utc) - timedelta(minutes=10)
+        states = {
+            "light.living_room": SimpleNamespace(state="off", attributes={}),
+            "switch.wall": SimpleNamespace(
+                state="on", attributes={}, last_updated=stale
+            ),
+            "switch.middle": SimpleNamespace(state="off", attributes={}),
+            "switch.upstream": SimpleNamespace(state="off", attributes={}),
+        }
+        self.hass.states = SimpleNamespace(get=states.get)
+
+        async def call_service(
+            _domain: str,
+            _service: str,
+            data: dict[str, object],
+            **_options: object,
+        ) -> None:
+            entity_id = str(data["entity_id"])
+            states[entity_id] = SimpleNamespace(
+                state="on",
+                attributes={},
+                last_updated=datetime.now(timezone.utc),
+            )
+
+        self.hass.services.async_call.side_effect = call_service
+        dependencies = {
+            "light.living_room": DevicePowerDependency(
+                "light.living_room", "switch.wall", "requires_on", 0
+            ),
+            "switch.wall": DevicePowerDependency(
+                "switch.wall", "switch.middle", "auto_turn_on", 0
+            ),
+            "switch.middle": DevicePowerDependency(
+                "switch.middle", "switch.upstream", "auto_turn_on", 0
+            ),
+        }
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            readback_window_seconds=0.02,
+            readback_interval_seconds=0.01,
+            power_dependency_resolver=lambda: dependencies,
+        )
+
+        with self.assertRaises(PowerSourceDispatchUncertain):
+            await executor.async_execute_device_action(
+                "device_1", "turn_on", dispatch_marker=lambda: None
+            )
+
+        self.assertGreaterEqual(self.hass.services.async_call.await_count, 1)
+
+    async def test_invalid_activated_at_after_nested_dispatch_is_unknown(self) -> None:
+        """Corrupt cached timing discovered after a source call cannot look unsent."""
+
+        states = {
+            "light.living_room": SimpleNamespace(state="off", attributes={}),
+            "switch.wall": SimpleNamespace(state="off", attributes={}),
+            "switch.upstream": SimpleNamespace(state="off", attributes={}),
+        }
+        self.hass.states = SimpleNamespace(get=states.get)
+
+        async def call_service(
+            _domain: str,
+            _service: str,
+            data: dict[str, object],
+            **_options: object,
+        ) -> None:
+            entity_id = str(data["entity_id"])
+            states[entity_id] = SimpleNamespace(
+                state="on",
+                attributes={},
+                last_updated=datetime.now(timezone.utc),
+            )
+
+        self.hass.services.async_call.side_effect = call_service
+        dependencies = {
+            "light.living_room": DevicePowerDependency(
+                "light.living_room", "switch.wall", "requires_on", 0
+            ),
+            "switch.wall": DevicePowerDependency(
+                "switch.wall", "switch.upstream", "auto_turn_on", 0
+            ),
+        }
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            readback_window_seconds=0.02,
+            readback_interval_seconds=0.01,
+            power_dependency_resolver=lambda: dependencies,
+        )
+
+        with self.assertRaises(PowerSourceDispatchUncertain):
+            await executor._device_action_receipt(
+                ScenarioAction(
+                    id="invalid-activation-cache",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="turn_on",
+                ),
+                {"action_id": "invalid-activation-cache", "status": "pending"},
+                powered_sources={"switch.wall": "invalid"},
+                dispatch_marker=lambda: None,
+            )
+
     async def test_auto_dependency_dry_run_plans_without_service_call(self) -> None:
         self.hass.states = SimpleNamespace(
             get={

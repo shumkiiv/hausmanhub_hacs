@@ -243,6 +243,81 @@ def test_restart_converts_uncertain_dispatch_to_no_redispatch_conflict() -> None
     assert replay.state == "dispatch_unknown"
 
 
+@pytest.mark.parametrize("state", ["reserved", "pending"])
+def test_restart_removes_work_that_never_reached_dispatch(state: str) -> None:
+    """A restart must release only records proven to have no dispatch attempt."""
+
+    store = MemoryStore()
+    first = DangerousActionIdempotency(store)
+    asyncio.run(first.async_load())
+    asyncio.run(
+        first.async_reserve(
+            key=f"safe-restart.{state}",
+            fingerprint="1" * 64,
+            dispatch_id=f"dispatch-{state}",
+            bindings=[
+                _binding(
+                    correlation_id=f"safe-restart.{state}",
+                    request_id=f"request-{state}",
+                )
+            ],
+        )
+    )
+    if state == "pending":
+        asyncio.run(first.async_mark_pending(f"safe-restart.{state}"))
+
+    restarted = DangerousActionIdempotency(store)
+    asyncio.run(restarted.async_load())
+
+    lookup = asyncio.run(
+        restarted.async_lookup(
+            key=f"safe-restart.{state}", fingerprint="1" * 64
+        )
+    )
+    assert lookup.outcome == "missing"
+    assert store.payload == {"version": 1, "records": []}
+
+
+@pytest.mark.parametrize("phase", ["dispatching", "dispatched"])
+def test_restart_retains_pending_dispatch_as_unknown(phase: str) -> None:
+    """Every persisted dispatch attempt survives restart as operator-owned work."""
+
+    store = MemoryStore()
+    first = DangerousActionIdempotency(store)
+    asyncio.run(first.async_load())
+    asyncio.run(
+        first.async_reserve(
+            key=f"uncertain-restart.{phase}",
+            fingerprint="2" * 64,
+            dispatch_id=f"dispatch-{phase}",
+            bindings=[
+                _binding(
+                    correlation_id=f"uncertain-restart.{phase}",
+                    request_id=f"request-{phase}",
+                )
+            ],
+        )
+    )
+    asyncio.run(first.async_mark_pending(f"uncertain-restart.{phase}"))
+    if phase == "dispatching":
+        asyncio.run(first.async_mark_dispatching(f"uncertain-restart.{phase}"))
+    else:
+        assert isinstance(store.payload, dict)
+        store.payload["records"][0]["dispatchPhase"] = "dispatched"
+
+    restarted = DangerousActionIdempotency(store)
+    asyncio.run(restarted.async_load())
+    replay = asyncio.run(
+        restarted.async_lookup(
+            key=f"uncertain-restart.{phase}", fingerprint="2" * 64
+        )
+    )
+
+    assert replay.outcome == "in_progress"
+    assert replay.state == "dispatch_unknown"
+    assert store.payload["records"][0]["state"] == "dispatch_unknown"
+
+
 def test_immediate_replay_of_dispatching_record_requires_operator_recovery() -> None:
     store = MemoryStore()
     coordinator = DangerousActionIdempotency(store)

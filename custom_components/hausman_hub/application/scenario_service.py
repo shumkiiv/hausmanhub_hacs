@@ -3356,6 +3356,7 @@ class ScenarioService:
             tuple[tuple[str, str, tuple[str, ...], str] | None, ...] | None
         ) = None,
         dispatch_marker: Callable[[], None] | None = None,
+        dispatch_markers: tuple[Callable[[], None], ...] | None = None,
     ) -> list[dict[str, Any]]:
         """Run one bounded ordered batch and preserve every target receipt."""
 
@@ -3367,6 +3368,11 @@ class ScenarioService:
             or not all(isinstance(item, str) and item for item in request_ids)
         ):
             raise ScenarioServiceError("Action batch request ids are invalid")
+        if dispatch_markers is not None and (
+            len(dispatch_markers) != len(actions)
+            or not all(callable(marker) for marker in dispatch_markers)
+        ):
+            raise ScenarioServiceError("Action batch dispatch markers are invalid")
         action_keys: set[tuple[str, str]] = set()
         normalized_actions: list[
             tuple[
@@ -3442,8 +3448,20 @@ class ScenarioService:
                 options["expected_service"] = context[3]
             if request_ids is not None:
                 options["request_id"] = request_ids[index]
-            if dispatch_marker is not None:
-                options["dispatch_marker"] = dispatch_marker
+            item_dispatch_marker = (
+                dispatch_markers[index]
+                if dispatch_markers is not None
+                else dispatch_marker
+            )
+            item_dispatch_state = {"crossed": False}
+
+            def mark_item_dispatch() -> None:
+                item_dispatch_state["crossed"] = True
+                if item_dispatch_marker is not None:
+                    item_dispatch_marker()
+
+            if item_dispatch_marker is not None:
+                options["dispatch_marker"] = mark_item_dispatch
             if dry_run:
                 options["dry_run"] = True
             release_required = (
@@ -3505,14 +3523,31 @@ class ScenarioService:
                 options["reassert_claim_id"] = reassert_key
                 options["expected_evidence_revision"] = expected_revision
                 options["expected_evidence_sequence"] = expected_sequence
-            receipts.append(
-                await self._executor.async_execute_device_action(
+            try:
+                receipt = await self._executor.async_execute_device_action(
                     target_id,
                     action_id,
                     value,
                     **options,
                 )
-            )
+            except Exception:  # noqa: BLE001
+                if dispatch_markers is None or item_dispatch_state["crossed"]:
+                    raise
+                receipt = {
+                    "correlationId": correlation_id,
+                    "requestId": (
+                        request_ids[index]
+                        if request_ids is not None
+                        else self.new_run_id()
+                    ),
+                    "targetId": target_id,
+                    "actionId": action_id,
+                    "accepted": False,
+                    "confirmed": False,
+                    "status": "failed",
+                    "error": "device_action_failed",
+                }
+            receipts.append(receipt)
         return receipts
 
     async def async_resolve_device_action(
@@ -3678,9 +3713,12 @@ class ScenarioService:
         *,
         expected_entity_id: str | None = None,
         expected_request_id: str | None = None,
+        unarmed_only: bool = True,
     ) -> bool:
         """Clear only an unarmed release prepared for a failed dispatch."""
 
+        if unarmed_only is not True:
+            raise ValueError("intercom release cleanup must be unarmed-only")
         obligation = self._intercom_release_obligation
         if obligation is None:
             return False
@@ -3688,7 +3726,7 @@ class ScenarioService:
             target_id,
             expected_entity_id=expected_entity_id,
             expected_request_id=expected_request_id,
-            unarmed_only=True,
+            unarmed_only=unarmed_only,
         )
 
     async def async_reconcile_intercom_release(

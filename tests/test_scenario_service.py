@@ -1440,6 +1440,65 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
             self.executor.correlated_device_actions,
         )
 
+    async def test_coordinated_batch_preserves_known_failure_after_earlier_dispatch(
+        self,
+    ) -> None:
+        """A later pre-dispatch exception stays a known partial batch outcome."""
+
+        calls = 0
+
+        class FailingSecondExecutor:
+            def replace_catalog(self, _catalog: ScenarioCatalog) -> None:
+                return None
+
+            async def async_execute_device_action(
+                self,
+                target_id: str,
+                action_id: str,
+                _value: object | None = None,
+                **options: object,
+            ) -> dict[str, object]:
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    options["dispatch_marker"]()
+                    return {
+                        "correlationId": options["correlation_id"],
+                        "requestId": options["request_id"],
+                        "targetId": target_id,
+                        "actionId": action_id,
+                        "accepted": True,
+                        "confirmed": True,
+                        "status": "confirmed",
+                    }
+                raise RuntimeError("late pre-dispatch validation failed")
+
+        service = ScenarioService(
+            None,
+            _FakeStore(),
+            self.catalog,
+            FailingSecondExecutor(),
+        )
+        await service.async_load()
+        markers = (unittest.mock.Mock(), unittest.mock.Mock())
+
+        receipts = await service.async_execute_device_action_batch(
+            [
+                {"targetId": "device_1", "actionId": "turn_on"},
+                {"targetId": "device_1", "actionId": "turn_off"},
+            ],
+            correlation_id="batch.known.partial",
+            request_ids=("batch.known.0", "batch.known.1"),
+            dispatch_markers=markers,
+        )
+
+        self.assertEqual(2, len(receipts))
+        self.assertTrue(receipts[0]["accepted"])
+        self.assertFalse(receipts[1]["accepted"])
+        self.assertEqual("device_action_failed", receipts[1]["error"])
+        markers[0].assert_called_once_with()
+        markers[1].assert_not_called()
+
     async def test_batch_reassert_forwards_shared_claim_identity(self) -> None:
         received: list[dict[str, object]] = []
 
