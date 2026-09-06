@@ -5291,7 +5291,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertEqual(expected_media_type, response.headers["Content-Type"])
                 self.assertEqual("no-store", response.headers["Cache-Control"])
 
-    def test_setup_migrates_only_the_obsolete_small_corridor_power_source(self) -> None:
+    def test_setup_persists_pending_power_source_before_entity_registration(self) -> None:
         from custom_components.hausman_hub import device_power_dependency_storage
 
         dependent = "light.0xa4c138d69d102803"
@@ -5330,7 +5330,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         power_store = PowerStore()
         hass = FakeHomeAssistant()
         hass.states.values[dependent] = SimpleNamespace(state="off", attributes={})
-        hass.states.values[new_source] = SimpleNamespace(state="off", attributes={})
+        self.assertNotIn(new_source, hass.states.values)
         entry = FakeEntry(
             {
                 "mode": "read-only",

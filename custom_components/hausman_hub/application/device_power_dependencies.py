@@ -146,8 +146,9 @@ class DevicePowerDependencyService:
         dependent_entity_id: str,
         old_source_entity_id: str,
         new_source_entity_id: str,
+        allow_unavailable_entities: bool = False,
     ) -> bool:
-        """CAS-replace one exact obsolete source without touching other links."""
+        """CAS-replace one exact source after validating the complete graph."""
 
         self._require_loaded()
         if type(expected_revision) is not int or expected_revision < 0:
@@ -185,27 +186,37 @@ class DevicePowerDependencyService:
                 )
             except DevicePowerDependencyViolation as error:
                 raise DevicePowerDependencyServiceViolation(str(error)) from error
-            if self._entity_pair_validator is not None and not self._entity_pair_validator(
-                dependent_entity_id, new_source_entity_id
-            ):
-                raise DevicePowerDependencyServiceViolation(
-                    "device power dependency references an unavailable entity"
-                )
             migrated = tuple(
                 replacement if item is current else item
                 for item in self._dependencies
             )
+            try:
+                validated = validate_device_power_dependencies(
+                    device_power_dependencies_to_payload(migrated)
+                )
+            except DevicePowerDependencyViolation as error:
+                raise DevicePowerDependencyServiceViolation(str(error)) from error
+            if (
+                not allow_unavailable_entities
+                and self._entity_pair_validator is not None
+                and not self._entity_pair_validator(
+                    dependent_entity_id, new_source_entity_id
+                )
+            ):
+                raise DevicePowerDependencyServiceViolation(
+                    "device power dependency references an unavailable entity"
+                )
             next_revision = self._revision + 1
             updated_at = self._timestamp()
             stored = {
                 "revision": next_revision,
                 "updatedAt": updated_at,
-                "dependencies": device_power_dependencies_to_payload(migrated),
+                "dependencies": device_power_dependencies_to_payload(validated),
             }
             await self._store.async_save(stored)
             self._revision = next_revision
             self._updated_at = updated_at
-            self._dependencies = migrated
+            self._dependencies = validated
         return True
 
     async def async_reset(self) -> dict[str, object]:
@@ -229,7 +240,7 @@ class DevicePowerDependencyService:
 async def async_migrate_obsolete_small_corridor_power_source(
     service: DevicePowerDependencyService,
 ) -> bool:
-    """Move only the release-owned obsolete small-corridor source binding."""
+    """Persist the exact release-owned binding, pending HA registration if needed."""
 
     revision = service.document["revision"]
     return await service.async_migrate_exact_source(
@@ -237,4 +248,5 @@ async def async_migrate_obsolete_small_corridor_power_source(
         dependent_entity_id=SMALL_CORRIDOR_CHANDELIER_ENTITY_ID,
         old_source_entity_id=OBSOLETE_SMALL_CORRIDOR_POWER_SOURCE_ENTITY_ID,
         new_source_entity_id=SMALL_CORRIDOR_POWER_SOURCE_ENTITY_ID,
+        allow_unavailable_entities=True,
     )
