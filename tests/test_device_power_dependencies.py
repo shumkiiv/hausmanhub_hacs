@@ -422,6 +422,51 @@ class DevicePowerDependencyServiceTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(DevicePowerDependencyServiceViolation):
             await service.async_replace(0, [_dependency()])
 
+    async def test_replace_rejects_auto_turn_on_for_server_classified_breaker(self) -> None:
+        service = DevicePowerDependencyService(
+            _Store(),
+            entity_pair_validator=lambda _dependent, _source: True,
+            electrical_breaker_resolver=lambda entity_id: entity_id == "switch.wall",
+        )
+        await service.async_load()
+
+        with self.assertRaises(DevicePowerDependencyServiceViolation) as raised:
+            await service.async_replace(
+                0,
+                [_dependency(policy="auto_turn_on", warmup_seconds=1)],
+            )
+
+        self.assertIn("electrical breaker", str(raised.exception))
+        self.assertEqual([], service.document["dependencies"])
+
+    async def test_replace_rejects_auto_turn_on_without_server_classifier(self) -> None:
+        service = DevicePowerDependencyService(
+            _Store(),
+            entity_pair_validator=lambda _dependent, _source: True,
+        )
+        await service.async_load()
+
+        with self.assertRaises(DevicePowerDependencyServiceViolation) as raised:
+            await service.async_replace(
+                0,
+                [_dependency(policy="auto_turn_on", warmup_seconds=1)],
+            )
+
+        self.assertIn("classification is unavailable", str(raised.exception))
+        self.assertEqual([], service.document["dependencies"])
+
+    async def test_replace_keeps_requires_on_for_server_classified_breaker(self) -> None:
+        service = DevicePowerDependencyService(
+            _Store(),
+            entity_pair_validator=lambda _dependent, _source: True,
+            electrical_breaker_resolver=lambda entity_id: entity_id == "switch.wall",
+        )
+        await service.async_load()
+
+        document = await service.async_replace(0, [_dependency(policy="requires_on")])
+
+        self.assertEqual([_dependency(policy="requires_on")], document["dependencies"])
+
     async def test_restart_loads_the_same_dependency_mapping(self) -> None:
         service = DevicePowerDependencyService(
             _Store(

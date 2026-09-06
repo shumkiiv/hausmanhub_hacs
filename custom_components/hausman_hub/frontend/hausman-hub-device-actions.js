@@ -4,8 +4,6 @@ import { filterCatalogActions } from "./hausman-hub-device-features.js?v=1.52.22
 import { fullDeviceActionRequest, withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.225";
 
 const DEVICE_ACTION_EXECUTOR_API = "hausman_hub/v1/device-actions";
-const ELECTRICAL_BREAKER_IDENTITY =
-  /(?:^|[\s._/:-])(?:автомат(?:а|у|ом|е|ы|ов|ам|ами|ах)?|circuit[\s._/:-]*breaker|breaker|mcb)(?:$|[\s._/:-])/i;
 
 function deviceActionRequestId() {
   const random = Math.random().toString(36).slice(2, 10);
@@ -15,7 +13,7 @@ function deviceActionRequestId() {
 export function configuredElectricalBreaker(owner, source, item) {
   const target = item && item.target;
   const action = item && item.action;
-  if (!target || !action || !["turn_on", "turn_off", "toggle"].includes(action.action_id)
+  if (!target || !action || !["turn_on", "turn_off"].includes(action.action_id)
       || action.domain !== "switch") return false;
   const physicalId = String(target.physical_id || "");
   const energy = owner._homeDashboard && owner._homeDashboard.energy;
@@ -23,18 +21,15 @@ export function configuredElectricalBreaker(owner, source, item) {
     ? energy.selectedSourceIds : []);
   const sourceIds = new Set([source && source.id, source && source.deviceId].filter(Boolean));
   if (!physicalId || !configuredIds.has(physicalId) || !sourceIds.has(physicalId)) return false;
-  const identity = [target.physical_name, target.name, target.entity_id, target.device_type]
-    .map((value) => String(value || "")).join(" ");
-  return ELECTRICAL_BREAKER_IDENTITY.test(identity);
+  return target.device_type === "electrical_breaker";
 }
 
 export function breakerConfirmation(source, actionId) {
   const effects = {
     turn_on: "Питание подключённой линии будет подано.",
     turn_off: "Питание подключённой линии будет снято.",
-    toggle: "Состояние питания подключённой линии изменится.",
   };
-  const verbs = { turn_on: "Включить", turn_off: "Отключить", toggle: "Переключить" };
+  const verbs = { turn_on: "Включить", turn_off: "Отключить" };
   return `${verbs[actionId]} «${source.name}»? ${effects[actionId]}`;
 }
 
@@ -74,6 +69,23 @@ export async function executeDeviceAction(owner, targetId, actionId, value, opti
   const configuredIntercom = owner._tabletProfile?.settings?.intercom?.deviceId;
   const catalog = owner._scenarios.catalog && Array.isArray(owner._scenarios.catalog.devices)
     ? owner._scenarios.catalog.devices : [];
+  const target = catalog.find((item) => item.target_id === targetId);
+  const breaker = target?.device_type === "electrical_breaker";
+  if (breaker && actionId === "toggle") {
+    owner._notice = "Для автомата доступны только явные команды включения и отключения.";
+    owner._render();
+    return;
+  }
+  if (breaker && ["turn_on", "turn_off"].includes(actionId)
+      && options.confirmedByUser !== true && options.dryRun !== true) {
+    if (typeof globalThis.confirm !== "function"
+        || !globalThis.confirm(breakerConfirmation(target, actionId))) {
+      owner._notice = "Команда автомату отменена.";
+      owner._render();
+      return;
+    }
+    options = { ...options, confirmedByUser: true };
+  }
   const intercom = configuredIntercom
     ? resolveIntercomQuickAction(owner._homeDevices("devices"), catalog, configuredIntercom)
     : null;

@@ -40,7 +40,15 @@ export function powerLinkCandidates(snapshot) {
   ));
 }
 
-export function validatePowerLinkDraft(dependencies) {
+function serverClassifiedBreakerEntityIds(panel) {
+  const catalog = panel?._scenarios?.catalog?.devices;
+  if (!Array.isArray(catalog)) return new Set();
+  return new Set(catalog
+    .filter((target) => target?.device_type === "electrical_breaker")
+    .map((target) => target.entity_id));
+}
+
+export function validatePowerLinkDraft(dependencies, breakerEntityIds = new Set()) {
   const seen = new Set();
   const graph = new Map();
   for (const dependency of dependencies) {
@@ -51,6 +59,9 @@ export function validatePowerLinkDraft(dependencies) {
     if (seen.has(dependent)) return "Для одного устройства можно выбрать только один источник питания.";
     seen.add(dependent);
     graph.set(dependent, source);
+    if (dependency.policy === "auto_turn_on" && breakerEntityIds.has(source)) {
+      return "Автомат можно использовать только для проверки наличия питания.";
+    }
     if (dependency.policy === "auto_turn_on") {
       const warmup = Number(dependency.warmupSeconds);
       if (!Number.isInteger(warmup) || warmup < 0 || warmup > 30) {
@@ -101,7 +112,7 @@ export async function loadPowerLinks(panel, force = false) {
 
 async function savePowerLinks(panel) {
   const state = panel._powerLinks;
-  const error = validatePowerLinkDraft(state.draft);
+  const error = validatePowerLinkDraft(state.draft, serverClassifiedBreakerEntityIds(panel));
   if (error) {
     state.status = error;
     panel._render();
@@ -156,7 +167,7 @@ function optionSelect(panel, candidates, value, placeholder, excludedEntityId, o
   return select;
 }
 
-function renderLinkRow(panel, dependency, index, candidates, helpers) {
+function renderLinkRow(panel, dependency, index, candidates, breakerEntityIds, helpers) {
   const { el } = helpers;
   const state = panel._powerLinks;
   const row = el("article", "power-link-row");
@@ -186,6 +197,10 @@ function renderLinkRow(panel, dependency, index, candidates, helpers) {
     dependency.dependentEntityId,
     (value) => {
       dependency.powerSourceEntityId = value;
+      if (breakerEntityIds.has(value)) {
+        dependency.policy = "requires_on";
+        delete dependency.warmupSeconds;
+      }
       state.status = "";
       panel._render();
     },
@@ -195,16 +210,23 @@ function renderLinkRow(panel, dependency, index, candidates, helpers) {
   const policyField = el("label", "settings-field");
   policyField.appendChild(el("span", "assistant-field-label", "Поведение"));
   const policy = document.createElement("select");
-  [
+  const breakerSource = breakerEntityIds.has(dependency.powerSourceEntityId);
+  if (breakerSource && dependency.policy === "auto_turn_on") {
+    dependency.policy = "requires_on";
+    delete dependency.warmupSeconds;
+  }
+  (breakerSource ? [
+    ["requires_on", "Только блокировать без питания"],
+  ] : [
     ["auto_turn_on", "Включать питание автоматически"],
     ["requires_on", "Только блокировать без питания"],
-  ].forEach(([value, label]) => {
+  ]).forEach(([value, label]) => {
     const option = document.createElement("option");
     option.value = value;
     option.textContent = label;
     policy.appendChild(option);
   });
-  policy.value = dependency.policy || "auto_turn_on";
+  policy.value = dependency.policy || (breakerSource ? "requires_on" : "auto_turn_on");
   policy.disabled = panel._busy;
   policy.addEventListener("change", () => {
     dependency.policy = policy.value;
@@ -282,6 +304,7 @@ export function renderPowerLinks(panel, container, helpers) {
 
   const snapshot = panel._homeDashboard || panel._data?.snapshot || {};
   const candidates = powerLinkCandidates(snapshot);
+  const breakerEntityIds = serverClassifiedBreakerEntityIds(panel);
   const editor = el("section", "card settings-card power-links-editor");
   const heading = el("div", "power-links-heading");
   const copy = el("div");
@@ -308,7 +331,9 @@ export function renderPowerLinks(panel, container, helpers) {
   }
   const list = el("div", "power-links-list");
   state.draft.forEach((dependency, index) => {
-    list.appendChild(renderLinkRow(panel, dependency, index, candidates, helpers));
+    list.appendChild(renderLinkRow(
+      panel, dependency, index, candidates, breakerEntityIds, helpers,
+    ));
   });
   editor.appendChild(list);
   if (state.status) editor.appendChild(el("p", "power-links-status", state.status));

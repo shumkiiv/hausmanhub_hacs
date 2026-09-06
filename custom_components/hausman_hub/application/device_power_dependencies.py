@@ -38,10 +38,12 @@ class DevicePowerDependencyService:
         store: object,
         *,
         entity_pair_validator: Callable[[str, str], bool] | None = None,
+        electrical_breaker_resolver: Callable[[str], bool] | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._store = store
         self._entity_pair_validator = entity_pair_validator
+        self._electrical_breaker_resolver = electrical_breaker_resolver
         self._now = now or (lambda: datetime.now(timezone.utc))
         self._revision = 0
         self._updated_at = ""
@@ -100,6 +102,40 @@ class DevicePowerDependencyService:
         self._require_loaded()
         return device_power_dependency_mapping(self._dependencies)
 
+    def set_electrical_breaker_resolver(
+        self, resolver: Callable[[str], bool]
+    ) -> None:
+        """Attach the live server classifier before accepting admin writes."""
+
+        self._electrical_breaker_resolver = resolver
+
+    def _validate_breaker_policy(
+        self, dependencies: tuple[DevicePowerDependency, ...]
+    ) -> None:
+        resolver = self._electrical_breaker_resolver
+        if resolver is None:
+            if any(
+                dependency.policy == "auto_turn_on"
+                for dependency in dependencies
+            ):
+                raise DevicePowerDependencyServiceViolation(
+                    "electrical breaker classification is unavailable"
+                )
+            return
+        for dependency in dependencies:
+            if dependency.policy != "auto_turn_on":
+                continue
+            try:
+                breaker = resolver(dependency.power_source_entity_id)
+            except Exception as error:  # noqa: BLE001
+                raise DevicePowerDependencyServiceViolation(
+                    "electrical breaker classification is unavailable"
+                ) from error
+            if breaker:
+                raise DevicePowerDependencyServiceViolation(
+                    "automatic power-on is forbidden for an electrical breaker"
+                )
+
     async def async_replace(
         self, expected_revision: object, dependencies: object
     ) -> dict[str, object]:
@@ -112,6 +148,7 @@ class DevicePowerDependencyService:
             validated = validate_device_power_dependencies(dependencies)
         except DevicePowerDependencyViolation as error:
             raise DevicePowerDependencyServiceViolation(str(error)) from error
+        self._validate_breaker_policy(validated)
         if self._entity_pair_validator is not None and any(
             not self._entity_pair_validator(
                 item.dependent_entity_id, item.power_source_entity_id
@@ -196,6 +233,13 @@ class DevicePowerDependencyService:
                 )
             except DevicePowerDependencyViolation as error:
                 raise DevicePowerDependencyServiceViolation(str(error)) from error
+            self._validate_breaker_policy(
+                tuple(
+                    item
+                    for item in validated
+                    if item.dependent_entity_id == dependent_entity_id
+                )
+            )
             if (
                 not allow_unavailable_entities
                 and self._entity_pair_validator is not None

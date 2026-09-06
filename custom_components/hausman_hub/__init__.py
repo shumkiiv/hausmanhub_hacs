@@ -419,6 +419,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             lambda: energy_meter_service.source_device_ids
         ),
     )
+    device_power_dependency_service.set_electrical_breaker_resolver(
+        scenario_service.is_electrical_breaker_entity
+    )
     await scenario_service.async_load()
     from .application.managed_switch_migration import (
         HomeAssistantManagedSwitchMigrationStore,
@@ -486,7 +489,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     scenario_command_contexts = ScenarioCommandContextRegistry()
     scenario_executor = ScenarioExecutor(
         hass,
-        scenario_catalog,
+        scenario_service.current_catalog(),
         scenario_service.async_run_scenario,
         power_dependency_resolver=lambda: device_power_dependency_service.mapping,
         command_guard=water_safety.command_guard,
@@ -497,6 +500,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         contextual_dangerous_resolver=(
             scenario_service.is_contextually_dangerous_action
         ),
+        electrical_breaker_resolver=scenario_service.is_electrical_breaker_entity,
         command_contexts=scenario_command_contexts,
         manual_light_off_protection=manual_light_off_protection,
     )

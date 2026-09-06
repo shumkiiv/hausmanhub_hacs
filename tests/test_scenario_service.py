@@ -2537,6 +2537,121 @@ class ScenarioServiceIntercomReleaseTest(unittest.IsolatedAsyncioTestCase):
             )
         )
 
+        self.assertIsNone(service.current_catalog().device("main_breaker").action("toggle"))
+        self.assertEqual(
+            "electrical_breaker",
+            service.current_catalog().device("main_breaker").device_type,
+        )
+        self.assertIsNotNone(service.current_catalog().device("main_breaker").action("turn_on"))
+        self.assertIsNotNone(service.current_catalog().device("main_breaker").action("turn_off"))
+        self.assertIsNotNone(service.current_catalog().device("selected_socket").action("toggle"))
+
+    async def test_breaker_identity_covers_rcbo_and_russian_forms_without_substrings(
+        self,
+    ) -> None:
+        switch_actions = tuple(
+            ScenarioDeviceAction(
+                action_id=action_id,
+                title=action_id,
+                domain="switch",
+                service=action_id,
+                allowed_fields=frozenset(),
+            )
+            for action_id in ("turn_on", "turn_off", "toggle")
+        )
+        positives = (
+            "RCBO 233",
+            "Дифавтомат кухни",
+            "Диф. автомат санузла",
+            "Диффавтоматы щита",
+            "Дифф. автомат мастерской",
+            "Дифференциальный автомат ванной",
+            "Автоматический выключатель гаража",
+            "Автоматом кухни",
+        )
+        negatives = (
+            "Автоматика климата",
+            "Автоматическая розетка",
+            "Розетка кофемашины",
+        )
+        names = positives + negatives
+        devices = {
+            f"target_{index}": ScenarioDeviceEntry(
+                target_id=f"target_{index}",
+                name=name,
+                entity_id=f"switch.line_{index}",
+                actions=switch_actions,
+                physical_id=f"device_{index:016d}",
+                physical_name=name,
+                device_type="switch",
+            )
+            for index, name in enumerate(names)
+        }
+        service = ScenarioService(
+            self.hass,
+            _FakeStore(),
+            ScenarioCatalog(devices=devices, scenarios={}),
+            electrical_breaker_device_ids_resolver=lambda: tuple(
+                device.physical_id for device in devices.values()
+            ),
+        )
+
+        for index, name in enumerate(positives):
+            with self.subTest(name=name):
+                self.assertTrue(
+                    service.is_electrical_breaker_action(f"target_{index}", "turn_off")
+                )
+                self.assertEqual(
+                    "electrical_breaker",
+                    service.current_catalog().device(f"target_{index}").device_type,
+                )
+        for index, name in enumerate(negatives, start=len(positives)):
+            with self.subTest(name=name):
+                self.assertFalse(
+                    service.is_electrical_breaker_action(f"target_{index}", "turn_off")
+                )
+                self.assertEqual(
+                    "switch",
+                    service.current_catalog().device(f"target_{index}").device_type,
+                )
+
+    async def test_breaker_toggle_is_rejected_after_catalog_filtering(self) -> None:
+        switch_actions = tuple(
+            ScenarioDeviceAction(
+                action_id=action_id,
+                title=action_id,
+                domain="switch",
+                service=action_id,
+                allowed_fields=frozenset(),
+            )
+            for action_id in ("turn_on", "turn_off", "toggle")
+        )
+        physical_id = "device_9999999999999999"
+        service = ScenarioService(
+            self.hass,
+            _FakeStore(),
+            ScenarioCatalog(
+                devices={
+                    "breaker": ScenarioDeviceEntry(
+                        target_id="breaker",
+                        name="Дифавтомат кухни",
+                        entity_id="switch.kitchen_breaker",
+                        actions=switch_actions,
+                        physical_id=physical_id,
+                        physical_name="Дифавтомат кухни",
+                        device_type="switch",
+                    )
+                },
+                scenarios={},
+            ),
+            electrical_breaker_device_ids_resolver=lambda: (physical_id,),
+        )
+
+        self.assertIsNone(
+            await service.async_resolve_device_action_context("breaker", "toggle")
+        )
+        self.assertTrue(service.is_electrical_breaker_action("breaker", "toggle"))
+
     async def test_energy_breaker_classification_rechecks_refreshed_catalog(
         self,
     ) -> None:

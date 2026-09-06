@@ -1751,7 +1751,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           physical_id: "device_0123456789abcdef",
           physical_name: "Автомат кухни",
           name: "Автомат кухни",
-          device_type: "switch",
+          device_type: "electrical_breaker",
           actions: [
             { action_id: "turn_on", title: "Включить", domain: "switch", service: "turn_on", allowed_fields: [] },
             { action_id: "turn_off", title: "Выключить", domain: "switch", service: "turn_off", allowed_fields: [] },
@@ -1830,8 +1830,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           physical_id: physicalId,
           physical_name: "Автомат 232",
           name: "Канал питания",
-          device_type: "switch",
-          actions: ["turn_on", "turn_off", "toggle"].map((actionId) => ({
+          device_type: "electrical_breaker",
+          actions: ["turn_on", "turn_off"].map((actionId) => ({
             action_id: actionId,
             title: actionId,
             domain: "switch",
@@ -1848,17 +1848,17 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         const commands = calls.slice(before).filter((call) =>
           call.method === "POST" && call.path === "hausman_hub/v1/device-actions");
-        if (confirmations.length !== 3
+        if (confirmations.length !== 2
           || !confirmations.some((message) => message.includes("будет подано"))
           || !confirmations.some((message) => message.includes("будет снято"))
-          || !confirmations.some((message) => message.includes("изменится"))) {
-          throw new Error("every breaker power action needs a clear confirmation: "
+          || confirmations.some((message) => message.includes("изменится"))) {
+          throw new Error("explicit breaker power actions need a clear confirmation: "
             + JSON.stringify(confirmations));
         }
-        if (commands.length !== 3) {
+        if (commands.length !== 2) {
           throw new Error("confirmed breaker actions mismatch: " + commands.length);
         }
-        for (const [index, actionId] of ["turn_on", "turn_off", "toggle"].entries()) {
+        for (const [index, actionId] of ["turn_on", "turn_off"].entries()) {
           const command = commands[index];
           if (command.payload.targetId !== "target-breaker-232"
             || command.payload.actionId !== actionId
@@ -1880,7 +1880,57 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
-    def test_cancelled_energy_breaker_actions_send_no_post(self) -> None:
+    def test_generic_breaker_action_uses_confirmation_and_never_sends_toggle(
+        self,
+    ) -> None:
+        script = panel_script(
+            dict(GET_PATHS),
+            {"hausman_hub/v1/device-actions": {"status": "confirmed"}},
+            """
+        panel._scenarios.catalog = { devices: [{
+          target_id: "target-breaker-generic",
+          entity_id: "switch.breaker_generic",
+          name: "Дифавтомат мастерской",
+          device_type: "electrical_breaker",
+          actions: ["turn_on", "turn_off"].map((actionId) => ({
+            action_id: actionId,
+            title: actionId,
+            domain: "switch",
+            service: actionId,
+            allowed_fields: [],
+          })),
+        }] };
+        panel._load = async () => {};
+        const confirmations = [];
+        globalThis.confirm = (message) => { confirmations.push(message); return false; };
+        const before = calls.length;
+        await panel._executeDeviceAction("target-breaker-generic", "turn_off", null);
+        globalThis.confirm = (message) => { confirmations.push(message); return true; };
+        await panel._executeDeviceAction("target-breaker-generic", "turn_on", null);
+        await panel._executeDeviceAction("target-breaker-generic", "toggle", null);
+        const commands = calls.slice(before).filter((call) =>
+          call.method === "POST" && call.path === "hausman_hub/v1/device-actions");
+        if (confirmations.length !== 2
+          || !confirmations[0].includes("будет снято")
+          || !confirmations[1].includes("будет подано")) {
+          throw new Error("generic breaker confirmation mismatch: "
+            + JSON.stringify(confirmations));
+        }
+        if (commands.length !== 1
+          || commands[0].payload.actionId !== "turn_on"
+          || commands[0].payload.confirmedByUser !== true
+          || commands[0].payload.contract?.name !== "hausman-hub-device-action-request"
+          || commands[0].payload.idempotencyKey
+            !== `confirmed.${commands[0].payload.requestId}`) {
+          throw new Error("generic breaker command escaped safe protocol: "
+            + JSON.stringify(commands));
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_server_classified_rcbo_hides_toggle_and_cancel_sends_no_post(self) -> None:
         script = panel_script(
             dict(GET_PATHS),
             {"hausman_hub/v1/device-actions": {"status": "confirmed"}},
@@ -1912,10 +1962,10 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           target_id: "target-breaker-233",
           entity_id: "switch.kitchen_input",
           physical_id: physicalId,
-          physical_name: "Автомат 233",
+          physical_name: "RCBO 233",
           name: "Канал питания",
-          device_type: "switch",
-          actions: ["turn_on", "turn_off", "toggle"].map((actionId) => ({
+          device_type: "electrical_breaker",
+          actions: ["turn_on", "turn_off"].map((actionId) => ({
             action_id: actionId,
             title: actionId,
             domain: "switch",
@@ -1932,7 +1982,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         const commands = calls.slice(before).filter((call) =>
           call.method === "POST" && call.path === "hausman_hub/v1/device-actions");
-        if (confirmations.length !== 3 || commands.length !== 0) {
+        if (confirmations.length !== 2 || commands.length !== 0) {
           throw new Error("cancelled breaker actions must not reach the API: "
             + JSON.stringify({ confirmations, commands }));
         }
@@ -1976,13 +2026,13 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           physical_name: "Розетка кофемашины",
           name: "Розетка кофемашины",
           device_type: "outlet",
-          actions: [{
-            action_id: "turn_off",
-            title: "Выключить",
+          actions: ["turn_on", "turn_off", "toggle"].map((actionId) => ({
+            action_id: actionId,
+            title: actionId,
             domain: "switch",
-            service: "turn_off",
+            service: actionId,
             allowed_fields: [],
-          }],
+          })),
         }] };
         let confirmations = 0;
         window.confirm = () => { confirmations += 1; return false; };
@@ -1995,6 +2045,79 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("dashboard text must not promote a catalog socket to breaker: "
             + JSON.stringify({ confirmations, command }));
         }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_power_link_editor_keeps_breaker_source_requires_on(self) -> None:
+        dashboard = json.loads(
+            (ROOT / "fixtures/hausmanhub_dashboard_v1/dashboard.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        path = "hausman_hub/v1/admin/device-power-dependencies"
+        initial = {
+            "contract": {
+                "name": "hausman-hub-device-power-dependencies",
+                "version": 1,
+            },
+            "revision": 0,
+            "updatedAt": "2026-09-06T09:00:00Z",
+            "dependencies": [],
+        }
+        script = panel_script(
+            GET_PATHS
+            | {
+                "hausman_hub/v1/dashboard": dashboard,
+                path: initial,
+            },
+            {path: initial | {"revision": 1}},
+            f"""
+        panel._scenarios.catalog = {{ devices: [{{
+          target_id: "breaker-source",
+          entity_id: "switch.example_wall_relay",
+          physical_id: "device_breaker_source",
+          physical_name: "Дифавтомат кухни",
+          name: "Дифавтомат кухни",
+          device_type: "electrical_breaker",
+          actions: ["turn_on", "turn_off"].map((actionId) => ({{
+            action_id: actionId,
+            title: actionId,
+            domain: "switch",
+            service: actionId,
+            allowed_fields: [],
+          }})),
+        }}] }};
+        panel._activateSection("settings");
+        panel._activateSettingsView("power");
+        await tick();
+        const add = findAll(panel._shell.settings, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Добавить связь")[0];
+        add.fire("click");
+        let selects = findAll(panel._shell.settings, (node) => node.tagName === "SELECT");
+        selects[0].value = "light.example_ceiling";
+        selects[0].fire("change");
+        selects = findAll(panel._shell.settings, (node) => node.tagName === "SELECT");
+        selects[1].value = "switch.example_wall_relay";
+        selects[1].fire("change");
+        selects = findAll(panel._shell.settings, (node) => node.tagName === "SELECT");
+        const policy = selects[2];
+        const values = policy.children.map((option) => option.value);
+        if (values.includes("auto_turn_on") || policy.value !== "requires_on") {{
+          throw new Error("breaker source must expose only requires_on: "
+            + JSON.stringify({{ values, selected: policy.value }}));
+        }}
+        const save = findAll(panel._shell.settings, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Сохранить связи")[0];
+        save.fire("click");
+        await tick();
+        const write = calls.find((item) => item.method === "PUT" && item.path === {path!r});
+        const dependency = write && write.payload.dependencies[0];
+        if (!dependency || dependency.policy !== "requires_on"
+          || Object.prototype.hasOwnProperty.call(dependency, "warmupSeconds")) {{
+          throw new Error("unsafe breaker dependency escaped: " + JSON.stringify(write));
+        }}
             """,
         )
         completed = run_panel_script(script)

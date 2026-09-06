@@ -7,7 +7,6 @@ import hashlib
 import inspect
 import json
 import logging
-import re
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
@@ -28,8 +27,12 @@ from ..domain.scenarios import (
     ScenarioViolation,
     _scenario_to_payload,
 )
-from .operation_journal import scenario_operation_receipt
+from .electrical_breakers import (
+    apply_electrical_breaker_catalog_policy,
+    is_configured_electrical_breaker,
+)
 from .intercom_release_obligation import IntercomReleaseObligation
+from .operation_journal import scenario_operation_receipt
 from .scenario_node_red import (
     NodeRedBackendError,
     NodeRedScenarioBackend,
@@ -67,12 +70,6 @@ _RESTART_ONLY_SYSTEM_SCENARIOS = frozenset(
         "system-small-corridor-light-controller",
     }
 )
-_ELECTRICAL_BREAKER_IDENTITY = re.compile(
-    r"(?:^|[\s._/:-])(?:автомат(?:а|у|ом|е|ы|ов|ам|ами|ах)?|"
-    r"circuit[\s._/:-]*breaker|breaker|mcb)(?:$|[\s._/:-])",
-    re.IGNORECASE,
-)
-
 _HEALTH_RECOMMENDATIONS = {
     "missing_device": "restore_device",
     "missing_action": "select_available_action",
@@ -577,7 +574,6 @@ class ScenarioService:
     ):
         self._hass = hass
         self._store = store
-        self._catalog = catalog
         self._executor = executor
         self._catalog_loader = catalog_loader
         self._intercom_entity_resolver = intercom_entity_resolver
@@ -596,6 +592,7 @@ class ScenarioService:
         self._electrical_breaker_device_ids_resolver = (
             electrical_breaker_device_ids_resolver
         )
+        self._catalog = self._apply_electrical_breaker_policy(catalog)
         self._smart_switch_receipt_consumer: object | None = None
         self._managed_switch_migration_transaction: (
             _ManagedSwitchMigrationTransaction | None
@@ -2337,6 +2334,7 @@ class ScenarioService:
                 raise ScenarioServiceError(
                     "Catalog refresh returned invalid data", status=500
                 )
+            catalog = self._apply_electrical_breaker_policy(catalog)
             self._catalog = catalog
             replace_catalog = getattr(self._executor, "replace_catalog", None)
             if callable(replace_catalog):
@@ -3840,35 +3838,58 @@ class ScenarioService:
 
         if action_id not in {"turn_on", "turn_off", "toggle"}:
             return False
-        device = self._catalog.device(target_id)
-        action = device.action(action_id) if device is not None else None
-        if device is None or action is None or action.domain != "switch":
-            return False
-        resolver = getattr(
-            self,
-            "_electrical_breaker_device_ids_resolver",
+        return self.is_electrical_breaker_entity_for_target(target_id)
+
+    def _configured_electrical_breaker_device_ids(self) -> tuple[str, ...]:
+        resolver = self._electrical_breaker_device_ids_resolver
+        if not callable(resolver):
+            return ()
+        return tuple(value for value in resolver() if isinstance(value, str))
+
+    def _apply_electrical_breaker_policy(
+        self, catalog: ScenarioCatalog
+    ) -> ScenarioCatalog:
+        try:
+            configured_ids = self._configured_electrical_breaker_device_ids()
+        except Exception:  # noqa: BLE001
+            configured_ids = tuple(
+                device.physical_id
+                for device in catalog.devices.values()
+                if isinstance(device.physical_id, str)
+            )
+        return apply_electrical_breaker_catalog_policy(catalog, configured_ids)
+
+    def is_electrical_breaker_entity_for_target(self, target_id: str) -> bool:
+        """Classify a catalog target even when its unsafe action was removed."""
+
+        try:
+            configured_ids = self._configured_electrical_breaker_device_ids()
+        except Exception:  # noqa: BLE001
+            configured_ids = tuple(
+                device.physical_id
+                for device in self._catalog.devices.values()
+                if isinstance(device.physical_id, str)
+            )
+        return is_configured_electrical_breaker(
+            self._catalog.device(target_id), configured_ids
+        )
+
+    def is_electrical_breaker_entity(self, entity_id: str) -> bool:
+        """Classify an upstream entity from the current server catalog."""
+
+        device = next(
+            (
+                item
+                for item in self._catalog.devices.values()
+                if item.entity_id == entity_id
+            ),
             None,
         )
-        if not callable(resolver):
-            return False
         try:
-            configured_ids = {
-                value for value in resolver() if isinstance(value, str)
-            }
-        except Exception:  # noqa: BLE001
-            return False
-        if device.physical_id not in configured_ids:
-            return False
-        identity = " ".join(
-            str(value or "")
-            for value in (
-                device.physical_name,
-                device.name,
-                device.entity_id,
-                device.device_type,
-            )
-        )
-        return _ELECTRICAL_BREAKER_IDENTITY.search(identity) is not None
+            configured_ids = self._configured_electrical_breaker_device_ids()
+        except Exception as error:  # noqa: BLE001
+            raise RuntimeError("electrical breaker classification unavailable") from error
+        return is_configured_electrical_breaker(device, configured_ids)
 
     def is_contextually_dangerous_action(
         self, target_id: str, action_id: str

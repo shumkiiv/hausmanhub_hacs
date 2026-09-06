@@ -3215,6 +3215,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             power_dependency_resolver=lambda: _power_link(
                 policy="auto_turn_on", warmup_seconds=2
             ),
+            electrical_breaker_resolver=lambda _entity_id: False,
             command_guard=lambda _entity_id, _action_id, _automatic: None,
         )
 
@@ -3247,6 +3248,132 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual("on", states["switch.wall"].state)
         sleep.assert_awaited_once_with(2.0)
+
+    async def test_auto_dependency_rechecks_breaker_identity_before_dispatch(self) -> None:
+        self.hass.states = SimpleNamespace(
+            get={
+                "light.living_room": SimpleNamespace(state="off", attributes={}),
+                "switch.wall": SimpleNamespace(state="off", attributes={}),
+            }.get
+        )
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            power_dependency_resolver=lambda: _power_link(
+                policy="auto_turn_on", warmup_seconds=0
+            ),
+            command_guard=lambda _entity_id, _action_id, _automatic: None,
+            electrical_breaker_resolver=lambda entity_id: entity_id == "switch.wall",
+        )
+
+        receipt = await executor.async_execute_device_action("device_1", "turn_on")
+
+        self.assertFalse(receipt["accepted"])
+        self.assertEqual("automatic_breaker_power_on_forbidden", receipt["error"])
+        self.hass.services.async_call.assert_not_awaited()
+
+    async def test_auto_dependency_fails_closed_without_breaker_classifier(self) -> None:
+        self.hass.states = SimpleNamespace(
+            get={
+                "light.living_room": SimpleNamespace(state="off", attributes={}),
+                "switch.wall": SimpleNamespace(state="off", attributes={}),
+            }.get
+        )
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            power_dependency_resolver=lambda: _power_link(
+                policy="auto_turn_on", warmup_seconds=0
+            ),
+            command_guard=lambda _entity_id, _action_id, _automatic: None,
+        )
+
+        receipt = await executor.async_execute_device_action("device_1", "turn_on")
+
+        self.assertFalse(receipt["accepted"])
+        self.assertEqual(
+            "automatic_power_source_safety_unavailable", receipt["error"]
+        )
+        self.hass.services.async_call.assert_not_awaited()
+
+    async def test_breaker_toggle_is_rejected_even_with_a_stale_catalog(self) -> None:
+        breaker_catalog = ScenarioCatalog(
+            devices={
+                "breaker": ScenarioDeviceEntry(
+                    target_id="breaker",
+                    name="Дифавтомат кухни",
+                    entity_id="switch.kitchen_breaker",
+                    actions=(
+                        ScenarioDeviceAction(
+                            action_id="toggle",
+                            title="Переключить",
+                            domain="switch",
+                            service="toggle",
+                            allowed_fields=frozenset(),
+                        ),
+                    ),
+                )
+            },
+            scenarios={},
+        )
+        self.hass.states = SimpleNamespace(
+            get={
+                "switch.kitchen_breaker": SimpleNamespace(
+                    state="off", attributes={}
+                )
+            }.get
+        )
+        executor = ScenarioExecutor(
+            self.hass,
+            breaker_catalog,
+            self.executor._run_callback,
+            electrical_breaker_resolver=lambda entity_id: (
+                entity_id == "switch.kitchen_breaker"
+            ),
+        )
+
+        receipt = await executor.async_execute_device_action("breaker", "toggle")
+
+        self.assertFalse(receipt["accepted"])
+        self.assertEqual("electrical_breaker_toggle_forbidden", receipt["error"])
+        self.hass.services.async_call.assert_not_awaited()
+
+    async def test_server_tagged_breaker_toggle_is_rejected_without_resolver(
+        self,
+    ) -> None:
+        breaker_catalog = ScenarioCatalog(
+            devices={
+                "breaker": ScenarioDeviceEntry(
+                    target_id="breaker",
+                    name="RCBO 233",
+                    entity_id="switch.kitchen_breaker",
+                    actions=(
+                        ScenarioDeviceAction(
+                            action_id="toggle",
+                            title="Переключить",
+                            domain="switch",
+                            service="toggle",
+                            allowed_fields=frozenset(),
+                        ),
+                    ),
+                    device_type="electrical_breaker",
+                )
+            },
+            scenarios={},
+        )
+        executor = ScenarioExecutor(
+            self.hass,
+            breaker_catalog,
+            self.executor._run_callback,
+        )
+
+        receipt = await executor.async_execute_device_action("breaker", "toggle")
+
+        self.assertFalse(receipt["accepted"])
+        self.assertEqual("electrical_breaker_toggle_forbidden", receipt["error"])
+        self.hass.services.async_call.assert_not_awaited()
 
     async def test_auto_dependency_checks_source_with_automatic_command_guard(
         self,
@@ -3282,6 +3409,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             readback_window_seconds=0.02,
             readback_interval_seconds=0.01,
             power_dependency_resolver=lambda: _power_link(policy="auto_turn_on"),
+            electrical_breaker_resolver=lambda _entity_id: False,
             command_guard=command_guard,
         )
 
@@ -3321,6 +3449,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             self.catalog,
             self.executor._run_callback,
             power_dependency_resolver=lambda: _power_link(policy="auto_turn_on"),
+            electrical_breaker_resolver=lambda _entity_id: False,
             command_guard=command_guard,
         )
 
@@ -3356,6 +3485,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             self.catalog,
             self.executor._run_callback,
             power_dependency_resolver=lambda: _power_link(policy="auto_turn_on"),
+            electrical_breaker_resolver=lambda _entity_id: False,
         )
 
         receipt = await executor.async_execute_device_action("device_1", "turn_on")
@@ -3415,6 +3545,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             power_dependency_resolver=lambda: _power_link(
                 policy="auto_turn_on", warmup_seconds=0
             ),
+            electrical_breaker_resolver=lambda _entity_id: False,
             readback_window_seconds=0.02,
             readback_interval_seconds=0.01,
             command_guard=lambda _entity_id, _action_id, _automatic: None,
@@ -3490,6 +3621,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             power_dependency_resolver=lambda: _power_link(
                 policy="auto_turn_on", warmup_seconds=0
             ),
+            electrical_breaker_resolver=lambda _entity_id: False,
             command_guard=lambda _entity_id, _action_id, _automatic: None,
         )
 
@@ -3547,6 +3679,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             power_dependency_resolver=lambda: _power_link(
                 policy="auto_turn_on", warmup_seconds=0
             ),
+            electrical_breaker_resolver=lambda _entity_id: False,
             command_guard=lambda _entity_id, _action_id, _automatic: None,
         )
 
@@ -3599,6 +3732,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             power_dependency_resolver=lambda: _power_link(
                 policy="auto_turn_on", warmup_seconds=0
             ),
+            electrical_breaker_resolver=lambda _entity_id: False,
         )
 
         receipt = await executor.async_execute_device_action("device_1", "turn_on")
@@ -3632,6 +3766,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             power_dependency_resolver=lambda: _power_link(
                 policy="auto_turn_on", warmup_seconds=0
             ),
+            electrical_breaker_resolver=lambda _entity_id: False,
             command_guard=lambda _entity_id, _action_id, _automatic: None,
         )
 
@@ -3666,6 +3801,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             self.catalog,
             self.executor._run_callback,
             power_dependency_resolver=lambda: dependencies,
+            electrical_breaker_resolver=lambda _entity_id: False,
             command_guard=lambda _entity_id, _action_id, _automatic: None,
         )
         markers: list[str] = []
@@ -3701,6 +3837,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             readback_window_seconds=0.01,
             readback_interval_seconds=0.01,
             power_dependency_resolver=lambda: _power_link(policy="auto_turn_on"),
+            electrical_breaker_resolver=lambda _entity_id: False,
             command_guard=lambda _entity_id, _action_id, _automatic: None,
         )
         markers: list[str] = []
@@ -3765,6 +3902,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             readback_window_seconds=0.02,
             readback_interval_seconds=0.01,
             power_dependency_resolver=lambda: dependencies,
+            electrical_breaker_resolver=lambda _entity_id: False,
             command_guard=lambda _entity_id, _action_id, _automatic: None,
         )
         markers: list[str] = []
@@ -3833,6 +3971,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             readback_window_seconds=0.02,
             readback_interval_seconds=0.01,
             power_dependency_resolver=lambda: dependencies,
+            electrical_breaker_resolver=lambda _entity_id: False,
             command_guard=lambda _entity_id, _action_id, _automatic: None,
         )
 
@@ -3882,6 +4021,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             readback_window_seconds=0.02,
             readback_interval_seconds=0.01,
             power_dependency_resolver=lambda: dependencies,
+            electrical_breaker_resolver=lambda _entity_id: False,
             command_guard=lambda _entity_id, _action_id, _automatic: None,
         )
 
@@ -3912,6 +4052,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             power_dependency_resolver=lambda: _power_link(
                 policy="auto_turn_on", warmup_seconds=5
             ),
+            electrical_breaker_resolver=lambda _entity_id: False,
         )
 
         receipt = await executor.async_execute_device_action(

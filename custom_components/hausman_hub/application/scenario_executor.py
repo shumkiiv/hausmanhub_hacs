@@ -591,6 +591,7 @@ class ScenarioExecutor:
         light_priority: LightAutomationPriority | None = None,
         light_safety_obligations: LightSafetyObligations | None = None,
         contextual_dangerous_resolver: Callable[[str, str], bool] | None = None,
+        electrical_breaker_resolver: Callable[[str], bool] | None = None,
         command_contexts: ScenarioCommandContextRegistry | None = None,
         manual_light_off_protection: ManualLightOffProtectionCoordinator | None = None,
     ):
@@ -612,6 +613,7 @@ class ScenarioExecutor:
         self._light_priority = light_priority or LightAutomationPriority()
         self._light_safety_obligations = light_safety_obligations
         self._contextual_dangerous_resolver = contextual_dangerous_resolver
+        self._electrical_breaker_resolver = electrical_breaker_resolver
         self._command_contexts = command_contexts
         self._manual_light_off_protection = manual_light_off_protection
 
@@ -2323,6 +2325,25 @@ class ScenarioExecutor:
                     f"{action.target_id}"
                 ),
             }
+        if action.action_id == "toggle":
+            breaker_toggle = device.device_type == "electrical_breaker"
+            if self._electrical_breaker_resolver is not None:
+                try:
+                    breaker_toggle = breaker_toggle or self._electrical_breaker_resolver(
+                        device.entity_id
+                    )
+                except Exception:  # noqa: BLE001
+                    return {
+                        **base,
+                        "status": "failed",
+                        "error": "electrical_breaker_safety_unavailable",
+                    }
+            if breaker_toggle:
+                return {
+                    **base,
+                    "status": "failed",
+                    "error": "electrical_breaker_toggle_forbidden",
+                }
         if (
             (expected_entity_id is not None and device.entity_id != expected_entity_id)
             or (expected_domain is not None and allowed.domain != expected_domain)
@@ -3040,6 +3061,28 @@ class ScenarioExecutor:
             return "power_source_unavailable", None, frozenset()
 
         source_entity_id = dependency.power_source_entity_id
+        if dependency.policy == AUTO_TURN_ON_POLICY:
+            resolver = self._electrical_breaker_resolver
+            if resolver is None:
+                return (
+                    "automatic_power_source_safety_unavailable",
+                    None,
+                    frozenset(),
+                )
+            try:
+                breaker = resolver(source_entity_id)
+            except Exception:  # noqa: BLE001
+                return (
+                    "automatic_power_source_safety_unavailable",
+                    None,
+                    frozenset(),
+                )
+            if breaker:
+                return (
+                    "automatic_breaker_power_on_forbidden",
+                    None,
+                    frozenset(),
+                )
         upstream_error, _, upstream_sources = await self._prepare_power_dependency(
             source_entity_id,
             powered_sources=powered_sources,
