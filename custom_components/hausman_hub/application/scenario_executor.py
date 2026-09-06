@@ -274,9 +274,9 @@ def _normalize_action_value(param: str, value: object) -> object:
             numeric = int(value)
         else:
             raise ValueError(f"{param} must be an integer")
-        maximum = 255 if param == "brightness" else 100
-        numeric = max(numeric, 0)
-        numeric = min(numeric, maximum)
+        if float(numeric) != int(numeric):
+            raise ValueError(f"{param} must be an integer")
+        numeric = int(numeric)
         return numeric
     if param == "color_temp_kelvin":
         if isinstance(value, str):
@@ -289,7 +289,9 @@ def _normalize_action_value(param: str, value: object) -> object:
             kelvin = int(value)
         else:
             raise ValueError(f"{param} must be an integer")
-        return min(max(kelvin, 1000), 10000)
+        if float(kelvin) != int(kelvin):
+            raise ValueError(f"{param} must be an integer")
+        return int(kelvin)
     if param in ("temperature", "value"):
         if isinstance(value, str):
             value = value.strip()
@@ -3899,6 +3901,17 @@ def _range_error_for_action(
         "set_temperature": ("min_temp", "max_temp"),
         "set_humidity": ("min_humidity", "max_humidity", None),
     }.get(action_id)
+    if action_id == "set_color_temperature":
+        attrs = getattr(state, "attributes", {})
+        if isinstance(attrs, Mapping) and any(key in attrs for key in ("min_color_temp_kelvin", "max_color_temp_kelvin")):
+            minimum = attrs.get("min_color_temp_kelvin")
+            maximum = attrs.get("max_color_temp_kelvin")
+            if not isinstance(minimum, (int, float)) or not isinstance(maximum, (int, float)):
+                return "device range is unavailable"
+            numeric = float(value) if isinstance(value, (int, float)) else math.nan
+            if not math.isfinite(numeric) or numeric < minimum or numeric > maximum:
+                return "value is outside the allowed range"
+        return None
     if required is None:
         return None
     attrs = getattr(state, "attributes", {})
