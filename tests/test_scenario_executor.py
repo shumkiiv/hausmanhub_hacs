@@ -99,7 +99,8 @@ class _FakeHass:
         self.state_values = {
             "light.living_room": SimpleNamespace(state="on", attributes={}),
             "climate.living_room": SimpleNamespace(
-                state="cool", attributes={"temperature": 22}
+                state="cool", attributes={"temperature": 22, "min_temp": 16,
+                "max_temp": 30, "target_temp_step": 0.5}
             ),
             "number.breaker_temperature_threshold": SimpleNamespace(
                 state="80", attributes={}

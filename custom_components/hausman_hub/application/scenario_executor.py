@@ -880,22 +880,22 @@ class ScenarioExecutor:
         return platform if isinstance(platform, str) else None
 
     def _action_confirmation_window_seconds(
-        self, target_id: str, action_id: str
+        self, target_id: str, action_id: str, *, contextual_dangerous: bool | None = None
     ) -> float:
         device = self._catalog.device(target_id)
         allowed = device.action(action_id) if device is not None else None
         if device is None or allowed is None:
             return self._readback_window_seconds
-        contextual = False
-        if self._contextual_dangerous_resolver is not None:
+        contextual = bool(contextual_dangerous)
+        if contextual_dangerous is None and self._contextual_dangerous_resolver is not None:
             try:
                 contextual = bool(self._contextual_dangerous_resolver(target_id, action_id))
             except Exception:  # noqa: BLE001
                 contextual = True
         if action_id in DANGEROUS_ACTION_IDS or contextual or allowed.domain in _CRITICAL_ACTION_DOMAINS:
             return self._readback_window_seconds
-        if allowed.domain == "climate" and self._entity_registry_platform(device.entity_id) == "smartir":
-            return 1.0
+        if allowed.domain == "climate":
+            return 1.0 if self._entity_registry_platform(device.entity_id) == "smartir" else self._readback_window_seconds
         if allowed.domain == "humidifier":
             return 2.0
         return min(self._readback_window_seconds, 1.5)
@@ -2477,6 +2477,12 @@ class ScenarioExecutor:
         is_dangerous = (
             action.action_id in DANGEROUS_ACTION_IDS or is_contextually_dangerous
         )
+        confirmation_window_ms = int(
+            self._action_confirmation_window_seconds(
+                action.target_id, action.action_id,
+                contextual_dangerous=is_contextually_dangerous,
+            ) * 1000
+        )
         dispatch_service = (
             "turn_on"
             if is_contextually_dangerous and action.action_id == "toggle"
@@ -2651,6 +2657,9 @@ class ScenarioExecutor:
         # effect of a rejected target command.
         current = self._hass.states.get(device.entity_id)
         pre_command_revision = _state_revision(current)
+        range_error = _range_error_for_action(device, current, action.action_id, confirmation_value)
+        if range_error is not None:
+            return {**base, "status": "failed", "error": range_error}
         stale_automatic_turn_on = bool(
             automatic
             and not dry_run
@@ -2975,6 +2984,7 @@ class ScenarioExecutor:
             "domain": allowed.domain,
             "service": dispatch_service,
             "entity_id": device.entity_id,
+            "confirmation_window_ms": confirmation_window_ms,
             **(
                 {"power_precondition": power_precondition}
                 if power_precondition is not None
@@ -3001,9 +3011,7 @@ class ScenarioExecutor:
                     pre_command_revision if require_new_readback else None
                 ),
                 require_new_evidence=require_new_readback,
-                window_seconds=self._action_confirmation_window_seconds(
-                    action.target_id, action.action_id
-                ),
+                window_seconds=confirmation_window_ms / 1000,
             )
             receipt["confirmed"] = read_back["matched"] is True
             receipt["read_back"] = read_back
@@ -3011,11 +3019,7 @@ class ScenarioExecutor:
             receipt["reason"] = (
                 None if read_back["matched"] is True else "state_not_confirmed"
             )
-            receipt["confirmation_window_ms"] = int(
-                self._action_confirmation_window_seconds(
-                    action.target_id, action.action_id
-                ) * 1000
-            )
+            receipt["confirmation_window_ms"] = confirmation_window_ms
         if adaptive_minimum is not None:
             receipt["adaptive_brightness"] = {
                 "minimum_percent": adaptive_minimum,
@@ -3530,6 +3534,9 @@ class ScenarioExecutor:
     ) -> float:
         """Keep safe batch confirmations within one common two-second budget."""
 
+        stored = receipt.get("confirmation_window_ms")
+        if isinstance(stored, (int, float)) and stored > 0:
+            return float(stored) / 1000
         target_id = receipt.get("target_id")
         if not isinstance(target_id, str):
             return self._readback_window_seconds
@@ -3878,5 +3885,39 @@ def _number_range_error(device: object, value: object) -> str | None:
         return "value is outside the allowed range"
     steps = (numeric - float(minimum)) / float(step)
     if abs(steps - round(steps)) > 1e-6:
+        return "value does not match the allowed step"
+    return None
+
+
+def _range_error_for_action(
+    device: object, state: object | None, action_id: str, value: object
+) -> str | None:
+    """Validate device-specific ranges before any physical dispatch."""
+
+    if action_id == "set_value":
+        return _number_range_error(device, value)
+    required = {
+        "set_temperature": ("min_temp", "max_temp", "target_temp_step"),
+        "set_humidity": ("min_humidity", "max_humidity", "target_humidity_step"),
+    }.get(action_id)
+    if required is None:
+        return None
+    attrs = getattr(state, "attributes", {})
+    if not isinstance(attrs, Mapping):
+        return "device range is unavailable"
+    values = [attrs.get(name) for name in required]
+    if action_id == "set_temperature":
+        values[2] = attrs.get("target_temp_step", attrs.get("target_temperature_step"))
+    if not all(isinstance(item, (int, float)) and not isinstance(item, bool) for item in values):
+        return "device range is unavailable"
+    minimum, maximum, step = (float(item) for item in values)
+    if not all(math.isfinite(item) for item in (minimum, maximum, step)) or minimum >= maximum or step <= 0:
+        return "device range is unavailable"
+    numeric = float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else math.nan
+    if not math.isfinite(numeric):
+        return "value must be a number"
+    if numeric < minimum or numeric > maximum:
+        return "value is outside the allowed range"
+    if abs((numeric - minimum) / step - round((numeric - minimum) / step)) > 1e-6:
         return "value does not match the allowed step"
     return None
