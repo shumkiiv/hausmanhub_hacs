@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+from datetime import UTC, datetime
 from functools import wraps
 import hashlib
 import json
@@ -19,6 +20,11 @@ from custom_components.hausman_hub.application.managed_switch_migration import (
     _entries_with_sources,
     _initial_journal,
     _receipt,
+)
+from custom_components.hausman_hub.application.native_automation_migration import (
+    HomeAssistantNativeAutomationAdapter,
+    NATIVE_AUTOMATION_ENTITY_IDS,
+    NativeAutomationMigration,
 )
 
 
@@ -422,6 +428,76 @@ class MigrationReceiptStore:
         self.value = value
 
 
+class NativeAutomationServices:
+    def __init__(self, states: dict[str, object]) -> None:
+        self.states = states
+        self.calls: list[tuple[str, str, dict[str, object], str]] = []
+
+    async def async_call(
+        self, domain, service, data, *, blocking, context
+    ) -> None:
+        assert domain == "automation"
+        assert blocking is True
+        entity_id = data["entity_id"]
+        self.calls.append((domain, service, dict(data), context.id))
+        state = self.states[entity_id]
+        state.state = "off" if service == "turn_off" else "on"
+        state.context = SimpleNamespace(id=context.id)
+        state.last_updated = datetime.now(UTC)
+
+
+class NativeAutomationComponent:
+    def __init__(self, configs: dict[str, dict[str, object]]) -> None:
+        self.configs = configs
+
+    def get_entity(self, entity_id: str) -> object:
+        return SimpleNamespace(raw_config=self.configs[entity_id])
+
+
+def _native_hass(
+    *,
+    state_overrides: dict[str, str] | None = None,
+    context_prefix: str,
+    updated_hour: int,
+) -> tuple[object, NativeAutomationServices]:
+    payload = json.loads(
+        (
+            Path(__file__).parents[1]
+            / "fixtures/hausmanhub_scenario_consolidation_v1/native18.json"
+        ).read_text(encoding="utf-8")
+    )
+    fixture = {item["entity_id"]: item for item in payload["automations"]}
+    states = {
+        entity_id: SimpleNamespace(
+            state=(
+                item["state"]
+                if state_overrides is None
+                else state_overrides[entity_id]
+            ),
+            attributes={"id": item["definition"]["id"]},
+            context=SimpleNamespace(id=f"{context_prefix}-{index}"),
+            last_updated=datetime(
+                2026, 9, 7, updated_hour, index, tzinfo=UTC
+            ),
+        )
+        for index, (entity_id, item) in enumerate(fixture.items())
+    }
+    services = NativeAutomationServices(states)
+    hass = SimpleNamespace(
+        states=SimpleNamespace(get=states.get),
+        services=services,
+        data={
+            "automation": NativeAutomationComponent(
+                {
+                    entity_id: item["definition"]
+                    for entity_id, item in fixture.items()
+                }
+            )
+        },
+    )
+    return hass, services
+
+
 _PRODUCTION_TAMBUR_INPUTS = (
     "entity_10b78187426f8485",
     "entity_156050daca86aa6c",
@@ -520,6 +596,14 @@ async def test_actual_startup_and_restart_apply_the_exact_registry_disposition()
     service = _service(registry_store, backend)
     await service.async_load()
     receipt_store = MigrationReceiptStore(None)
+    native_receipt_store = MigrationReceiptStore(None)
+    native_hass, native_services = _native_hass(
+        context_prefix="initial", updated_hour=6
+    )
+    native_migration = NativeAutomationMigration(
+        HomeAssistantNativeAutomationAdapter(native_hass),
+        native_receipt_store,
+    )
     activations = 0
 
     async def activate():
@@ -529,7 +613,11 @@ async def test_actual_startup_and_restart_apply_the_exact_registry_disposition()
 
     coordinator = ManagedSwitchStartupCoordinator(
         service,
-        ManagedSwitchMigration(service, receipt_store),
+        ManagedSwitchMigration(
+            service,
+            receipt_store,
+            native_automation_migration=native_migration,
+        ),
         activate,
     )
 
@@ -584,28 +672,85 @@ async def test_actual_startup_and_restart_apply_the_exact_registry_disposition()
         assert scenario.definition.node_red.input_target_ids == item.input_target_ids
     assert backend.commits == 1
     assert receipt_store.value["state"] == "completed"
+    assert native_receipt_store.value["state"] == "completed"
+    assert len(native_services.calls) == len(NATIVE_AUTOMATION_ENTITY_IDS)
     assert fixture_path.read_bytes() == original_bytes
 
     restarted_service = _service(registry_store, backend)
     await restarted_service.async_load()
     restart_activations = 0
+    restart_activation_ids: list[tuple[str, ...]] = []
 
     async def restart_activate():
         nonlocal restart_activations
         restart_activations += 1
+        restart_activation_ids.append(
+            tuple(
+                item.scenario_id
+                for item in MIGRATION_MANIFEST
+                if registry_store.registry.scenario(item.scenario_id).enabled
+            )
+        )
         return lambda: None
+
+    native_states = {
+        entity_id: state.state
+        for entity_id, state in native_services.states.items()
+    }
+    restarted_native_hass, restarted_native_services = _native_hass(
+        state_overrides=native_states,
+        context_prefix="restart",
+        updated_hour=7,
+    )
+    assert all(
+        restarted_native_services.states[entity_id]
+        is not native_services.states[entity_id]
+        for entity_id in native_states
+    )
 
     restarted = ManagedSwitchStartupCoordinator(
         restarted_service,
-        ManagedSwitchMigration(restarted_service, receipt_store),
+        ManagedSwitchMigration(
+            restarted_service,
+            receipt_store,
+            native_automation_migration=NativeAutomationMigration(
+                HomeAssistantNativeAutomationAdapter(restarted_native_hass),
+                native_receipt_store,
+            ),
+        ),
         restart_activate,
     )
     writes_before_restart = len(registry_store.saved)
+    migration_receipt_writes_before_restart = len(receipt_store.saved)
+    native_receipt_writes_before_restart = len(native_receipt_store.saved)
+    backend_mutations_before_restart = (
+        tuple(backend.updated),
+        tuple(backend.created),
+        tuple(backend.replaced),
+        tuple(backend.restored),
+        tuple(backend.deleted),
+    )
     await restarted.async_start()
 
     assert restarted.ready is True
     assert restart_activations == 1
+    assert restart_activation_ids == [
+        tuple(item.scenario_id for item in MIGRATION_MANIFEST)
+    ]
     assert len(registry_store.saved) == writes_before_restart
+    assert len(receipt_store.saved) == migration_receipt_writes_before_restart
+    assert (
+        len(native_receipt_store.saved)
+        == native_receipt_writes_before_restart
+    )
+    assert restarted_native_services.calls == []
+    assert (
+        tuple(backend.updated),
+        tuple(backend.created),
+        tuple(backend.replaced),
+        tuple(backend.restored),
+        tuple(backend.deleted),
+    ) == backend_mutations_before_restart
     assert len(registry_store.registry.scenarios) == 63
     assert sum(item.enabled for item in registry_store.registry.scenarios) == 22
     assert fixture_path.read_bytes() == original_bytes

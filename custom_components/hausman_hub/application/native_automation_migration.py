@@ -276,6 +276,16 @@ def _modified_image_matches(
     )
 
 
+def _completed_image_matches(
+    current: Mapping[str, object], expected: Mapping[str, object]
+) -> bool:
+    return all(
+        _stable_evidence(current[entity_id])
+        == _stable_evidence(expected[entity_id])
+        for entity_id in _ALL_ENTITIES
+    )
+
+
 class NativeAutomationMigration:
     """Disable five exact rules with durable per-operation CAS evidence."""
 
@@ -456,7 +466,7 @@ class NativeAutomationMigration:
 
         if journal["state"] == "completed":
             current = await self._snapshot()
-            if not _modified_image_matches(current, journal["after"]):
+            if not _completed_image_matches(current, journal["after"]):
                 raise NativeAutomationMigrationConflict(
                     "native automation completion drifted"
                 )
@@ -560,7 +570,7 @@ class NativeAutomationMigration:
             or loaded.get("state") != "completed"
         ):
             return False
-        return _modified_image_matches(await self._snapshot(), loaded["after"])
+        return _completed_image_matches(await self._snapshot(), loaded["after"])
 
     async def async_rollback(self) -> bool:
         """Restore only five objects still matching this migration's writes."""

@@ -187,16 +187,25 @@ class _AutomationComponent:
         return SimpleNamespace(raw_config=self.configs[entity_id])
 
 
-def _fake_hass_from_native_fixture() -> tuple[object, _StrictServices]:
+def _fake_hass_from_native_fixture(
+    *,
+    state_overrides: dict[str, str] | None = None,
+    context_prefix: str = "initial",
+    updated_hour: int = 6,
+) -> tuple[object, _StrictServices]:
     fixture = _native_fixture_by_entity()
     states = {
         entity_id: SimpleNamespace(
-            state=item["state"],
+            state=(
+                item["state"]
+                if state_overrides is None
+                else state_overrides[entity_id]
+            ),
             attributes={"id": item["definition"]["id"]},
             context=SimpleNamespace(
-                id=f"initial-{index}", parent_id=None, user_id=None
+                id=f"{context_prefix}-{index}", parent_id=None, user_id=None
             ),
-            last_updated=datetime(2026, 9, 7, 6, index, tzinfo=UTC),
+            last_updated=datetime(2026, 9, 7, updated_hour, index, tzinfo=UTC),
         )
         for index, (entity_id, item) in enumerate(fixture.items())
     }
@@ -206,6 +215,46 @@ def _fake_hass_from_native_fixture() -> tuple[object, _StrictServices]:
         states=SimpleNamespace(get=states.get), services=services, data=data
     )
     return hass, services
+
+
+def test_completed_handover_accepts_fresh_ha_state_objects_after_restart() -> None:
+    async def exercise() -> None:
+        hass, services = _fake_hass_from_native_fixture()
+        store = Store()
+        migration = NativeAutomationMigration(
+            HomeAssistantNativeAutomationAdapter(hass), store
+        )
+        await migration.async_apply()
+        stable_states = {
+            entity_id: state.state
+            for entity_id, state in services.states.items()
+        }
+        saved_before_restart = len(store.saved)
+        receipt_before_restart = json.loads(json.dumps(store.value))
+
+        restarted_hass, restarted_services = _fake_hass_from_native_fixture(
+            state_overrides=stable_states,
+            context_prefix="restart",
+            updated_hour=7,
+        )
+        assert all(
+            restarted_services.states[entity_id]
+            is not services.states[entity_id]
+            for entity_id in stable_states
+        )
+        restarted = NativeAutomationMigration(
+            HomeAssistantNativeAutomationAdapter(restarted_hass), store
+        )
+
+        assert await restarted.async_verify_completed() is True
+        await restarted.async_apply()
+
+        assert len(services.calls) == len(NATIVE_AUTOMATION_ENTITY_IDS)
+        assert restarted_services.calls == []
+        assert len(store.saved) == saved_before_restart
+        assert store.value == receipt_before_restart
+
+    asyncio.run(exercise())
 
 
 def test_ha_adapter_uses_exact_definition_identity_and_service_schemas() -> None:
@@ -276,6 +325,95 @@ def test_completed_handover_allows_preserve_trigger_context_but_not_enabled_drif
         )
         with pytest.raises(NativeAutomationMigrationConflict, match="completion drifted"):
             await migration.async_apply()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    "drift",
+    (
+        "disabled_state",
+        "preserved_state",
+        "automation_id",
+        "definition_hash",
+        "missing",
+        "unknown",
+        "unavailable",
+    ),
+)
+def test_completed_handover_rejects_restart_semantic_drift(drift: str) -> None:
+    async def exercise() -> None:
+        hass, services = _fake_hass_from_native_fixture()
+        store = Store()
+        await NativeAutomationMigration(
+            HomeAssistantNativeAutomationAdapter(hass), store
+        ).async_apply()
+        calls_before_drift = len(services.calls)
+        saves_before_drift = len(store.saved)
+        disabled = next(iter(NATIVE_AUTOMATION_ENTITY_IDS.values()))
+        preserved = next(iter(NATIVE_AUTOMATION_PRESERVE_ENTITY_IDS.values()))
+        target = preserved if drift == "preserved_state" else disabled
+
+        if drift in {"disabled_state", "preserved_state"}:
+            state = services.states[target]
+            state.state = "off" if state.state == "on" else "on"
+            assert not await NativeAutomationMigration(
+                HomeAssistantNativeAutomationAdapter(hass), store
+            ).async_verify_completed()
+        else:
+            if drift == "automation_id":
+                services.states[target].attributes["id"] = "foreign-automation"
+            elif drift == "definition_hash":
+                hass.data["automation"].configs[target]["alias"] = (
+                    "Чужая автоматизация"
+                )
+            elif drift == "missing":
+                del services.states[target]
+            elif drift in {"unknown", "unavailable"}:
+                services.states[target].state = drift
+            else:  # pragma: no cover - the parameter list is closed above.
+                raise AssertionError(drift)
+            with pytest.raises(NativeAutomationMigrationConflict):
+                await NativeAutomationMigration(
+                    HomeAssistantNativeAutomationAdapter(hass), store
+                ).async_verify_completed()
+
+        with pytest.raises(NativeAutomationMigrationConflict):
+            await NativeAutomationMigration(
+                HomeAssistantNativeAutomationAdapter(hass), store
+            ).async_apply()
+        assert len(services.calls) == calls_before_drift
+        assert len(store.saved) == saves_before_drift
+
+    asyncio.run(exercise())
+
+
+def test_prepared_handover_rejects_disabled_context_drift_before_writes() -> None:
+    async def exercise() -> None:
+        adapter = Adapter()
+        before = await adapter.async_snapshot(tuple(EXPECTED_NATIVE_AUTOMATIONS))
+        store = Store()
+        store.value = {
+            "version": 1,
+            "state": "prepared",
+            "mode": "apply",
+            "before": before,
+            "baseline": {key: dict(value) for key, value in before.items()},
+            "operations": {},
+            "after": None,
+        }
+        target = next(iter(NATIVE_AUTOMATION_ENTITY_IDS.values()))
+        adapter.states[target]["contextId"] = "foreign-context"
+        adapter.states[target]["lastUpdated"] = "foreign-update"
+
+        with pytest.raises(
+            NativeAutomationMigrationConflict, match="baseline drifted"
+        ):
+            await NativeAutomationMigration(adapter, store).async_apply()
+
+        assert adapter.calls == []
+        assert adapter.restores == []
+        assert store.saved == []
 
     asyncio.run(exercise())
 
