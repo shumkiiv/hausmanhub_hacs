@@ -169,6 +169,13 @@ Migration regression 36/36 включает настоящий ремонт по
 
 ## 5. Остальные комнаты
 
+Checkpoint `9b127c3`: четыре комнатных контроллера проверены исполнителем.
+2679 passed, 4 skipped, 1238 subtests за 302.33s; package до/после commit
+PASS. Исправлены partial restart душевой и повтор uncertain off ванной.
+Browser будет повторён в общей приёмке. Установки нет, activation_ready
+закрыт. До части 6 уточнить совместимую квитанцию ограниченной позиции:
+root `docs/migration/CURTAIN_COMMON_COMMAND_PATH_2026-09-07.md`.
+
 - [ ] Душевая: светoff300s absence, ручной источник не переключать;
   fan humidity>55 или presence120s, off300 при нормальной известной humidity.
   Клавиша2 одно действие на подтверждённое нажатие. Не считать `up`
