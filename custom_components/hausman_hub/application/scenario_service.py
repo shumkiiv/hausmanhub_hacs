@@ -3366,6 +3366,7 @@ class ScenarioService:
         correlation_id: str,
         dangerous_authorized: frozenset[tuple[str, str]] = frozenset(),
         intercom_release_required: frozenset[tuple[str, str]] = frozenset(),
+        initial_contextually_dangerous: frozenset[tuple[str, str]] = frozenset(),
         request_ids: tuple[str, ...] | None = None,
         dispatch_contexts: (
             tuple[tuple[str, str, tuple[str, ...], str] | None, ...] | None
@@ -3493,9 +3494,11 @@ class ScenarioService:
                 current_intercom_action = self._is_intercom_action(
                     target_id, action_id
                 )
-                current_contextual_action = self.is_contextually_dangerous_action(
-                    target_id, action_id
-                )
+                try:
+                    current_contextual_action = self.is_contextually_dangerous_action(target_id, action_id)
+                except Exception as error:
+                    raise ScenarioServiceError("Contextual danger classification failed", status=503) from error
+                current_contextual_action = bool(current_contextual_action or (target_id, action_id) in initial_contextually_dangerous)
                 if release_required and (
                     not current_intercom_action
                     or request_ids is None

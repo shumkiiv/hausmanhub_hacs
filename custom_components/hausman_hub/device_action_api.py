@@ -1183,6 +1183,10 @@ class DeviceActionBatchView(HomeAssistantView):
                 for index in dangerous_indexes
                 if intercom_flags[index]
             )
+        batch_options["initial_contextually_dangerous"] = frozenset(
+            (str(normalized[index]["targetId"]), str(normalized[index]["actionId"]))
+            for index, flag in enumerate(contextual_dangerous_flags) if flag
+        )
         try:
             if physical_actions and _supports_keyword(
                 service.async_execute_device_action_batch, "dispatch_marker"
