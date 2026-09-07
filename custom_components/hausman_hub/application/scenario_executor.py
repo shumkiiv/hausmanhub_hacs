@@ -2744,6 +2744,11 @@ class ScenarioExecutor:
             and _device_action_confirmed(current, confirmation_action_id, confirmation_value)
         ):
             observed_state = str(getattr(current, "state", "unknown"))
+            if not automatic and allowed.domain == "light" and action.action_id == "turn_on":
+                begin = self._light_priority.async_begin_direct_action
+                await begin(action.target_id, action.action_id, self._catalog, self._hass)
+                if self._light_safety_obligations is not None:
+                    await self._light_safety_obligations.async_cancel(action.target_id)
             return {
                 **base,
                 "status": "completed",

@@ -1105,6 +1105,23 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             ["persist_manual", "cancel_obligation", "dispatch"], order
         )
 
+    async def test_manual_idempotent_light_claims_ownership_without_dispatch(self) -> None:
+        priority = LightAutomationPriority()
+        priority.async_begin_direct_action = AsyncMock()
+        obligations = AsyncMock()
+        executor = ScenarioExecutor(
+            self.hass, self.catalog, self.executor._run_callback,
+            light_priority=priority, light_safety_obligations=obligations,
+            readback_window_seconds=0.02, readback_interval_seconds=0.01,
+        )
+        result = await executor.async_execute_device_action(
+            "device_1", "turn_on", idempotent_actions=True
+        )
+        self.assertTrue(result["skipped"])
+        self.assertEqual("already_in_target_state", result["reason"])
+        priority.async_begin_direct_action.assert_awaited_once()
+        obligations.async_cancel.assert_awaited_once_with("device_1")
+
     async def test_manual_authority_storage_failure_blocks_physical_dispatch(
         self,
     ) -> None:
