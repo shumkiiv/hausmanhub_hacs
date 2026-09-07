@@ -247,10 +247,10 @@ def test_restart_and_stale_presence_do_not_create_release_evidence() -> None:
     "unsafe_attributes",
     [{"restored": True}, {"cached": True}, {"assumed_state": True}],
 )
-def test_untrusted_same_state_presence_event_invalidates_prior_absence(
+def test_untrusted_same_state_presence_event_does_not_extend_direct_off_timer(
     unsafe_attributes: dict[str, object],
 ) -> None:
-    """A restored off-to-off event must revoke earlier live absence evidence."""
+    """A restored event cannot make the exact timer-only inhibit linger."""
 
     async def exercise() -> None:
         now = datetime.now(timezone.utc)
@@ -289,13 +289,12 @@ def test_untrusted_same_state_presence_event_invalidates_prior_absence(
                 context=None,
             )
         )
-        now += timedelta(seconds=180)
+        now += timedelta(seconds=200)
 
         decision = await coordinator.async_decide_entity(
             "light.tambur_chandelier", automatic=True, dry_run=False
         )
-        assert not decision.allowed
-        assert decision.reason == "manual_off_protection_absence_required"
+        assert decision.allowed
 
     asyncio.run(exercise())
 

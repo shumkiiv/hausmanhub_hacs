@@ -39,7 +39,7 @@ from custom_components.hausman_hub.domain.scenarios import (
 SCENARIO_ID = "system-small-corridor-light-controller"
 OLD_TARGET = "entity_ff0244d6b760be7e"
 NEW_TARGET = "entity_4be32416634e6416"
-SOURCE_HASH = "bc9a2c7883046e568a428e355af312953d70f0f504393b063130f516fe5052b1"
+SOURCE_HASH = "c3097df8fefa2d09be4e57b059239bcb92fbb0302069500178fc0be1c8fc4800"
 INPUTS = next(
     item.input_target_ids for item in MIGRATION_MANIFEST if item.scenario_id == SCENARIO_ID
 )

@@ -10,6 +10,7 @@ from datetime import datetime, time
 from enum import StrEnum
 from dataclasses import dataclass
 from datetime import timedelta
+import math
 import re
 from typing import Mapping
 
@@ -80,6 +81,63 @@ def fade_steps(current: int, target: int) -> tuple[int, ...]:
     if target >= current:
         return () if target == current else tuple(range(current + 1, target + 1))
     return tuple(range(current - 1, target - 1, -1))
+
+
+def brightness_sequence_deadline_ms(
+    started_at_ms: int,
+    deadline_ms: int,
+    start: int,
+    target: int,
+    current: int,
+) -> int | None:
+    """Return the absolute due time of the next one-point brightness step."""
+
+    if any(type(value) is not int for value in (
+        started_at_ms, deadline_ms, start, target, current
+    )):
+        raise ValueError("brightness sequence values must be integers")
+    if deadline_ms <= started_at_ms:
+        raise ValueError("brightness sequence deadline must follow its start")
+    if not all(0 <= value <= 100 for value in (start, target, current)):
+        raise ValueError("brightness sequence percentages are out of range")
+    distance = abs(target - start)
+    if distance == 0 or current == target:
+        return None
+    completed = abs(current - start)
+    ordinal = min(distance, completed + 1)
+    duration = deadline_ms - started_at_ms
+    return started_at_ms + math.ceil(duration * ordinal / distance)
+
+
+def brightness_sequence_step(
+    current: int,
+    *,
+    start: int,
+    target: int,
+    started_at_ms: int,
+    deadline_ms: int,
+    now_ms: int,
+) -> tuple[int, float]:
+    """Advance at most one point towards the time-bounded brightness target."""
+
+    next_due = brightness_sequence_deadline_ms(
+        started_at_ms, deadline_ms, start, target, current
+    )
+    if next_due is None or now_ms < next_due:
+        return current, 0.0
+    direction = 1 if target > current else -1
+    next_value = current + direction
+    if direction > 0:
+        next_value = min(next_value, target)
+    else:
+        next_value = max(next_value, target)
+    fraction = min(
+        1.0,
+        max(0.0, (now_ms - started_at_ms) / (deadline_ms - started_at_ms)),
+    )
+    ideal = start + (target - start) * fraction
+    remainder = abs(ideal - next_value) % 1.0
+    return next_value, remainder
 
 
 def manual_command(event: object, *, supports_temperature: bool) -> dict[str, object] | None:

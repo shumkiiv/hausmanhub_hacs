@@ -1375,6 +1375,50 @@ class ScenarioService:
             scenario_ids = [str(getattr(item, "scenario_id", "")) for item in entries]
             if not scenario_ids or len(scenario_ids) != len(set(scenario_ids)):
                 raise ScenarioServiceError("Managed switch migration manifest is invalid.", status=500)
+            staging_active = bool(
+                self._managed_switch_create_staging
+                or self._managed_switch_replace_staging
+            )
+            if staging_active:
+                expected_creates = {
+                    str(getattr(item, "scenario_id"))
+                    for item in entries
+                    if getattr(item, "operation", "replace") == "create"
+                }
+                expected_replacements = {
+                    str(getattr(item, "scenario_id"))
+                    for item in entries
+                    if getattr(item, "operation", "replace") == "replace"
+                    and getattr(item, "legacy_source_hash", None)
+                    != getattr(item, "new_source_hash", None)
+                }
+                if (
+                    set(self._managed_switch_create_staging) != expected_creates
+                    or set(self._managed_switch_replace_staging)
+                    != expected_replacements
+                    or any(
+                        staged[2] != getattr(item, "new_source_hash", None)
+                        for item in entries
+                        if (
+                            staged := self._managed_switch_create_staging.get(
+                                str(getattr(item, "scenario_id"))
+                            )
+                        )
+                    )
+                    or any(
+                        staged[2] != getattr(item, "new_source_hash", None)
+                        for item in entries
+                        if (
+                            staged := self._managed_switch_replace_staging.get(
+                                str(getattr(item, "scenario_id"))
+                            )
+                        )
+                    )
+                ):
+                    raise ScenarioServiceError(
+                        "Managed source staging does not match the manifest.",
+                        status=409,
+                    )
             for item in entries:
                 for target_id in tuple(getattr(item, "input_target_ids")):
                     device = self._catalog.device(target_id)
@@ -1454,7 +1498,15 @@ class ScenarioService:
                 evidence = await backend.async_verify_managed_topology(scenario_id, metadata.flow_id)
                 if evidence.get("topology") != getattr(item, "legacy_topology"):
                     raise ScenarioServiceError("Protected scenario topology changed.", status=409)
-                if evidence.get("source_hash") != metadata.source_hash:
+                staged_replacement = self._managed_switch_replace_staging.get(
+                    scenario_id
+                )
+                expected_deployed_hash = (
+                    staged_replacement[2]
+                    if staged_replacement is not None
+                    else metadata.source_hash
+                )
+                if evidence.get("source_hash") != expected_deployed_hash:
                     raise ScenarioRevisionConflictError(
                         scenario_id,
                         expected_revision=getattr(item, "expected_revision", None),
@@ -1464,7 +1516,7 @@ class ScenarioService:
                         current_action_ids=tuple(action.id for action in scenario.definition.actions),
                     )
                 entry_state[scenario_id] = (item, scenario, metadata)
-            if self._managed_switch_create_staging or self._managed_switch_replace_staging:
+            if staging_active:
                 return
         create = getattr(backend, "async_prepare_new_release_source", None)
         prepare = getattr(backend, "async_prepare_release_source", None)
@@ -1670,16 +1722,25 @@ class ScenarioService:
                     if operation.get("kind") == "replace":
                         flow_id = str(operation.get("flowId") or "")
                         current = await deployed_source(scenario_id, flow_id)
-                        if current.get("source_hash") == new_hash:
+                        old_hash = operation.get("expectedSourceHash")
+                        if new_hash == old_hash:
+                            if (
+                                current.get("source_hash") != old_hash
+                                or current.get("source")
+                                != operation.get("previousSource")
+                            ):
+                                raise ScenarioServiceError(
+                                    "Managed no-op replacement recovery is ambiguous.",
+                                    status=409,
+                                )
+                        elif current.get("source_hash") == new_hash:
                             await backend.async_restore_source(
                                 scenario_id,
                                 flow_id,
                                 str(operation["previousSource"]),
                                 expected_current_hash=new_hash,
                             )
-                        elif current.get("source_hash") != operation.get(
-                            "expectedSourceHash"
-                        ):
+                        elif current.get("source_hash") != old_hash:
                             raise ScenarioServiceError(
                                 "Managed replacement recovery is ambiguous.",
                                 status=409,

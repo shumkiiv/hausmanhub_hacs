@@ -43,12 +43,14 @@ def _run_source(
     timestamp: str,
     states: dict[str, object],
     trigger: dict[str, object] | None = None,
+    controls: dict[str, object] | None = None,
 ) -> dict[str, object]:
     request = {
         "correlationId": "managed-source-test",
         "context": {
             "timestampMs": int(datetime.fromisoformat(timestamp).timestamp() * 1000),
             "trigger": trigger or {},
+            "controls": controls or {},
         },
         "inputs": {
             target_id: (
@@ -81,8 +83,15 @@ def _run_tambur(
     timestamp: str,
     states: dict[str, object],
     trigger: dict[str, object] | None = None,
+    controls: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    return _run_source(TAMBUR_SOURCE, timestamp=timestamp, states=states, trigger=trigger)
+    return _run_source(
+        TAMBUR_SOURCE,
+        timestamp=timestamp,
+        states=states,
+        trigger=trigger,
+        controls=controls,
+    )
 
 
 def _run_shower(*, timestamp: str, states: dict[str, object], trigger: dict[str, object] | None = None) -> dict[str, object]:
@@ -94,12 +103,14 @@ def _run_small_corridor(
     timestamp: str,
     states: dict[str, object],
     trigger: dict[str, object] | None = None,
+    controls: dict[str, object] | None = None,
 ) -> dict[str, object]:
     return _run_source(
         SMALL_CORRIDOR_SOURCE,
         timestamp=timestamp,
         states=states,
         trigger=trigger,
+        controls=controls,
     )
 
 
@@ -114,6 +125,30 @@ def _typed(binding: str, trigger_id: str, typed: str, direct: str) -> dict[str, 
         "direct_user_intent": direct, "intent_receipt_id": "receipt.test",
         "raw_subtype": trigger_id, "dedup_disposition": "accepted",
         "correlation_id": "receipt.test",
+    }
+
+
+def _controls(
+    target_id: str,
+    action_id: str,
+    value: int | None = None,
+    *,
+    transition: str = "light_action",
+) -> dict[str, object]:
+    return {
+        "policyRevision": 3,
+        "policy": {},
+        "state": {
+            "ready": True,
+            "generation": 7,
+            "transition": transition,
+            "evidence": {"motion": "on", "presence": "off"},
+            "action": {
+                "targetId": target_id,
+                "actionId": action_id,
+                "value": value,
+            },
+        },
     }
 
 
@@ -157,20 +192,14 @@ class ManagedTamburSourceTest(unittest.TestCase):
             MIRROR: "off", TAMBUR_POWER: "on", ENTRY_DOOR: "locked",
         }
 
-    def test_day_uses_full_neutral_profile_and_points(self) -> None:
+    def test_sensor_snapshot_cannot_create_a_profile_without_server_action(self) -> None:
         states = self.base_states()
         states[PRESENCE] = "on"
         payload = _run_tambur(timestamp="2026-08-27T10:00:00+06:00", states=states)
-        self.assertEqual("sunrise_to_sunset", payload["selectedBranch"])
-        self.assertEqual(
-            ["chandelier_on", "chandelier_ownership_wait", "brightness", "temperature_target", "points_on"],
-            _action_ids(payload),
-        )
-        values = {action["id"]: action.get("value") for action in payload["actions"]}
-        self.assertEqual(100, values["brightness"])
-        self.assertEqual(3000, values["temperature_target"])
+        self.assertEqual("stale_generation", payload["selectedBranch"])
+        self.assertEqual([], _action_ids(payload))
 
-    def test_entry_door_uses_day_profile_without_waiting_for_presence(self) -> None:
+    def test_entry_door_cannot_create_a_profile_without_server_action(self) -> None:
         states = self.base_states()
         states[ENTRY_DOOR] = "unlocked"
         payload = _run_tambur(
@@ -182,19 +211,10 @@ class ManagedTamburSourceTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual("entry_sunrise_to_sunset", payload["selectedBranch"])
-        self.assertEqual(
-            [
-                "chandelier_on",
-                "chandelier_ownership_wait",
-                "brightness",
-                "temperature_target",
-                "points_on",
-            ],
-            _action_ids(payload),
-        )
+        self.assertEqual("stale_generation", payload["selectedBranch"])
+        self.assertEqual([], _action_ids(payload))
 
-    def test_entry_door_uses_evening_lux_profile(self) -> None:
+    def test_evening_inputs_cannot_create_a_profile_without_server_action(self) -> None:
         states = self.base_states()
         states.update({ENTRY_DOOR: "unlocked", SUN: "below_horizon", OUTSIDE_LUX: "5"})
         payload = _run_tambur(
@@ -206,33 +226,27 @@ class ManagedTamburSourceTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual("entry_after_sunset_dark", payload["selectedBranch"])
-        values = {action["id"]: action.get("value") for action in payload["actions"]}
-        self.assertEqual((85, 6500), (values["brightness"], values["temperature_target"]))
+        self.assertEqual("stale_generation", payload["selectedBranch"])
+        self.assertEqual([], _action_ids(payload))
 
-    def test_darkness_increases_brightness_and_physical_warmth(self) -> None:
-        profiles = []
+    def test_lux_values_never_author_server_actions(self) -> None:
         for lux in (500, 200, 50, 5):
             states = self.base_states()
             states.update({PRESENCE: "on", SUN: "below_horizon", OUTSIDE_LUX: str(lux)})
             payload = _run_tambur(timestamp="2026-08-27T22:00:00+06:00", states=states)
-            values = {action["id"]: action.get("value") for action in payload["actions"]}
-            profiles.append((values["brightness"], values["temperature_target"]))
-        self.assertEqual([(35, 3600), (50, 4400), (70, 5200), (85, 6500)], profiles)
+            self.assertEqual([], _action_ids(payload))
 
-    def test_manual_switch_forces_full_neutral_without_points(self) -> None:
+    def test_untyped_manual_switch_does_not_overwrite_light_parameters(self) -> None:
         states = self.base_states()
         payload = _run_tambur(
             timestamp="2026-08-27T23:30:00+06:00",
             states=states,
             trigger={"source": "manual", "trigger_id": "manual_chandelier_on"},
         )
-        self.assertEqual("manual_chandelier", payload["selectedBranch"])
-        self.assertNotIn("points_on", _action_ids(payload))
-        values = {action["id"]: action.get("value") for action in payload["actions"]}
-        self.assertEqual((100, 3000), (values["brightness"], values["temperature_target"]))
+        self.assertEqual("stale_generation", payload["selectedBranch"])
+        self.assertEqual([], _action_ids(payload))
 
-    def test_absence_waits_then_fades_both_automatic_loads(self) -> None:
+    def test_absence_inputs_do_not_author_client_side_fade(self) -> None:
         states = self.base_states()
         states.update({
             CHANDELIER: {"state": "on", "attributes": {"brightness": 255}},
@@ -243,10 +257,7 @@ class ManagedTamburSourceTest(unittest.TestCase):
             states=states,
             trigger={"trigger_id": "motion_changed"},
         )
-        actions = _action_ids(payload)
-        self.assertEqual("absence_wait", actions[0])
-        self.assertEqual(["chandelier_off", "points_off"], actions[-2:])
-        self.assertEqual([75, 50, 25, 5], [a["value"] for a in payload["actions"] if str(a["id"]).startswith("fade_") and not str(a["id"]).startswith("fade_wait")])
+        self.assertEqual([], _action_ids(payload))
 
     def test_lux_change_does_not_restart_absence_timer(self) -> None:
         states = self.base_states()
@@ -258,20 +269,29 @@ class ManagedTamburSourceTest(unittest.TestCase):
         )
         self.assertEqual([], payload["actions"])
 
-    def test_mirror_has_only_23_and_01_schedule_branches(self) -> None:
+    def test_clock_input_does_not_author_mirror_actions(self) -> None:
         states = self.base_states()
         on = _run_tambur(timestamp="2026-08-27T23:00:00+06:00", states=states, trigger={"trigger_id": "mirror_window_start"})
-        self.assertEqual(["mirror_on"], _action_ids(on))
+        self.assertEqual([], _action_ids(on))
         states[MIRROR] = "on"
         off = _run_tambur(timestamp="2026-08-28T01:00:00+06:00", states=states, trigger={"trigger_id": "mirror_window_end"})
-        self.assertEqual(["mirror_off"], _action_ids(off))
+        self.assertEqual([], _action_ids(off))
 
     def test_uncertain_presence_never_turns_lighting_off(self) -> None:
         states = self.base_states()
         states.update({PRESENCE: "unknown", CHANDELIER: "on", POINTS: "on"})
         payload = _run_tambur(timestamp="2026-08-27T10:00:00+06:00", states=states)
-        self.assertEqual("presence_uncertain", payload["selectedBranch"])
+        self.assertEqual("stale_generation", payload["selectedBranch"])
         self.assertEqual([], payload["actions"])
+
+    def test_exact_server_action_is_forwarded_without_profile_expansion(self) -> None:
+        payload = _run_tambur(
+            timestamp="2026-08-27T22:00:00+06:00",
+            states=self.base_states(),
+            controls=_controls(CHANDELIER, "set_brightness_percent", 72),
+        )
+        self.assertEqual(["server_action"], _action_ids(payload))
+        self.assertEqual(72, payload["actions"][0]["value"])
 
 
 class ManagedSmallCorridorSourceTest(unittest.TestCase):
@@ -279,14 +299,14 @@ class ManagedSmallCorridorSourceTest(unittest.TestCase):
         return {SMALL_MOTION: "off", SUN: "above_horizon", OUTSIDE_LUX: "500",
             SMALL_LOCAL_LIGHT: "dark", SMALL_RELAY: "off", SMALL_CHANDELIER: "off"}
 
-    def test_motion_day_turns_on_full_neutral(self) -> None:
+    def test_motion_snapshot_cannot_author_profile_without_server_action(self) -> None:
         states = self.base_states()
         states[SMALL_MOTION] = "on"
         payload = _run_small_corridor(timestamp="2026-08-27T10:00:00+06:00", states=states)
-        self.assertEqual("day", payload["selectedBranch"])
-        self.assertEqual(["chandelier_on", "ownership_wait", "brightness", "temperature"], _action_ids(payload))
+        self.assertEqual("stale_generation", payload["selectedBranch"])
+        self.assertEqual([], _action_ids(payload))
 
-    def test_absence_keeps_light_five_minutes_then_fades(self) -> None:
+    def test_absence_snapshot_cannot_author_client_side_fade(self) -> None:
         states = self.base_states()
         states.update({SMALL_RELAY: "on", SMALL_CHANDELIER: {"state": "on", "attributes": {"brightness": 255}}})
         payload = _run_small_corridor(
@@ -294,9 +314,7 @@ class ManagedSmallCorridorSourceTest(unittest.TestCase):
             states=states,
             trigger={"trigger_id": "motion_changed"},
         )
-        actions = _action_ids(payload)
-        self.assertEqual("absence_wait", actions[0])
-        self.assertEqual(["chandelier_off", "relay_off"], actions[-2:])
+        self.assertEqual([], _action_ids(payload))
 
     def test_lux_change_does_not_restart_five_minute_timer(self) -> None:
         states = self.base_states()
@@ -308,7 +326,7 @@ class ManagedSmallCorridorSourceTest(unittest.TestCase):
         )
         self.assertEqual([], payload["actions"])
 
-    def test_manual_switch_claims_relay_and_full_neutral_chandelier(self) -> None:
+    def test_untyped_manual_switch_does_not_rewrite_profile(self) -> None:
         states = self.base_states()
         states[SMALL_RELAY] = "on"
         payload = _run_small_corridor(
@@ -316,25 +334,31 @@ class ManagedSmallCorridorSourceTest(unittest.TestCase):
             states=states,
             trigger={"source": "manual", "trigger_id": "manual_chandelier_on"},
         )
-        self.assertEqual("manual_chandelier", payload["selectedBranch"])
-        self.assertEqual(
-            ["relay_on", "chandelier_on", "ownership_wait", "brightness", "temperature"],
-            _action_ids(payload),
-        )
+        self.assertEqual("stale_generation", payload["selectedBranch"])
+        self.assertEqual([], _action_ids(payload))
 
     def test_midnight_to_sunrise_never_turns_on(self) -> None:
         states = self.base_states()
         states.update({SMALL_MOTION: "on", SUN: "below_horizon"})
         payload = _run_small_corridor(timestamp="2026-08-28T00:30:00+06:00", states=states)
-        self.assertEqual("night_blocked_until_sunrise", payload["selectedBranch"])
+        self.assertEqual("stale_generation", payload["selectedBranch"])
         self.assertEqual([], payload["actions"])
 
     def test_sunrise_reenables_motion_profile(self) -> None:
         states = self.base_states()
         states.update({SMALL_MOTION: "on", SUN: "above_horizon"})
         payload = _run_small_corridor(timestamp="2026-08-28T06:30:00+06:00", states=states, trigger={"trigger_id": "sunrise"})
-        self.assertEqual("day", payload["selectedBranch"])
-        self.assertIn("chandelier_on", _action_ids(payload))
+        self.assertEqual("stale_generation", payload["selectedBranch"])
+        self.assertEqual([], _action_ids(payload))
+
+    def test_exact_server_action_is_forwarded_without_profile_expansion(self) -> None:
+        payload = _run_small_corridor(
+            timestamp="2026-08-27T20:00:00+06:00",
+            states=self.base_states(),
+            controls=_controls(SMALL_CHANDELIER, "set_color_temperature", 2200),
+        )
+        self.assertEqual(["server_action"], _action_ids(payload))
+        self.assertEqual(2200, payload["actions"][0]["value"])
 
 
 class ManagedShowerSourceTest(unittest.TestCase):

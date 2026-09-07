@@ -140,10 +140,10 @@ async def test_only_explicit_reconciliation_adopts_exact_interrupted_create() ->
 def test_release_trust_allows_exact_previous_and_current_system_sources() -> None:
     assert scenario_node_red._TRUSTED_SYSTEM_SOURCE_HASHES == {  # noqa: SLF001
         "system-tambur-adaptive-controller": frozenset(
-            {"4daef9ac2de8dc1c95dd2da6887e178751a65d0e47bcf48443635f68eb1ba5dc"}
+            {"c8d5cd80006111146053767f7fd775c25a09ec8b5fab38f3a93a6c9126a417ca"}
         ),
         "system-small-corridor-light-controller": frozenset(
-            {"bc9a2c7883046e568a428e355af312953d70f0f504393b063130f516fe5052b1"}
+            {"c3097df8fefa2d09be4e57b059239bcb92fbb0302069500178fc0be1c8fc4800"}
         ),
         "system-shower-comfort-controller": frozenset(
                 {"757bde711c85ebad4826c2ec0bf2695d0034f7dd820c9ec7c30816f3f37c1551"}
@@ -1556,6 +1556,9 @@ async def test_storage_coordinator_crosses_real_async_plan_and_executor_path() -
         service.async_run_scenario,
         node_red_backend=backend,
     )
+    service.executor.set_scenario_generation_validator(
+        coordinator.async_validate_generation
+    )
 
     await coordinator.async_handle_storage_change()
 
@@ -1732,6 +1735,9 @@ async def test_storage_real_service_switch_ownership_and_120_second_off_path() -
         node_red_backend=backend,
         light_priority=priority,
     )
+    executor.set_scenario_generation_validator(
+        coordinator.async_validate_generation
+    )
     service.set_executor(executor)
 
     await coordinator.async_handle_storage_change()
@@ -1775,7 +1781,22 @@ def test_tambur_power_up_plan_matches_release_envelope() -> None:
             "entity_fbdf27871edb89bf": {"state": "off", "attributes": {}},
         },
         "correlationId": "run.power-up",
-        "context": {"timestampMs": 1_785_553_200_000},
+        "context": {
+            "timestampMs": 1_785_553_200_000,
+            "controls": {
+                "policyRevision": 4,
+                "state": {
+                    "ready": True,
+                    "generation": 9,
+                    "transition": "light_action",
+                    "action": {
+                        "targetId": "entity_71859313239a14e4",
+                        "actionId": "set_color_temperature",
+                        "value": 3000,
+                    },
+                },
+            },
+        },
     }
     executed = subprocess.run(
         ["node", "-e", f"const msg={{payload:{json.dumps(payload)}}};\n(function(){{\n{source}\n}})();\nconsole.log(JSON.stringify(msg.payload));"],
@@ -1787,10 +1808,17 @@ def test_tambur_power_up_plan_matches_release_envelope() -> None:
         for item in result["actions"]
     ]
     NodeRedScenarioBackend._validate_plan_envelope(  # noqa: SLF001
-        "system-tambur-adaptive-controller", _definition(), actions
+        "system-tambur-adaptive-controller",
+        _definition(),
+        actions,
+        expected_control_action={
+            "targetId": "entity_71859313239a14e4",
+            "actionId": "set_color_temperature",
+            "value": 3000,
+        },
     )
     assert [action.action_id for action in actions].count("set_color_temperature") == 1
-    assert sum(action.type is ScenarioActionType.DELAY for action in actions) == 1
+    assert len(actions) == 1
 
 
 def test_release_owned_trigger_context_is_exact_and_correlated() -> None:
@@ -1886,7 +1914,26 @@ def test_system_input_snapshot_drives_real_tambur_sunset_mired_branch() -> None:
     assert snapshot[ids["sun"]]["attributes"] == {"next_setting": "2026-08-27T13:00:00Z"}
     assert snapshot[ids["chandelier"]]["attributes"] == {"brightness": 153, "color_temp": 278}
     source = Path("tools/managed_scenarios/tambur_controller.js").read_text(encoding="utf-8")
-    request = {"inputs": snapshot, "context": {"timestampMs": 1_787_839_200_000}}
+    expected = {
+        "targetId": ids["chandelier"],
+        "actionId": "set_brightness_percent",
+        "value": 50,
+    }
+    request = {
+        "inputs": snapshot,
+        "context": {
+            "timestampMs": 1_787_839_200_000,
+            "controls": {
+                "policyRevision": 2,
+                "state": {
+                    "ready": True,
+                    "generation": 3,
+                    "transition": "brightness_sequence",
+                    "action": expected,
+                },
+            },
+        },
+    }
     executed = subprocess.run(
         ["node", "-e", f"const msg={{payload:{json.dumps(request)}}};\n(function(){{\n{source}\n}})();\nconsole.log(JSON.stringify(msg.payload));"],
         check=True, capture_output=True, text=True,
@@ -1894,22 +1941,24 @@ def test_system_input_snapshot_drives_real_tambur_sunset_mired_branch() -> None:
     payload = json.loads(executed.stdout)
     actions = [scenario_node_red._action_from_payload(item, "tambur") for item in payload["actions"]]  # noqa: SLF001
     NodeRedScenarioBackend._validate_plan_envelope(  # noqa: SLF001
-        "system-tambur-adaptive-controller", definition, actions
+        "system-tambur-adaptive-controller",
+        definition,
+        actions,
+        expected_control_action=expected,
     )
-    assert payload["selectedBranch"] == "after_sunset_lux_fallback"
-    assert [action.id for action in actions] == [
-        "chandelier_on", "chandelier_ownership_wait", "brightness",
-        "temperature_target", "points_on",
-    ]
+    assert payload["selectedBranch"] == "brightness_sequence"
+    assert [action.id for action in actions] == ["server_action"]
 
 
 def test_system_branch_validator_rejects_mutated_values_order_unions_and_excess() -> None:
     tambur = [
-        ScenarioAction("chandelier_on", ScenarioActionType.DEVICE_ACTION, target_id="entity_71859313239a14e4", action_id="turn_on"),
-        ScenarioAction("chandelier_ownership_wait", ScenarioActionType.DELAY, delay_seconds=1),
-        ScenarioAction("brightness", ScenarioActionType.DEVICE_ACTION, target_id="entity_71859313239a14e4", action_id="set_brightness_percent", value=50),
-        ScenarioAction("temperature_target", ScenarioActionType.DEVICE_ACTION, target_id="entity_71859313239a14e4", action_id="set_color_temperature", value=4400),
+        ScenarioAction("server_action", ScenarioActionType.DEVICE_ACTION, target_id="entity_71859313239a14e4", action_id="set_brightness_percent", value=50),
     ]
+    expected_tambur = {
+        "targetId": "entity_71859313239a14e4",
+        "actionId": "set_brightness_percent",
+        "value": 50,
+    }
     shower_source = Path("tools/managed_scenarios/shower_controller.js").read_text(encoding="utf-8")
     shower_request = {
         "inputs": {
@@ -1931,13 +1980,18 @@ def test_system_branch_validator_rejects_mutated_values_order_unions_and_excess(
         scenario_node_red._action_from_payload(item, "shower")  # noqa: SLF001
         for item in json.loads(shower_run.stdout)["actions"]
     ]
-    NodeRedScenarioBackend._validate_plan_envelope("system-tambur-adaptive-controller", _definition(), tambur)  # noqa: SLF001
+    NodeRedScenarioBackend._validate_plan_envelope(  # noqa: SLF001
+        "system-tambur-adaptive-controller",
+        _definition(),
+        tambur,
+        expected_control_action=expected_tambur,
+    )
     NodeRedScenarioBackend._validate_plan_envelope("system-shower-comfort-controller", _definition(), shower)  # noqa: SLF001
     invalid = (
-        ("system-tambur-adaptive-controller", [*tambur[:-1], replace(tambur[-1], value=3500)]),
-        ("system-tambur-adaptive-controller", [*tambur[:-1], replace(tambur[-1], value=float("nan"))]),
-        ("system-tambur-adaptive-controller", [*tambur[:-1], replace(tambur[-1], value=float("inf"))]),
-        ("system-tambur-adaptive-controller", [tambur[1], tambur[0], *tambur[2:]]),
+        ("system-tambur-adaptive-controller", [replace(tambur[0], value=51)]),
+        ("system-tambur-adaptive-controller", [replace(tambur[0], value=float("nan"))]),
+        ("system-tambur-adaptive-controller", [replace(tambur[0], value=float("inf"))]),
+        ("system-tambur-adaptive-controller", [tambur[0], tambur[0]]),
         ("system-shower-comfort-controller", [ScenarioAction("fan_presence_wait", ScenarioActionType.DELAY, delay_seconds=120), ScenarioAction("set_fan_on", ScenarioActionType.DEVICE_ACTION, target_id="entity_afef5df0e0cae309", action_id="turn_on"), *shower]),
         ("system-shower-comfort-controller", [*shower, ScenarioAction("extra_wait", ScenarioActionType.DELAY, delay_seconds=300)]),
         ("system-shower-comfort-controller", [*shower, ScenarioAction("set_fan_off_again", ScenarioActionType.DEVICE_ACTION, target_id="entity_afef5df0e0cae309", action_id="turn_off")]),
@@ -1945,7 +1999,16 @@ def test_system_branch_validator_rejects_mutated_values_order_unions_and_excess(
     )
     for scenario_id, actions in invalid:
         with pytest.raises(NodeRedBackendError):
-            NodeRedScenarioBackend._validate_plan_envelope(scenario_id, _definition(), actions)  # noqa: SLF001
+            NodeRedScenarioBackend._validate_plan_envelope(  # noqa: SLF001
+                scenario_id,
+                _definition(),
+                actions,
+                expected_control_action=(
+                    expected_tambur
+                    if scenario_id == "system-tambur-adaptive-controller"
+                    else None
+                ),
+            )
 
 
 def test_system_branch_validator_accepts_exhaustive_real_source_plans() -> None:

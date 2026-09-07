@@ -395,16 +395,10 @@ class LightAutomationPriority:
                 )
             )
             if manual_target_ids:
-                # The tambur chandelier and spots are complementary sources.
-                # A manual chandelier must stay untouched without suppressing
-                # the spots that independently follow presence. Other light
-                # profiles keep the conservative whole-branch guard because
-                # their sources may be interchangeable.
-                guarded_target_ids = (
-                    manual_target_ids
-                    if scenario_id == _TAMBUR_ADAPTIVE_SCENARIO_ID
-                    else light_target_ids
-                )
+                # A direct choice of any interchangeable source owns the whole
+                # profile. Automation must not switch to another source around
+                # the user's choice or change appearance on a sibling output.
+                guarded_target_ids = light_target_ids
                 manual_claims = {
                     action.target_id: device.entity_id
                     for action, device in visible
@@ -951,6 +945,31 @@ class LightAutomationPriority:
     async def async_clear_ownership(self, entity_id: str) -> None:
         async with self._authority_lock:
             await self._async_clear_ownership_unlocked(entity_id)
+
+    async def async_release_manual_claims(
+        self, entity_ids: frozenset[str]
+    ) -> frozenset[str]:
+        """Release only confirmed manual markers after stable zone absence."""
+
+        async with self._authority_lock:
+            released = frozenset(
+                entity_id
+                for entity_id in entity_ids
+                if entity_id in self._manual_records
+            )
+            for entity_id in released:
+                self._manual_records.pop(entity_id, None)
+            if released:
+                self._dirty = True
+                await self._async_save_if_dirty()
+            return released
+
+    def manual_claim_entity_ids(
+        self, entity_ids: frozenset[str]
+    ) -> frozenset[str]:
+        """Return durable manual markers without granting or clearing authority."""
+
+        return frozenset(entity_ids & self._manual_records.keys())
 
     async def _async_clear_ownership_unlocked(self, entity_id: str) -> None:
         """Clear automation ownership while the shared authority lock is held."""

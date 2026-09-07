@@ -8,17 +8,41 @@ import math
 import time
 import uuid
 from collections.abc import Callable, Mapping
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..domain.scenario_controls import (
     OccupancyEvidence,
     ScenarioControlDocument,
+    brightness_sequence_deadline_ms,
+    brightness_sequence_step,
+    maximum_brightness,
     scenario_control_policy_to_payload,
 )
 
 STORAGE_SCENARIO_ID = "system-storage-light-controller"
 STORAGE_LIGHT_TARGET_ID = "entity_0ec37ef18b4b39a6"
 STORAGE_MOTION_TARGET_ID = "entity_00dcf0ebdc0bc6cb"
+TAMBUR_SCENARIO_ID = "system-tambur-adaptive-controller"
+TAMBUR_MOTION_TARGET_ID = "entity_10b78187426f8485"
+TAMBUR_PRESENCE_TARGET_IDS = (
+    "entity_156050daca86aa6c",
+    "entity_402b26d150a1ef3f",
+)
+TAMBUR_CHANDELIER_TARGET_ID = "entity_71859313239a14e4"
+TAMBUR_POINTS_TARGET_ID = "entity_cd0098e5ff95da46"
+TAMBUR_MIRROR_TARGET_ID = "entity_fbdf27871edb89bf"
+TAMBUR_POWER_TARGET_ID = "entity_b47991988cc6b9f3"
+TAMBUR_ENTRY_DOOR_TARGET_ID = "entity_170c7a4e2505b803"
+SMALL_CORRIDOR_SCENARIO_ID = "system-small-corridor-light-controller"
+SMALL_CORRIDOR_MOTION_TARGET_ID = "entity_a371cea02388be65"
+SMALL_CORRIDOR_LUX_TARGET_ID = "entity_2e306a9650ac5728"
+SMALL_CORRIDOR_RELAY_TARGET_ID = "entity_4be32416634e6416"
+SMALL_CORRIDOR_CHANDELIER_TARGET_ID = "entity_9ed909332fdaa8fd"
+SUN_TARGET_ID = "entity_6b9ccdab9bb484b2"
+_LIGHT_ACTION_IDS = frozenset(
+    {"turn_on", "turn_off", "set_brightness_percent", "set_color_temperature"}
+)
 _TRANSITIONS = frozenset(
     {
         "idle",
@@ -38,6 +62,21 @@ _TRANSITIONS = frozenset(
         "storage_exhaust_failed",
         "policy_changed",
         "stale_generation",
+        "presence_rise_pending",
+        "manual_release_pending",
+        "manual_release_completed",
+        "manual_profile_hold",
+        "lux_hold_pending",
+        "lux_too_bright",
+        "night_automatic_off",
+        "night_mirror_only",
+        "light_action",
+        "light_action_failed",
+        "brightness_sequence",
+        "brightness_sequence_failed",
+        "brightness_sequence_completed",
+        "controller_unknown",
+        "controller_idle",
     }
 )
 
@@ -58,11 +97,16 @@ def _empty_storage_record(policy_revision: int) -> dict[str, object]:
         "transition": "idle",
         "fractionalRemainder": 0.0,
         "correlationId": None,
+        "action": None,
+        "sequence": None,
+        "manualAbsenceStartedAtMs": None,
+        "luxCandidateSinceMs": None,
+        "welcomeArmed": True,
     }
 
 
 def _validated_storage_record(value: object) -> dict[str, object] | None:
-    if not isinstance(value, Mapping) or set(value) != {
+    legacy_keys = {
         "generation",
         "policyRevision",
         "evidence",
@@ -72,8 +116,28 @@ def _validated_storage_record(value: object) -> dict[str, object] | None:
         "transition",
         "fractionalRemainder",
         "correlationId",
-    }:
+    }
+    current_keys = legacy_keys | {
+        "action",
+        "sequence",
+        "manualAbsenceStartedAtMs",
+        "luxCandidateSinceMs",
+        "welcomeArmed",
+    }
+    if not isinstance(value, Mapping) or (
+        set(value) != legacy_keys and set(value) != current_keys
+    ):
         return None
+    normalized = dict(value)
+    for key, default in (
+        ("action", None),
+        ("sequence", None),
+        ("manualAbsenceStartedAtMs", None),
+        ("luxCandidateSinceMs", None),
+        ("welcomeArmed", True),
+    ):
+        normalized.setdefault(key, default)
+    value = normalized
     if (
         type(value.get("generation")) is not int
         or not 0 <= int(value["generation"]) <= 2**31 - 1
@@ -92,7 +156,13 @@ def _validated_storage_record(value: object) -> dict[str, object] | None:
         for item in evidence.values()
     ):
         return None
-    for key in ("absenceStartedAtMs", "deadlineMs", "exhaustDeadlineMs"):
+    for key in (
+        "absenceStartedAtMs",
+        "deadlineMs",
+        "exhaustDeadlineMs",
+        "manualAbsenceStartedAtMs",
+        "luxCandidateSinceMs",
+    ):
         item = value.get(key)
         if item is not None and (
             type(item) is not int or not 0 <= item <= 2**63 - 1
@@ -111,6 +181,34 @@ def _validated_storage_record(value: object) -> dict[str, object] | None:
         not isinstance(correlation, str) or not correlation or len(correlation) > 128
     ):
         return None
+    if type(value.get("welcomeArmed")) is not bool:
+        return None
+    action = value.get("action")
+    if action is not None and (
+        not isinstance(action, Mapping)
+        or set(action) != {"targetId", "actionId", "value"}
+        or not isinstance(action.get("targetId"), str)
+        or not 1 <= len(str(action["targetId"])) <= 128
+        or action.get("actionId") not in _LIGHT_ACTION_IDS
+        or action.get("value") is not None
+        and (type(action.get("value")) is not int or not 0 <= int(action["value"]) <= 6500)
+    ):
+        return None
+    sequence = value.get("sequence")
+    if sequence is not None and (
+        not isinstance(sequence, Mapping)
+        or set(sequence) != {
+            "kind", "startedAtMs", "deadlineMs", "start", "target", "current"
+        }
+        or sequence.get("kind") not in {"ramp", "fade", "cap"}
+        or any(
+            type(sequence.get(key)) is not int
+            for key in ("startedAtMs", "deadlineMs", "start", "target", "current")
+        )
+        or not 0 <= int(sequence["startedAtMs"]) < int(sequence["deadlineMs"]) <= 2**63 - 1
+        or any(not 0 <= int(sequence[key]) <= 100 for key in ("start", "target", "current"))
+    ):
+        return None
     record = copy.deepcopy(dict(value))
     record["evidence"] = copy.deepcopy(dict(evidence))
     record["fractionalRemainder"] = float(remainder)
@@ -118,13 +216,18 @@ def _validated_storage_record(value: object) -> dict[str, object] | None:
 
 
 def valid_scenario_control_state_payload(value: object) -> bool:
-    """Validate the exact single-record controller state document."""
+    """Validate the legacy storage record or the complete controller state."""
 
+    if not isinstance(value, Mapping) or value.get("version") != 1:
+        return False
+    if set(value) == {"version", "storage"}:
+        return _validated_storage_record(value.get("storage")) is not None
     return bool(
-        isinstance(value, Mapping)
-        and set(value) == {"version", "storage"}
-        and value.get("version") == 1
-        and _validated_storage_record(value.get("storage")) is not None
+        set(value) == {"version", "storage", "tambur", "smallCorridor"}
+        and all(
+            _validated_storage_record(value.get(key)) is not None
+            for key in ("storage", "tambur", "smallCorridor")
+        )
     )
 
 
@@ -143,6 +246,7 @@ class ScenarioControlCoordinator:
         storage_motion_target_id: str | None = STORAGE_MOTION_TARGET_ID,
         storage_presence_target_id: str | None = None,
         now_ms: Callable[[], int] | None = None,
+        now: Callable[[], datetime] | None = None,
         schedule_tasks: bool = True,
     ) -> None:
         self._hass = hass
@@ -154,10 +258,14 @@ class ScenarioControlCoordinator:
         self._storage_motion_target_id = storage_motion_target_id
         self._storage_presence_target_id = storage_presence_target_id
         self._now_ms = now_ms or (lambda: time.time_ns() // 1_000_000)
+        self._now = now
         self._schedule_tasks = schedule_tasks
         self._storage = _empty_storage_record(0)
+        self._tambur = _empty_storage_record(0)
+        self._small_corridor = _empty_storage_record(0)
         self._light_task: asyncio.Task[None] | None = None
         self._exhaust_task: asyncio.Task[None] | None = None
+        self._zone_tasks: dict[str, asyncio.Task[None]] = {}
         self._lock = asyncio.Lock()
         self._decision_lock = asyncio.Lock()
         self._remove_policy_observer: Callable[[], None] | None = None
@@ -169,13 +277,17 @@ class ScenarioControlCoordinator:
     def owned_scenario_ids(self) -> frozenset[str]:
         """Scenario IDs whose device and clock triggers are coordinated here."""
 
-        return frozenset({STORAGE_SCENARIO_ID})
+        return frozenset(
+            {STORAGE_SCENARIO_ID, TAMBUR_SCENARIO_ID, SMALL_CORRIDOR_SCENARIO_ID}
+        )
 
     async def async_load(self) -> None:
         document = self._policy_service.current
         payload = await self._store.async_load()
         if payload is None:
             self._storage = _empty_storage_record(document.policy_revision)
+            self._tambur = _empty_storage_record(document.policy_revision)
+            self._small_corridor = _empty_storage_record(document.policy_revision)
             await self._save()
         elif not valid_scenario_control_state_payload(payload):
             raise RuntimeError("scenario control state storage is invalid")
@@ -183,16 +295,47 @@ class ScenarioControlCoordinator:
             record = _validated_storage_record(payload["storage"])
             assert record is not None
             self._storage = record
+            tambur = _validated_storage_record(payload.get("tambur"))
+            small = _validated_storage_record(payload.get("smallCorridor"))
+            self._tambur = tambur or _empty_storage_record(document.policy_revision)
+            self._small_corridor = small or _empty_storage_record(document.policy_revision)
+            if set(payload) == {"version", "storage"}:
+                await self._save()
         if getattr(self._store, "recovered_previous", False):
-            self._storage = _empty_storage_record(document.policy_revision)
-            self._storage["transition"] = "stale_generation"
+            for record in (
+                self._storage,
+                self._tambur,
+                self._small_corridor,
+            ):
+                record.clear()
+                record.update(_empty_storage_record(document.policy_revision))
+                record["transition"] = "stale_generation"
             await self._save()
-        elif self._storage["policyRevision"] != document.policy_revision:
-            self._storage = self._next_record(
+        elif any(
+            record["policyRevision"] != document.policy_revision
+            for record in (self._storage, self._tambur, self._small_corridor)
+        ):
+            self._storage = self._next_record_for(
+                self._storage,
                 transition="policy_changed",
                 policy_revision=document.policy_revision,
                 clear_absence=True,
                 clear_exhaust=True,
+                clear_sequence=True,
+            )
+            self._tambur = self._next_record_for(
+                self._tambur,
+                transition="policy_changed",
+                policy_revision=document.policy_revision,
+                clear_absence=True,
+                clear_sequence=True,
+            )
+            self._small_corridor = self._next_record_for(
+                self._small_corridor,
+                transition="policy_changed",
+                policy_revision=document.policy_revision,
+                clear_absence=True,
+                clear_sequence=True,
             )
             await self._save()
         self._remove_policy_observer = self._policy_service.add_observer(
@@ -214,15 +357,22 @@ class ScenarioControlCoordinator:
                 return
             data = getattr(event, "data", {})
             entity_id = data.get("entity_id") if isinstance(data, Mapping) else None
-            if entity_id not in self._storage_entity_ids():
-                return
-            await self.async_handle_storage_change()
+            if entity_id in self._storage_entity_ids():
+                await self.async_handle_storage_change()
+            if entity_id in self._tambur_entity_ids():
+                await self.async_handle_tambur_change(
+                    trigger_entity_id=entity_id,
+                    old_state=data.get("old_state"),
+                    new_state=data.get("new_state"),
+                )
+            if entity_id in self._small_corridor_entity_ids():
+                await self.async_handle_small_corridor_change()
 
         unsubscribe = bus.async_listen("state_changed", state_changed)
         getattr(entry, "async_on_unload")(unsubscribe)
         getattr(entry, "async_on_unload")(self.stop_runtime)
         self._started = True
-        self._rearm_exhaust_schedule()
+        self._rearm_schedules()
 
     def activate(self) -> None:
         """Reconcile durable state once the shared activation latch is open."""
@@ -240,6 +390,16 @@ class ScenarioControlCoordinator:
                     await self.async_reconcile_storage_exhaust_due()
                 else:
                     self._schedule_exhaust_due()
+            await self.async_handle_tambur_change(
+                recovery=True,
+                allow_activation=False,
+            )
+            await self.async_handle_small_corridor_change(
+                recovery=True,
+                allow_activation=False,
+            )
+            self._schedule_zone_due(TAMBUR_SCENARIO_ID)
+            self._schedule_zone_due(SMALL_CORRIDOR_SCENARIO_ID)
 
         create_task = getattr(self._hass, "async_create_task", None)
         coroutine = reconcile()
@@ -254,7 +414,12 @@ class ScenarioControlCoordinator:
 
     @property
     def payload(self) -> dict[str, object]:
-        return {"version": 1, "storage": self.storage_state}
+        return {
+            "version": 1,
+            "storage": self.storage_state,
+            "tambur": copy.deepcopy(self._tambur),
+            "smallCorridor": copy.deepcopy(self._small_corridor),
+        }
 
     @property
     def storage_remaining_seconds(self) -> int | None:
@@ -271,17 +436,18 @@ class ScenarioControlCoordinator:
     ) -> dict[str, object]:
         """Return only server state, never fields from the trigger body."""
 
-        del trigger
         document: ScenarioControlDocument = self._policy_service.current
         policy = scenario_control_policy_to_payload(document.policy)
-        if scenario_id != STORAGE_SCENARIO_ID:
+        record = self._record_for_scenario(scenario_id)
+        manual = trigger.get("source") == "manual"
+        if record is None:
             state: dict[str, object] = {
                 "ready": False,
                 "transition": "incomplete",
                 "correlationId": run_id,
             }
         else:
-            state = self.storage_state
+            state = copy.deepcopy(record)
             matching = (
                 state.get("correlationId") == run_id
                 and state.get("policyRevision") == document.policy_revision
@@ -292,9 +458,10 @@ class ScenarioControlCoordinator:
                 and self._now_ms() - absence_started
                 >= document.policy.absence_confirmation_seconds * 1000
             )
-            state["ready"] = matching
+            state["ready"] = matching or manual
             if not matching:
-                state["transition"] = "stale_generation"
+                if not manual:
+                    state["transition"] = "stale_generation"
         return {
             "policyRevision": document.policy_revision,
             "policy": policy,
@@ -539,6 +706,846 @@ class ScenarioControlCoordinator:
             clear_exhaust=True,
         )
 
+    async def async_handle_tambur_change(
+        self,
+        *,
+        recovery: bool = False,
+        allow_activation: bool = True,
+        trigger_entity_id: str | None = None,
+        old_state: object = None,
+        new_state: object = None,
+    ) -> None:
+        """Derive one bounded tambur action from current server evidence."""
+
+        async with self._decision_lock:
+            await self._async_handle_tambur_change(
+                recovery=recovery,
+                allow_activation=allow_activation,
+                trigger_entity_id=trigger_entity_id,
+                old_state=old_state,
+                new_state=new_state,
+            )
+
+    async def _async_handle_tambur_change(
+        self,
+        *,
+        recovery: bool,
+        allow_activation: bool,
+        trigger_entity_id: str | None,
+        old_state: object,
+        new_state: object,
+    ) -> None:
+        motion = self._target_state(TAMBUR_MOTION_TARGET_ID)
+        presence = self._combined_target_state(TAMBUR_PRESENCE_TARGET_IDS)
+        chandelier = self._target_state(TAMBUR_CHANDELIER_TARGET_ID)
+        evidence = self._evidence_payload(motion, presence, chandelier, None)
+        if self._failed_with_same_evidence(self._tambur, evidence):
+            return
+        sun_entity = self._target_entity_id(SUN_TARGET_ID)
+        sun_changed_to_evening = bool(
+            trigger_entity_id == sun_entity
+            and self._state_value(old_state) != "below_horizon"
+            and self._state_value(new_state) == "below_horizon"
+        )
+        if (
+            (sun_changed_to_evening or recovery and self._tambur_band() == "evening")
+            and self._target_state(TAMBUR_MIRROR_TARGET_ID) == "off"
+            and not self._manual_claims((TAMBUR_MIRROR_TARGET_ID,))
+        ):
+            await self._run_zone_action(
+                TAMBUR_SCENARIO_ID,
+                TAMBUR_MIRROR_TARGET_ID,
+                "turn_on",
+                None,
+                evidence=evidence,
+            )
+            if sun_changed_to_evening:
+                await self._start_tambur_evening_cap_if_owned()
+            return
+        if sun_changed_to_evening:
+            await self._start_tambur_evening_cap_if_owned()
+            return
+        door_entity = self._target_entity_id(TAMBUR_ENTRY_DOOR_TARGET_ID)
+        if trigger_entity_id == door_entity:
+            old = self._state_value(old_state)
+            new = self._state_value(new_state)
+            if new == "locked" and old != new:
+                await self._set_zone_transition(
+                    TAMBUR_SCENARIO_ID,
+                    "controller_idle",
+                    evidence=evidence,
+                    welcome_armed=True,
+                    clear_absence=True,
+                    clear_sequence=True,
+                    clear_manual_absence=True,
+                )
+            elif new == "unlocked" and old != new and self._tambur["welcomeArmed"]:
+                await self._set_zone_transition(
+                    TAMBUR_SCENARIO_ID,
+                    "controller_idle",
+                    evidence=evidence,
+                    welcome_armed=False,
+                )
+                # The welcome follows the same safe occupancy profile once.
+                motion = "on"
+        occupied = await self._confirmed_occupancy(
+            TAMBUR_SCENARIO_ID,
+            motion,
+            presence,
+            evidence,
+            recovery=recovery,
+        )
+        if occupied is None:
+            if (
+                OccupancyEvidence.from_states(motion, presence)
+                is OccupancyEvidence.UNKNOWN
+            ):
+                self._cancel_zone_task(TAMBUR_SCENARIO_ID)
+                await self._set_zone_transition(
+                    TAMBUR_SCENARIO_ID,
+                    "controller_unknown",
+                    evidence=evidence,
+                    clear_absence=True,
+                    clear_sequence=True,
+                    clear_manual_absence=True,
+                )
+            return
+        if occupied is False:
+            await self._handle_zone_absence(
+                TAMBUR_SCENARIO_ID,
+                (TAMBUR_CHANDELIER_TARGET_ID, TAMBUR_POINTS_TARGET_ID),
+                evidence,
+            )
+            return
+        await self._clear_manual_absence(TAMBUR_SCENARIO_ID, evidence)
+        if self._manual_claims(
+            (TAMBUR_CHANDELIER_TARGET_ID, TAMBUR_POINTS_TARGET_ID)
+        ):
+            self._cancel_zone_task(TAMBUR_SCENARIO_ID)
+            await self._set_zone_transition(
+                TAMBUR_SCENARIO_ID,
+                "manual_profile_hold",
+                evidence=evidence,
+                clear_absence=True,
+                clear_sequence=True,
+                clear_manual_absence=True,
+            )
+            return
+        active_sequence = self._tambur.get("sequence")
+        if isinstance(active_sequence, Mapping) and active_sequence.get("kind") == "fade":
+            self._cancel_zone_task(TAMBUR_SCENARIO_ID)
+            await self._set_zone_transition(
+                TAMBUR_SCENARIO_ID,
+                "controller_idle",
+                evidence=evidence,
+                clear_absence=True,
+                clear_sequence=True,
+            )
+        band = self._tambur_band()
+        if band == "night":
+            await self._turn_off_owned_targets(
+                TAMBUR_SCENARIO_ID,
+                (TAMBUR_CHANDELIER_TARGET_ID, TAMBUR_POINTS_TARGET_ID),
+            )
+            await self._set_zone_transition(
+                TAMBUR_SCENARIO_ID,
+                "night_mirror_only",
+                evidence=evidence,
+                clear_absence=True,
+                clear_sequence=True,
+            )
+            return
+        if self._tambur.get("sequence") is not None:
+            self._schedule_zone_due(TAMBUR_SCENARIO_ID)
+            return
+        brightness = self._target_brightness_percent(TAMBUR_CHANDELIER_TARGET_ID)
+        cap = self._tambur_cap_percent(band)
+        if chandelier == "off":
+            if not allow_activation:
+                await self._set_zone_transition(
+                    TAMBUR_SCENARIO_ID,
+                    "controller_idle",
+                    evidence=evidence,
+                    clear_sequence=True,
+                )
+                return
+            if not await self._run_zone_action(
+                TAMBUR_SCENARIO_ID,
+                TAMBUR_CHANDELIER_TARGET_ID,
+                "set_brightness_percent",
+                5,
+                evidence=evidence,
+            ):
+                return
+            await self._start_brightness_sequence(
+                TAMBUR_SCENARIO_ID, "ramp", 5, cap
+            )
+            return
+        if chandelier not in {"on", "off"} or brightness is None:
+            await self._set_zone_transition(
+                TAMBUR_SCENARIO_ID,
+                "controller_unknown",
+                evidence=evidence,
+                clear_sequence=True,
+            )
+            return
+        if brightness != cap:
+            duration = (
+                self._seconds_until_clock(self._policy_service.current.policy.tambur_main_off)
+                if brightness > cap and band == "evening"
+                else self._policy_service.current.policy.brightness_ramp_seconds
+            )
+            await self._start_brightness_sequence(
+                TAMBUR_SCENARIO_ID,
+                "cap" if brightness > cap else "ramp",
+                brightness,
+                cap,
+                duration_seconds=max(1, duration),
+            )
+            return
+        target_kelvin = (
+            self._zone_color_temperature(TAMBUR_SCENARIO_ID, evening=True)
+            if band == "evening"
+            else self._zone_color_temperature(TAMBUR_SCENARIO_ID, evening=False)
+        )
+        if self._target_color_temperature(TAMBUR_CHANDELIER_TARGET_ID) != target_kelvin:
+            await self._run_zone_action(
+                TAMBUR_SCENARIO_ID,
+                TAMBUR_CHANDELIER_TARGET_ID,
+                "set_color_temperature",
+                target_kelvin,
+                evidence=evidence,
+            )
+            return
+        if self._target_state(TAMBUR_POINTS_TARGET_ID) == "off":
+            await self._run_zone_action(
+                TAMBUR_SCENARIO_ID,
+                TAMBUR_POINTS_TARGET_ID,
+                "turn_on",
+                None,
+                evidence=evidence,
+            )
+            return
+        if band == "evening" and await self._start_tambur_evening_cap_if_owned():
+            return
+        await self._set_zone_transition(
+            TAMBUR_SCENARIO_ID,
+            "occupied_hold",
+            evidence=evidence,
+            clear_absence=True,
+        )
+
+    async def async_handle_small_corridor_change(
+        self,
+        *,
+        recovery: bool = False,
+        allow_activation: bool = True,
+    ) -> None:
+        """Derive one bounded small-corridor action from live sensor evidence."""
+
+        async with self._decision_lock:
+            motion = self._target_state(SMALL_CORRIDOR_MOTION_TARGET_ID)
+            chandelier = self._target_state(SMALL_CORRIDOR_CHANDELIER_TARGET_ID)
+            evidence = self._evidence_payload(motion, None, chandelier, None)
+            if self._failed_with_same_evidence(self._small_corridor, evidence):
+                return
+            if motion == "on":
+                occupied: bool | None = True
+            elif motion == "off":
+                occupied = False
+            else:
+                occupied = None
+            if occupied is None:
+                self._cancel_zone_task(SMALL_CORRIDOR_SCENARIO_ID)
+                await self._set_zone_transition(
+                    SMALL_CORRIDOR_SCENARIO_ID,
+                    "controller_unknown",
+                    evidence=evidence,
+                    clear_absence=True,
+                    clear_sequence=True,
+                    clear_lux_candidate=True,
+                )
+                return
+            if not occupied:
+                await self._handle_zone_absence(
+                    SMALL_CORRIDOR_SCENARIO_ID,
+                    (SMALL_CORRIDOR_RELAY_TARGET_ID, SMALL_CORRIDOR_CHANDELIER_TARGET_ID),
+                    evidence,
+                )
+                return
+            await self._clear_manual_absence(SMALL_CORRIDOR_SCENARIO_ID, evidence)
+            if self._manual_claims(
+                (SMALL_CORRIDOR_RELAY_TARGET_ID, SMALL_CORRIDOR_CHANDELIER_TARGET_ID)
+            ):
+                self._cancel_zone_task(SMALL_CORRIDOR_SCENARIO_ID)
+                await self._set_zone_transition(
+                    SMALL_CORRIDOR_SCENARIO_ID,
+                    "manual_profile_hold",
+                    evidence=evidence,
+                    clear_absence=True,
+                    clear_sequence=True,
+                    clear_manual_absence=True,
+                )
+                return
+            active_sequence = self._small_corridor.get("sequence")
+            if (
+                isinstance(active_sequence, Mapping)
+                and active_sequence.get("kind") == "fade"
+            ):
+                self._cancel_zone_task(SMALL_CORRIDOR_SCENARIO_ID)
+                await self._set_zone_transition(
+                    SMALL_CORRIDOR_SCENARIO_ID,
+                    "controller_idle",
+                    evidence=evidence,
+                    clear_absence=True,
+                    clear_sequence=True,
+                )
+            band = self._small_corridor_band()
+            if band == "night":
+                await self._turn_off_owned_targets(
+                    SMALL_CORRIDOR_SCENARIO_ID,
+                    (
+                        SMALL_CORRIDOR_CHANDELIER_TARGET_ID,
+                        SMALL_CORRIDOR_RELAY_TARGET_ID,
+                    ),
+                )
+                await self._set_zone_transition(
+                    SMALL_CORRIDOR_SCENARIO_ID,
+                    "night_automatic_off",
+                    evidence=evidence,
+                    clear_sequence=True,
+                    clear_lux_candidate=True,
+                )
+                return
+            if self._small_corridor.get("sequence") is not None:
+                self._schedule_zone_due(SMALL_CORRIDOR_SCENARIO_ID)
+                return
+            brightness = self._target_brightness_percent(
+                SMALL_CORRIDOR_CHANDELIER_TARGET_ID
+            )
+            cap = 5 if band == "late" else 80
+            if chandelier == "off":
+                if not allow_activation:
+                    await self._set_zone_transition(
+                        SMALL_CORRIDOR_SCENARIO_ID,
+                        "controller_idle",
+                        evidence=evidence,
+                        clear_sequence=True,
+                        clear_lux_candidate=True,
+                    )
+                    return
+                if band == "day" and not await self._small_corridor_lux_allows_on(
+                    evidence
+                ):
+                    return
+                if not await self._run_zone_action(
+                    SMALL_CORRIDOR_SCENARIO_ID,
+                    SMALL_CORRIDOR_CHANDELIER_TARGET_ID,
+                    "set_brightness_percent",
+                    5,
+                    evidence=evidence,
+                ):
+                    return
+                await self._start_brightness_sequence(
+                    SMALL_CORRIDOR_SCENARIO_ID, "ramp", 5, cap
+                )
+                return
+            if chandelier not in {"on", "off"} or brightness is None:
+                await self._set_zone_transition(
+                    SMALL_CORRIDOR_SCENARIO_ID,
+                    "controller_unknown",
+                    evidence=evidence,
+                    clear_sequence=True,
+                )
+                return
+            # A lit lamp contaminates local lux. Never derive an off decision
+            # or reset the dark hold from its own light.
+            if brightness != cap:
+                await self._start_brightness_sequence(
+                    SMALL_CORRIDOR_SCENARIO_ID,
+                    "cap" if brightness > cap else "ramp",
+                    brightness,
+                    cap,
+                )
+                return
+            target_kelvin = (
+                self._zone_color_temperature(
+                    SMALL_CORRIDOR_SCENARIO_ID, evening=True
+                )
+                if band == "late"
+                else self._zone_color_temperature(
+                    SMALL_CORRIDOR_SCENARIO_ID, evening=False
+                )
+            )
+            if self._target_color_temperature(SMALL_CORRIDOR_CHANDELIER_TARGET_ID) != target_kelvin:
+                await self._run_zone_action(
+                    SMALL_CORRIDOR_SCENARIO_ID,
+                    SMALL_CORRIDOR_CHANDELIER_TARGET_ID,
+                    "set_color_temperature",
+                    target_kelvin,
+                    evidence=evidence,
+                )
+                return
+            await self._set_zone_transition(
+                SMALL_CORRIDOR_SCENARIO_ID,
+                "occupied_hold",
+                evidence=evidence,
+                clear_absence=True,
+                clear_lux_candidate=True,
+            )
+
+    async def _small_corridor_lux_allows_on(
+        self, evidence: Mapping[str, object]
+    ) -> bool:
+        lux = self._target_numeric_state(SMALL_CORRIDOR_LUX_TARGET_ID)
+        policy = self._policy_service.current.policy
+        if lux is None:
+            await self._set_zone_transition(
+                SMALL_CORRIDOR_SCENARIO_ID,
+                "controller_unknown",
+                evidence=evidence,
+                clear_lux_candidate=True,
+            )
+            return False
+        dark_limit = policy.small_corridor_lux_threshold - policy.lux_hysteresis
+        if lux >= dark_limit:
+            await self._set_zone_transition(
+                SMALL_CORRIDOR_SCENARIO_ID,
+                "lux_too_bright",
+                evidence=evidence,
+                clear_lux_candidate=True,
+            )
+            return False
+        started = self._small_corridor.get("luxCandidateSinceMs")
+        if type(started) is not int:
+            started = self._now_ms()
+            await self._set_zone_transition(
+                SMALL_CORRIDOR_SCENARIO_ID,
+                "lux_hold_pending",
+                evidence=evidence,
+                lux_candidate_since_ms=started,
+                deadline_ms=started + policy.lux_hold_seconds * 1000,
+            )
+            self._schedule_zone_due(SMALL_CORRIDOR_SCENARIO_ID)
+            return policy.lux_hold_seconds == 0
+        if self._now_ms() - started < policy.lux_hold_seconds * 1000:
+            self._schedule_zone_due(SMALL_CORRIDOR_SCENARIO_ID)
+            return False
+        return True
+
+    async def _confirmed_occupancy(
+        self,
+        scenario_id: str,
+        motion: object,
+        presence: object,
+        evidence: Mapping[str, object],
+        *,
+        recovery: bool,
+    ) -> bool | None:
+        if motion == "on":
+            return True
+        if presence == "on":
+            policy = self._policy_service.current.policy
+            record = self._record_for_scenario(scenario_id)
+            assert record is not None
+            if record.get("transition") == "presence_rise_pending":
+                deadline = record.get("deadlineMs")
+                if type(deadline) is int and self._now_ms() >= deadline:
+                    return True
+                self._schedule_zone_due(scenario_id)
+                return False if recovery and type(deadline) is not int else None
+            started = self._now_ms()
+            await self._set_zone_transition(
+                scenario_id,
+                "presence_rise_pending",
+                evidence=evidence,
+                absence_started_at_ms=started,
+                deadline_ms=started + policy.presence_rise_seconds * 1000,
+                clear_sequence=True,
+            )
+            self._schedule_zone_due(scenario_id)
+            return True if policy.presence_rise_seconds == 0 else None
+        evidence_value = OccupancyEvidence.from_states(motion, presence)
+        if evidence_value is OccupancyEvidence.ABSENT:
+            return False
+        return None
+
+    async def _handle_zone_absence(
+        self,
+        scenario_id: str,
+        target_ids: tuple[str, ...],
+        evidence: Mapping[str, object],
+    ) -> None:
+        record = self._record_for_scenario(scenario_id)
+        assert record is not None
+        first_absence = bool(
+            record.get("transition") == "presence_rise_pending"
+            or type(record.get("absenceStartedAtMs")) is not int
+        )
+        if first_absence:
+            await self._set_zone_transition(
+                scenario_id,
+                "controller_idle",
+                evidence=evidence,
+                absence_started_at_ms=self._now_ms(),
+            )
+            record = self._record_for_scenario(scenario_id)
+            assert record is not None
+        claims = self._manual_claims(target_ids)
+        if claims:
+            started = record.get("manualAbsenceStartedAtMs")
+            if type(started) is not int:
+                started = self._now_ms()
+                await self._set_zone_transition(
+                    scenario_id,
+                    "manual_release_pending",
+                    evidence=evidence,
+                    manual_absence_started_at_ms=started,
+                    deadline_ms=(
+                        started
+                        + self._policy_service.current.policy.manual_release_seconds
+                        * 1000
+                    ),
+                    clear_sequence=True,
+                )
+                self._schedule_zone_due(scenario_id)
+                return
+            deadline = started + self._policy_service.current.policy.manual_release_seconds * 1000
+            if self._now_ms() < deadline:
+                self._schedule_zone_due(scenario_id)
+                return
+            await self._light_priority.async_release_manual_claims(claims)
+            await self._set_zone_transition(
+                scenario_id,
+                "manual_release_completed",
+                evidence=evidence,
+                clear_absence=True,
+                clear_sequence=True,
+                clear_manual_absence=True,
+            )
+        absence_started = record.get("absenceStartedAtMs")
+        assert type(absence_started) is int
+        confirmation_deadline = (
+            absence_started
+            + self._policy_service.current.policy.absence_confirmation_seconds
+            * 1000
+        )
+        if self._now_ms() < confirmation_deadline:
+            await self._set_zone_transition(
+                scenario_id,
+                "absence_pending",
+                evidence=evidence,
+                absence_started_at_ms=absence_started,
+                deadline_ms=confirmation_deadline,
+            )
+            self._schedule_zone_due(scenario_id)
+            return
+        await self._clear_manual_absence(scenario_id, evidence)
+        primary = target_ids[-1] if scenario_id == SMALL_CORRIDOR_SCENARIO_ID else target_ids[0]
+        entity_id = self._target_entity_id(primary)
+        brightness = self._target_brightness_percent(primary)
+        if (
+            entity_id is None
+            or self._target_state(primary) != "on"
+            or brightness is None
+            or not self._light_priority.is_owned(entity_id, self._hass)
+        ):
+            self._cancel_zone_task(scenario_id)
+            await self._set_zone_transition(
+                scenario_id,
+                "controller_idle",
+                evidence=evidence,
+                clear_absence=True,
+                clear_sequence=True,
+            )
+            return
+        if record.get("sequence") is not None:
+            self._schedule_zone_due(scenario_id)
+            return
+        if (
+            not first_absence
+            and record.get("transition") == "brightness_sequence_completed"
+        ):
+            return
+        policy = self._policy_service.current.policy
+        floor = (
+            policy.evening_brightness_floor_percent
+            if self._is_evening_or_night()
+            else policy.day_brightness_floor_percent
+        )
+        target = max(
+            floor,
+            round(brightness * (100 - policy.relative_fade_percent) / 100),
+        )
+        if target == brightness:
+            await self._set_zone_transition(
+                scenario_id,
+                "controller_idle",
+                evidence=evidence,
+                clear_absence=True,
+            )
+            return
+        target_kelvin = self._zone_color_temperature(scenario_id, evening=True)
+        if self._target_color_temperature(primary) != target_kelvin:
+            if not await self._run_zone_action(
+                scenario_id,
+                primary,
+                "set_color_temperature",
+                target_kelvin,
+                evidence=evidence,
+            ):
+                return
+        await self._start_brightness_sequence(
+            scenario_id,
+            "fade",
+            brightness,
+            target,
+            duration_seconds=policy.relative_fade_period_seconds,
+            started_at_ms=absence_started,
+            evidence=evidence,
+        )
+
+    async def _clear_manual_absence(
+        self, scenario_id: str, evidence: Mapping[str, object]
+    ) -> None:
+        record = self._record_for_scenario(scenario_id)
+        if record is not None and record.get("manualAbsenceStartedAtMs") is not None:
+            await self._set_zone_transition(
+                scenario_id,
+                "controller_idle",
+                evidence=evidence,
+                clear_manual_absence=True,
+                clear_absence=True,
+            )
+
+    async def _start_brightness_sequence(
+        self,
+        scenario_id: str,
+        kind: str,
+        start: int,
+        target: int,
+        *,
+        duration_seconds: int | None = None,
+        started_at_ms: int | None = None,
+        evidence: Mapping[str, object] | None = None,
+    ) -> None:
+        if start == target:
+            return
+        duration = duration_seconds or self._policy_service.current.policy.brightness_ramp_seconds
+        started = self._now_ms() if started_at_ms is None else started_at_ms
+        sequence = {
+            "kind": kind,
+            "startedAtMs": started,
+            "deadlineMs": started + duration * 1000,
+            "start": start,
+            "target": target,
+            "current": start,
+        }
+        await self._set_zone_transition(
+            scenario_id,
+            "brightness_sequence",
+            evidence=evidence,
+            sequence=sequence,
+            clear_absence=kind != "fade",
+        )
+        self._schedule_zone_due(scenario_id)
+
+    async def async_reconcile_zone_due(self, scenario_id: str) -> None:
+        async with self._decision_lock:
+            record = self._record_for_scenario(scenario_id)
+            if record is None or scenario_id == STORAGE_SCENARIO_ID:
+                return
+            sequence = record.get("sequence")
+            if isinstance(sequence, Mapping):
+                current = int(sequence["current"])
+                due = brightness_sequence_deadline_ms(
+                    int(sequence["startedAtMs"]),
+                    int(sequence["deadlineMs"]),
+                    int(sequence["start"]),
+                    int(sequence["target"]),
+                    current,
+                )
+                if due is None:
+                    await self._set_zone_transition(
+                        scenario_id,
+                        "brightness_sequence_completed",
+                        clear_sequence=True,
+                    )
+                    return
+                if self._now_ms() < due:
+                    self._schedule_zone_due(scenario_id)
+                    return
+                target_id = (
+                    TAMBUR_CHANDELIER_TARGET_ID
+                    if scenario_id == TAMBUR_SCENARIO_ID
+                    else SMALL_CORRIDOR_CHANDELIER_TARGET_ID
+                )
+                next_value, remainder = brightness_sequence_step(
+                    current,
+                    start=int(sequence["start"]),
+                    target=int(sequence["target"]),
+                    started_at_ms=int(sequence["startedAtMs"]),
+                    deadline_ms=int(sequence["deadlineMs"]),
+                    now_ms=self._now_ms(),
+                )
+                if not await self._run_zone_action(
+                    scenario_id,
+                    target_id,
+                    "set_brightness_percent",
+                    next_value,
+                ):
+                    await self._set_zone_transition(
+                        scenario_id,
+                        "brightness_sequence_failed",
+                        clear_sequence=True,
+                    )
+                    return
+                updated = dict(sequence)
+                updated["current"] = next_value
+                if next_value == int(sequence["target"]):
+                    await self._set_zone_transition(
+                        scenario_id,
+                        "brightness_sequence_completed",
+                        clear_sequence=True,
+                    )
+                    if scenario_id == TAMBUR_SCENARIO_ID:
+                        await self._async_handle_tambur_change(
+                            recovery=True,
+                            allow_activation=True,
+                            trigger_entity_id=None,
+                            old_state=None,
+                            new_state=None,
+                        )
+                    elif self._target_state(SMALL_CORRIDOR_MOTION_TARGET_ID) == "on":
+                        band = self._small_corridor_band()
+                        target_kelvin = (
+                            self._zone_color_temperature(
+                                SMALL_CORRIDOR_SCENARIO_ID, evening=True
+                            )
+                            if band == "late"
+                            else self._zone_color_temperature(
+                                SMALL_CORRIDOR_SCENARIO_ID, evening=False
+                            )
+                        )
+                        if (
+                            self._target_color_temperature(
+                                SMALL_CORRIDOR_CHANDELIER_TARGET_ID
+                            )
+                            != target_kelvin
+                        ):
+                            await self._run_zone_action(
+                                SMALL_CORRIDOR_SCENARIO_ID,
+                                SMALL_CORRIDOR_CHANDELIER_TARGET_ID,
+                                "set_color_temperature",
+                                target_kelvin,
+                            )
+                        else:
+                            await self._set_zone_transition(
+                                SMALL_CORRIDOR_SCENARIO_ID,
+                                "occupied_hold",
+                                clear_absence=True,
+                                clear_lux_candidate=True,
+                            )
+                else:
+                    await self._set_zone_transition(
+                        scenario_id,
+                        "brightness_sequence",
+                        sequence=updated,
+                    )
+                    current_record = self._record_for_scenario(scenario_id)
+                    assert current_record is not None
+                    current_record["fractionalRemainder"] = remainder
+                    await self._save()
+                    self._schedule_zone_due(scenario_id)
+                return
+            deadline = record.get("deadlineMs")
+            if type(deadline) is int and self._now_ms() < deadline:
+                self._schedule_zone_due(scenario_id)
+                return
+            if scenario_id == TAMBUR_SCENARIO_ID:
+                await self._async_handle_tambur_change(
+                    recovery=True,
+                    allow_activation=True,
+                    trigger_entity_id=None,
+                    old_state=None,
+                    new_state=None,
+                )
+            else:
+                # Avoid reacquiring the decision lock via the public wrapper.
+                motion = self._target_state(SMALL_CORRIDOR_MOTION_TARGET_ID)
+                if motion == "on" and record.get("transition") == "lux_hold_pending":
+                    evidence = self._evidence_payload(
+                        motion,
+                        None,
+                        self._target_state(SMALL_CORRIDOR_CHANDELIER_TARGET_ID),
+                        None,
+                    )
+                    if await self._small_corridor_lux_allows_on(evidence):
+                        if await self._run_zone_action(
+                            SMALL_CORRIDOR_SCENARIO_ID,
+                            SMALL_CORRIDOR_CHANDELIER_TARGET_ID,
+                            "set_brightness_percent",
+                            5,
+                            evidence=evidence,
+                        ):
+                            await self._start_brightness_sequence(
+                                SMALL_CORRIDOR_SCENARIO_ID, "ramp", 5, 80
+                            )
+                else:
+                    await self._handle_zone_absence(
+                        SMALL_CORRIDOR_SCENARIO_ID,
+                        (SMALL_CORRIDOR_RELAY_TARGET_ID, SMALL_CORRIDOR_CHANDELIER_TARGET_ID),
+                        self._evidence_payload(
+                            motion,
+                            None,
+                            self._target_state(SMALL_CORRIDOR_CHANDELIER_TARGET_ID),
+                            None,
+                        ),
+                    )
+
+    async def _run_zone_action(
+        self,
+        scenario_id: str,
+        target_id: str,
+        action_id: str,
+        value: int | None,
+        *,
+        evidence: Mapping[str, object] | None = None,
+    ) -> bool:
+        correlation = f"{scenario_id.rsplit('-', 2)[0]}.{uuid.uuid4().hex}"
+        await self._set_zone_transition(
+            scenario_id,
+            "light_action",
+            evidence=evidence,
+            correlation_id=correlation,
+            action={"targetId": target_id, "actionId": action_id, "value": value},
+        )
+        try:
+            result = await self._scenario_service.async_run_scenario(
+                scenario_id,
+                correlation_id=correlation,
+                trigger_context={
+                    "source": "scenario_control",
+                    "trigger_id": "light_action",
+                    "recovery": False,
+                },
+            )
+        except Exception:
+            result = {"status": "failed", "confirmed": False}
+        completed = bool(
+            isinstance(result, Mapping)
+            and result.get("status") == "completed"
+            and result.get("confirmed") is True
+        )
+        if not completed:
+            await self._set_zone_transition(
+                scenario_id,
+                "light_action_failed",
+                evidence=evidence,
+                clear_sequence=True,
+            )
+        return completed
+
     async def _run_storage_transition(
         self,
         transition: str,
@@ -573,14 +1580,38 @@ class ScenarioControlCoordinator:
         async with self._decision_lock:
             self._cancel_light_task()
             self._cancel_exhaust_task()
-            await self._set_transition(
-                "policy_changed",
-                policy_revision=document.policy_revision,
-                clear_absence=True,
-                clear_exhaust=True,
-            )
+            self._cancel_zone_task(TAMBUR_SCENARIO_ID)
+            self._cancel_zone_task(SMALL_CORRIDOR_SCENARIO_ID)
+            async with self._lock:
+                self._storage = self._next_record_for(
+                    self._storage,
+                    transition="policy_changed",
+                    policy_revision=document.policy_revision,
+                    clear_absence=True,
+                    clear_exhaust=True,
+                    clear_sequence=True,
+                )
+                self._tambur = self._next_record_for(
+                    self._tambur,
+                    transition="policy_changed",
+                    policy_revision=document.policy_revision,
+                    clear_absence=True,
+                    clear_sequence=True,
+                    clear_manual_absence=True,
+                    clear_lux_candidate=True,
+                )
+                self._small_corridor = self._next_record_for(
+                    self._small_corridor,
+                    transition="policy_changed",
+                    policy_revision=document.policy_revision,
+                    clear_absence=True,
+                    clear_sequence=True,
+                    clear_manual_absence=True,
+                    clear_lux_candidate=True,
+                )
+                await self._save()
         if self._started:
-            self._rearm_exhaust_schedule()
+            self._rearm_schedules()
 
     async def _set_transition(
         self,
@@ -609,6 +1640,52 @@ class ScenarioControlCoordinator:
             )
             await self._save()
 
+    async def _set_zone_transition(
+        self,
+        scenario_id: str,
+        transition: str,
+        *,
+        evidence: Mapping[str, object] | None = None,
+        absence_started_at_ms: int | None = None,
+        deadline_ms: int | None = None,
+        correlation_id: str | None = None,
+        action: Mapping[str, object] | None = None,
+        sequence: Mapping[str, object] | None = None,
+        manual_absence_started_at_ms: int | None = None,
+        lux_candidate_since_ms: int | None = None,
+        welcome_armed: bool | None = None,
+        clear_absence: bool = False,
+        clear_sequence: bool = False,
+        clear_manual_absence: bool = False,
+        clear_lux_candidate: bool = False,
+    ) -> None:
+        async with self._lock:
+            current = self._record_for_scenario(scenario_id)
+            if current is None or scenario_id == STORAGE_SCENARIO_ID:
+                raise ValueError("zone scenario id is invalid")
+            updated = self._next_record_for(
+                current,
+                transition=transition,
+                evidence=evidence,
+                absence_started_at_ms=absence_started_at_ms,
+                deadline_ms=deadline_ms,
+                correlation_id=correlation_id,
+                action=action,
+                sequence=sequence,
+                manual_absence_started_at_ms=manual_absence_started_at_ms,
+                lux_candidate_since_ms=lux_candidate_since_ms,
+                welcome_armed=welcome_armed,
+                clear_absence=clear_absence,
+                clear_sequence=clear_sequence,
+                clear_manual_absence=clear_manual_absence,
+                clear_lux_candidate=clear_lux_candidate,
+            )
+            if scenario_id == TAMBUR_SCENARIO_ID:
+                self._tambur = updated
+            else:
+                self._small_corridor = updated
+            await self._save()
+
     def _next_record(
         self,
         *,
@@ -622,7 +1699,42 @@ class ScenarioControlCoordinator:
         clear_absence: bool = False,
         clear_exhaust: bool = False,
     ) -> dict[str, object]:
-        record = self.storage_state
+        return self._next_record_for(
+            self._storage,
+            transition=transition,
+            evidence=evidence,
+            policy_revision=policy_revision,
+            absence_started_at_ms=absence_started_at_ms,
+            deadline_ms=deadline_ms,
+            exhaust_deadline_ms=exhaust_deadline_ms,
+            correlation_id=correlation_id,
+            clear_absence=clear_absence,
+            clear_exhaust=clear_exhaust,
+        )
+
+    def _next_record_for(
+        self,
+        current: Mapping[str, object],
+        *,
+        transition: str,
+        evidence: Mapping[str, object] | None = None,
+        policy_revision: int | None = None,
+        absence_started_at_ms: int | None = None,
+        deadline_ms: int | None = None,
+        exhaust_deadline_ms: int | None = None,
+        correlation_id: str | None = None,
+        action: Mapping[str, object] | None = None,
+        sequence: Mapping[str, object] | None = None,
+        manual_absence_started_at_ms: int | None = None,
+        lux_candidate_since_ms: int | None = None,
+        welcome_armed: bool | None = None,
+        clear_absence: bool = False,
+        clear_exhaust: bool = False,
+        clear_sequence: bool = False,
+        clear_manual_absence: bool = False,
+        clear_lux_candidate: bool = False,
+    ) -> dict[str, object]:
+        record = copy.deepcopy(dict(current))
         generation = int(record.get("generation", 0))
         if generation >= 2**31 - 1:
             raise RuntimeError("scenario control generation exhausted")
@@ -638,15 +1750,55 @@ class ScenarioControlCoordinator:
         if clear_absence:
             record["absenceStartedAtMs"] = None
             record["deadlineMs"] = None
-        elif absence_started_at_ms is not None or deadline_ms is not None:
-            record["absenceStartedAtMs"] = absence_started_at_ms
-            record["deadlineMs"] = deadline_ms
+        else:
+            if absence_started_at_ms is not None:
+                record["absenceStartedAtMs"] = absence_started_at_ms
+            if deadline_ms is not None:
+                record["deadlineMs"] = deadline_ms
         if clear_exhaust:
             record["exhaustDeadlineMs"] = None
         elif exhaust_deadline_ms is not None:
             record["exhaustDeadlineMs"] = exhaust_deadline_ms
         record["correlationId"] = correlation_id
+        record["action"] = copy.deepcopy(dict(action)) if action is not None else None
+        if clear_sequence:
+            record["sequence"] = None
+        elif sequence is not None:
+            record["sequence"] = copy.deepcopy(dict(sequence))
+        if clear_manual_absence:
+            record["manualAbsenceStartedAtMs"] = None
+        elif manual_absence_started_at_ms is not None:
+            record["manualAbsenceStartedAtMs"] = manual_absence_started_at_ms
+        if clear_lux_candidate:
+            record["luxCandidateSinceMs"] = None
+        elif lux_candidate_since_ms is not None:
+            record["luxCandidateSinceMs"] = lux_candidate_since_ms
+        if welcome_armed is not None:
+            record["welcomeArmed"] = welcome_armed
         return record
+
+    def _record_for_scenario(
+        self, scenario_id: str
+    ) -> dict[str, object] | None:
+        return {
+            STORAGE_SCENARIO_ID: self._storage,
+            TAMBUR_SCENARIO_ID: self._tambur,
+            SMALL_CORRIDOR_SCENARIO_ID: self._small_corridor,
+        }.get(scenario_id)
+
+    async def async_validate_generation(
+        self, scenario_id: str, correlation_id: str
+    ) -> bool:
+        """Recheck the durable transition immediately before physical dispatch."""
+
+        async with self._lock:
+            record = self._record_for_scenario(scenario_id)
+            return bool(
+                record is not None
+                and record.get("correlationId") == correlation_id
+                and record.get("policyRevision")
+                == self._policy_service.current.policy_revision
+            )
 
     def _storage_evidence(self) -> tuple[object, object, str | None, str | None]:
         motion = self._target_state(self._storage_motion_target_id)
@@ -677,7 +1829,7 @@ class ScenarioControlCoordinator:
             or getattr(self._activation_latch, "is_open", False)
         )
 
-    def _rearm_exhaust_schedule(self) -> None:
+    def _rearm_schedules(self) -> None:
         for unsubscribe in self._schedule_unsubs:
             unsubscribe()
         self._schedule_unsubs.clear()
@@ -685,12 +1837,26 @@ class ScenarioControlCoordinator:
             return
         from homeassistant.helpers.event import async_track_time_change
 
-        for clock in self._policy_service.current.policy.storage_exhaust_times:
+        policy = self._policy_service.current.policy
+        clocks = sorted(
+            set(policy.storage_exhaust_times)
+            | {
+                policy.tambur_main_off,
+                policy.small_corridor_main_off,
+                policy.evening_latest,
+                "09:00",
+                "10:00",
+                "23:00",
+            }
+        )
+        for clock in clocks:
             hour, minute = (int(part) for part in clock.split(":"))
 
             async def due(_now: datetime, scheduled: str = clock) -> None:
                 if self._is_active():
-                    await self.async_handle_storage_exhaust_schedule(scheduled)
+                    if scheduled in self._policy_service.current.policy.storage_exhaust_times:
+                        await self.async_handle_storage_exhaust_schedule(scheduled)
+                    await self.async_handle_controller_clock(scheduled)
 
             self._schedule_unsubs.append(
                 async_track_time_change(
@@ -701,6 +1867,127 @@ class ScenarioControlCoordinator:
                     second=0,
                 )
             )
+
+    async def async_handle_controller_clock(self, clock: str) -> None:
+        """Apply exact corridor boundaries without generic scenario timers."""
+
+        async with self._decision_lock:
+            policy = self._policy_service.current.policy
+            if clock in {policy.evening_latest, "23:00"}:
+                if (
+                    self._target_state(TAMBUR_MIRROR_TARGET_ID) == "off"
+                    and not self._manual_claims((TAMBUR_MIRROR_TARGET_ID,))
+                ):
+                    await self._run_zone_action(
+                        TAMBUR_SCENARIO_ID,
+                        TAMBUR_MIRROR_TARGET_ID,
+                        "turn_on",
+                        None,
+                    )
+                if clock == policy.evening_latest:
+                    await self._start_tambur_evening_cap_if_owned()
+            if clock == policy.tambur_main_off:
+                self._cancel_zone_task(TAMBUR_SCENARIO_ID)
+                if not self._manual_claims(
+                    (TAMBUR_CHANDELIER_TARGET_ID, TAMBUR_POINTS_TARGET_ID)
+                ):
+                    await self._turn_off_owned_targets(
+                        TAMBUR_SCENARIO_ID,
+                        (TAMBUR_CHANDELIER_TARGET_ID, TAMBUR_POINTS_TARGET_ID),
+                    )
+            if clock == policy.small_corridor_main_off:
+                self._cancel_zone_task(SMALL_CORRIDOR_SCENARIO_ID)
+                if not self._manual_claims(
+                    (SMALL_CORRIDOR_RELAY_TARGET_ID, SMALL_CORRIDOR_CHANDELIER_TARGET_ID)
+                ):
+                    await self._turn_off_owned_targets(
+                        SMALL_CORRIDOR_SCENARIO_ID,
+                        (SMALL_CORRIDOR_CHANDELIER_TARGET_ID, SMALL_CORRIDOR_RELAY_TARGET_ID),
+                    )
+            if clock == "10:00":
+                mirror_entity = self._target_entity_id(TAMBUR_MIRROR_TARGET_ID)
+                if (
+                    mirror_entity is not None
+                    and self._target_state(TAMBUR_MIRROR_TARGET_ID) == "on"
+                    and self._light_priority.is_owned(mirror_entity, self._hass)
+                ):
+                    await self._run_zone_action(
+                        TAMBUR_SCENARIO_ID,
+                        TAMBUR_MIRROR_TARGET_ID,
+                        "turn_off",
+                        None,
+                    )
+            if clock in {"09:00", "10:00"}:
+                await self._async_handle_tambur_change(
+                    recovery=True,
+                    allow_activation=False,
+                    trigger_entity_id=None,
+                    old_state=None,
+                    new_state=None,
+                )
+
+    async def _turn_off_owned_targets(
+        self, scenario_id: str, target_ids: tuple[str, ...]
+    ) -> None:
+        small_dependent = self._target_entity_id(
+            SMALL_CORRIDOR_CHANDELIER_TARGET_ID
+        )
+        small_profile_owned = bool(
+            small_dependent is not None
+            and self._light_priority.is_owned(small_dependent, self._hass)
+        )
+        for target_id in target_ids:
+            entity_id = self._target_entity_id(target_id)
+            if (
+                entity_id is None
+                or self._target_state(target_id) != "on"
+                or not (
+                    self._light_priority.is_owned(entity_id, self._hass)
+                    or target_id == SMALL_CORRIDOR_RELAY_TARGET_ID
+                    and small_profile_owned
+                )
+            ):
+                continue
+            if not await self._run_zone_action(
+                scenario_id, target_id, "turn_off", None
+            ):
+                return
+
+    async def _start_tambur_evening_cap_if_owned(self) -> bool:
+        """Move an active automatic main light to five percent by 23:00."""
+
+        if (
+            self._tambur.get("sequence") is not None
+            or self._manual_claims(
+                (TAMBUR_CHANDELIER_TARGET_ID, TAMBUR_POINTS_TARGET_ID)
+            )
+        ):
+            return False
+        entity_id = self._target_entity_id(TAMBUR_CHANDELIER_TARGET_ID)
+        brightness = self._target_brightness_percent(
+            TAMBUR_CHANDELIER_TARGET_ID
+        )
+        if (
+            entity_id is None
+            or self._target_state(TAMBUR_CHANDELIER_TARGET_ID) != "on"
+            or brightness is None
+            or brightness <= 5
+            or not self._light_priority.is_owned(entity_id, self._hass)
+        ):
+            return False
+        duration = self._seconds_until_clock(
+            self._policy_service.current.policy.tambur_main_off
+        )
+        if duration <= 0:
+            return False
+        await self._start_brightness_sequence(
+            TAMBUR_SCENARIO_ID,
+            "cap",
+            brightness,
+            5,
+            duration_seconds=duration,
+        )
+        return True
 
     def _target_state(self, target_id: str | None) -> object:
         if target_id is None:
@@ -718,6 +2005,238 @@ class ScenarioControlCoordinator:
         state = self._hass.states.get(entity_id)
         value = getattr(state, "state", None)
         return str(value).strip().casefold() if value is not None else None
+
+    @staticmethod
+    def _state_value(value: object) -> str | None:
+        state = getattr(value, "state", value)
+        return (
+            str(state).strip().casefold()
+            if state is not None
+            else None
+        )
+
+    def _target_entity_id(self, target_id: str) -> str | None:
+        device = self._catalog_resolver(target_id)
+        entity_id = getattr(device, "entity_id", None)
+        return entity_id if isinstance(entity_id, str) else None
+
+    def _target_state_object(self, target_id: str) -> object | None:
+        entity_id = self._target_entity_id(target_id)
+        return self._hass.states.get(entity_id) if entity_id is not None else None
+
+    def _target_numeric_state(self, target_id: str) -> float | None:
+        raw = self._target_state(target_id)
+        if raw in {None, "unknown", "unavailable"}:
+            return None
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return None
+        return value if math.isfinite(value) else None
+
+    def _target_brightness_percent(self, target_id: str) -> int | None:
+        state = self._target_state_object(target_id)
+        attributes = getattr(state, "attributes", {})
+        if not isinstance(attributes, Mapping):
+            return None
+        raw = attributes.get("brightness")
+        if type(raw) not in {int, float} or isinstance(raw, bool):
+            return None
+        return max(0, min(100, round(float(raw) * 100 / 255)))
+
+    def _target_color_temperature(self, target_id: str) -> int | None:
+        state = self._target_state_object(target_id)
+        attributes = getattr(state, "attributes", {})
+        if not isinstance(attributes, Mapping):
+            return None
+        direct = attributes.get("color_temp_kelvin")
+        if type(direct) in {int, float} and not isinstance(direct, bool):
+            return round(float(direct))
+        mired = attributes.get("color_temp")
+        if type(mired) in {int, float} and not isinstance(mired, bool) and mired > 0:
+            return round(1_000_000 / float(mired))
+        return None
+
+    def _combined_target_state(self, target_ids: tuple[str, ...]) -> str:
+        states = tuple(self._target_state(target_id) for target_id in target_ids)
+        if "on" in states:
+            return "on"
+        if states and all(state == "off" for state in states):
+            return "off"
+        return "unknown"
+
+    def _manual_claims(self, target_ids: tuple[str, ...]) -> frozenset[str]:
+        entity_ids = frozenset(
+            entity_id
+            for target_id in target_ids
+            if (entity_id := self._target_entity_id(target_id)) is not None
+        )
+        resolver = getattr(self._light_priority, "manual_claim_entity_ids", None)
+        if not callable(resolver):
+            return frozenset()
+        return resolver(entity_ids)
+
+    @staticmethod
+    def _failed_with_same_evidence(
+        record: Mapping[str, object], evidence: Mapping[str, object]
+    ) -> bool:
+        return bool(
+            str(record.get("transition", "")).endswith("failed")
+            and record.get("evidence") == evidence
+        )
+
+    def _local_now(self) -> datetime:
+        if self._now is not None:
+            value = self._now()
+            return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+        zone_name = getattr(getattr(self._hass, "config", None), "time_zone", "UTC")
+        try:
+            zone = ZoneInfo(str(zone_name))
+        except ZoneInfoNotFoundError:
+            zone = timezone.utc
+        return datetime.fromtimestamp(self._now_ms() / 1000, timezone.utc).astimezone(zone)
+
+    @staticmethod
+    def _clock_minutes(clock: str) -> int:
+        hour, minute = (int(part) for part in clock.split(":"))
+        return hour * 60 + minute
+
+    def _now_minutes(self) -> int:
+        current = self._local_now()
+        return current.hour * 60 + current.minute
+
+    def _is_evening_or_night(self) -> bool:
+        now_minutes = self._now_minutes()
+        policy = self._policy_service.current.policy
+        if (
+            now_minutes < 9 * 60
+            or now_minutes >= self._clock_minutes(policy.evening_latest)
+        ):
+            return True
+        if self._target_state(SUN_TARGET_ID) != "below_horizon":
+            return False
+        now = self._local_now()
+        changed = getattr(self._target_state_object(SUN_TARGET_ID), "last_changed", None)
+        if isinstance(changed, datetime):
+            changed = (
+                changed.astimezone(now.tzinfo)
+                if changed.tzinfo
+                else changed.replace(tzinfo=now.tzinfo)
+            )
+            return changed.date() == now.date() and changed <= now
+        # A timestamp-free adapter cannot distinguish last night's state from
+        # today's sunset. Noon is the conservative dividing point.
+        return now_minutes >= 12 * 60
+
+    def _tambur_band(self) -> str:
+        now_minutes = self._now_minutes()
+        policy = self._policy_service.current.policy
+        off = self._clock_minutes(policy.tambur_main_off)
+        if now_minutes >= off or now_minutes < 9 * 60:
+            return "night"
+        if now_minutes < 10 * 60:
+            return "morning"
+        if self._is_evening_or_night():
+            return "evening"
+        return "day"
+
+    def _small_corridor_band(self) -> str:
+        now_minutes = self._now_minutes()
+        policy = self._policy_service.current.policy
+        off = self._clock_minutes(policy.small_corridor_main_off)
+        if now_minutes >= off or (
+            self._target_state(SUN_TARGET_ID) == "below_horizon"
+            and now_minutes < 12 * 60
+        ):
+            return "night"
+        if now_minutes >= 23 * 60:
+            return "late"
+        return "day"
+
+    def _tambur_cap_percent(self, band: str) -> int:
+        now = self._local_now()
+        if band == "morning":
+            start = now.replace(hour=9, minute=0, second=0, microsecond=0)
+            end = now.replace(hour=10, minute=0, second=0, microsecond=0)
+            return maximum_brightness(now, start, end, 5, 80)
+        if band != "evening":
+            return 80
+        policy = self._policy_service.current.policy
+        latest_hour, latest_minute = (
+            int(part) for part in policy.evening_latest.split(":")
+        )
+        start = now.replace(
+            hour=latest_hour, minute=latest_minute, second=0, microsecond=0
+        )
+        sun = self._target_state_object(SUN_TARGET_ID)
+        changed = getattr(sun, "last_changed", None)
+        if (
+            self._target_state(SUN_TARGET_ID) == "below_horizon"
+            and isinstance(changed, datetime)
+        ):
+            changed = changed.astimezone(now.tzinfo) if changed.tzinfo else changed.replace(tzinfo=now.tzinfo)
+            if changed.date() == now.date():
+                start = min(start, changed)
+        off_hour, off_minute = (int(part) for part in policy.tambur_main_off.split(":"))
+        deadline = now.replace(
+            hour=off_hour, minute=off_minute, second=0, microsecond=0
+        )
+        return max(5, min(80, maximum_brightness(now, start, deadline, 80, 5)))
+
+    def _zone_color_temperature(self, scenario_id: str, *, evening: bool) -> int:
+        """Translate the shared warmth policy for the inverted tambur lamp."""
+
+        policy = self._policy_service.current.policy
+        if not evening:
+            return policy.neutral_color_temperature_kelvin
+        if scenario_id != TAMBUR_SCENARIO_ID:
+            return policy.evening_color_temperature_kelvin
+        neutral = policy.neutral_color_temperature_kelvin
+        return max(
+            1500,
+            min(6500, neutral + (neutral - policy.evening_color_temperature_kelvin)),
+        )
+
+    def _seconds_until_clock(self, clock: str) -> int:
+        now = self._local_now()
+        hour, minute = (int(part) for part in clock.split(":"))
+        deadline = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        return max(0, math.ceil((deadline - now).total_seconds()))
+
+    def _all_controller_entity_ids(self) -> frozenset[str]:
+        return self._storage_entity_ids() | self._tambur_entity_ids() | self._small_corridor_entity_ids()
+
+    def _tambur_entity_ids(self) -> frozenset[str]:
+        return self._entity_ids_for_targets(
+            (
+                TAMBUR_MOTION_TARGET_ID,
+                *TAMBUR_PRESENCE_TARGET_IDS,
+                TAMBUR_CHANDELIER_TARGET_ID,
+                TAMBUR_POINTS_TARGET_ID,
+                TAMBUR_MIRROR_TARGET_ID,
+                TAMBUR_POWER_TARGET_ID,
+                TAMBUR_ENTRY_DOOR_TARGET_ID,
+                SUN_TARGET_ID,
+            )
+        )
+
+    def _small_corridor_entity_ids(self) -> frozenset[str]:
+        return self._entity_ids_for_targets(
+            (
+                SMALL_CORRIDOR_MOTION_TARGET_ID,
+                SMALL_CORRIDOR_LUX_TARGET_ID,
+                SMALL_CORRIDOR_RELAY_TARGET_ID,
+                SMALL_CORRIDOR_CHANDELIER_TARGET_ID,
+                SUN_TARGET_ID,
+            )
+        )
+
+    def _entity_ids_for_targets(self, target_ids: tuple[str, ...]) -> frozenset[str]:
+        return frozenset(
+            entity_id
+            for target_id in target_ids
+            if (entity_id := self._target_entity_id(target_id)) is not None
+        )
 
     @staticmethod
     def _evidence_payload(
@@ -766,6 +2285,38 @@ class ScenarioControlCoordinator:
 
         self._exhaust_task = asyncio.create_task(due())
 
+    def _schedule_zone_due(self, scenario_id: str) -> None:
+        if not self._schedule_tasks:
+            return
+        record = self._record_for_scenario(scenario_id)
+        if record is None:
+            return
+        sequence = record.get("sequence")
+        deadline: int | None = None
+        if isinstance(sequence, Mapping):
+            deadline = brightness_sequence_deadline_ms(
+                int(sequence["startedAtMs"]),
+                int(sequence["deadlineMs"]),
+                int(sequence["start"]),
+                int(sequence["target"]),
+                int(sequence["current"]),
+            )
+        if deadline is None and type(record.get("deadlineMs")) is int:
+            deadline = int(record["deadlineMs"])
+        if deadline is None:
+            return
+        self._cancel_zone_task(scenario_id)
+
+        async def due() -> None:
+            try:
+                await asyncio.sleep(max(0, deadline - self._now_ms()) / 1000)
+                await self.async_reconcile_zone_due(scenario_id)
+            finally:
+                if self._zone_tasks.get(scenario_id) is asyncio.current_task():
+                    self._zone_tasks.pop(scenario_id, None)
+
+        self._zone_tasks[scenario_id] = asyncio.create_task(due())
+
     def _cancel_light_task(self) -> None:
         task = self._light_task
         self._light_task = None
@@ -778,9 +2329,16 @@ class ScenarioControlCoordinator:
         if task is not None and task is not asyncio.current_task():
             task.cancel()
 
+    def _cancel_zone_task(self, scenario_id: str) -> None:
+        task = self._zone_tasks.pop(scenario_id, None)
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
+
     def stop_runtime(self) -> None:
         self._cancel_light_task()
         self._cancel_exhaust_task()
+        for scenario_id in tuple(self._zone_tasks):
+            self._cancel_zone_task(scenario_id)
         for unsubscribe in self._schedule_unsubs:
             unsubscribe()
         self._schedule_unsubs.clear()

@@ -71,6 +71,27 @@ from custom_components.hausman_hub.domain.scenarios import (
 )
 
 
+_CREATE_IDS = tuple(
+    item.scenario_id for item in MIGRATION_MANIFEST if item.operation == "create"
+)
+_REPLACED_SOURCE_IDS = tuple(
+    item.scenario_id
+    for item in MIGRATION_MANIFEST
+    if item.operation == "replace"
+    and item.legacy_source_hash != item.new_source_hash
+)
+
+
+def _runtime_source(item: object) -> str:
+    return (
+        Path(__file__).parents[1]
+        / "custom_components"
+        / "hausman_hub"
+        / "managed_scenarios"
+        / str(getattr(item, "source_file"))
+    ).read_text(encoding="utf-8")
+
+
 def _registry(
     *, migrated: set[str] = frozenset(), include_creates: bool = False
 ) -> ScenarioRegistry:
@@ -157,6 +178,8 @@ class Backend:
             if item.operation == "replace"
         }
         self.updated = []
+        self.created = []
+        self.replaced = []
         self.restored = []
         self.deleted = []
         self.commits = 0
@@ -191,6 +214,7 @@ class Backend:
         self.sources[scenario_id] = source
         self.revisions[scenario_id] = "revision.stable"
         self.updated.append(scenario_id)
+        self.created.append(scenario_id)
         return {"flow_id": f"flow-{scenario_id}", "flow_revision": 1}
 
     async def async_delete_managed_flow(self, scenario_id, _flow_id, *, expected_source_hash):
@@ -212,6 +236,7 @@ class Backend:
         self.deployed[scenario_id] = entry.new_source_hash
         self.sources[scenario_id] = source
         self.updated.append(scenario_id)
+        self.replaced.append(scenario_id)
         return {"saved": True, "proposed_source_hash": entry.new_source_hash, "previous_source": f"legacy:{scenario_id}"}
 
     async def async_prepare_release_source(
@@ -305,9 +330,9 @@ async def test_batch_migration_updates_three_sources_and_registry_once() -> None
     service = _service(store, backend)
     await service.async_load()
     assert await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST) == "completed"
-    assert set(backend.updated) == {
-        item.scenario_id for item in MIGRATION_MANIFEST if item.operation == "create"
-    }
+    assert tuple(backend.replaced) == _REPLACED_SOURCE_IDS
+    assert tuple(backend.created) == _CREATE_IDS
+    assert set(backend.updated) == set(_REPLACED_SOURCE_IDS) | set(_CREATE_IDS)
     assert len(store.saved) == 1
     assert backend.commits == 0
     for entry in MIGRATION_MANIFEST:
@@ -347,7 +372,7 @@ async def test_snapshot_three_to_eight_creates_only_absent_controllers_disabled(
 async def test_create_failure_compensates_only_previously_created_flows() -> None:
     class FailSecondCreate(Backend):
         async def async_prepare_new_release_source(self, scenario_id, title, source, expected):
-            if self.updated:
+            if self.created:
                 raise RuntimeError("Node-RED unavailable")
             return await super().async_prepare_new_release_source(scenario_id, title, source, expected)
 
@@ -364,6 +389,22 @@ async def test_create_failure_compensates_only_previously_created_flows() -> Non
         await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
 
     assert backend.deleted == ["system-toilet-comfort-controller"]
+    assert tuple(backend.replaced) == _REPLACED_SOURCE_IDS
+    assert tuple(backend.restored) == tuple(reversed(_REPLACED_SOURCE_IDS))
+    assert all(
+        backend.deployed[item.scenario_id] == item.legacy_source_hash
+        and backend.sources[item.scenario_id] == f"legacy:{item.scenario_id}"
+        for item in MIGRATION_MANIFEST
+        if item.scenario_id in _REPLACED_SOURCE_IDS
+    )
+    shower = next(
+        item
+        for item in MIGRATION_MANIFEST
+        if item.scenario_id == "system-shower-comfort-controller"
+    )
+    assert shower.scenario_id not in backend.restored
+    assert backend.deployed[shower.scenario_id] == shower.legacy_source_hash
+    assert backend.sources[shower.scenario_id] == f"legacy:{shower.scenario_id}"
     assert store.registry == _registry_from_inventory58()
 
 
@@ -381,6 +422,15 @@ async def test_replace_source_preparation_runs_outside_registry_lock() -> None:
         async def async_prepare_release_source(
             self, scenario_id, _definition, _flow_id, source, expected, _catalog
         ):
+            if scenario_id != replacement.scenario_id:
+                return await super().async_prepare_release_source(
+                    scenario_id,
+                    _definition,
+                    _flow_id,
+                    source,
+                    expected,
+                    _catalog,
+                )
             assert not service._lock.locked()
             assert scenario_id == replacement.scenario_id
             assert source == new_source
@@ -389,6 +439,7 @@ async def test_replace_source_preparation_runs_outside_registry_lock() -> None:
             self.deployed[scenario_id] = replacement.new_source_hash
             self.sources[scenario_id] = source
             self.updated.append(scenario_id)
+            self.replaced.append(scenario_id)
             return {
                 "saved": True,
                 "proposed_source_hash": replacement.new_source_hash,
@@ -423,10 +474,21 @@ async def test_replace_source_staging_restores_exact_source_after_cas_conflict()
         async def async_prepare_release_source(
             self, scenario_id, _definition, _flow_id, _source, expected, _catalog
         ):
+            if scenario_id != replacement.scenario_id:
+                return await super().async_prepare_release_source(
+                    scenario_id,
+                    _definition,
+                    _flow_id,
+                    _source,
+                    expected,
+                    _catalog,
+                )
             assert self.deployed[scenario_id] == expected
             previous_source = self.sources[scenario_id]
             self.deployed[scenario_id] = replacement.new_source_hash
             self.sources[scenario_id] = _source
+            self.updated.append(scenario_id)
+            self.replaced.append(scenario_id)
             return {
                 "saved": True,
                 "proposed_source_hash": replacement.new_source_hash,
@@ -459,8 +521,21 @@ async def test_replace_source_staging_restores_exact_source_after_cas_conflict()
             journal=journal,
         )
 
-    assert backend.deployed[replacement.scenario_id] == replacement.legacy_source_hash
-    assert backend.restored == [replacement.scenario_id]
+    expected_restored = tuple(
+        reversed(
+            tuple(
+                item.scenario_id
+                for item in entries
+                if item.operation == "replace"
+                and item.legacy_source_hash != item.new_source_hash
+            )
+        )
+    )
+    assert tuple(backend.restored) == expected_restored
+    for item in entries:
+        if item.scenario_id in expected_restored:
+            assert backend.deployed[item.scenario_id] == item.legacy_source_hash
+            assert backend.sources[item.scenario_id] == f"legacy:{item.scenario_id}"
     assert service._managed_switch_replace_staging == {}
 
 
@@ -505,6 +580,13 @@ async def test_staged_flows_are_recovered_when_the_registry_cas_changes() -> Non
     assert set(backend.deleted) == {
         item.scenario_id for item in MIGRATION_MANIFEST if item.operation == "create"
     }
+    assert tuple(backend.restored) == tuple(reversed(_REPLACED_SOURCE_IDS))
+    assert all(
+        backend.deployed[item.scenario_id] == item.legacy_source_hash
+        and backend.sources[item.scenario_id] == f"legacy:{item.scenario_id}"
+        for item in MIGRATION_MANIFEST
+        if item.scenario_id in _REPLACED_SOURCE_IDS
+    )
     assert service._managed_switch_create_staging == {}
     assert store.registry == original
 
@@ -547,6 +629,116 @@ async def test_prepared_restart_normalizes_permuted_legacy_inputs() -> None:
     assert receipt_store.saved[-1]["state"] == "completed"
     assert receipt_store.saved[-1]["journal"]["before"]["registry"]["scenarios"]
     assert receipt_store.saved[-1]["journal"]["after"]["registry"]["scenarios"]
+    assert tuple(backend.replaced) == _REPLACED_SOURCE_IDS
+    assert all(
+        backend.deployed[item.scenario_id] == item.new_source_hash
+        and backend.sources[item.scenario_id] == _runtime_source(item)
+        for item in MIGRATION_MANIFEST
+        if item.scenario_id in _REPLACED_SOURCE_IDS
+    )
+
+
+async def test_reused_staging_rejects_foreign_replacement_source_hash() -> None:
+    store = RegistryStore(_registry())
+    backend = Backend()
+    service = _service(store, backend)
+    await service.async_load()
+    before = await service.async_capture_managed_switch_migration(
+        MIGRATION_MANIFEST
+    )
+    journal = _initial_journal(before, MIGRATION_MANIFEST)
+    await service.async_stage_managed_switch_migration(
+        MIGRATION_MANIFEST,
+        journal=journal,
+    )
+    changed_id = _REPLACED_SOURCE_IDS[0]
+    backend.deployed[changed_id] = "f" * 64
+
+    with unittest.TestCase().assertRaises(ScenarioRevisionConflictError):
+        await service.async_stage_managed_switch_migration(
+            MIGRATION_MANIFEST,
+            journal=journal,
+        )
+
+    assert backend.deployed[changed_id] == "f" * 64
+    assert service._managed_switch_replace_staging[changed_id][2] == next(
+        item.new_source_hash
+        for item in MIGRATION_MANIFEST
+        if item.scenario_id == changed_id
+    )
+
+
+async def test_reused_staging_rejects_a_different_manifest_key_set() -> None:
+    store = RegistryStore(_registry())
+    backend = Backend()
+    service = _service(store, backend)
+    await service.async_load()
+    before = await service.async_capture_managed_switch_migration(
+        MIGRATION_MANIFEST
+    )
+    journal = _initial_journal(before, MIGRATION_MANIFEST)
+    await service.async_stage_managed_switch_migration(
+        MIGRATION_MANIFEST,
+        journal=journal,
+    )
+    different_entries = tuple(
+        item
+        for item in MIGRATION_MANIFEST
+        if item.scenario_id != _CREATE_IDS[-1]
+    )
+
+    with unittest.TestCase().assertRaisesRegex(
+        ScenarioServiceError,
+        "does not match the manifest",
+    ):
+        await service.async_stage_managed_switch_migration(
+            different_entries,
+            journal=journal,
+        )
+
+    assert set(service._managed_switch_create_staging) == set(_CREATE_IDS)
+    assert set(service._managed_switch_replace_staging) == set(
+        _REPLACED_SOURCE_IDS
+    )
+
+
+async def test_reused_staging_rejects_actual_topology_drift() -> None:
+    class DriftingTopologyBackend(Backend):
+        drifted = False
+
+        async def async_verify_managed_topology(self, scenario_id, flow_id):
+            evidence = await super().async_verify_managed_topology(
+                scenario_id,
+                flow_id,
+            )
+            if self.drifted and scenario_id == _REPLACED_SOURCE_IDS[0]:
+                evidence["topology"] = "foreign-topology"
+            return evidence
+
+    store = RegistryStore(_registry())
+    backend = DriftingTopologyBackend()
+    service = _service(store, backend)
+    await service.async_load()
+    before = await service.async_capture_managed_switch_migration(
+        MIGRATION_MANIFEST
+    )
+    journal = _initial_journal(before, MIGRATION_MANIFEST)
+    await service.async_stage_managed_switch_migration(
+        MIGRATION_MANIFEST,
+        journal=journal,
+    )
+    backend.drifted = True
+
+    with unittest.TestCase().assertRaisesRegex(
+        ScenarioServiceError,
+        "topology changed",
+    ):
+        await service.async_stage_managed_switch_migration(
+            MIGRATION_MANIFEST,
+            journal=journal,
+        )
+
+    assert tuple(backend.replaced) == _REPLACED_SOURCE_IDS
 
 
 async def test_permuted_legacy_inputs_with_wrong_member_fail_before_mutation() -> None:
@@ -763,10 +955,13 @@ async def test_registry_failure_compensates_sources_and_later_manual_edit_blocks
     assert set(backend.deleted) == {
         item.scenario_id for item in MIGRATION_MANIFEST if item.operation == "create"
     }
-
-    # The fixture already has the exact three live source hashes.  No replace
-    # source is written in this phase, so an unrelated edit cannot turn a
-    # create-only compensation into an overwrite attempt.
+    assert tuple(backend.restored) == tuple(reversed(_REPLACED_SOURCE_IDS))
+    assert all(
+        backend.deployed[item.scenario_id] == item.legacy_source_hash
+        and backend.sources[item.scenario_id] == f"legacy:{item.scenario_id}"
+        for item in MIGRATION_MANIFEST
+        if item.scenario_id in _REPLACED_SOURCE_IDS
+    )
 
 
 async def test_cancellation_after_first_source_mutation_restores_exact_source() -> None:
@@ -775,12 +970,23 @@ async def test_cancellation_after_first_source_mutation_restores_exact_source() 
             super().__init__()
             self.second_update_started = asyncio.Event()
 
-        async def async_prepare_new_release_source(
-            self, scenario_id, title, source, expected
-        ):
+        async def _pause_after_first_mutation(self) -> None:
             if self.updated:
                 self.second_update_started.set()
                 await asyncio.Event().wait()
+
+        async def async_prepare_release_source(
+            self, scenario_id, definition, flow_id, source, expected, catalog
+        ):
+            await self._pause_after_first_mutation()
+            return await super().async_prepare_release_source(
+                scenario_id, definition, flow_id, source, expected, catalog
+            )
+
+        async def async_prepare_new_release_source(
+            self, scenario_id, title, source, expected
+        ):
+            await self._pause_after_first_mutation()
             return await super().async_prepare_new_release_source(
                 scenario_id, title, source, expected
             )
@@ -800,7 +1006,17 @@ async def test_cancellation_after_first_source_mutation_restores_exact_source() 
         await migration
 
     assert len(backend.updated) == 1
-    assert backend.deleted == backend.updated
+    assert backend.updated == [_REPLACED_SOURCE_IDS[0]]
+    assert backend.created == []
+    assert backend.deleted == []
+    assert backend.restored == [_REPLACED_SOURCE_IDS[0]]
+    first_replacement = next(
+        item
+        for item in MIGRATION_MANIFEST
+        if item.scenario_id == _REPLACED_SOURCE_IDS[0]
+    )
+    assert backend.deployed[first_replacement.scenario_id] == first_replacement.legacy_source_hash
+    assert backend.sources[first_replacement.scenario_id] == f"legacy:{first_replacement.scenario_id}"
     assert store.registry == original
     assert service._managed_switch_migration_transaction is None
 
@@ -822,6 +1038,13 @@ async def test_final_snapshot_drift_can_restore_exact_sources_and_registry() -> 
     assert set(backend.deleted) == {
         item.scenario_id for item in MIGRATION_MANIFEST if item.operation == "create"
     }
+    assert tuple(backend.restored) == tuple(reversed(_REPLACED_SOURCE_IDS))
+    assert all(
+        backend.deployed[item.scenario_id] == item.legacy_source_hash
+        and backend.sources[item.scenario_id] == f"legacy:{item.scenario_id}"
+        for item in MIGRATION_MANIFEST
+        if item.scenario_id in _REPLACED_SOURCE_IDS
+    )
     assert backend.commits == 1
 
 
@@ -889,6 +1112,30 @@ async def test_replace_intent_contains_exact_rollback_source_before_write() -> N
         async def async_prepare_release_source(
             self, scenario_id, definition, flow_id, source, expected, catalog
         ):
+            if scenario_id != replacement.scenario_id:
+                operation = snapshots[-1][scenario_id]
+                entry = next(
+                    item
+                    for item in entries
+                    if item.scenario_id == scenario_id
+                )
+                assert operation == {
+                    "kind": "replace",
+                    "state": "intent",
+                    "flowId": flow_id,
+                    "flowRevision": None,
+                    "expectedSourceHash": expected,
+                    "newSourceHash": entry.new_source_hash,
+                    "previousSource": f"legacy:{scenario_id}",
+                }
+                return await super().async_prepare_release_source(
+                    scenario_id,
+                    definition,
+                    flow_id,
+                    source,
+                    expected,
+                    catalog,
+                )
             operation = snapshots[-1][scenario_id]
             assert operation == {
                 "kind": "replace",
@@ -903,6 +1150,7 @@ async def test_replace_intent_contains_exact_rollback_source_before_write() -> N
             self.deployed[scenario_id] = replacement.new_source_hash
             self.sources[scenario_id] = source
             self.updated.append(scenario_id)
+            self.replaced.append(scenario_id)
             return {
                 "saved": True,
                 "proposed_source_hash": replacement.new_source_hash,
@@ -922,6 +1170,12 @@ async def test_replace_intent_contains_exact_rollback_source_before_write() -> N
         entries, journal=journal, on_staged=persist
     )
     assert snapshots
+    assert tuple(backend.replaced) == tuple(
+        item.scenario_id
+        for item in entries
+        if item.operation == "replace"
+        and item.legacy_source_hash != item.new_source_hash
+    )
 
 
 async def test_exact_foreign_create_without_durable_intent_is_not_adopted_or_deleted() -> None:

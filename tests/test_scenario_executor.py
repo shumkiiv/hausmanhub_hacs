@@ -1317,7 +1317,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.hass.services.async_call.assert_not_awaited()
         sleep.assert_not_awaited()
 
-    async def test_tambur_manual_chandelier_does_not_block_presence_spots(
+    async def test_tambur_manual_chandelier_blocks_the_whole_presence_profile(
         self,
     ) -> None:
         self.catalog._devices["device_2"] = ScenarioDeviceEntry(
@@ -1383,17 +1383,11 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("completed", result["status"])
         self.assertEqual(
-            ["manual_light_already_on", None],
+            ["manual_light_already_on", "manual_light_already_on"],
             [receipt.get("reason") for receipt in result["receipts"]],
         )
-        self.assertTrue(result["receipts"][0]["skipped"])
-        self.assertTrue(result["receipts"][1]["confirmed"])
-        self.hass.services.async_call.assert_awaited_once_with(
-            "light",
-            "turn_on",
-            {"entity_id": "light.tambur_spots"},
-            blocking=True,
-        )
+        self.assertTrue(all(receipt["skipped"] for receipt in result["receipts"]))
+        self.hass.services.async_call.assert_not_awaited()
 
     async def test_represence_cancels_every_profile_obligation_but_dry_run_does_not(
         self,
@@ -3693,6 +3687,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_stale_source_on_is_confirmed_before_dependent_light(self) -> None:
+        stale = datetime.now(timezone.utc) - timedelta(minutes=10)
         states = {
             "light.living_room": SimpleNamespace(
                 state="off",
@@ -3702,7 +3697,9 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             "switch.wall": SimpleNamespace(
                 state="on",
                 attributes={},
-                last_updated=datetime.now(timezone.utc) - timedelta(minutes=10),
+                last_changed=stale,
+                last_updated=stale,
+                last_reported=stale,
             ),
         }
         self.hass.states = SimpleNamespace(get=states.get)
@@ -3715,11 +3712,20 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             blocking: bool,
         ) -> None:
             entity_id = str(data["entity_id"])
-            states[entity_id] = SimpleNamespace(
-                state="on",
-                attributes={},
-                last_updated=datetime.now(timezone.utc),
-            )
+            if entity_id == "switch.wall":
+                states[entity_id] = SimpleNamespace(
+                    state="on",
+                    attributes={},
+                    last_changed=stale,
+                    last_updated=stale,
+                    last_reported=datetime.now(timezone.utc),
+                )
+            else:
+                states[entity_id] = SimpleNamespace(
+                    state="on",
+                    attributes={},
+                    last_updated=datetime.now(timezone.utc),
+                )
 
         self.hass.services.async_call.side_effect = apply_service
         executor = ScenarioExecutor(
@@ -3749,6 +3755,228 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
                 for current in self.hass.services.async_call.await_args_list
             ],
         )
+
+    async def test_stale_source_same_state_without_new_report_fails_closed(self) -> None:
+        stale = datetime.now(timezone.utc) - timedelta(minutes=10)
+        states = {
+            "light.living_room": SimpleNamespace(
+                state="off", attributes={}, last_updated=datetime.now(timezone.utc)
+            ),
+            "switch.wall": SimpleNamespace(
+                state="on",
+                attributes={},
+                last_changed=stale,
+                last_updated=stale,
+                last_reported=stale,
+            ),
+        }
+        self.hass.states = SimpleNamespace(get=states.get)
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            readback_window_seconds=0.02,
+            readback_interval_seconds=0.01,
+            power_dependency_resolver=lambda: _power_link(
+                policy="auto_turn_on", warmup_seconds=0
+            ),
+            electrical_breaker_resolver=lambda _entity_id: False,
+            command_guard=lambda _entity_id, _action_id, _automatic: None,
+        )
+
+        receipt = await executor.async_execute_device_action("device_1", "turn_on")
+
+        self.assertFalse(receipt["accepted"])
+        self.assertEqual("power_source_unavailable", receipt["error"])
+        self.assertEqual(
+            ["switch.wall"],
+            [item.args[2]["entity_id"] for item in self.hass.services.async_call.await_args_list],
+        )
+
+    async def test_same_state_attribute_update_cannot_confirm_power_source(self) -> None:
+        stale = datetime.now(timezone.utc) - timedelta(minutes=10)
+        states = {
+            "light.living_room": SimpleNamespace(
+                state="off",
+                attributes={},
+                last_changed=datetime.now(timezone.utc),
+                last_updated=datetime.now(timezone.utc),
+            ),
+            "switch.wall": SimpleNamespace(
+                state="on",
+                attributes={"power": 1},
+                last_changed=stale,
+                last_updated=stale,
+            ),
+        }
+        self.hass.states = SimpleNamespace(get=states.get)
+
+        async def attribute_only_report(
+            _domain: str,
+            _service: str,
+            data: dict[str, object],
+            *,
+            blocking: bool,
+        ) -> None:
+            self.assertTrue(blocking)
+            entity_id = str(data["entity_id"])
+            states[entity_id] = SimpleNamespace(
+                state="on",
+                attributes={"power": 2},
+                last_changed=stale,
+                last_updated=datetime.now(timezone.utc),
+            )
+
+        self.hass.services.async_call.side_effect = attribute_only_report
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            readback_window_seconds=0.02,
+            readback_interval_seconds=0.01,
+            power_dependency_resolver=lambda: _power_link(
+                policy="auto_turn_on", warmup_seconds=0
+            ),
+            electrical_breaker_resolver=lambda _entity_id: False,
+            command_guard=lambda _entity_id, _action_id, _automatic: None,
+        )
+
+        receipt = await executor.async_execute_device_action("device_1", "turn_on")
+
+        self.assertFalse(receipt["accepted"])
+        self.assertEqual("power_source_unavailable", receipt["error"])
+        self.assertEqual(
+            ["switch.wall"],
+            [item.args[2]["entity_id"] for item in self.hass.services.async_call.await_args_list],
+        )
+
+    async def test_control_generation_is_checked_before_relay_and_dependent_light(
+        self,
+    ) -> None:
+        states = {
+            "light.living_room": SimpleNamespace(state="off", attributes={}),
+            "switch.wall": SimpleNamespace(state="off", attributes={}),
+        }
+        self.hass.states = SimpleNamespace(get=states.get)
+
+        async def apply_service(
+            _domain: str,
+            _service: str,
+            data: dict[str, object],
+            **_options: object,
+        ) -> None:
+            entity_id = str(data["entity_id"])
+            states[entity_id] = SimpleNamespace(state="on", attributes={})
+
+        self.hass.services.async_call.side_effect = apply_service
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            readback_window_seconds=0.02,
+            readback_interval_seconds=0.01,
+            power_dependency_resolver=lambda: _power_link(policy="auto_turn_on"),
+            electrical_breaker_resolver=lambda _entity_id: False,
+            command_guard=lambda _entity_id, _action_id, _automatic: None,
+        )
+
+        async def stale_before_relay(_scenario_id: str, _run_id: str) -> bool:
+            return False
+
+        executor.set_scenario_generation_validator(stale_before_relay)
+        stale = await executor.async_execute(
+            _definition(
+                (
+                    ScenarioAction(
+                        id="controlled-light",
+                        type=ScenarioActionType.DEVICE_ACTION,
+                        target_id="device_1",
+                        action_id="turn_on",
+                    ),
+                )
+            ),
+            "generation.1",
+            scenario_id="system-small-corridor-light-controller",
+            trigger_context={"source": "scenario_control"},
+        )
+        self.assertEqual("failed", stale["status"])
+        self.hass.services.async_call.assert_not_awaited()
+
+        checks = 0
+
+        async def stale_before_light(_scenario_id: str, _run_id: str) -> bool:
+            nonlocal checks
+            checks += 1
+            return checks == 1
+
+        executor.set_scenario_generation_validator(stale_before_light)
+        result = await executor.async_execute(
+            _definition(
+                (
+                    ScenarioAction(
+                        id="controlled-light",
+                        type=ScenarioActionType.DEVICE_ACTION,
+                        target_id="device_1",
+                        action_id="turn_on",
+                    ),
+                )
+            ),
+            "generation.2",
+            scenario_id="system-small-corridor-light-controller",
+            trigger_context={"source": "scenario_control"},
+        )
+
+        self.assertEqual("failed", result["status"])
+        self.assertEqual(2, checks)
+        self.assertEqual(
+            ["switch.wall"],
+            [item.args[2]["entity_id"] for item in self.hass.services.async_call.await_args_list],
+        )
+
+    async def test_future_same_state_power_report_fails_closed(self) -> None:
+        stale = datetime.now(timezone.utc) - timedelta(minutes=10)
+        states = {
+            "light.living_room": SimpleNamespace(
+                state="off", attributes={}, last_updated=datetime.now(timezone.utc)
+            ),
+            "switch.wall": SimpleNamespace(
+                state="on",
+                attributes={},
+                last_changed=stale,
+                last_updated=stale,
+                last_reported=stale,
+            ),
+        }
+        self.hass.states = SimpleNamespace(get=states.get)
+
+        async def future_report(*_args: object, **_kwargs: object) -> None:
+            states["switch.wall"] = SimpleNamespace(
+                state="on",
+                attributes={},
+                last_changed=stale,
+                last_updated=stale,
+                last_reported=datetime.now(timezone.utc) + timedelta(minutes=1),
+            )
+
+        self.hass.services.async_call.side_effect = future_report
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            readback_window_seconds=0.02,
+            readback_interval_seconds=0.01,
+            power_dependency_resolver=lambda: _power_link(
+                policy="auto_turn_on", warmup_seconds=0
+            ),
+            electrical_breaker_resolver=lambda _entity_id: False,
+            command_guard=lambda _entity_id, _action_id, _automatic: None,
+        )
+
+        receipt = await executor.async_execute_device_action("device_1", "turn_on")
+
+        self.assertFalse(receipt["accepted"])
+        self.assertEqual("power_source_unavailable", receipt["error"])
+        self.assertEqual(1, self.hass.services.async_call.await_count)
 
     async def test_restored_source_marker_must_clear_after_turn_on_readback(
         self,

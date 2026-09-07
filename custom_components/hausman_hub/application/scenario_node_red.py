@@ -49,7 +49,7 @@ _ALLOWED_RESULT_STATUSES = frozenset({"completed", "skipped", "failed"})
 _TRUSTED_SYSTEM_SOURCE_HASHES = {
     "system-tambur-adaptive-controller": frozenset(
         {
-            "4daef9ac2de8dc1c95dd2da6887e178751a65d0e47bcf48443635f68eb1ba5dc",
+            "c8d5cd80006111146053767f7fd775c25a09ec8b5fab38f3a93a6c9126a417ca",
         }
     ),
     "system-shower-comfort-controller": frozenset(
@@ -58,7 +58,7 @@ _TRUSTED_SYSTEM_SOURCE_HASHES = {
         }
     ),
     "system-small-corridor-light-controller": frozenset(
-        {"bc9a2c7883046e568a428e355af312953d70f0f504393b063130f516fe5052b1"}
+        {"c3097df8fefa2d09be4e57b059239bcb92fbb0302069500178fc0be1c8fc4800"}
     ),
 }
 _TRUSTED_ADDITIONAL_SYSTEM_SOURCE_HASHES = {
@@ -129,14 +129,14 @@ _SYSTEM_PLAN_ENVELOPES = {
         "actions": {
             ("entity_71859313239a14e4", "turn_on"): 1,
             ("entity_71859313239a14e4", "turn_off"): 1,
-            ("entity_71859313239a14e4", "set_brightness_percent"): 4,
+            ("entity_71859313239a14e4", "set_brightness_percent"): 1,
             ("entity_71859313239a14e4", "set_color_temperature"): 1,
             ("entity_cd0098e5ff95da46", "turn_on"): 1,
             ("entity_cd0098e5ff95da46", "turn_off"): 1,
             ("entity_fbdf27871edb89bf", "turn_on"): 1,
             ("entity_fbdf27871edb89bf", "turn_off"): 1,
         },
-        "delays": {1: 1, 5: 4, 600: 1},
+        "delays": {},
         "runScenarios": {},
     },
     "system-small-corridor-light-controller": {
@@ -145,10 +145,10 @@ _SYSTEM_PLAN_ENVELOPES = {
             ("entity_4be32416634e6416", "turn_off"): 1,
             ("entity_9ed909332fdaa8fd", "turn_on"): 1,
             ("entity_9ed909332fdaa8fd", "turn_off"): 1,
-            ("entity_9ed909332fdaa8fd", "set_brightness_percent"): 4,
+            ("entity_9ed909332fdaa8fd", "set_brightness_percent"): 1,
             ("entity_9ed909332fdaa8fd", "set_color_temperature"): 1,
         },
-        "delays": {1: 1, 5: 4, 300: 1},
+        "delays": {},
         "runScenarios": {},
     },
 }
@@ -2093,7 +2093,16 @@ class NodeRedScenarioBackend:
                 raise NodeRedBackendError("Node-RED returned a forbidden action type")
             actions.append(action)
         self._validate_plan_envelope(
-            scenario_id, definition, actions, server_bindings=bindings
+            scenario_id,
+            definition,
+            actions,
+            server_bindings=bindings,
+            expected_control_action=(
+                controls.get("state", {}).get("action")
+                if isinstance(controls.get("state"), Mapping)
+                else None
+            ),
+            trigger_context=safe_trigger,
         )
         self._validate_typed_plan(scenario_id, actions, safe_trigger)
         trace = body.get("trace")
@@ -2167,12 +2176,18 @@ class NodeRedScenarioBackend:
         actions: list[ScenarioAction],
         *,
         server_bindings: Mapping[str, str] | None = None,
+        expected_control_action: object = None,
+        trigger_context: Mapping[str, object] | None = None,
     ) -> None:
         if scenario_id not in _SYSTEM_PLAN_ENVELOPES:
             _validate_definition_subsequence(definition, actions)
             return
         _validate_system_branch(
-            scenario_id, actions, server_bindings=server_bindings
+            scenario_id,
+            actions,
+            server_bindings=server_bindings,
+            expected_control_action=expected_control_action,
+            trigger_context=trigger_context,
         )
         envelope = _SYSTEM_PLAN_ENVELOPES[scenario_id]
         counts: dict[tuple[str, object], int] = {}
@@ -2281,6 +2296,43 @@ def _action_signature(action: ScenarioAction) -> tuple[object, ...]:
     )
 
 
+def _matches_control_action(
+    actions: list[ScenarioAction],
+    expected: object,
+    allowed_targets: set[str],
+) -> bool:
+    """Require the one Node-RED action to equal the durable server decision."""
+
+    if (
+        len(actions) != 1
+        or not isinstance(expected, Mapping)
+        or set(expected) != {"targetId", "actionId", "value"}
+    ):
+        return False
+    action = actions[0]
+    target_id = expected.get("targetId")
+    action_id = expected.get("actionId")
+    value = expected.get("value")
+    if (
+        action.id != "server_action"
+        or action.type is not ScenarioActionType.DEVICE_ACTION
+        or target_id not in allowed_targets
+        or action.target_id != target_id
+        or action.action_id != action_id
+        or action.value != value
+        or action.scenario_id is not None
+        or action.message is not None
+    ):
+        return False
+    if action_id in {"turn_on", "turn_off"}:
+        return value is None
+    if action_id == "set_brightness_percent":
+        return type(value) is int and 0 <= value <= 100
+    if action_id == "set_color_temperature":
+        return type(value) is int and 1500 <= value <= 6500
+    return False
+
+
 def _validate_definition_subsequence(
     definition: ScenarioDefinition, actions: list[ScenarioAction]
 ) -> None:
@@ -2297,6 +2349,8 @@ def _validate_system_branch(
     actions: list[ScenarioAction],
     *,
     server_bindings: Mapping[str, str] | None = None,
+    expected_control_action: object = None,
+    trigger_context: Mapping[str, object] | None = None,
 ) -> None:
     """Validate the ordered, release-authored branches of both controllers."""
 
@@ -2356,7 +2410,13 @@ def _validate_system_branch(
         mirror = "entity_fbdf27871edb89bf"
         if not actions:
             return
-        if len(actions) in {1, 2} and all(
+        # Direct typed group controls remain a separate exact user path.
+        typed_group = bool(
+            isinstance(trigger_context, Mapping)
+            and trigger_context.get("source") == "manual"
+            and trigger_context.get("binding") == "tambur-light-group"
+        )
+        if typed_group and len(actions) in {1, 2} and all(
             action.type is ScenarioActionType.DEVICE_ACTION
             and action.target_id in {chandelier, points}
             and action.action_id in {"turn_on", "turn_off"}
@@ -2365,117 +2425,25 @@ def _validate_system_branch(
             and action.message is None
             for action in actions
         ):
-            if any(action.target_id == mirror for action in actions):
-                raise NodeRedBackendError("Node-RED tambur manual group includes mirror")
             return
-        if len(actions) == 1 and (
-            device(actions[0], "mirror_on", mirror, "turn_on")
-            or device(actions[0], "mirror_off", mirror, "turn_off")
+        if not _matches_control_action(
+            actions, expected_control_action, {chandelier, points, mirror}
         ):
-            return
-        if delay(actions[0], "absence_wait", 600):
-            cursor = 1
-            previous = 101
-            while cursor + 1 < len(actions) and actions[cursor].id.startswith("fade_"):
-                value = actions[cursor].value
-                if (
-                    type(value) is not int
-                    or value not in {75, 50, 25, 5}
-                    or value >= previous
-                    or not device(actions[cursor], f"fade_{value}", chandelier, "set_brightness_percent", value)
-                    or not delay(actions[cursor + 1], f"fade_wait_{value}", 5)
-                ):
-                    raise NodeRedBackendError("Node-RED tambur fade exceeds release source")
-                previous = value
-                cursor += 2
-            if cursor < len(actions) and device(actions[cursor], "chandelier_off", chandelier, "turn_off"):
-                cursor += 1
-            if cursor < len(actions) and device(actions[cursor], "points_off", points, "turn_off"):
-                cursor += 1
-            if cursor == len(actions) and cursor > 1:
-                return
-            raise NodeRedBackendError("Node-RED tambur absence branch exceeds release source")
-        if not (len(actions) >= 2 and device(actions[0], "chandelier_on", chandelier, "turn_on") and delay(actions[1], "chandelier_ownership_wait", 1)):
-            raise NodeRedBackendError("Node-RED tambur profile prefix exceeds release source")
-        cursor = 2
-        brightness: int | None = None
-        target_kelvin: int | None = None
-        if cursor < len(actions) and actions[cursor].id == "brightness":
-            action = actions[cursor]
-            if not device(action, "brightness", chandelier, "set_brightness_percent", action.value) or type(action.value) is not int:
-                raise NodeRedBackendError("Node-RED tambur brightness exceeds release source")
-            brightness = action.value
-            cursor += 1
-        if cursor < len(actions) and actions[cursor].id == "temperature_target":
-            target_kelvin = actions[cursor].value if type(actions[cursor].value) is int else None
-            if target_kelvin is None or not device(actions[cursor], "temperature_target", chandelier, "set_color_temperature", target_kelvin):
-                raise NodeRedBackendError("Node-RED tambur temperature exceeds release source")
-            cursor += 1
-        pairs = {(100, 3000), (85, 6500), (70, 5200), (50, 4400), (35, 3600)}
-        if (brightness is not None and brightness not in {item[0] for item in pairs}) or (brightness is not None and target_kelvin is not None and (brightness, target_kelvin) not in pairs) or (target_kelvin is not None and target_kelvin not in {item[1] for item in pairs}):
-            raise NodeRedBackendError("Node-RED tambur profile values exceed release source")
-        if cursor < len(actions) and device(actions[cursor], "points_on", points, "turn_on"):
-            cursor += 1
-        if cursor != len(actions):
-            raise NodeRedBackendError("Node-RED tambur profile order exceeds release source")
+            raise NodeRedBackendError(
+                "Node-RED tambur action differs from the server decision"
+            )
         return
     if scenario_id == "system-small-corridor-light-controller":
         relay = "entity_4be32416634e6416"
         chandelier = "entity_9ed909332fdaa8fd"
         if not actions:
             return
-        cursor = 0
-        if delay(actions[0], "absence_wait", 300):
-            cursor = 1
-        if cursor < len(actions) and actions[cursor].id.startswith("fade_"):
-            previous = 101
-            while cursor + 1 < len(actions) and actions[cursor].id.startswith("fade_"):
-                value = actions[cursor].value
-                if (
-                    type(value) is not int
-                    or value not in {75, 50, 25, 5}
-                    or value >= previous
-                    or not device(actions[cursor], f"fade_{value}", chandelier, "set_brightness_percent", value)
-                    or not delay(actions[cursor + 1], f"fade_wait_{value}", 5)
-                ):
-                    raise NodeRedBackendError("Node-RED small corridor fade exceeds release source")
-                previous = value
-                cursor += 2
-        if cursor < len(actions) and device(actions[cursor], "chandelier_off", chandelier, "turn_off"):
-            cursor += 1
-            if cursor < len(actions) and device(actions[cursor], "relay_off", relay, "turn_off") and cursor + 1 == len(actions):
-                return
-            raise NodeRedBackendError("Node-RED small corridor off branch exceeds release source")
-        cursor = 0
-        if device(actions[0], "relay_on", relay, "turn_on"):
-            cursor = 1
-        if not (
-            cursor + 1 < len(actions)
-            and device(actions[cursor], "chandelier_on", chandelier, "turn_on")
-            and delay(actions[cursor + 1], "ownership_wait", 1)
+        if not _matches_control_action(
+            actions, expected_control_action, {relay, chandelier}
         ):
-            raise NodeRedBackendError("Node-RED small corridor profile prefix exceeds release source")
-        cursor += 2
-        brightness: int | None = None
-        kelvin: int | None = None
-        if cursor < len(actions) and actions[cursor].id == "brightness":
-            brightness = actions[cursor].value if type(actions[cursor].value) is int else None
-            if brightness is None or not device(actions[cursor], "brightness", chandelier, "set_brightness_percent", brightness):
-                raise NodeRedBackendError("Node-RED small corridor brightness exceeds release source")
-            cursor += 1
-        if cursor < len(actions) and actions[cursor].id == "temperature":
-            kelvin = actions[cursor].value if type(actions[cursor].value) is int else None
-            if kelvin is None or not device(actions[cursor], "temperature", chandelier, "set_color_temperature", kelvin):
-                raise NodeRedBackendError("Node-RED small corridor temperature exceeds release source")
-            cursor += 1
-        pairs = {(100, 3000), (45, 3000), (35, 2700), (30, 2700), (20, 2400), (10, 2200)}
-        if (
-            cursor != len(actions)
-            or brightness is not None and brightness not in {item[0] for item in pairs}
-            or kelvin is not None and kelvin not in {item[1] for item in pairs}
-            or brightness is not None and kelvin is not None and (brightness, kelvin) not in pairs
-        ):
-            raise NodeRedBackendError("Node-RED small corridor profile exceeds release source")
+            raise NodeRedBackendError(
+                "Node-RED small corridor action differs from the server decision"
+            )
         return
     targets = {"main": "entity_46174e1ff9913212", "extra": "entity_1fdcd8b244637246", "cabinet": "entity_e7a7c61eec7bdff8", "fan": "entity_afef5df0e0cae309"}
     cursor = 0

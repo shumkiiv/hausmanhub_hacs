@@ -57,10 +57,21 @@ _SMALL_LEGACY_INPUTS = (
     "entity_5f3b4436fb7b6f2b", "entity_c9d6bc67f172f30d",
     "entity_4be32416634e6416", "entity_9ed909332fdaa8fd",
 )
-_SMALL_INPUTS = _SMALL_LEGACY_INPUTS
-_TAMBUR_INPUTS = (
+_SMALL_INPUTS = (
+    "entity_a371cea02388be65", "entity_6b9ccdab9bb484b2",
+    "entity_2e306a9650ac5728", "entity_4be32416634e6416",
+    "entity_9ed909332fdaa8fd",
+)
+_TAMBUR_LEGACY_INPUTS = (
     "entity_156050daca86aa6c", "entity_10b78187426f8485",
     "entity_6b9ccdab9bb484b2", "entity_5f3b4436fb7b6f2b",
+    "entity_71859313239a14e4", "entity_cd0098e5ff95da46",
+    "entity_fbdf27871edb89bf", "entity_b47991988cc6b9f3",
+    "entity_170c7a4e2505b803",
+)
+_TAMBUR_INPUTS = (
+    "entity_156050daca86aa6c", "entity_402b26d150a1ef3f",
+    "entity_10b78187426f8485", "entity_6b9ccdab9bb484b2",
     "entity_71859313239a14e4", "entity_cd0098e5ff95da46",
     "entity_fbdf27871edb89bf", "entity_b47991988cc6b9f3",
     "entity_170c7a4e2505b803",
@@ -100,14 +111,14 @@ FULL_MIGRATION_MANIFEST: tuple[ManagedSwitchMigrationEntry, ...] = (
         "system-small-corridor-light-controller", 3,
         "bc9a2c7883046e568a428e355af312953d70f0f504393b063130f516fe5052b1",
         MANAGED_TOPOLOGY, _SMALL_LEGACY_INPUTS, _SMALL_INPUTS,
-        "bc9a2c7883046e568a428e355af312953d70f0f504393b063130f516fe5052b1",
+        "c3097df8fefa2d09be4e57b059239bcb92fbb0302069500178fc0be1c8fc4800",
         "small_corridor_controller.js", expected_revision=3,
     ),
     ManagedSwitchMigrationEntry(
         "system-tambur-adaptive-controller", 8,
         "4daef9ac2de8dc1c95dd2da6887e178751a65d0e47bcf48443635f68eb1ba5dc",
-        MANAGED_TOPOLOGY, _TAMBUR_INPUTS, _TAMBUR_INPUTS,
-        "4daef9ac2de8dc1c95dd2da6887e178751a65d0e47bcf48443635f68eb1ba5dc",
+        MANAGED_TOPOLOGY, _TAMBUR_LEGACY_INPUTS, _TAMBUR_INPUTS,
+        "c8d5cd80006111146053767f7fd775c25a09ec8b5fab38f3a93a6c9126a417ca",
         "tambur_controller.js", expected_revision=8,
     ),
     ManagedSwitchMigrationEntry(

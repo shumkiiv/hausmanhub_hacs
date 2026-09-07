@@ -394,6 +394,37 @@ def test_manual_claim_is_cleared_by_real_off_before_first_presence_turn_on() -> 
     assert "light.hall" not in priority._manual_records  # noqa: SLF001
 
 
+def test_absence_release_clears_only_manual_marker_without_granting_ownership() -> None:
+    priority = LightAutomationPriority(MemoryStore())
+    priority._manual_records["light.manual"] = {  # noqa: SLF001
+        "entityId": "light.manual",
+        "targetId": "manual_target",
+        "ownership": "manual",
+        "evidenceRevision": "manual-revision",
+        "confirmedAt": 1,
+    }
+    priority._owned_records["light.automatic"] = {  # noqa: SLF001
+        "entityId": "light.automatic",
+        "targetId": "automatic_target",
+        "ownership": "automation",
+        "evidenceRevision": "automatic-revision",
+        "confirmedAt": 1,
+        "expiresAt": 2**63 - 1,
+    }
+    priority._owned_revisions["light.automatic"] = "automatic-revision"  # noqa: SLF001
+
+    released = asyncio.run(
+        priority.async_release_manual_claims(
+            frozenset({"light.manual", "light.automatic"})
+        )
+    )
+
+    assert released == frozenset({"light.manual"})
+    assert "light.manual" not in priority._manual_records  # noqa: SLF001
+    assert "light.manual" not in priority._owned_records  # noqa: SLF001
+    assert "light.automatic" in priority._owned_records  # noqa: SLF001
+
+
 def test_manual_claim_survives_restored_and_stale_off_after_restart() -> None:
     action_spec = ScenarioDeviceAction(
         action_id="turn_on",

@@ -82,12 +82,56 @@ def _trusted_power_state(state: object | None) -> str | None:
 
     if (
         state is None
-        or not _state_is_fresh(state)
+        or not _power_state_is_fresh(state)
         or _state_is_restored_or_cached(state)
     ):
         return None
     value = str(getattr(state, "state", "unknown"))
     return None if value in _UNAVAILABLE_EVIDENCE else value
+
+
+def _power_state_is_fresh(
+    state: object | None,
+    *,
+    same_state_confirmation: bool = False,
+) -> bool:
+    """Trust a fresh same-state power report without rewriting manual history.
+
+    ``last_changed`` intentionally remains the ownership boundary for lights.
+    A relay that has stayed on for hours can nevertheless publish a new
+    ``last_updated`` report after an idempotent ``turn_on``. Power readiness
+    uses that observation while restored, cached and assumed states are still
+    rejected separately.
+    """
+
+    if state is None:
+        return False
+    observed = (
+        getattr(state, "last_reported", None)
+        or getattr(state, "last_updated", None)
+        if same_state_confirmation
+        else getattr(state, "last_changed", None)
+    )
+    if observed is None:
+        observed = getattr(state, "last_updated", None)
+    if not isinstance(observed, datetime):
+        return True
+    if observed.tzinfo is None:
+        observed = observed.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - observed.astimezone(timezone.utc)).total_seconds()
+    return 0 <= age <= 300
+
+
+def _power_state_revision(state: object | None) -> str | None:
+    """Identify a relay report without changing light ownership semantics."""
+
+    if state is None:
+        return None
+    observed = (
+        getattr(state, "last_reported", None)
+        or getattr(state, "last_changed", None)
+    )
+    return observed.isoformat() if isinstance(observed, datetime) else _state_revision(state)
 
 
 def _state_is_restored_or_cached(state: object | None) -> bool:
@@ -624,6 +668,9 @@ class ScenarioExecutor:
         self._electrical_breaker_resolver = electrical_breaker_resolver
         self._command_contexts = command_contexts
         self._manual_light_off_protection = manual_light_off_protection
+        self._scenario_generation_validator: (
+            Callable[[str, str], Awaitable[bool]] | None
+        ) = None
 
     def new_run_id(self) -> str:
         """Generate a unique execution trace id."""
@@ -633,6 +680,15 @@ class ScenarioExecutor:
         """Use the latest HA entities for following validations and commands."""
 
         self._catalog = catalog
+
+    def set_scenario_generation_validator(
+        self, validator: Callable[[str, str], Awaitable[bool]]
+    ) -> None:
+        """Attach the controller generation check used at physical dispatch."""
+
+        if not callable(validator):
+            raise TypeError("scenario generation validator must be callable")
+        self._scenario_generation_validator = validator
 
     async def async_execute_device_action(
         self,
@@ -917,6 +973,7 @@ class ScenarioExecutor:
         after_revision: str | None = None,
         require_new_evidence: bool = False,
         window_seconds: float | None = None,
+        prepared_power_sources: frozenset[str] = frozenset(),
     ) -> dict[str, object]:
         """Poll one bounded HA state window and return explicit evidence."""
 
@@ -956,6 +1013,10 @@ class ScenarioExecutor:
                     if current is None:
                         return None
                     if requested_entity_id in power_source_ids:
+                        if requested_entity_id in prepared_power_sources:
+                            if _state_is_restored_or_cached(current):
+                                return None
+                            return str(getattr(current, "state", "unknown"))
                         return _trusted_power_state(current)
                     return str(getattr(current, "state", "unknown"))
 
@@ -1453,6 +1514,24 @@ class ScenarioExecutor:
                 self._light_priority.authority_lock().release()
                 scenario_authority_lock_held = False
                 light_group_start = None
+
+        async def validate_control_generation() -> None:
+            validator = self._scenario_generation_validator
+            if (
+                validator is None
+                or not await validator(scenario_id, run_id)
+            ):
+                raise ReassertEvidenceChanged(
+                    "scenario control generation changed before dispatch"
+                )
+
+        control_before_dispatch = (
+            validate_control_generation
+            if not dry_run
+            and isinstance(trigger_context, Mapping)
+            and trigger_context.get("source") == "scenario_control"
+            else None
+        )
         for action_index, action in enumerate(actions):
             if action.id not in light_priority.light_action_ids:
                 # DELAY, NOTIFICATION and RUN_SCENARIO are explicit authority
@@ -1501,7 +1580,7 @@ class ScenarioExecutor:
                     )
                     break
                 absence_generations.update(armed)
-            before_dispatch = None
+            before_dispatch = control_before_dispatch
             if (
                 not dry_run
                 and action.type is ScenarioActionType.DEVICE_ACTION
@@ -1523,8 +1602,15 @@ class ScenarioExecutor:
                 continue
             if action.action_id == "turn_off" and action.target_id in absence_generations:
                 generation = absence_generations[action.target_id]
+                previous_before_dispatch = before_dispatch
 
-                async def before_dispatch(target_id: str = action.target_id, expected: str = generation) -> None:
+                async def before_dispatch(
+                    target_id: str = action.target_id,
+                    expected: str = generation,
+                    previous: Callable[[], Awaitable[None]] | None = previous_before_dispatch,
+                ) -> None:
+                    if previous is not None:
+                        await previous()
                     obligations = self._light_safety_obligations
                     if obligations is None or not await obligations.async_is_current(target_id, expected):
                         raise ReassertEvidenceChanged("delayed off authority changed before dispatch")
@@ -2785,7 +2871,7 @@ class ScenarioExecutor:
             }
 
         try:
-            power_error, power_precondition, _prepared_sources = (
+            power_error, power_precondition, prepared_sources = (
                 await self._prepare_power_dependency(
                     device.entity_id,
                     powered_sources=powered_sources or {},
@@ -2797,6 +2883,7 @@ class ScenarioExecutor:
                         if external_dispatch_marker is not None
                         else None
                     ),
+                    before_dispatch=before_dispatch,
                 )
             )
         except Exception as error:  # noqa: BLE001
@@ -3028,6 +3115,10 @@ class ScenarioExecutor:
             if require_new_readback:
                 receipt["_readback_after_revision"] = pre_command_revision
                 receipt["_readback_require_new"] = True
+            if prepared_sources:
+                receipt["_readback_prepared_power_sources"] = sorted(
+                    prepared_sources
+                )
         else:
             read_back = await self._read_back_device(
                 device.entity_id,
@@ -3038,6 +3129,7 @@ class ScenarioExecutor:
                 ),
                 require_new_evidence=require_new_readback,
                 window_seconds=confirmation_window_ms / 1000,
+                prepared_power_sources=prepared_sources,
             )
             receipt["confirmed"] = read_back["matched"] is True
             receipt["read_back"] = read_back
@@ -3075,19 +3167,24 @@ class ScenarioExecutor:
         source_target_id = self._target_id_for_entity(
             dependency.power_source_entity_id
         )
-        observed = (
-            getattr(source_state, "last_changed", None)
-            or getattr(source_state, "last_updated", None)
-            if source_state is not None
-            else None
-        )
+        observed = None
+        if source_state is not None:
+            if source_command_sent_at is not None:
+                observed = (
+                    getattr(source_state, "last_reported", None)
+                    or getattr(source_state, "last_updated", None)
+                )
+            observed = observed or getattr(source_state, "last_changed", None)
+            observed = observed or getattr(source_state, "last_updated", None)
         if isinstance(observed, datetime):
             if observed.tzinfo is None:
                 observed = observed.replace(tzinfo=timezone.utc)
             sequence = max(0, int(observed.timestamp() * 1000))
         else:
             sequence = max(0, int(source_read_back_at or time.time_ns() // 1_000_000))
-        source_revision = _state_revision(source_state) or f"evidence.{sequence}"
+        source_revision = (
+            _power_state_revision(source_state) or f"evidence.{sequence}"
+        )
         source_revision = "".join(
             character
             if character.isalnum() or character in "._:-"
@@ -3166,6 +3263,7 @@ class ScenarioExecutor:
         dry_run: bool,
         request_id: str,
         dispatch_marker: Callable[[], None] | None = None,
+        before_dispatch: Callable[[], Awaitable[None]] | None = None,
         visiting: frozenset[str] = frozenset(),
     ) -> tuple[str | None, dict[str, object] | None, frozenset[str]]:
         """Ensure an automatic upstream source is on before a device command."""
@@ -3208,6 +3306,7 @@ class ScenarioExecutor:
             dry_run=dry_run,
             request_id=request_id,
             dispatch_marker=dispatch_marker,
+            before_dispatch=before_dispatch,
             visiting=visiting | {entity_id},
         )
         precondition: dict[str, object] = {
@@ -3236,7 +3335,7 @@ class ScenarioExecutor:
                 if (
                     confirmed_source is None
                     or str(getattr(confirmed_source, "state", "unknown")) != "on"
-                    or not _state_is_fresh(confirmed_source)
+                    or not _power_state_is_fresh(confirmed_source)
                     or _state_is_restored_or_cached(confirmed_source)
                 ):
                     return "power_source_unavailable", precondition, upstream_sources
@@ -3268,7 +3367,7 @@ class ScenarioExecutor:
         )
         if (
             state == "on"
-            and _state_is_fresh(source_state_object)
+            and _power_state_is_fresh(source_state_object)
             and not _state_is_restored_or_cached(source_state_object)
         ):
             precondition["waitedSeconds"] = 0
@@ -3293,7 +3392,7 @@ class ScenarioExecutor:
         if (
             state == "on"
             and (
-                not _state_is_fresh(source_state_object)
+                not _power_state_is_fresh(source_state_object)
                 or _state_is_restored_or_cached(source_state_object)
             )
             and dependency.policy != AUTO_TURN_ON_POLICY
@@ -3325,7 +3424,7 @@ class ScenarioExecutor:
             )
             source_turned_on = False
             source_command_sent_at: int | None = None
-            source_is_fresh = _state_is_fresh(source_state_object)
+            source_is_fresh = _power_state_is_fresh(source_state_object)
             source_is_restored = _state_is_restored_or_cached(
                 source_state_object
             )
@@ -3357,7 +3456,7 @@ class ScenarioExecutor:
                 if guard_error is not None:
                     return guard_error, precondition, upstream_sources
                 domain = source_entity_id.split(".", 1)[0]
-                previous_revision = _state_revision(source_state_object)
+                previous_revision = _power_state_revision(source_state_object)
                 source_command_sent_at = int(time.time() * 1000)
                 service_context = (
                     self._command_contexts.create(source_entity_id, "on")
@@ -3365,6 +3464,8 @@ class ScenarioExecutor:
                     else None
                 )
                 try:
+                    if before_dispatch is not None:
+                        await before_dispatch()
                     if dispatch_marker is not None:
                         dispatch_marker()
                     await self._call_service(
@@ -3404,7 +3505,10 @@ class ScenarioExecutor:
             if (
                 confirmed_source is None
                 or str(getattr(confirmed_source, "state", "unknown")) != "on"
-                or not _state_is_fresh(confirmed_source)
+                or not _power_state_is_fresh(
+                    confirmed_source,
+                    same_state_confirmation=source_turned_on,
+                )
                 or _state_is_restored_or_cached(confirmed_source)
             ):
                 if source_turned_on and dispatch_marker is not None:
@@ -3448,7 +3552,11 @@ class ScenarioExecutor:
         deadline = loop.time() + self._readback_window_seconds
         while True:
             state = self._entity_state_object(entity_id)
-            revision = _state_revision(state)
+            revision = (
+                _power_state_revision(state)
+                if require_trusted
+                else _state_revision(state)
+            )
             if (
                 state is not None
                 and str(getattr(state, "state", "unknown")) == expected
@@ -3459,7 +3567,10 @@ class ScenarioExecutor:
                 and (
                     not require_trusted
                     or (
-                        _state_is_fresh(state)
+                        _power_state_is_fresh(
+                            state,
+                            same_state_confirmation=after_revision is not None,
+                        )
                         and not _state_is_restored_or_cached(state)
                     )
                 )
@@ -3512,6 +3623,7 @@ class ScenarioExecutor:
             value = receipt.pop("_readback_value", None)
             after_revision = receipt.pop("_readback_after_revision", None)
             require_new = receipt.pop("_readback_require_new", False) is True
+            prepared = receipt.pop("_readback_prepared_power_sources", ())
             if not isinstance(action_id, str):
                 continue
             pending.append(
@@ -3527,6 +3639,9 @@ class ScenarioExecutor:
                         require_new_evidence=require_new,
                         window_seconds=self._batch_confirmation_window_seconds(
                             receipt, action_id
+                        ),
+                        prepared_power_sources=frozenset(
+                            item for item in prepared if isinstance(item, str)
                         ),
                     ),
                 )

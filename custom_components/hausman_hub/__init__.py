@@ -453,6 +453,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         binding_safety_validator=_safe_storage_exhaust_binding,
     )
     await scenario_control_policy.async_load()
+    manual_light_off_protection.set_release_owned_block_seconds_provider(
+        lambda: scenario_control_policy.current.policy.manual_off_block_seconds
+    )
     domain_data["scenario_control_policy_service"] = scenario_control_policy
     from .application.managed_switch_migration import (
         HomeAssistantManagedSwitchMigrationStore,
@@ -566,6 +569,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ),
     )
     await scenario_control_coordinator.async_load()
+    scenario_executor.set_scenario_generation_validator(
+        scenario_control_coordinator.async_validate_generation
+    )
     scenario_node_red_backend.set_control_context_provider(
         scenario_control_coordinator.async_control_context
     )

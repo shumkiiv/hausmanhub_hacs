@@ -33,7 +33,7 @@ MAX_ACTIVE_PROTECTIONS = 64
 MAX_COMPLETED_PROTECTIONS = 256
 MAX_IDEMPOTENCY_RECEIPTS = 128
 _FRESH_SENSOR_SECONDS = 300
-_DIRECT_USER_BLOCK_SECONDS = 180
+_DIRECT_USER_BLOCK_SECONDS = 300
 _DIRECT_USER_ROOM_ID = "tambur"
 _DIRECT_USER_PROFILE_ID = "tambur-direct-user-off"
 _LOGGER = logging.getLogger(__name__)
@@ -97,6 +97,9 @@ class ManualLightOffProtectionCoordinator:
         self._receipt_metadata: dict[str, tuple[str, str]] = {}
         self._sensor_states: dict[str, tuple[str, datetime]] = {}
         self._event_entity_listeners: set[Callable[[], None]] = set()
+        self._release_owned_block_seconds: Callable[[], int] = (
+            lambda: _DIRECT_USER_BLOCK_SECONDS
+        )
         self._loaded = False
         self._runtime_unhealthy = False
         self._catalog_coverage_healthy = True
@@ -126,6 +129,15 @@ class ManualLightOffProtectionCoordinator:
             and not self.unhealthy
             and not getattr(self._store, "recovered_previous", False)
         )
+
+    def set_release_owned_block_seconds_provider(
+        self, provider: Callable[[], int]
+    ) -> None:
+        """Use the current server policy for future direct-user off records."""
+
+        if not callable(provider):
+            raise TypeError("release-owned block provider must be callable")
+        self._release_owned_block_seconds = provider
 
     async def async_load(self) -> None:
         try:
@@ -218,9 +230,15 @@ class ManualLightOffProtectionCoordinator:
                 raise ManualLightOffProtectionValidationError(
                     "release-owned direct-off scope is invalid"
                 )
+            block_seconds = self._release_owned_block_seconds()
+            if type(block_seconds) is not int or not 0 <= block_seconds <= 3600:
+                raise ManualLightOffProtectionValidationError(
+                    "release-owned direct-off duration is invalid"
+                )
             request = {
                 "lightEntityIds": list(light_entity_ids),
                 "presenceSensorEntityIds": list(presence_sensor_entity_ids),
+                "blockSeconds": block_seconds,
             }
             fingerprint = _request_fingerprint(request)
             existing = self._receipt(
@@ -235,7 +253,7 @@ class ManualLightOffProtectionCoordinator:
             if current is not None:
                 if (
                     tuple(current.get("lightIds", ())) != light_entity_ids
-                    or self._frozen_sensor_ids.get(key) != presence_sensor_entity_ids
+                    or self._frozen_sensor_ids.get(key) != ()
                     or current.get("state") != ProtectionState.ACTIVE.value
                 ):
                     raise ManualLightOffProtectionValidationError(
@@ -259,9 +277,9 @@ class ManualLightOffProtectionCoordinator:
                 {
                     "globalPolicy": {
                         "enabled": True,
-                        "minimumIntervalSeconds": _DIRECT_USER_BLOCK_SECONDS,
-                        "releaseMode": "timer_and_absence",
-                        "stableAbsenceSeconds": _DIRECT_USER_BLOCK_SECONDS,
+                        "minimumIntervalSeconds": block_seconds,
+                        "releaseMode": "timer_only",
+                        "stableAbsenceSeconds": block_seconds,
                         "extendOnRepeatedManualOff": False,
                         "noSensorFallback": "manual_release",
                         "protectedScope": "profile",
@@ -279,7 +297,7 @@ class ManualLightOffProtectionCoordinator:
                 "lightIds": list(light_entity_ids),
                 "startedAt": _wire_time(now),
                 "notBefore": _wire_time(
-                    now.timestamp() + _DIRECT_USER_BLOCK_SECONDS
+                    now.timestamp() + block_seconds
                 ),
                 "absenceSince": None,
                 "effectivePolicy": policy.as_wire(),
@@ -292,7 +310,12 @@ class ManualLightOffProtectionCoordinator:
                 "state": ProtectionState.ACTIVE.value,
             }
             self._protections[key] = record
-            self._frozen_sensor_ids[key] = tuple(presence_sensor_entity_ids)
+            # This release-owned group uses an exact timer-only inhibit. Sensor
+            # state must neither shorten nor extend it. The validated sensor
+            # scope stays in the request fingerprint so retries cannot silently
+            # change the physical profile, but it is deliberately not frozen as
+            # release evidence.
+            self._frozen_sensor_ids[key] = ()
             self._state_revision += 1
             self._restore_sensor_evidence(sensor_states, now)
             receipt = _receipt(

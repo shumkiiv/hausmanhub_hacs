@@ -1,6 +1,8 @@
 from datetime import datetime, time, timedelta
 
 from custom_components.hausman_hub.domain.scenario_controls import (
+    brightness_sequence_deadline_ms,
+    brightness_sequence_step,
     OccupancyEvidence,
     brightness_after_relative_fade,
     evening_start,
@@ -52,6 +54,58 @@ def test_relative_fade_and_one_percent_steps_respect_minimum():
     assert brightness_after_relative_fade(80, minimum=20) == 72
     assert fade_steps(80, 72) == (79, 78, 77, 76, 75, 74, 73, 72)
     assert brightness_after_relative_fade(1, minimum=5) == 5
+
+
+def test_bounded_brightness_sequences_reach_exact_targets_without_large_steps():
+    current = 80
+    for ordinal in range(1, 9):
+        now_ms = brightness_sequence_deadline_ms(
+            0, 300_000, 80, 72, current
+        )
+        assert now_ms == ordinal * 37_500
+        next_value, remainder = brightness_sequence_step(
+            current,
+            start=80,
+            target=72,
+            started_at_ms=0,
+            deadline_ms=300_000,
+            now_ms=now_ms,
+        )
+        assert current - next_value == 1
+        assert 0 <= remainder < 1
+        current = next_value
+    assert current == 72
+
+    current = 5
+    deadlines = []
+    while current < 80:
+        now_ms = brightness_sequence_deadline_ms(0, 30_000, 5, 80, current)
+        assert now_ms is not None
+        deadlines.append(now_ms)
+        next_value, _remainder = brightness_sequence_step(
+            current,
+            start=5,
+            target=80,
+            started_at_ms=0,
+            deadline_ms=30_000,
+            now_ms=now_ms,
+        )
+        assert next_value - current == 1
+        current = next_value
+    assert deadlines[-1] == 30_000
+    assert current == 80
+
+
+def test_brightness_sequence_never_exceeds_a_five_percent_cap():
+    value, _remainder = brightness_sequence_step(
+        5,
+        start=5,
+        target=5,
+        started_at_ms=0,
+        deadline_ms=30_000,
+        now_ms=30_000,
+    )
+    assert value == 5
 
 
 def test_manual_upper_or_hold_forces_neutral_full_brightness():

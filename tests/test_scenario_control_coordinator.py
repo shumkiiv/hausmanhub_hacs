@@ -447,8 +447,13 @@ async def test_runtime_wiring_uses_shared_latch_state_events_and_exact_policy_cl
     await coordinator.async_start(entry, latch)
 
     assert [(hour, minute, second) for hour, minute, second, _ in schedules] == [
+        (9, 0, 0),
+        (10, 0, 0),
         (11, 0, 0),
         (20, 0, 0),
+        (21, 0, 0),
+        (23, 0, 0),
+        (23, 30, 0),
     ]
     states.values["binary_sensor.motion"] = "on"
     await callbacks["state_changed"](
@@ -461,7 +466,7 @@ async def test_runtime_wiring_uses_shared_latch_state_events_and_exact_policy_cl
         SimpleNamespace(data={"entity_id": "binary_sensor.motion"})
     )
     assert service.calls[0]["trigger_context"]["trigger_id"] == "storage_light_on"
-    await schedules[0][3](None)
+    await next(callback for hour, _, _, callback in schedules if hour == 11)(None)
     assert service.calls[-1]["trigger_context"]["trigger_id"] == "storage_exhaust_unbound"
     coordinator.cancel()
     await asyncio.sleep(0)
