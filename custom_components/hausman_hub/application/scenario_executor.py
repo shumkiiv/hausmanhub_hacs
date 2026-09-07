@@ -653,6 +653,7 @@ class ScenarioExecutor:
         command_contexts: ScenarioCommandContextRegistry | None = None,
         manual_light_off_protection: ManualLightOffProtectionCoordinator | None = None,
         curtain_command_policy: CurtainCommandPolicy | None = None,
+        curtain_protection: object | None = None,
     ):
         if not 0.01 <= readback_window_seconds <= 30.0:
             raise ValueError("readback window must be between 0.01 and 30 seconds")
@@ -676,6 +677,7 @@ class ScenarioExecutor:
         self._command_contexts = command_contexts
         self._manual_light_off_protection = manual_light_off_protection
         self._curtain_command_policy = curtain_command_policy or CurtainCommandPolicy()
+        self._curtain_protection = curtain_protection
         self._scenario_generation_validator: (
             Callable[[str, str], Awaitable[bool]] | None
         ) = None
@@ -697,6 +699,13 @@ class ScenarioExecutor:
         if not callable(validator):
             raise TypeError("scenario generation validator must be callable")
         self._scenario_generation_validator = validator
+
+    def set_curtain_protection(self, protection: object) -> None:
+        """Attach durable curtain state after both runtime objects are loaded."""
+
+        if not callable(getattr(protection, "async_before_action", None)):
+            raise TypeError("curtain protection coordinator is invalid")
+        self._curtain_protection = protection
 
     async def async_execute_device_action(
         self,
@@ -1949,6 +1958,8 @@ class ScenarioExecutor:
         await finalize_light_group(len(actions))
         if not dry_run:
             await self._confirm_deferred_device_receipts(receipts)
+            for receipt in receipts:
+                await self._async_note_curtain_protection(receipt)
             await self._async_resolve_light_off_obligations(
                 actions,
                 receipts,
@@ -2864,6 +2875,15 @@ class ScenarioExecutor:
         pre_command_revision = _state_revision(current)
         physical_dispatch_at: datetime | None = None
         curtain_plan: CurtainDispatchPlan | None = None
+        curtain_protection_token: str | None = None
+        curtain_automatic = bool(
+            automatic
+            and not (
+                isinstance(protection_trigger_context, Mapping)
+                and protection_trigger_context.get("source") == "nested"
+                and protection_trigger_context.get("origin_source") == "manual"
+            )
+        )
         try:
             curtain_plan = self._curtain_command_policy.plan(
                 device=device,
@@ -2922,6 +2942,38 @@ class ScenarioExecutor:
                     "status": "failed",
                     "error": "curtain_evidence_unavailable",
                 }
+            protection = self._curtain_protection
+            decide = getattr(protection, "async_before_action", None)
+            if callable(decide):
+                receipt_identity = command_request_id or str(
+                    base.get("correlation_id") or base.get("action_id")
+                )
+                decision = await decide(
+                    target_id=curtain_plan.target_id,
+                    entity_id=curtain_plan.entity_id,
+                    action_id=curtain_plan.public_action_id,
+                    requested=curtain_plan.requested,
+                    applied=curtain_plan.applied,
+                    current_position=curtain_plan.pre_command_position,
+                    automatic=curtain_automatic,
+                    dry_run=dry_run,
+                    receipt_id=receipt_identity,
+                )
+                curtain_protection_token = decision.token
+                if not decision.allowed:
+                    return {
+                        **base,
+                        "status": "completed",
+                        "target_id": action.target_id,
+                        "domain": allowed.domain,
+                        "service": allowed.service,
+                        "entity_id": device.entity_id,
+                        "confirmed": None if dry_run else True,
+                        "skipped": True,
+                        "physicalAttempted": False,
+                        "reason": decision.reason,
+                        **({"planned": True} if dry_run else {}),
+                    }
         range_error = _range_error_for_action(device, current, action.action_id, confirmation_value)
         if range_error is not None:
             return {**base, "status": "failed", "error": range_error}
@@ -3208,6 +3260,35 @@ class ScenarioExecutor:
                         "status": "failed",
                         "error": "curtain_dispatch_plan_changed",
                     })
+                validate_protection = getattr(
+                    self._curtain_protection,
+                    "async_validate_before_dispatch",
+                    None,
+                )
+                if callable(validate_protection):
+                    protection_decision = await validate_protection(
+                        target_id=curtain_plan.target_id,
+                        entity_id=curtain_plan.entity_id,
+                        action_id=curtain_plan.public_action_id,
+                        requested=curtain_plan.requested,
+                        applied=curtain_plan.applied,
+                        current_position=curtain_plan.pre_command_position,
+                        automatic=curtain_automatic,
+                        token=curtain_protection_token,
+                    )
+                    if not protection_decision.allowed:
+                        return failed_after_power_dispatch({
+                            **base,
+                            "status": "completed",
+                            "target_id": action.target_id,
+                            "domain": allowed.domain,
+                            "service": allowed.service,
+                            "entity_id": device.entity_id,
+                            "confirmed": True,
+                            "skipped": True,
+                            "physicalAttempted": False,
+                            "reason": protection_decision.reason,
+                        })
             if stale_automatic_turn_on:
                 assert reassert_identity is not None
                 if not await self._light_priority.async_validate_reassert(
@@ -3306,6 +3387,20 @@ class ScenarioExecutor:
                 receipt["curtain_command_sent_at_ms"] = max(
                     0, int(physical_dispatch_at.timestamp() * 1000)
                 )
+            receipt["_curtain_protection"] = {
+                "target_id": curtain_plan.target_id,
+                "entity_id": curtain_plan.entity_id,
+                "action_id": curtain_plan.public_action_id,
+                "requested": curtain_plan.requested,
+                "applied": curtain_plan.applied,
+                "current_position": curtain_plan.pre_command_position,
+                "automatic": curtain_automatic,
+                "dry_run": dry_run,
+                "receipt_id": command_request_id or str(
+                    base.get("correlation_id") or base.get("action_id")
+                ),
+                "protection_generation": curtain_protection_token,
+            }
         if dry_run:
             receipt["service_data"] = service_data
             receipt["planned"] = True
@@ -3369,7 +3464,29 @@ class ScenarioExecutor:
                 "minimum_percent": adaptive_minimum,
                 "resolved_percent": round(100 * confirmation_value / 255),
             }
+        if not defer_readback:
+            await self._async_note_curtain_protection(receipt)
         return receipt
+
+    async def _async_note_curtain_protection(
+        self, receipt: dict[str, Any]
+    ) -> None:
+        metadata = receipt.pop("_curtain_protection", None)
+        note = getattr(self._curtain_protection, "async_note_result", None)
+        if not isinstance(metadata, Mapping) or not callable(note):
+            return
+        read_back = receipt.get("read_back")
+        evidence_revision = (
+            read_back.get("evidenceRevision")
+            if isinstance(read_back, Mapping)
+            and isinstance(read_back.get("evidenceRevision"), str)
+            else None
+        )
+        await note(
+            **metadata,
+            confirmed=receipt.get("confirmed") is True,
+            evidence_revision=evidence_revision,
+        )
 
     def _target_id_for_entity(self, entity_id: str) -> str:
         devices = getattr(self._catalog, "devices", {})
@@ -4018,6 +4135,17 @@ class ScenarioExecutor:
                 dry_run=True,
                 trigger_context={
                     "source": "nested",
+                    "origin_source": (
+                        "manual"
+                        if isinstance(trigger_context, Mapping)
+                        and (
+                            trigger_context.get("source") == "manual"
+                            or trigger_context.get("origin_source") == "manual"
+                        )
+                        else str(trigger_context.get("source") or "automatic")
+                        if isinstance(trigger_context, Mapping)
+                        else "automatic"
+                    ),
                     "target_id": (
                         trigger_context.get("target_id")
                         if isinstance(trigger_context, Mapping)
@@ -4057,6 +4185,17 @@ class ScenarioExecutor:
             visited=visited,
             trigger_context={
                 "source": "nested",
+                "origin_source": (
+                    "manual"
+                    if isinstance(trigger_context, Mapping)
+                    and (
+                        trigger_context.get("source") == "manual"
+                        or trigger_context.get("origin_source") == "manual"
+                    )
+                    else str(trigger_context.get("source") or "automatic")
+                    if isinstance(trigger_context, Mapping)
+                    else "automatic"
+                ),
                 "target_id": origin_target_id,
                 "trigger_id": None,
                 "recovery": False,

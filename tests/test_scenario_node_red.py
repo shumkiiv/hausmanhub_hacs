@@ -30,6 +30,15 @@ from custom_components.hausman_hub.application.scenario_node_red import (
     validate_managed_source,
 )
 from custom_components.hausman_hub.application.scenario_executor import ScenarioExecutor
+from custom_components.hausman_hub.application.curtain_command_policy import (
+    KITCHEN_CURTAIN_TARGET,
+    OFFICE_CURTAIN_TARGET,
+    CurtainCommandPolicy,
+)
+from custom_components.hausman_hub.application.curtain_protection import (
+    CURTAIN_TARGET_IDS,
+    CurtainProtectionCoordinator,
+)
 from custom_components.hausman_hub.application.scenario_control_coordinator import (
     STORAGE_LIGHT_TARGET_ID,
     STORAGE_MOTION_TARGET_ID,
@@ -46,6 +55,7 @@ from custom_components.hausman_hub.application.managed_switch_migration import (
     FULL_MIGRATION_MANIFEST,
 )
 from custom_components.hausman_hub.application.scenarios import (
+    ScenarioCatalog,
     ScenarioDeviceAction,
     ScenarioDeviceEntry,
 )
@@ -1316,6 +1326,217 @@ async def test_all_eight_release_sources_cross_real_async_plan_js_transport() ->
         assert managed_source_hash(source) == item.new_source_hash
 
 
+async def test_curtains_cross_real_service_async_plan_and_executor_without_deadlock() -> None:
+    item = next(
+        entry
+        for entry in FULL_MIGRATION_MANIFEST
+        if entry.scenario_id == "system-curtains-privacy-controller"
+    )
+    source = Path(
+        "custom_components/hausman_hub/managed_scenarios/curtains_controller.js"
+    ).read_text(encoding="utf-8")
+    flow_id = "flow-curtains-e2e"
+    deployed = build_managed_flow(
+        item.scenario_id, "Шторы", source, flow_id=flow_id
+    )
+    revision = [datetime.now(timezone.utc)]
+
+    def cover_state(position: int) -> SimpleNamespace:
+        return SimpleNamespace(
+            state="closed" if position == 0 else "open",
+            attributes={"current_position": position},
+            last_changed=revision[0],
+            last_updated=revision[0],
+        )
+
+    state_values = {target_id: cover_state(0) for target_id in CURTAIN_TARGET_IDS}
+
+    class Services:
+        calls: list[tuple[str, str, dict[str, object]]] = []
+
+        async def async_call(self, domain, service, data, **_kwargs):
+            self.calls.append((domain, service, dict(data)))
+            assert domain == "cover"
+            assert service == "set_cover_position"
+            revision[0] = datetime.now(timezone.utc) + timedelta(milliseconds=1)
+            state_values[str(data["entity_id"])] = cover_state(
+                int(data["position"])
+            )
+
+    hass = SimpleNamespace(
+        states=SimpleNamespace(get=state_values.get),
+        services=Services(),
+    )
+    actions = tuple(
+        ScenarioDeviceAction(
+            action_id=action_id,
+            title=action_id,
+            domain="cover",
+            service=ha_service,
+            allowed_fields=(
+                frozenset({"value"})
+                if action_id == "set_position"
+                else frozenset()
+            ),
+        )
+        for action_id, ha_service in (
+            ("open_cover", "open_cover"),
+            ("close_cover", "close_cover"),
+            ("set_position", "set_cover_position"),
+        )
+    )
+    devices = {
+        target_id: ScenarioDeviceEntry(
+            target_id=target_id,
+            name=target_id,
+            entity_id=target_id,
+            actions=actions,
+        )
+        for target_id in CURTAIN_TARGET_IDS
+    }
+    catalog = ScenarioCatalog(devices=devices, scenarios={})
+    definition = replace(
+        _definition(),
+        node_red=ScenarioNodeRedMetadata(
+            flow_id=flow_id,
+            source_hash=item.new_source_hash,
+            input_target_ids=item.input_target_ids,
+            sync_status=ScenarioNodeRedSyncStatus.SYNCED,
+        ),
+    )
+
+    class ScenarioStore:
+        def __init__(self):
+            self.registry = ScenarioRegistry(scenarios=(
+                Scenario.from_definition(
+                    item.scenario_id,
+                    "Шторы",
+                    definition,
+                    group="system",
+                ),
+            ))
+
+        async def async_load(self):
+            return self.registry
+
+        async def async_save(self, registry):
+            self.registry = registry
+
+    class MappingStore:
+        payload = None
+        recovered_previous = False
+
+        async def async_load(self):
+            return self.payload
+
+        async def async_save(self, payload):
+            self.payload = json.loads(json.dumps(payload))
+
+    async def adapter(method, path, headers, payload):
+        del headers
+        if method == "GET" and path.endswith("/flows"):
+            return 200, _global_revision(deployed, "rev-curtains-e2e")
+        if method == "GET" and path.endswith(f"/flow/{flow_id}"):
+            return 200, deployed
+        if method == "POST":
+            completed = subprocess.run(
+                [
+                    "node",
+                    "-e",
+                    "const p=JSON.parse(process.argv[1]);const s=process.argv[2];"
+                    "const r=(new Function('msg',s))({payload:p});"
+                    "process.stdout.write(JSON.stringify(r.payload));",
+                    json.dumps(payload),
+                    source,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return 200, json.loads(completed.stdout)
+        raise AssertionError((method, path))
+
+    backend = NodeRedScenarioBackend(hass, request_adapter=adapter)
+    backend._ingress_token = "token"  # noqa: SLF001
+    backend._ingress_session = "session"  # noqa: SLF001
+    service = ScenarioService(
+        hass, ScenarioStore(), catalog, node_red_backend=backend
+    )
+    await service.async_load()
+    protection = CurtainProtectionCoordinator(
+        MappingStore(),
+        catalog_resolver=catalog.device,
+        next_sunrise_ms=lambda: 2_000,
+        now_ms=lambda: 1_000,
+    )
+    await protection.async_load()
+
+    async def controls(scenario_id, run_id, trigger):
+        assert scenario_id == item.scenario_id
+        return {
+            "policyRevision": 0,
+            "policy": {
+                "kitchenCoverCapPercent": 80,
+                "cabinetCoverCapPercent": 90,
+            },
+            "state": await protection.async_control_state(run_id, trigger),
+        }
+
+    backend.set_control_context_provider(controls)
+    executor = ScenarioExecutor(
+        hass,
+        catalog,
+        service.async_run_scenario,
+        node_red_backend=backend,
+        curtain_command_policy=CurtainCommandPolicy.with_confirmed_scales(
+            {KITCHEN_CURTAIN_TARGET, OFFICE_CURTAIN_TARGET}
+        ),
+        curtain_protection=protection,
+        readback_window_seconds=0.05,
+        readback_interval_seconds=0.01,
+    )
+    service.set_executor(executor)
+
+    manual = await asyncio.wait_for(
+        service.async_run_scenario(
+            item.scenario_id,
+            trigger_context={
+                "source": "manual",
+                "trigger_id": "manual_open_all",
+                "recovery": False,
+            },
+        ),
+        timeout=2,
+    )
+    assert manual["status"] == "completed", manual
+    assert len(hass.services.calls) == 4, manual
+    assert manual["confirmed"] is True
+    assert {data["position"] for _, _, data in hass.services.calls} == {
+        80, 90, 100
+    }
+
+    revision[0] += timedelta(milliseconds=1)
+    state_values.update({target_id: cover_state(0) for target_id in CURTAIN_TARGET_IDS})
+    sunrise = await asyncio.wait_for(
+        protection.async_run_trusted_sunrise(
+            2_000, service.async_run_scenario
+        ),
+        timeout=2,
+    )
+    assert sunrise["status"] == "completed"
+    assert len(hass.services.calls) == 8
+    assert sunrise["confirmed"] is True
+    before_duplicate = list(hass.services.calls)
+    duplicate = await protection.async_run_trusted_sunrise(
+        2_000, service.async_run_scenario
+    )
+    assert duplicate == {
+        "status": "skipped",
+        "reason": "curtain_sunrise_already_processed",
+    }
+    assert hass.services.calls == before_duplicate
+
+
 async def test_storage_js_transport_selects_only_server_generation_actions() -> None:
     item = next(
         item
@@ -2015,6 +2236,77 @@ def test_system_branch_validator_rejects_mutated_values_order_unions_and_excess(
                     if scenario_id == "system-tambur-adaptive-controller"
                     else expected_shower
                 ),
+            )
+
+
+def test_curtain_branch_validator_binds_values_and_targets_to_server_controls() -> None:
+    living, kitchen, _alice, office = CURTAIN_TARGET_IDS
+    controls = {
+        "policyRevision": 4,
+        "policy": {
+            "kitchenCoverCapPercent": 80,
+            "cabinetCoverCapPercent": 90,
+        },
+        "state": {
+            "ready": True,
+            "transition": "curtain_snapshot",
+            "trustedSunrise": False,
+            "targets": {
+                target: {
+                    "automaticCloseAllowed": True,
+                    "morningOpenAllowed": False,
+                }
+                for target in CURTAIN_TARGET_IDS
+            },
+        },
+    }
+    valid = [
+        ScenarioAction(
+            f"cover_{living}",
+            ScenarioActionType.DEVICE_ACTION,
+            target_id=living,
+            action_id="set_position",
+            value=100,
+        ),
+        ScenarioAction(
+            f"cover_{kitchen}",
+            ScenarioActionType.DEVICE_ACTION,
+            target_id=kitchen,
+            action_id="set_position",
+            value=80,
+        ),
+    ]
+    NodeRedScenarioBackend._validate_plan_envelope(  # noqa: SLF001
+        "system-curtains-privacy-controller",
+        _definition(),
+        valid,
+        server_controls=controls,
+        trigger_context={"source": "manual", "trigger_id": "manual_open_all"},
+    )
+    invalid_plans = (
+        [replace(valid[1], value=90)],
+        [valid[1], valid[0]],
+        [
+            ScenarioAction(
+                f"cover_{office}",
+                ScenarioActionType.DEVICE_ACTION,
+                target_id=office,
+                action_id="set_position",
+                value=0,
+            )
+        ],
+    )
+    for actions in invalid_plans:
+        with pytest.raises(NodeRedBackendError):
+            NodeRedScenarioBackend._validate_plan_envelope(  # noqa: SLF001
+                "system-curtains-privacy-controller",
+                _definition(),
+                actions,
+                server_controls=controls,
+                trigger_context={
+                    "source": "manual",
+                    "trigger_id": "manual_open_all",
+                },
             )
 
 

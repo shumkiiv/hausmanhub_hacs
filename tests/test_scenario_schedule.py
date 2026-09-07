@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 import unittest
+import importlib
+import sys
 from datetime import datetime, timedelta, timezone
+from types import ModuleType, SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
 
 from custom_components.hausman_hub.application.scenario_schedule import (
     ScheduledRun,
@@ -195,6 +201,79 @@ class SkipKeyTest(unittest.TestCase):
 
     def test_prune_empty(self) -> None:
         self.assertEqual(prune_skip_keys([], "2026-08-09"), set())
+
+
+@pytest.mark.asyncio
+async def test_only_zero_offset_real_sunrise_is_trusted(monkeypatch) -> None:
+    callbacks: list[tuple[str, object, object]] = []
+
+    def track_time(_hass, callback, **_kwargs):
+        callbacks.append(("time", None, callback))
+        return lambda: None
+
+    def track_sunrise(_hass, callback, *, offset):
+        callbacks.append(("sunrise", offset, callback))
+        return lambda: None
+
+    def track_sunset(_hass, callback, *, offset):
+        callbacks.append(("sunset", offset, callback))
+        return lambda: None
+
+    homeassistant = ModuleType("homeassistant")
+    helpers = ModuleType("homeassistant.helpers")
+    ha_event = ModuleType("homeassistant.helpers.event")
+    ha_event.async_track_time_interval = lambda *_args, **_kwargs: lambda: None
+    ha_event.async_track_time_change = track_time
+    ha_event.async_track_sunrise = track_sunrise
+    ha_event.async_track_sunset = track_sunset
+    util = ModuleType("homeassistant.util")
+    dt = ModuleType("homeassistant.util.dt")
+    dt.now = lambda: datetime.now(timezone.utc)
+    util.dt = dt
+    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant)
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers)
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers.event", ha_event)
+    monkeypatch.setitem(sys.modules, "homeassistant.util", util)
+    monkeypatch.setitem(sys.modules, "homeassistant.util.dt", dt)
+    schedule_adapter = importlib.import_module(
+        "custom_components.hausman_hub.scenario_schedule"
+    )
+    monkeypatch.setattr(
+        schedule_adapter,
+        "async_track_time_interval",
+        lambda *_args, **_kwargs: (lambda: None),
+    )
+
+    service = SimpleNamespace(
+        scheduled_trigger_items=lambda: (
+            ("system-curtains-privacy-controller", "sunrise", "time", "06:00"),
+            ("system-curtains-privacy-controller", "sunrise", "sunset", 0),
+            ("system-curtains-privacy-controller", "sunrise", "sunrise", 15),
+            ("system-curtains-privacy-controller", "sunrise", "sunrise", 0),
+        ),
+        async_consume_skip=AsyncMock(return_value=False),
+        async_run_scenario=AsyncMock(return_value={"status": "completed"}),
+    )
+    protection = SimpleNamespace(
+        async_run_trusted_sunrise=AsyncMock(
+            return_value={"status": "completed"}
+        )
+    )
+    unloads = []
+    entry = SimpleNamespace(async_on_unload=unloads.append)
+    await schedule_adapter.async_start_scenario_schedule(
+        SimpleNamespace(), entry, service, curtain_protection=protection
+    )
+
+    now = datetime(2026, 9, 7, 5, 0, tzinfo=timezone.utc)
+    for _kind, _offset, callback in callbacks:
+        await callback(now)
+
+    assert protection.async_run_trusted_sunrise.await_count == 1
+    protection.async_run_trusted_sunrise.assert_awaited_once_with(
+        int(now.timestamp() * 1000), service.async_run_scenario
+    )
+    assert service.async_run_scenario.await_count == 3
 
 
 if __name__ == "__main__":

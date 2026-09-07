@@ -67,7 +67,7 @@ _TRUSTED_ADDITIONAL_SYSTEM_SOURCE_HASHES = {
     "system-bathroom-exhaust-controller": frozenset({"235302aeaa38e0d82eae01f63015a5180f3d4098f495919a18a587c973902af6"}),
     "system-storage-light-controller": frozenset({"3190e744c05403f496d5399ee56c4ff1a199461df0e51040afe5a7244d424fd0"}),
     "system-cabinet-light-controller": frozenset({"ead4919d6c3d088fc45a26e0b240a4b0520b0a62ba7277476d143b650133468c"}),
-    "system-curtains-privacy-controller": frozenset({"d60c10c32f0f689a7f0fe1a31466d4825454cdec00a67590a10bcfdc44cf54cc"}),
+    "system-curtains-privacy-controller": frozenset({"663af424f9fdb51ca3f9d95ed055206858810adf9ba780d5b1fb3ddb9336368e"}),
 }
 
 def _trusted_hashes(scenario_id: str) -> frozenset[str]:
@@ -367,7 +367,7 @@ def _validated_trigger_context(
             raise NodeRedBackendError("release-owned trigger context is invalid")
         return dict(value)
     allowed = {
-        "source", "trigger_id", "target_id", "old_value", "new_value", "recovery"
+        "source", "origin_source", "trigger_id", "target_id", "old_value", "new_value", "recovery"
     }
     return {
         key: item
@@ -2105,6 +2105,7 @@ class NodeRedScenarioBackend:
                 if isinstance(controls.get("state"), Mapping)
                 else None
             ),
+            server_controls=controls,
             trigger_context=safe_trigger,
         )
         self._validate_typed_plan(scenario_id, actions, safe_trigger)
@@ -2180,6 +2181,7 @@ class NodeRedScenarioBackend:
         *,
         server_bindings: Mapping[str, str] | None = None,
         expected_control_action: object = None,
+        server_controls: Mapping[str, object] | None = None,
         trigger_context: Mapping[str, object] | None = None,
     ) -> None:
         if scenario_id not in _SYSTEM_PLAN_ENVELOPES:
@@ -2190,6 +2192,7 @@ class NodeRedScenarioBackend:
             actions,
             server_bindings=server_bindings,
             expected_control_action=expected_control_action,
+            server_controls=server_controls,
             trigger_context=trigger_context,
         )
         envelope = _SYSTEM_PLAN_ENVELOPES[scenario_id]
@@ -2353,6 +2356,7 @@ def _validate_system_branch(
     *,
     server_bindings: Mapping[str, str] | None = None,
     expected_control_action: object = None,
+    server_controls: Mapping[str, object] | None = None,
     trigger_context: Mapping[str, object] | None = None,
 ) -> None:
     """Validate the ordered, release-authored branches of both controllers."""
@@ -2370,6 +2374,91 @@ def _validate_system_branch(
             and action.delay_seconds == seconds and action.target_id is None
             and action.action_id is None and action.value is None and action.message is None
         )
+
+    if scenario_id == "system-curtains-privacy-controller":
+        targets = (
+            "entity_8746cfd7f6f7103d",
+            "entity_2da2065add6e2168",
+            "entity_1e0b476b7d082cc0",
+            "entity_9164132c7692d6f5",
+        )
+        controls = server_controls if isinstance(server_controls, Mapping) else {}
+        policy = controls.get("policy")
+        state = controls.get("state")
+        policy = policy if isinstance(policy, Mapping) else {}
+        state = state if isinstance(state, Mapping) else {}
+        caps = {
+            targets[0]: 100,
+            targets[1]: policy.get("kitchenCoverCapPercent"),
+            targets[2]: 100,
+            targets[3]: policy.get("cabinetCoverCapPercent"),
+        }
+        protected = state.get("targets")
+        protected = protected if isinstance(protected, Mapping) else {}
+        trigger = trigger_context if isinstance(trigger_context, Mapping) else {}
+        manual = trigger.get("source") == "manual" or (
+            trigger.get("source") == "nested"
+            and trigger.get("origin_source") == "manual"
+        )
+        manual_open = manual and trigger.get("trigger_id") == "manual_open_all"
+        manual_close = manual and trigger.get("trigger_id") == "manual_close_all"
+        trusted_sunrise = bool(
+            state.get("ready") is True
+            and state.get("trustedSunrise") is True
+            and state.get("transition") == "trusted_sunrise"
+            and trigger.get("source") == "curtain_schedule"
+            and trigger.get("trigger_id") == "curtain_trusted_sunrise"
+        )
+        automatic_close = bool(
+            not manual
+            and trigger.get("trigger_id")
+            in {"sunset", "low_lux", "living_light_on", "service_light_on"}
+        )
+        expected: dict[str, int] = {}
+        if manual_open:
+            expected = {
+                target: int(cap)
+                for target, cap in caps.items()
+                if type(cap) is int and 1 <= cap <= 100
+            }
+        elif manual_close:
+            expected = {target: 0 for target in targets}
+        elif trusted_sunrise:
+            expected = {
+                target: int(cap)
+                for target, cap in caps.items()
+                if type(cap) is int
+                and 1 <= cap <= 100
+                and isinstance(protected.get(target), Mapping)
+                and protected[target].get("morningOpenAllowed") is True
+            }
+        elif automatic_close and state.get("ready") is True:
+            expected = {
+                target: 0
+                for target in targets
+                if isinstance(protected.get(target), Mapping)
+                and protected[target].get("automaticCloseAllowed") is True
+            }
+        if len(actions) != len({action.target_id for action in actions}):
+            raise NodeRedBackendError("Node-RED curtain branch contains duplicates")
+        ordered_targets = [action.target_id for action in actions]
+        if ordered_targets != [target for target in targets if target in ordered_targets]:
+            raise NodeRedBackendError("Node-RED curtain branch order is invalid")
+        if any(
+            action.target_id not in expected
+            or not device(
+                action,
+                f"cover_{action.target_id}",
+                str(action.target_id),
+                "set_position",
+                expected.get(str(action.target_id)),
+            )
+            for action in actions
+        ):
+            raise NodeRedBackendError(
+                "Node-RED curtain action differs from the server decision"
+            )
+        return
 
     if scenario_id == "system-storage-light-controller":
         if not actions:

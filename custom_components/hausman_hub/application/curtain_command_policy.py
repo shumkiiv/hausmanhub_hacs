@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import MappingProxyType
@@ -80,6 +81,67 @@ class CurtainDispatchPlan:
     limited: bool
     pre_command_evidence_revision: str | None
     pre_command_position: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class CurtainCalibrationGrant:
+    """Opaque one-use server capability, never accepted from request JSON."""
+
+    token: str
+    target_id: str
+    operation: str
+    expires_at_ms: int
+
+
+class CurtainCalibrationAuthority:
+    """Issue and consume narrowly scoped full-travel calibration grants."""
+
+    _OPERATIONS = frozenset({"full_open", "full_close"})
+
+    def __init__(self, *, now_ms: Callable[[], int]) -> None:
+        self._now_ms = now_ms
+        self._grants: dict[str, CurtainCalibrationGrant] = {}
+
+    def issue(
+        self, target_id: str, operation: str, *, expires_at_ms: int
+    ) -> CurtainCalibrationGrant:
+        if target_id not in _CURTAIN_TARGETS:
+            raise ValueError("unknown curtain calibration target")
+        if operation not in self._OPERATIONS:
+            raise ValueError("unknown curtain calibration operation")
+        if type(expires_at_ms) is not int or expires_at_ms <= self._now_ms():
+            raise ValueError("curtain calibration expiry is invalid")
+        grant = CurtainCalibrationGrant(
+            token=secrets.token_urlsafe(32),
+            target_id=target_id,
+            operation=operation,
+            expires_at_ms=expires_at_ms,
+        )
+        self._grants[grant.token] = grant
+        return grant
+
+    def revoke(self, grant: CurtainCalibrationGrant) -> None:
+        if isinstance(grant, CurtainCalibrationGrant):
+            self._grants.pop(grant.token, None)
+
+    def consume(
+        self,
+        grant: CurtainCalibrationGrant,
+        *,
+        target_id: str,
+        operation: str,
+    ) -> bool:
+        """Consume before planning, so reuse is impossible even after failure."""
+
+        if not isinstance(grant, CurtainCalibrationGrant):
+            return False
+        current = self._grants.pop(grant.token, None)
+        return bool(
+            current == grant
+            and grant.target_id == target_id
+            and grant.operation == operation
+            and grant.expires_at_ms > self._now_ms()
+        )
 
 
 class CurtainCommandPolicy:
@@ -270,6 +332,59 @@ class CurtainCommandPolicy:
             limited=limited,
             pre_command_evidence_revision=_state_revision(current_state),
             pre_command_position=position,
+        )
+
+    def plan_calibration(
+        self,
+        *,
+        device: object,
+        operation: str,
+        grant: CurtainCalibrationGrant,
+        authority: CurtainCalibrationAuthority,
+        current_state: object | None,
+    ) -> CurtainDispatchPlan:
+        """Build one full-travel plan only from an in-process server grant."""
+
+        target_id = getattr(device, "target_id", None)
+        if (
+            target_id not in _CURTAIN_TARGETS
+            or not isinstance(authority, CurtainCalibrationAuthority)
+            or not authority.consume(
+                grant, target_id=str(target_id), operation=operation
+            )
+        ):
+            raise CurtainPolicyError("curtain_calibration_unauthorized")
+        action_id, service, applied = (
+            ("open_cover", "open_cover", 100)
+            if operation == "full_open"
+            else ("close_cover", "close_cover", 0)
+        )
+        entity_id = getattr(device, "entity_id", None)
+        action = getattr(device, "action", lambda _value: None)(action_id)
+        if (
+            not isinstance(entity_id, str)
+            or not entity_id
+            or action is None
+            or getattr(action, "domain", None) != "cover"
+            or getattr(action, "service", None) != service
+        ):
+            raise CurtainPolicyError("curtain_dispatch_descriptor_invalid")
+        return CurtainDispatchPlan(
+            target_id=str(target_id),
+            entity_id=entity_id,
+            public_action_id=action_id,
+            requested=None,
+            domain="cover",
+            service=service,
+            service_data=MappingProxyType({"entity_id": entity_id}),
+            applied=applied,
+            confirmation_action_id=action_id,
+            confirmation_value=None,
+            policy_revision=f"curtain-calibration.{grant.token[:16]}",
+            generation=0,
+            limited=False,
+            pre_command_evidence_revision=_state_revision(current_state),
+            pre_command_position=trusted_curtain_position(current_state),
         )
 
     def _snapshot(

@@ -53,6 +53,8 @@ from custom_components.hausman_hub.application.scenario_service import (
     ScenarioRevisionConflictError,
     ScenarioService,
     ScenarioServiceError,
+    _updated_curtain_manual_wrappers,
+    _verify_curtain_manual_wrappers,
 )
 from custom_components.hausman_hub.domain.scenarios import (
     Scenario,
@@ -80,6 +82,29 @@ _REPLACED_SOURCE_IDS = tuple(
     if item.operation == "replace"
     and item.legacy_source_hash != item.new_source_hash
 )
+
+
+def test_independent_fixture_manual_curtain_wrappers_expand_without_mutating_before() -> None:
+    fixture_path = (
+        Path(__file__).parents[1]
+        / "fixtures/hausmanhub_scenario_consolidation_v1/scenarios58.json"
+    )
+    before_document = json.loads(fixture_path.read_text(encoding="utf-8"))
+    original_bytes = fixture_path.read_bytes()
+    before = ScenarioRegistry.from_storage(before_document)
+
+    after = _updated_curtain_manual_wrappers(before)
+    _verify_curtain_manual_wrappers(after)
+
+    assert len(before.scenarios) == 58
+    assert len(after.scenarios) == 58
+    for scenario_id in (
+        "scenario_manual_curtains_open", "scenario_manual_curtains_close"
+    ):
+        assert len(before.scenario(scenario_id).definition.actions) == 2
+        assert len(after.scenario(scenario_id).definition.actions) == 4
+        assert after.scenario(scenario_id).revision == before.scenario(scenario_id).revision + 1
+    assert fixture_path.read_bytes() == original_bytes
 
 
 def _runtime_source(item: object) -> str:

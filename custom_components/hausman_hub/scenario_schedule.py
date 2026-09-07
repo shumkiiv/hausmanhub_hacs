@@ -33,6 +33,7 @@ async def async_start_scenario_schedule(
     service: ScenarioService,
     activation_latch: object | None = None,
     excluded_scenario_ids: frozenset[str] = frozenset(),
+    curtain_protection: object | None = None,
 ) -> None:
     """Arm every enabled time/sun trigger and keep the arming in sync."""
 
@@ -49,7 +50,11 @@ async def async_start_scenario_schedule(
         )
 
     async def _async_run_due(
-        scenario_id: str, trigger_id: str, _now: datetime
+        scenario_id: str,
+        trigger_id: str,
+        trigger_type: str,
+        trigger_value: object,
+        _now: datetime,
     ) -> None:
         if activation_latch is not None and not activation_latch.is_open:
             return
@@ -62,6 +67,22 @@ async def async_start_scenario_schedule(
         if activation_latch is not None and not activation_latch.is_open:
             return
         try:
+            trusted_sunrise = getattr(
+                curtain_protection, "async_run_trusted_sunrise", None
+            )
+            if (
+                scenario_id == "system-curtains-privacy-controller"
+                and trigger_id == "sunrise"
+                and trigger_type == "sunrise"
+                and _offset_minutes(
+                    trigger_value, "sunrise trigger offset"
+                ) == 0
+                and callable(trusted_sunrise)
+            ):
+                await trusted_sunrise(
+                    int(_now.timestamp() * 1000), service.async_run_scenario
+                )
+                return
             await service.async_run_scenario(
                 scenario_id,
                 trigger_context={
@@ -100,7 +121,9 @@ async def async_start_scenario_schedule(
                 unsubs.append(
                     async_track_time_change(
                         hass,
-                        lambda now, s=scenario_id, t=trigger_id: _async_run_due(s, t, now),
+                        lambda now, s=scenario_id, t=trigger_id, k=trigger_type, v=value: _async_run_due(
+                            s, t, k, v, now
+                        ),
                         hour=hour,
                         minute=minute,
                         second=0,
@@ -121,7 +144,9 @@ async def async_start_scenario_schedule(
                 unsubs.append(
                     track(
                         hass,
-                        lambda now, s=scenario_id, t=trigger_id: _async_run_due(s, t, now),
+                        lambda now, s=scenario_id, t=trigger_id, k=trigger_type, v=value: _async_run_due(
+                            s, t, k, v, now
+                        ),
                         offset=offset,
                     )
                 )

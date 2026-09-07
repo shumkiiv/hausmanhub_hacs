@@ -155,10 +155,10 @@ FULL_MIGRATION_MANIFEST: tuple[ManagedSwitchMigrationEntry, ...] = (
     ),
     ManagedSwitchMigrationEntry(
         "system-curtains-privacy-controller", 0,
-        "d60c10c32f0f689a7f0fe1a31466d4825454cdec00a67590a10bcfdc44cf54cc",
+        "663af424f9fdb51ca3f9d95ed055206858810adf9ba780d5b1fb3ddb9336368e",
         MANAGED_TOPOLOGY,
         _CURTAIN_INPUTS, _CURTAIN_INPUTS,
-        "d60c10c32f0f689a7f0fe1a31466d4825454cdec00a67590a10bcfdc44cf54cc",
+        "663af424f9fdb51ca3f9d95ed055206858810adf9ba780d5b1fb3ddb9336368e",
         "curtains_controller.js", operation="create", expected_revision=None,
     ),
 )

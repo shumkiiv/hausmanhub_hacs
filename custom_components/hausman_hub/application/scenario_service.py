@@ -89,6 +89,100 @@ _MANAGED_SWITCH_TITLES = {
     "system-cabinet-light-controller": "Кабинет: свет",
     "system-curtains-privacy-controller": "Шторы: приватность",
 }
+_CURTAIN_MANUAL_WRAPPERS = {
+    "scenario_manual_curtains_open": "open_cover",
+    "scenario_manual_curtains_close": "close_cover",
+}
+_CURTAIN_MANUAL_TARGETS = (
+    ("entity_8746cfd7f6f7103d", "Шторы гостиная"),
+    ("entity_2da2065add6e2168", "Шторы кухня"),
+    ("entity_1e0b476b7d082cc0", "Шторы Алисы"),
+    ("entity_9164132c7692d6f5", "Шторы кабинет"),
+)
+
+
+def _updated_curtain_manual_wrappers(registry: ScenarioRegistry) -> ScenarioRegistry:
+    """CAS-expand the two exact legacy wrappers without touching fixture input."""
+
+    present = {
+        scenario_id
+        for scenario_id in _CURTAIN_MANUAL_WRAPPERS
+        if registry.scenario(scenario_id) is not None
+    }
+    if not present:
+        return registry
+    if present != set(_CURTAIN_MANUAL_WRAPPERS):
+        raise ScenarioServiceError("Curtain manual wrapper is missing.", status=409)
+    replacements: dict[str, Scenario] = {}
+    expected_legacy_targets = tuple(target for target, _name in _CURTAIN_MANUAL_TARGETS[:2])
+    expected_targets = tuple(target for target, _name in _CURTAIN_MANUAL_TARGETS)
+    for scenario_id, action_id in _CURTAIN_MANUAL_WRAPPERS.items():
+        scenario = registry.scenario(scenario_id)
+        if scenario is None:
+            raise ScenarioServiceError(
+                "Curtain manual wrapper is missing.", status=409
+            )
+        definition = scenario.definition
+        current_targets = tuple(action.target_id for action in definition.actions)
+        current_actions = tuple(action.action_id for action in definition.actions)
+        if (
+            len(definition.triggers) != 1
+            or definition.triggers[0].type is not ScenarioTriggerType.MANUAL
+            or definition.conditions
+            or current_actions != (action_id,) * len(current_actions)
+            or current_targets not in {expected_legacy_targets, expected_targets}
+        ):
+            raise ScenarioServiceError(
+                "Curtain manual wrapper changed before migration.", status=409
+            )
+        if current_targets == expected_targets:
+            continue
+        title = "Открыть" if action_id == "open_cover" else "Закрыть"
+        actions = tuple(
+            ScenarioAction(
+                id=f"action-{index}",
+                type=ScenarioActionType.DEVICE_ACTION,
+                target_id=target_id,
+                target_name=target_name,
+                action_id=action_id,
+                action_title=title,
+            )
+            for index, (target_id, target_name) in enumerate(
+                _CURTAIN_MANUAL_TARGETS, start=1
+            )
+        )
+        replacements[scenario_id] = replace(
+            scenario,
+            definition=replace(definition, actions=actions),
+            revision=scenario.revision + 1,
+            updated_at=int(time.time() * 1000),
+        )
+    if not replacements:
+        return registry
+    return ScenarioRegistry(
+        scenarios=tuple(replacements.get(item.id, item) for item in registry.scenarios)
+    )
+
+
+def _verify_curtain_manual_wrappers(registry: ScenarioRegistry) -> None:
+    present = {
+        scenario_id
+        for scenario_id in _CURTAIN_MANUAL_WRAPPERS
+        if registry.scenario(scenario_id) is not None
+    }
+    if not present:
+        return
+    if present != set(_CURTAIN_MANUAL_WRAPPERS):
+        raise ScenarioServiceError("Curtain manual wrapper is missing.", status=409)
+    expected_targets = tuple(target for target, _name in _CURTAIN_MANUAL_TARGETS)
+    for scenario_id, action_id in _CURTAIN_MANUAL_WRAPPERS.items():
+        scenario = registry.scenario(scenario_id)
+        if scenario is None or tuple(
+            (action.target_id, action.action_id) for action in scenario.definition.actions
+        ) != tuple((target, action_id) for target in expected_targets):
+            raise ScenarioServiceError(
+                "Curtain manual wrapper migration is incomplete.", status=409
+            )
 
 
 def _new_managed_switch_scenario(item: object, metadata: ScenarioNodeRedMetadata) -> Scenario:
@@ -2103,9 +2197,12 @@ class ScenarioService:
                         updated_at=int(time.time() * 1000),
                     )
                 if any(not item[4] for item in prepared) or created_sources:
-                    next_registry = ScenarioRegistry(
+                    managed_registry = ScenarioRegistry(
                         scenarios=tuple(replacements.get(item.id, item) for item in registry.scenarios)
                         + tuple(replacements[scenario_id] for scenario_id, _, _ in created_sources)
+                    )
+                    next_registry = _updated_curtain_manual_wrappers(
+                        managed_registry
                     )
                     registry_state = {
                         "state": "intent",
@@ -2157,7 +2254,12 @@ class ScenarioService:
                     self._scenario_content_revision_key = None
                     self._scenario_content_revision = None
                 else:
-                    next_registry = registry
+                    next_registry = _updated_curtain_manual_wrappers(registry)
+                    if next_registry != registry:
+                        raise ScenarioServiceError(
+                            "Curtain manual wrappers lag managed migration.",
+                            status=409,
+                        )
                 self._managed_switch_migration_transaction = (
                     _ManagedSwitchMigrationTransaction(
                         previous_registry=previous_registry,
@@ -2651,6 +2753,7 @@ class ScenarioService:
             )
 
         revisions: set[str] = set()
+        _verify_curtain_manual_wrappers(registry)
         for item in entries:
             scenario_id = str(getattr(item, "scenario_id"))
             scenario = registry.scenario(scenario_id)

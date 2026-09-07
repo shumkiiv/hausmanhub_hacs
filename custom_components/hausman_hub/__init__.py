@@ -11,7 +11,7 @@ strict climate-call executor used by trial, managed ticks, and settings applicat
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import timedelta
 import logging
 from typing import TYPE_CHECKING
@@ -531,6 +531,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ScenarioCommandContextRegistry,
     )
     from .application.curtain_command_policy import CurtainCommandPolicy
+    from .application.curtain_protection import CurtainProtectionCoordinator
+    from .curtain_protection_storage import HomeAssistantCurtainProtectionStore
+
+    def next_curtain_sunrise_ms() -> int | None:
+        state = hass.states.get("sun.sun")
+        attributes = getattr(state, "attributes", {})
+        value = (
+            attributes.get("next_rising")
+            if isinstance(attributes, Mapping)
+            else None
+        )
+        if not isinstance(value, str):
+            return None
+        from homeassistant.util import dt as dt_util
+
+        parsed = dt_util.parse_datetime(value)
+        return int(parsed.timestamp() * 1000) if parsed is not None else None
+
+    curtain_protection = CurtainProtectionCoordinator(
+        HomeAssistantCurtainProtectionStore(hass, entry.entry_id),
+        catalog_resolver=lambda target_id: (
+            scenario_service.current_catalog().device(target_id)
+        ),
+        next_sunrise_ms=next_curtain_sunrise_ms,
+    )
+    await curtain_protection.async_load()
+    domain_data["curtain_protection"] = curtain_protection
 
     scenario_command_contexts = ScenarioCommandContextRegistry()
     scenario_executor = ScenarioExecutor(
@@ -552,6 +579,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         curtain_command_policy=CurtainCommandPolicy(
             lambda: scenario_control_policy.current
         ),
+        curtain_protection=curtain_protection,
     )
     entry.async_on_unload(
         light_safety_obligations.start(
@@ -576,9 +604,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     scenario_executor.set_scenario_generation_validator(
         scenario_control_coordinator.async_validate_generation
     )
-    scenario_node_red_backend.set_control_context_provider(
-        scenario_control_coordinator.async_control_context
-    )
+    async def managed_control_context(
+        scenario_id: str, run_id: str, trigger: Mapping[str, object]
+    ) -> dict[str, object]:
+        context = await scenario_control_coordinator.async_control_context(
+            scenario_id, run_id, trigger
+        )
+        if scenario_id == "system-curtains-privacy-controller":
+            context["state"] = await curtain_protection.async_control_state(
+                run_id, trigger
+            )
+        return context
+
+    scenario_node_red_backend.set_control_context_provider(managed_control_context)
     domain_data["scenario_control_coordinator"] = scenario_control_coordinator
     entry.async_on_unload(scenario_control_coordinator.cancel)
     entry.async_on_unload(
@@ -648,6 +686,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 scenario_service,
                 activation_latch,
                 scenario_control_coordinator.owned_scenario_ids,
+                curtain_protection,
             )
             await async_start_scenario_events(
                 hass,
@@ -658,6 +697,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 scenario_control_coordinator.owned_scenario_ids,
             )
             await smart_switch_adapter.async_start()
+            staged_entry.async_on_unload(curtain_protection.start(hass))
         except asyncio.CancelledError:
             try:
                 _cleanup_managed_switch_runtime()
