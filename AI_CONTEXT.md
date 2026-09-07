@@ -1,5 +1,17 @@
 # HausmanHub AI Context
 
+- 2026-09-07: владелец выбрал вариант 1 для консолидации сценариев и явно
+  разрешил fallback planner на Sol high. Раскрытый в диагностическом выводе
+  HA admin token перевыпущен: новый токен проверен, старый refresh token
+  отозван, локальный access-файл сохранён с mode `0600`, секреты не попали в
+  репозиторий или вывод. Архитектурная спецификация восьми release-owned
+  Node-RED контроллеров, атомарной миграции, защиты ручного света, плавного
+  гашения, curtain latch до sunrise и климатического latency hotfix сохранена
+  в commit `7b27839`: `docs/superpowers/specs/2026-09-07-hausman-scenario-consolidation-design.md`.
+  По обязательному brainstorming gate код и planner ещё не запускались:
+  сначала владелец должен проверить записанную спецификацию. Production
+  остаётся на HACS `1.52.226`.
+
 - 2026-09-05: повторная общая агентная цепочка остановлена на этапе worker.
   Explorer и planner завершили работу со статусом PASS. Worker добавил commit
   `b521ff0` с проверяемым manifest и fail-closed gate миграции трёх системных
