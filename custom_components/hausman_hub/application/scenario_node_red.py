@@ -61,9 +61,9 @@ _TRUSTED_SYSTEM_SOURCE_HASHES = {
     ),
 }
 _TRUSTED_ADDITIONAL_SYSTEM_SOURCE_HASHES = {
-    "system-toilet-comfort-controller": frozenset({"d53fba40dc7ec73590ad7c0e5db18708b18f50f9933db7d205635b3b2366d2d7"}),
-    "system-bathroom-exhaust-controller": frozenset({"951a9ecfdae7bf7a7b3f7acab0b685702d0769b73430ee225ed0338d5b896d51"}),
-    "system-storage-light-controller": frozenset({"687a66462ce5445e8473f2519dc086b88d9252b51520662444d6196f3c3a0896"}),
+    "system-toilet-comfort-controller": frozenset({"2bbb3d66ce65b3938602992dbc93902004d43eaa3d9e561b48a043dd8502ef85"}),
+    "system-bathroom-exhaust-controller": frozenset({"67a6ea3ee8c62198e07dce7e75bf379eb95a0a459f74890d5a494212c9ff85ff"}),
+    "system-storage-light-controller": frozenset({"9168494c56a6434bcf49d0170c4b4a2759967c2cf771b2450ed6989a770e1de8"}),
     "system-cabinet-light-controller": frozenset({"80db20857c8809d68201f0f137886b52a3f17a827fc6af414d7be5e1ef80d7eb"}),
     "system-curtains-privacy-controller": frozenset({"32a60a508f87cf02c09b85adabd1de77fa30449a44028ee11c4da31e3b7f9211"}),
 }
@@ -74,6 +74,31 @@ def _trusted_hashes(scenario_id: str) -> frozenset[str]:
 # physical envelope. Each listed device action is allowed at most once; their
 # delays are exact source constants, not values supplied by Node-RED.
 _SYSTEM_PLAN_ENVELOPES = {
+    "system-toilet-comfort-controller": {
+        "actions": {
+            ("entity_6667b3400bce7970", "turn_on"): 1,
+            ("entity_5d95de599d2b5cec", "turn_on"): 1,
+        }, "delays": {}, "runScenarios": {},
+    },
+    "system-bathroom-exhaust-controller": {
+        "actions": {
+            ("entity_a591e035e3e5b34f", "turn_on"): 1,
+            ("entity_d82766182d69dd51", "turn_on"): 1,
+        }, "delays": {1800: 1}, "runScenarios": {},
+    },
+    "system-storage-light-controller": {
+        "actions": {("entity_0ec37ef18b4b39a6", "turn_on"): 1},
+        "delays": {120: 1, 1800: 1}, "runScenarios": {},
+    },
+    "system-cabinet-light-controller": {
+        "actions": {}, "delays": {}, "runScenarios": {},
+    },
+    "system-curtains-privacy-controller": {
+        "actions": {
+            ("cover.shtory_gostinaia", "set_position"): 1,
+            ("cover.0xa4c1385a4bcce3d6", "set_position"): 1,
+        }, "delays": {}, "runScenarios": {},
+    },
     "system-shower-comfort-controller": {
         "actions": {
             ("entity_46174e1ff9913212", "turn_on"): 1,

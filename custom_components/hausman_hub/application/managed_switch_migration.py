@@ -99,19 +99,19 @@ FULL_MIGRATION_MANIFEST: tuple[ManagedSwitchMigrationEntry, ...] = (
     ManagedSwitchMigrationEntry(
         "system-toilet-comfort-controller", 1, "0" * 64, MANAGED_TOPOLOGY,
         _TOILET_INPUTS, _TOILET_INPUTS,
-        "d53fba40dc7ec73590ad7c0e5db18708b18f50f9933db7d205635b3b2366d2d7",
+        "2bbb3d66ce65b3938602992dbc93902004d43eaa3d9e561b48a043dd8502ef85",
         "toilet_controller.js",
     ),
     ManagedSwitchMigrationEntry(
         "system-bathroom-exhaust-controller", 1, "1" * 64, MANAGED_TOPOLOGY,
         _BATHROOM_INPUTS, _BATHROOM_INPUTS,
-        "951a9ecfdae7bf7a7b3f7acab0b685702d0769b73430ee225ed0338d5b896d51",
+        "67a6ea3ee8c62198e07dce7e75bf379eb95a0a459f74890d5a494212c9ff85ff",
         "bathroom_controller.js",
     ),
     ManagedSwitchMigrationEntry(
         "system-storage-light-controller", 1, "2" * 64, MANAGED_TOPOLOGY,
         _STORAGE_INPUTS, _STORAGE_INPUTS,
-        "687a66462ce5445e8473f2519dc086b88d9252b51520662444d6196f3c3a0896",
+        "9168494c56a6434bcf49d0170c4b4a2759967c2cf771b2450ed6989a770e1de8",
         "storage_controller.js",
     ),
     ManagedSwitchMigrationEntry(
@@ -148,7 +148,7 @@ class ManagedSwitchActivation:
     revoke: Callable[[], None]
 
 
-def _manifest_hash() -> str:
+def _manifest_hash_for(manifest: tuple[ManagedSwitchMigrationEntry, ...]) -> str:
     payload = [
         {
             "scenarioId": item.scenario_id,
@@ -160,14 +160,15 @@ def _manifest_hash() -> str:
             "newSourceHash": item.new_source_hash,
             "sourceFile": item.source_file,
         }
-        for item in MIGRATION_MANIFEST
+        for item in manifest
     ]
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
 
 
-MANIFEST_HASH = _manifest_hash()
+MANIFEST_HASH = _manifest_hash_for(MIGRATION_MANIFEST)
+FULL_MANIFEST_HASH = _manifest_hash_for(FULL_MIGRATION_MANIFEST)
 
 
 def valid_managed_switch_migration_payload(value: object) -> bool:
@@ -190,10 +191,12 @@ def _receipt(state: str) -> dict[str, object]:
     }
 
 
-def _entries_with_sources() -> tuple[ManagedSwitchMigrationEntry, ...]:
+def _entries_with_sources(
+    manifest: tuple[ManagedSwitchMigrationEntry, ...] = MIGRATION_MANIFEST,
+) -> tuple[ManagedSwitchMigrationEntry, ...]:
     root = Path(__file__).resolve().parents[1] / "managed_scenarios"
     entries: list[ManagedSwitchMigrationEntry] = []
-    for item in MIGRATION_MANIFEST:
+    for item in manifest:
         source = (root / item.source_file).read_text(encoding="utf-8")
         if hashlib.sha256(source.encode()).hexdigest() != item.new_source_hash:
             raise ManagedSwitchMigrationConflict("release-owned source hash mismatch")
@@ -209,8 +212,9 @@ def _entries_with_sources() -> tuple[ManagedSwitchMigrationEntry, ...]:
 
 async def async_load_managed_switch_migration_entries(
     add_executor_job: Callable[..., Awaitable[object]],
+    manifest: tuple[ManagedSwitchMigrationEntry, ...] = MIGRATION_MANIFEST,
 ) -> tuple[ManagedSwitchMigrationEntry, ...]:
-    entries = await add_executor_job(_entries_with_sources)
+    entries = await add_executor_job(_entries_with_sources, manifest)
     if not isinstance(entries, tuple) or not all(
         isinstance(item, ManagedSwitchMigrationEntry) for item in entries
     ):
@@ -229,12 +233,14 @@ class ManagedSwitchStartupCoordinator:
         *,
         binding_migration: object | None = None,
         status_publisher: Callable[[dict[str, str]], None] | None = None,
+        manifest: tuple[ManagedSwitchMigrationEntry, ...] = MIGRATION_MANIFEST,
     ) -> None:
         self._service = service
         self._migration = migration
         self._binding_migration = binding_migration
         self._activate = activate
         self._status_publisher = status_publisher or (lambda _status: None)
+        self._manifest = manifest
         self._remove_observer: Callable[[], None] | None = None
         self._activation_task: asyncio.Task[object] | None = None
         self._activation_cleanup: Callable[[], None] | None = None
@@ -284,7 +290,7 @@ class ManagedSwitchStartupCoordinator:
         async with self._lock:
             if self._cancelled or self._terminal or self.ready:
                 return
-            if not self._catalog_has_required_targets(catalog):
+            if not self._catalog_has_required_targets(catalog, self._manifest):
                 if final:
                     self._terminal = True
                     self._unsubscribe()
@@ -350,7 +356,10 @@ class ManagedSwitchStartupCoordinator:
             self._publish("completed")
 
     @staticmethod
-    def _catalog_has_required_targets(catalog: object) -> bool:
+    def _catalog_has_required_targets(
+        catalog: object,
+        manifest: tuple[ManagedSwitchMigrationEntry, ...] = MIGRATION_MANIFEST,
+    ) -> bool:
         resolve = getattr(catalog, "device", None)
         if not callable(resolve):
             return False
@@ -358,7 +367,7 @@ class ManagedSwitchStartupCoordinator:
             getattr(resolve(target_id), "target_id", None) == target_id
             for target_id in dict.fromkeys(
                 target_id
-                for entry in MIGRATION_MANIFEST
+                for entry in manifest
                 for target_id in entry.input_target_ids
             )
         )
@@ -464,25 +473,39 @@ class ManagedSwitchMigration:
             [], Awaitable[tuple[ManagedSwitchMigrationEntry, ...]]
         ]
         | None = None,
+        manifest: tuple[ManagedSwitchMigrationEntry, ...] = MIGRATION_MANIFEST,
     ) -> None:
         self._service = service
         self._store = store
         self._source_loader = source_loader
+        self._manifest = manifest
+        self._manifest_hash = _manifest_hash_for(manifest)
+
+    def _receipt(self, state: str) -> dict[str, object]:
+        return {
+            "migrationId": MIGRATION_ID,
+            "version": MIGRATION_VERSION,
+            "state": state,
+            "manifestHash": self._manifest_hash,
+        }
 
     async def async_apply(self) -> str:
         loaded = await self._store.async_load()
-        if loaded is not None and not valid_managed_switch_migration_payload(loaded):
+        if loaded is not None and not (
+            valid_managed_switch_migration_payload(loaded)
+            and loaded.get("manifestHash") == self._manifest_hash
+        ):
             raise ManagedSwitchMigrationConflict("migration receipt is invalid")
         completed = isinstance(loaded, Mapping) and loaded.get("state") == "completed"
         if loaded is None:
-            await self._store.async_save(_receipt("prepared"))
+            await self._store.async_save(self._receipt("prepared"))
         apply = getattr(self._service, "async_apply_managed_switch_migration", None)
         if not callable(apply):
             raise ManagedSwitchMigrationConflict("scenario migration CAS is unavailable")
         entries = (
             await self._source_loader()
             if self._source_loader is not None
-            else _entries_with_sources()
+            else _entries_with_sources(self._manifest)
         )
         applied = False
         try:
@@ -499,7 +522,7 @@ class ManagedSwitchMigration:
                 )
             await verify(entries)
             if not completed:
-                await self._store.async_save(_receipt("completed"))
+                await self._store.async_save(self._receipt("completed"))
                 # A receipt write is not execution authority by itself. Recheck
                 # after persistence so drift in that gap keeps the adapter off.
                 await verify(entries)
@@ -518,7 +541,7 @@ class ManagedSwitchMigration:
                 raise
             try:
                 await asyncio.shield(
-                    self._store.async_save(_receipt("prepared"))
+                    self._store.async_save(self._receipt("prepared"))
                 )
             except Exception:  # noqa: BLE001
                 pass

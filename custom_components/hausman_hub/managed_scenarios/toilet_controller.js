@@ -4,9 +4,8 @@ const r = msg.payload && typeof msg.payload === 'object' ? msg.payload : {};
 const i = r.inputs && typeof r.inputs === 'object' ? r.inputs : {};
 const s = id => i[id] && i[id].state != null ? String(i[id].state) : null;
 const targets = [
-  ['switch.0xacbac0fffebde2d3_1', 'Туалет: свет 1'],
-  ['switch.0xacbac0fffebde2d3_2', 'Туалет: свет 2'],
-  ['switch.0x54ef44100019f608', 'Туалет: вытяжка'],
+  ['entity_6667b3400bce7970', 'Туалет: свет 1'],
+  ['entity_5d95de599d2b5cec', 'Туалет: свет 2'],
 ];
 const motion = ['binary_sensor.datchik_dvizheniia_tualet_zaniatost', 'binary_sensor.0xa4c13889c39443d5_occupancy']
   .some(id => ['on', 'true', 'occupied', 'detected'].includes(s(id)));
