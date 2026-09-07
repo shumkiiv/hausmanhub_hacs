@@ -1,5 +1,17 @@
 # HausmanHub AI Context
 
+- Шторы: optimistic-evidence завершён в 6e382eb. Полный pytest:
+  2792 passed, 4 skipped, 1238 subtests за 303.83s; root сверил исходный
+  вывод и повторил package PASS на чистом коммите. Известные четыре
+  привода не получают physical confirmation по echo; повторное automatic
+  закрытие в одном цикле блокируется сохраняемым intent. Проверены
+  отказ до отправки, crash/restart, downgrade старого неподтверждённого
+  состояния и полный service/Node-RED/executor/eventbus путь sunrise.
+  Теперь единственный writer выполняет часть7, исходный fixture58 не меняет.
+  Затем остаются климат, конечные activation/version и общая цепочка.
+  Production 1.52.226 не обновлён. Временный hold тамбура уже истёк,
+  root не отправлял команд включения после него.
+
 - Сохраняемый допуск кабинета завершён в8d978a4. Root сверил исходный
   полный результат2774 passed/4 skipped/1238 subtests за304.26s и
   независимо повторил package PASS после коммита. Реальная identity
