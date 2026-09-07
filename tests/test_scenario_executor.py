@@ -8,7 +8,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, call, patch
+from unittest.mock import AsyncMock, Mock, call, patch
 
 from custom_components.hausman_hub.application.scenario_executor import (
     PowerSourceDispatchUncertain,
@@ -1881,13 +1881,12 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             )
 
         self.hass.services.async_call.side_effect = apply_service
+        contextual_resolver = Mock(return_value=False)
         executor = ScenarioExecutor(
             self.hass,
             self.catalog,
             self.executor._run_callback,
-            contextual_dangerous_resolver=lambda target_id, action_id: (
-                target_id == "intercom_1" and action_id == "toggle"
-            ),
+            contextual_dangerous_resolver=contextual_resolver,
             readback_window_seconds=0.02,
             readback_interval_seconds=0.01,
         )
@@ -1896,6 +1895,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             "intercom_1",
             "toggle",
             dangerous_authorized=True,
+            contextually_dangerous=True,
             before_dispatch=AsyncMock(),
             expected_entity_id=entity_id,
             expected_domain="switch",
@@ -1903,6 +1903,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertTrue(receipt["accepted"])
+        contextual_resolver.assert_called_once_with("intercom_1", "toggle")
         self.assertTrue(receipt["confirmed"])
         self.assertEqual("on", receipt["readBack"]["observedState"])
         self.hass.services.async_call.assert_awaited_once_with(

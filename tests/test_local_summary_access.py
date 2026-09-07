@@ -717,6 +717,200 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         return settings, release
 
+    def _install_monotonic_contextual_action_stack(self) -> SimpleNamespace:
+        """Wire the real API service and executor around a scripted classifier."""
+
+        from custom_components.hausman_hub.application.scenario_executor import (
+            ScenarioExecutor,
+        )
+        from custom_components.hausman_hub.application.scenario_service import (
+            ScenarioService,
+        )
+        from custom_components.hausman_hub.application.scenarios import (
+            ScenarioCatalog,
+            ScenarioDeviceAction,
+            ScenarioDeviceEntry,
+        )
+
+        entity_id = "switch.contextual_action"
+        catalog = ScenarioCatalog(
+            devices={
+                "contextual_switch": ScenarioDeviceEntry(
+                    target_id="contextual_switch",
+                    name="Контекстный выключатель",
+                    entity_id=entity_id,
+                    actions=(
+                        ScenarioDeviceAction(
+                            action_id="turn_on",
+                            title="Включить",
+                            domain="switch",
+                            service="turn_on",
+                            allowed_fields=frozenset(),
+                        ),
+                    ),
+                    device_type="switch",
+                )
+            },
+            scenarios={},
+        )
+
+        class Store:
+            async def async_load(self) -> None:
+                return None
+
+            async def async_save(self, _value: object) -> None:
+                return None
+
+        state = SimpleNamespace(
+            refreshes=0,
+            outcomes=[],
+            classifications=[],
+            direct_markers=0,
+            batch_markers=0,
+            service_calls=[],
+        )
+
+        async def load_catalog() -> object:
+            state.refreshes += 1
+            return catalog
+
+        def classify(target_id: str, action_id: str) -> bool:
+            self.assertEqual(("contextual_switch", "turn_on"), (target_id, action_id))
+            if not state.outcomes:
+                raise AssertionError("unexpected contextual danger classification")
+            outcome = state.outcomes.pop(0)
+            state.classifications.append(
+                (
+                    state.refreshes,
+                    type(outcome).__name__
+                    if isinstance(outcome, Exception)
+                    else outcome,
+                )
+            )
+            if isinstance(outcome, Exception):
+                raise outcome
+            return bool(outcome)
+
+        service = ScenarioService(
+            self.hass,
+            Store(),
+            catalog,
+            catalog_loader=load_catalog,
+        )
+        executor = ScenarioExecutor(
+            self.hass,
+            catalog,
+            service.async_run_scenario,
+            contextual_dangerous_resolver=classify,
+        )
+        service.set_executor(executor)
+        service.is_contextually_dangerous_action = classify
+
+        original_direct = service.async_execute_device_action
+
+        async def execute_direct(
+            target_id: str,
+            action_id: str,
+            value: object,
+            *,
+            dispatch_marker=None,
+            **options: object,
+        ) -> dict[str, object]:
+            external_request_id = options.get("request_id")
+            if external_request_id is not None:
+                options["request_id"] = "contextual_direct_internal"
+            tracked_marker = None
+            if dispatch_marker is not None:
+
+                def tracked_marker() -> None:
+                    state.direct_markers += 1
+                    dispatch_marker()
+
+            receipt = await original_direct(
+                target_id,
+                action_id,
+                value,
+                dispatch_marker=tracked_marker,
+                **options,
+            )
+            if external_request_id is not None:
+                receipt["requestId"] = external_request_id
+            return receipt
+
+        original_batch = service.async_execute_device_action_batch
+
+        async def execute_batch(
+            actions: list[dict[str, object]],
+            *,
+            dispatch_marker=None,
+            dispatch_markers=None,
+            **options: object,
+        ) -> list[dict[str, object]]:
+            external_request_ids = options.get("request_ids")
+            if isinstance(external_request_ids, tuple):
+                options["request_ids"] = tuple(
+                    f"contextual_batch_internal_{index}"
+                    for index in range(len(external_request_ids))
+                )
+            tracked_markers = None
+            if dispatch_markers is not None:
+
+                def tracked(index: int):
+                    def mark() -> None:
+                        state.batch_markers += 1
+                        dispatch_markers[index]()
+
+                    return mark
+
+                tracked_markers = tuple(
+                    tracked(index) for index in range(len(dispatch_markers))
+                )
+            receipts = await original_batch(
+                actions,
+                dispatch_marker=dispatch_marker,
+                dispatch_markers=tracked_markers,
+                **options,
+            )
+            if isinstance(external_request_ids, tuple):
+                for index, receipt in enumerate(receipts):
+                    receipt["requestId"] = external_request_ids[index]
+            return receipts
+
+        service.async_execute_device_action = execute_direct
+        service.async_execute_device_action_batch = execute_batch
+        self.hass.data["hausman_hub"]["scenario_service"] = service
+
+        self.hass.states.values[entity_id] = SimpleNamespace(
+            state="off",
+            attributes={},
+            last_updated=datetime.now(timezone.utc),
+        )
+
+        class Services:
+            async def async_call(
+                inner_self,
+                domain: str,
+                action: str,
+                service_data: dict[str, object],
+                *,
+                blocking: bool,
+                **options: object,
+            ) -> None:
+                state.service_calls.append(
+                    (domain, action, dict(service_data), blocking, dict(options))
+                )
+                self.hass.states.values[entity_id] = SimpleNamespace(
+                    state="on" if action == "turn_on" else "off",
+                    attributes={},
+                    last_updated=datetime.now(timezone.utc) + timedelta(microseconds=1),
+                )
+
+        self.hass.services = Services()
+        state.service = service
+        state.executor = executor
+        state.entity_id = entity_id
+        return state
+
     @staticmethod
     def _manual_settings_request(request_id: str, interval: int = 30) -> dict[str, object]:
         return {
@@ -4454,7 +4648,9 @@ class LocalSummaryAccessTest(unittest.TestCase):
             *,
             correlation_id: str | None = None,
             dry_run: bool = False,
+            contextually_dangerous: bool = False,
         ) -> dict[str, object]:
+            self.assertTrue(contextually_dangerous)
             executions.append(dry_run)
             return {
                 "requestId": "request-intercom",
@@ -5017,7 +5213,11 @@ class LocalSummaryAccessTest(unittest.TestCase):
             actions: list[dict[str, object]],
             *,
             correlation_id: str,
+            initial_contextually_dangerous: frozenset[
+                tuple[str, str]
+            ] = frozenset(),
         ) -> list[dict[str, object]]:
+            self.assertEqual(frozenset(), initial_contextually_dangerous)
             calls.append((actions, correlation_id))
             return [
                 {
@@ -7215,6 +7415,255 @@ class LocalSummaryAccessTest(unittest.TestCase):
             power_store.saved,
         )
 
+    def test_direct_contextual_danger_stays_true_across_refreshes(self) -> None:
+        path = "/api/hausman_hub/v1/device-actions"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        tablet = reader_user("system-users")
+
+        legacy_stack = self._install_monotonic_contextual_action_stack()
+        legacy_stack.outcomes.extend([True])
+        legacy = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    tablet,
+                    path,
+                    {"targetId": "contextual_switch", "actionId": "turn_on"},
+                )
+            )
+        )
+        self.assertEqual(403, legacy.status)
+        self.assertEqual([(2, True)], legacy_stack.classifications)
+        self.assertEqual(0, legacy_stack.direct_markers)
+        self.assertEqual([], legacy_stack.service_calls)
+
+        unconfirmed_stack = self._install_monotonic_contextual_action_stack()
+        unconfirmed_stack.outcomes.extend([True])
+        unconfirmed_payload = {
+            "contract": {
+                "name": "hausman-hub-device-action-request",
+                "version": 1,
+            },
+            "correlationId": "contextual.direct.unconfirmed.1",
+            "requestId": "contextual.direct.unconfirmed.request.1",
+            "targetId": "contextual_switch",
+            "actionId": "turn_on",
+            "idempotencyKey": "contextual.direct.unconfirmed.key.1",
+        }
+        unconfirmed = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    tablet,
+                    path,
+                    unconfirmed_payload,
+                    content_type="application/vnd.hausmanhub.device-action-request.full+json",
+                    accept="application/vnd.hausmanhub.device-action-receipt.full+json",
+                )
+            )
+        )
+        self.assertEqual(409, unconfirmed.status)
+        self.assertEqual([(2, True)], unconfirmed_stack.classifications)
+        self.assertEqual(0, unconfirmed_stack.direct_markers)
+        self.assertEqual([], unconfirmed_stack.service_calls)
+
+        stack = self._install_monotonic_contextual_action_stack()
+        stack.outcomes.extend([True, False, False])
+        payload = {
+            **unconfirmed_payload,
+            "correlationId": "contextual.direct.confirmed.1",
+            "requestId": "contextual.direct.confirmed.request.1",
+            "idempotencyKey": "contextual.direct.confirmed.key.1",
+            "confirmedByUser": True,
+        }
+        response = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    tablet,
+                    path,
+                    payload,
+                    content_type="application/vnd.hausmanhub.device-action-request.full+json",
+                    accept="application/vnd.hausmanhub.device-action-receipt.full+json",
+                )
+            )
+        )
+
+        self.assertEqual(200, response.status)
+        self.assertTrue(response.payload["confirmed"])
+        self.assertEqual(8000, response.payload["confirmationWindowMs"])
+        self.assertEqual([(2, True), (3, False), (3, False)], stack.classifications)
+        self.assertEqual([], stack.outcomes)
+        self.assertEqual(1, stack.direct_markers)
+        self.assertEqual(
+            [
+                (
+                    "switch",
+                    "turn_on",
+                    {"entity_id": "switch.contextual_action"},
+                    True,
+                    {},
+                )
+            ],
+            stack.service_calls,
+        )
+        record = self.hass.data["hausman_hub"]["device_action_idempotency"]._records[
+            "contextual.direct.confirmed.key.1"
+        ]
+        self.assertEqual("completed", record["state"])
+        self.assertEqual(8000, record["receipt"]["confirmationWindowMs"])
+
+    def test_direct_contextual_reclassification_error_fails_before_dispatch(self) -> None:
+        path = "/api/hausman_hub/v1/device-actions"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        stack = self._install_monotonic_contextual_action_stack()
+        stack.outcomes.extend([True, RuntimeError("classification unavailable")])
+        key = "contextual.direct.failure.key.1"
+        response = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    reader_user("system-users"),
+                    path,
+                    {
+                        "contract": {
+                            "name": "hausman-hub-device-action-request",
+                            "version": 1,
+                        },
+                        "correlationId": "contextual.direct.failure.1",
+                        "requestId": "contextual.direct.failure.request.1",
+                        "targetId": "contextual_switch",
+                        "actionId": "turn_on",
+                        "confirmedByUser": True,
+                        "idempotencyKey": key,
+                    },
+                    content_type="application/vnd.hausmanhub.device-action-request.full+json",
+                    accept="application/vnd.hausmanhub.device-action-receipt.full+json",
+                )
+            )
+        )
+
+        self.assertEqual(503, response.status)
+        self.assertEqual(
+            [(2, True), (3, "RuntimeError")],
+            stack.classifications,
+        )
+        self.assertEqual([], stack.outcomes)
+        self.assertEqual(0, stack.direct_markers)
+        self.assertEqual([], stack.service_calls)
+        self.assertNotIn(
+            key,
+            self.hass.data["hausman_hub"]["device_action_idempotency"]._records,
+        )
+
+    def test_batch_contextual_danger_stays_true_across_refreshes(self) -> None:
+        path = "/api/hausman_hub/v1/device-actions/batch"
+        view = next(item for item in self.hass.http.views if item.url == path)
+
+        stack = self._install_monotonic_contextual_action_stack()
+        stack.outcomes.extend([True, False, False])
+        key = "contextual.batch.confirmed.key.1"
+        response = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    reader_user("system-users"),
+                    path,
+                    {
+                        "contract": {
+                            "name": "hausman-hub-device-action-batch-request",
+                            "version": 1,
+                        },
+                        "correlationId": "contextual.batch.confirmed.1",
+                        "requestId": "contextual.batch.confirmed.request.1",
+                        "actions": [
+                            {
+                                "targetId": "contextual_switch",
+                                "actionId": "turn_on",
+                                "confirmedByUser": True,
+                                "idempotencyKey": key,
+                            }
+                        ],
+                    },
+                    content_type="application/vnd.hausmanhub.device-action-batch-request.full+json",
+                    accept="application/vnd.hausmanhub.device-action-batch-receipt.full+json",
+                )
+            )
+        )
+
+        self.assertEqual(200, response.status)
+        self.assertEqual("confirmed", response.payload["status"])
+        self.assertEqual(8000, response.payload["receipts"][0]["confirmationWindowMs"])
+        self.assertEqual([(2, True), (3, False), (3, False)], stack.classifications)
+        self.assertEqual([], stack.outcomes)
+        self.assertEqual(1, stack.batch_markers)
+        self.assertEqual(
+            [
+                (
+                    "switch",
+                    "turn_on",
+                    {"entity_id": "switch.contextual_action"},
+                    True,
+                    {},
+                )
+            ],
+            stack.service_calls,
+        )
+        record = self.hass.data["hausman_hub"]["device_action_idempotency"]._records[key]
+        self.assertEqual("completed", record["state"])
+        self.assertEqual(
+            8000,
+            record["receipt"]["receipts"][0]["confirmationWindowMs"],
+        )
+        self.assertEqual(8000, record["itemJournal"][0]["confirmationWindowMs"])
+
+    def test_batch_contextual_reclassification_error_fails_before_dispatch(self) -> None:
+        path = "/api/hausman_hub/v1/device-actions/batch"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        stack = self._install_monotonic_contextual_action_stack()
+        stack.outcomes.extend([True, RuntimeError("classification unavailable")])
+        key = "contextual.batch.failure.key.1"
+        response = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    reader_user("system-users"),
+                    path,
+                    {
+                        "contract": {
+                            "name": "hausman-hub-device-action-batch-request",
+                            "version": 1,
+                        },
+                        "correlationId": "contextual.batch.failure.1",
+                        "requestId": "contextual.batch.failure.request.1",
+                        "actions": [
+                            {
+                                "targetId": "contextual_switch",
+                                "actionId": "turn_on",
+                                "confirmedByUser": True,
+                                "idempotencyKey": key,
+                            }
+                        ],
+                    },
+                    content_type="application/vnd.hausmanhub.device-action-batch-request.full+json",
+                    accept="application/vnd.hausmanhub.device-action-batch-receipt.full+json",
+                )
+            )
+        )
+
+        self.assertEqual(503, response.status)
+        self.assertEqual(
+            [(2, True), (3, "RuntimeError")],
+            stack.classifications,
+        )
+        self.assertEqual([], stack.outcomes)
+        self.assertEqual(0, stack.batch_markers)
+        self.assertEqual([], stack.service_calls)
+        self.assertNotIn(
+            key,
+            self.hass.data["hausman_hub"]["device_action_idempotency"]._records,
+        )
+
     def test_external_gate_requires_full_confirmation_and_fresh_state(self) -> None:
         path = "/api/hausman_hub/v1/device-actions"
         view = next(item for item in self.hass.http.views if item.url == path)
@@ -7508,8 +7957,12 @@ class LocalSummaryAccessTest(unittest.TestCase):
             correlation_id: str,
             request_ids: tuple[str, ...],
             dispatch_contexts: tuple[object, ...],
+            initial_contextually_dangerous: frozenset[
+                tuple[str, str]
+            ] = frozenset(),
         ) -> list[dict[str, object]]:
             self.assertEqual(2, len(dispatch_contexts))
+            self.assertEqual(frozenset(), initial_contextually_dangerous)
             calls.append(request_ids)
             return [
                 {

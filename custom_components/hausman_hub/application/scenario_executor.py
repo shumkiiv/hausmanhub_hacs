@@ -2468,10 +2468,14 @@ class ScenarioExecutor:
                 }
             return receipt
         try:
+            resolved_contextual_danger = bool(
+                self._contextual_dangerous_resolver is not None
+                and self._contextual_dangerous_resolver(
+                    action.target_id, action.action_id
+                )
+            )
             is_contextually_dangerous = bool(
-                force_contextually_dangerous
-                or (self._contextual_dangerous_resolver is not None
-                    and self._contextual_dangerous_resolver(action.target_id, action.action_id))
+                force_contextually_dangerous or resolved_contextual_danger
             )
         except Exception:  # noqa: BLE001
             return {**base, "status": "failed", "error": "contextual_dangerous_resolution_failed"}
