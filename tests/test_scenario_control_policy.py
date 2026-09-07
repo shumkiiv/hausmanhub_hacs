@@ -39,6 +39,16 @@ def test_default_policy_round_trip_contains_required_controller_bounds() -> None
     assert payload["policyRevision"] == 0
     assert payload["policy"]["absenceConfirmationSeconds"] == 10
     assert payload["policy"]["storageAbsenceSeconds"] == 120
+    assert payload["policy"]["showerFanPresenceSeconds"] == 120
+    assert payload["policy"]["showerFanOffSeconds"] == 300
+    assert payload["policy"]["toiletAbsenceSeconds"] == 480
+    assert payload["policy"]["toiletFanOffSeconds"] == 180
+    assert payload["policy"]["toiletFanStart"] == "08:30"
+    assert payload["policy"]["toiletFanEnd"] == "22:30"
+    assert payload["policy"]["bathroomHumidityThreshold"] == 65
+    assert payload["policy"]["bathroomDayOffSeconds"] == 1800
+    assert payload["policy"]["officeDayMediumKelvin"] == 2500
+    assert payload["policy"]["officeEveningMediumKelvin"] == 5700
     assert payload["policy"]["storageExhaustTimes"] == ["11:00", "20:00"]
     assert payload["policy"]["storageExhaustRunSeconds"] == 1800
     assert payload["policy"]["storageExhaustTargetId"] is None
@@ -51,6 +61,26 @@ def test_default_policy_round_trip_contains_required_controller_bounds() -> None
     assert payload["policy"]["kitchenCoverCapPercent"] == 80
     assert payload["policy"]["cabinetCoverCapPercent"] == 90
     assert scenario_control_document_from_payload(payload) == document
+
+
+@pytest.mark.asyncio
+async def test_previous_policy_document_is_upgraded_without_revision_change() -> None:
+    payload = scenario_control_document_to_payload(ScenarioControlDocument(7))
+    room_fields = {
+        key
+        for key in payload["policy"]
+        if key.startswith(("showerFan", "toiletFan", "bathroom", "office"))
+    }
+    for key in room_fields:
+        payload["policy"].pop(key)
+    store = MemoryStore(payload)
+    service = ScenarioControlPolicyService(store)
+
+    await service.async_load()
+
+    assert service.current.policy_revision == 7
+    assert service.current.policy.office_day_medium_kelvin == 2500
+    assert store.payload == scenario_control_document_to_payload(service.current)
 
 
 @pytest.mark.parametrize(
@@ -68,6 +98,11 @@ def test_default_policy_round_trip_contains_required_controller_bounds() -> None
         replace(ScenarioControlPolicy(), storage_exhaust_times=("11:00", "11:00")),
         replace(ScenarioControlPolicy(), storage_exhaust_run_seconds=0),
         replace(ScenarioControlPolicy(), neutral_color_temperature_kelvin=9000),
+        replace(ScenarioControlPolicy(), toilet_fan_start="22:30", toilet_fan_end="08:30"),
+        replace(ScenarioControlPolicy(), bathroom_day_start="05:00"),
+        replace(ScenarioControlPolicy(), office_low_lux_threshold=1000),
+        replace(ScenarioControlPolicy(), office_day_low_brightness=90),
+        replace(ScenarioControlPolicy(), office_evening_dark_kelvin=4500),
     ),
 )
 def test_policy_rejects_unsafe_ranges_and_relationships(

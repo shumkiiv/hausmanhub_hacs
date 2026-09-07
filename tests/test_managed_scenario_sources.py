@@ -94,8 +94,20 @@ def _run_tambur(
     )
 
 
-def _run_shower(*, timestamp: str, states: dict[str, object], trigger: dict[str, object] | None = None) -> dict[str, object]:
-    return _run_source(SHOWER_SOURCE, timestamp=timestamp, states=states, trigger=trigger)
+def _run_shower(
+    *,
+    timestamp: str,
+    states: dict[str, object],
+    trigger: dict[str, object] | None = None,
+    controls: dict[str, object] | None = None,
+) -> dict[str, object]:
+    return _run_source(
+        SHOWER_SOURCE,
+        timestamp=timestamp,
+        states=states,
+        trigger=trigger,
+        controls=controls,
+    )
 
 
 def _run_small_corridor(
@@ -363,11 +375,11 @@ class ManagedSmallCorridorSourceTest(unittest.TestCase):
 
 class ManagedShowerSourceTest(unittest.TestCase):
     def test_direct_user_off_matrix_has_exactly_1296_safe_cases(self) -> None:
-        """A typed user-off owns the cabinet action and suppresses every profile.
+        """A server-validated user-off ignores every raw room-state combination.
 
         Six independently realistic reports over four affected actuators give
-        6^4 cases.  This catches regressions where an automatic profile or the
-        five-minute absence branch leaks into a direct user decision.
+        6^4 cases. This catches regressions where an automatic profile leaks
+        into a direct user decision already validated by ScenarioService.
         """
         reports = ("on", "off", "unknown", "unavailable", "restored", None)
         observed: set[tuple[object, object, object, object]] = set()
@@ -385,42 +397,27 @@ class ManagedShowerSourceTest(unittest.TestCase):
                 trigger=_typed("shower-cabinet", "toggle_b2_down", "toggle", "off"),
             )
             actions = _action_ids(payload)
-            cabinet_is_known = cabinet in {"on", "off"}
-            expected = ["set_cabinet_off"] if cabinet_is_known else []
-            self.assertEqual(expected, actions, case)
+            self.assertEqual(["set_cabinet_off"], actions, case)
+            self.assertEqual("cabinet_toggle", payload["selectedBranch"], case)
+            self.assertEqual("completed", payload["status"], case)
             self.assertEqual(
-                "cabinet_toggle__fan_hold"
-                if cabinet_is_known
-                else "cabinet_toggle_unavailable__fan_hold",
-                payload["selectedBranch"],
+                [
+                    {
+                        "id": "set_cabinet_off",
+                        "type": "device_action",
+                        "targetId": SHOWER_CABINET,
+                        "targetName": "Душевая: подсветка шкафа",
+                        "actionId": "turn_off",
+                        "actionTitle": "Выключить",
+                    }
+                ],
+                payload["actions"],
                 case,
             )
-            self.assertEqual("completed" if cabinet_is_known else "skipped", payload["status"], case)
-            self.assertEqual("fan_hold", payload["trace"][3]["expected"], case)
-            self.assertEqual(
-                "cabinet_toggle" if cabinet_is_known else "cabinet_toggle_unavailable",
-                payload["trace"][2]["expected"],
-                case,
-            )
-            if cabinet_is_known:
-                self.assertEqual(
-                    [
-                        {
-                            "id": "set_cabinet_off",
-                            "type": "device_action",
-                            "targetId": SHOWER_CABINET,
-                            "targetName": "Душевая: подсветка шкафа",
-                            "actionId": "turn_off",
-                            "actionTitle": "Выключить",
-                        }
-                    ],
-                    payload["actions"],
-                    case,
-                )
-            else:
-                self.assertEqual([], payload["actions"], case)
             self.assertNotIn("absence_wait", actions)
-            self.assertFalse(any(action.get("delaySeconds") == 300 for action in payload["actions"]))
+            self.assertFalse(
+                any(action.get("delaySeconds") == 300 for action in payload["actions"])
+            )
             self.assertTrue(
                 all(action.get("targetId") == SHOWER_CABINET for action in payload["actions"]),
                 case,
@@ -437,14 +434,13 @@ class ManagedShowerSourceTest(unittest.TestCase):
         self.assertEqual(["set_cabinet_on"], _action_ids(payload))
         self.assertNotIn("set_main_off", _action_ids(payload))
 
-    def test_cabinet_toggle_down_unknown_state_fails_closed_with_reason(self) -> None:
+    def test_cabinet_direct_intent_does_not_reinspect_raw_snapshot(self) -> None:
         payload = _run_shower(
             timestamp="2026-08-27T12:00:00+06:00",
             states={SHOWER_MAIN: "on", SHOWER_CABINET: "unknown"},
             trigger=_typed("shower-cabinet", "toggle_b2_down", "toggle", "on"),
         )
-        self.assertEqual([], _action_ids(payload))
-        self.assertIn("недоступ", payload["trace"][2]["reason"].lower())
+        self.assertEqual(["set_cabinet_on"], _action_ids(payload))
 
     def test_cabinet_toggle_up_is_ignored(self) -> None:
         payload = _run_shower(
@@ -454,16 +450,21 @@ class ManagedShowerSourceTest(unittest.TestCase):
         )
         self.assertEqual([], _action_ids(payload))
 
-    def test_shower_uses_released_main_relay_target(self) -> None:
+    def test_shower_forwards_exact_released_main_relay_target(self) -> None:
         states = {
             SHOWER_PRESENCE: "on", SHOWER_HUMIDITY: "45", SUN: "above_horizon",
             SHOWER_MAIN_NEW: "off", SHOWER_EXTRA: "off", SHOWER_FAN: "off", SHOWER_CABINET: "off",
         }
-        payload = _run_shower(timestamp="2026-08-27T12:00:00+06:00", states=states)
+        payload = _run_shower(
+            timestamp="2026-08-27T12:00:00+06:00",
+            states=states,
+            trigger={"source": "scenario_control"},
+            controls=_controls(SHOWER_MAIN_NEW, "turn_on"),
+        )
         actions = {item["id"]: item for item in payload["actions"]}
-        self.assertEqual(SHOWER_MAIN_NEW, actions["set_main_on"]["targetId"])
+        self.assertEqual(SHOWER_MAIN_NEW, actions["server_action"]["targetId"])
 
-    def test_absent_humid_fan_off_keeps_fan_on_while_delaying_light_off(self) -> None:
+    def test_absent_humid_inputs_cannot_plan_actions_in_node_red(self) -> None:
         payload = _run_shower(
             timestamp="2026-08-27T12:00:00+06:00",
             states={
@@ -471,9 +472,10 @@ class ManagedShowerSourceTest(unittest.TestCase):
                 SHOWER_MAIN: "on", SHOWER_EXTRA: "off", SHOWER_FAN: "off", SHOWER_CABINET: "off",
             },
         )
-        self.assertEqual(["set_fan_on", "absence_wait", "set_main_off"], _action_ids(payload))
+        self.assertEqual([], _action_ids(payload))
+        self.assertEqual("server_hold", payload["selectedBranch"])
 
-    def test_absent_humid_fan_on_delays_only_light_off(self) -> None:
+    def test_absent_humid_fan_on_cannot_plan_light_actions_in_node_red(self) -> None:
         payload = _run_shower(
             timestamp="2026-08-27T12:00:00+06:00",
             states={
@@ -481,12 +483,10 @@ class ManagedShowerSourceTest(unittest.TestCase):
                 SHOWER_MAIN: "on", SHOWER_EXTRA: "on", SHOWER_FAN: "on", SHOWER_CABINET: "on",
             },
         )
-        self.assertEqual(
-            ["absence_wait", "set_main_off", "set_extra_off", "set_cabinet_off"],
-            _action_ids(payload),
-        )
+        self.assertEqual([], _action_ids(payload))
+        self.assertEqual("server_hold", payload["selectedBranch"])
 
-    def test_absence_uses_one_five_minute_wait_for_light_and_fan(self) -> None:
+    def test_absence_input_cannot_create_a_node_red_timer(self) -> None:
         payload = _run_shower(
             timestamp="2026-08-27T12:00:00+06:00",
             states={
@@ -500,14 +500,10 @@ class ManagedShowerSourceTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual("light_off_5m__fan_off_5m", payload["selectedBranch"])
-        self.assertEqual(
-            ["absence_wait", "set_main_off", "set_fan_off"],
-            _action_ids(payload),
-        )
-        self.assertEqual(300, payload["actions"][0]["delaySeconds"])
+        self.assertEqual("server_hold", payload["selectedBranch"])
+        self.assertEqual([], _action_ids(payload))
 
-    def test_day_profile_always_claims_main_light_before_other_changes(self) -> None:
+    def test_day_inputs_cannot_claim_or_switch_a_profile_in_node_red(self) -> None:
         payload = _run_shower(
             timestamp="2026-08-27T12:00:00+06:00",
             states={
@@ -521,13 +517,10 @@ class ManagedShowerSourceTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual("day_main__fan_hold", payload["selectedBranch"])
-        self.assertEqual(
-            ["set_main_on", "set_extra_off", "set_cabinet_on"],
-            _action_ids(payload),
-        )
+        self.assertEqual("server_hold", payload["selectedBranch"])
+        self.assertEqual([], _action_ids(payload))
 
-    def test_presence_starts_fan_immediately_and_adds_cabinet_light(self) -> None:
+    def test_presence_input_cannot_start_fan_or_light_in_node_red(self) -> None:
         payload = _run_shower(
             timestamp="2026-08-27T12:00:00+06:00",
             states={
@@ -541,16 +534,10 @@ class ManagedShowerSourceTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual("day_main__fan_presence", payload["selectedBranch"])
-        self.assertEqual(
-            ["set_main_on", "set_cabinet_on", "set_fan_on"],
-            _action_ids(payload),
-        )
-        self.assertFalse(
-            any(action["type"] == "delay" for action in payload["actions"])
-        )
+        self.assertEqual("server_hold", payload["selectedBranch"])
+        self.assertEqual([], _action_ids(payload))
 
-    def test_unknown_presence_never_switches_light_or_fan(self) -> None:
+    def test_unknown_presence_without_server_action_holds_every_output(self) -> None:
         payload = _run_shower(
             timestamp="2026-08-27T12:00:00+06:00",
             states={
@@ -564,5 +551,5 @@ class ManagedShowerSourceTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual("light_unknown__fan_hold", payload["selectedBranch"])
+        self.assertEqual("server_hold", payload["selectedBranch"])
         self.assertEqual([], payload["actions"])

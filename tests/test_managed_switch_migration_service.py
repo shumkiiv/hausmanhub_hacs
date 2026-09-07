@@ -402,7 +402,7 @@ async def test_create_failure_compensates_only_previously_created_flows() -> Non
         for item in MIGRATION_MANIFEST
         if item.scenario_id == "system-shower-comfort-controller"
     )
-    assert shower.scenario_id not in backend.restored
+    assert shower.scenario_id in backend.restored
     assert backend.deployed[shower.scenario_id] == shower.legacy_source_hash
     assert backend.sources[shower.scenario_id] == f"legacy:{shower.scenario_id}"
     assert store.registry == _registry_from_inventory58()
@@ -814,21 +814,45 @@ async def test_snapshot_binding_is_not_replayed_after_the_v3_migration() -> None
     await service.async_commit_managed_switch_migration(MIGRATION_MANIFEST)
 
 
-async def test_partial_restart_reconciles_new_source_without_redeploy() -> None:
-    partial = MIGRATION_MANIFEST[0]
-    backend = Backend({
-        item.scenario_id: partial.new_source_hash if item is partial else item.legacy_source_hash
+async def test_each_replace_crash_point_reconciles_without_redeploy() -> None:
+    replacements = tuple(
+        item
         for item in MIGRATION_MANIFEST
-        if item.operation == "replace"
-    })
-    store = RegistryStore(_registry())
-    service = _service(store, backend)
-    await service.async_load()
-    await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
-    assert partial.scenario_id not in backend.updated
-    migrated = store.registry.scenario(partial.scenario_id)
-    assert migrated.revision == partial.legacy_revision + 1
-    assert migrated.definition.node_red.flow_revision == 9
+        if item.scenario_id in _REPLACED_SOURCE_IDS
+    )
+    assert len(replacements) == 3
+    for crash_index, partial in enumerate(replacements):
+        for source_write_completed in (False, True):
+            backend = Backend()
+            store = RegistryStore(_registry())
+            service = _service(store, backend)
+            await service.async_load()
+            before = await service.async_capture_managed_switch_migration(
+                MIGRATION_MANIFEST
+            )
+            journal = _initial_journal(before, MIGRATION_MANIFEST)
+            for completed in replacements[:crash_index]:
+                journal["operations"][completed.scenario_id]["state"] = "applied"
+                backend.deployed[completed.scenario_id] = completed.new_source_hash
+                backend.sources[completed.scenario_id] = _runtime_source(completed)
+            journal["operations"][partial.scenario_id]["state"] = "intent"
+            if source_write_completed:
+                backend.deployed[partial.scenario_id] = partial.new_source_hash
+                backend.sources[partial.scenario_id] = _runtime_source(partial)
+
+            await service.async_apply_managed_switch_migration(
+                MIGRATION_MANIFEST,
+                journal=journal,
+            )
+
+            first_not_deployed = crash_index + int(source_write_completed)
+            assert tuple(backend.replaced) == tuple(
+                item.scenario_id for item in replacements[first_not_deployed:]
+            )
+            for item in replacements:
+                migrated = store.registry.scenario(item.scenario_id)
+                assert migrated.revision == item.legacy_revision + 1
+                assert migrated.definition.node_red.flow_revision == 9
 
 
 async def test_completed_registry_is_verified_without_any_mutation() -> None:
@@ -1049,20 +1073,28 @@ async def test_final_snapshot_drift_can_restore_exact_sources_and_registry() -> 
 
 
 async def test_manual_source_edit_rejects_final_rollback_without_overwrite() -> None:
-    store = RegistryStore(_registry())
-    backend = Backend()
-    service = _service(store, backend)
-    await service.async_load()
-    await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
-    first = MIGRATION_MANIFEST[0]
-    backend.deployed[first.scenario_id] = "f" * 64
-
-    assert not await service.async_rollback_managed_switch_migration(
-        MIGRATION_MANIFEST
+    replacements = tuple(
+        item
+        for item in MIGRATION_MANIFEST
+        if item.scenario_id in _REPLACED_SOURCE_IDS
     )
-    assert backend.deployed[first.scenario_id] == "f" * 64
-    assert backend.restored == []
-    assert store.registry.scenario(first.scenario_id).revision == first.legacy_revision + 1
+    for changed in replacements:
+        store = RegistryStore(_registry())
+        backend = Backend()
+        service = _service(store, backend)
+        await service.async_load()
+        await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
+        backend.deployed[changed.scenario_id] = "f" * 64
+
+        assert not await service.async_rollback_managed_switch_migration(
+            MIGRATION_MANIFEST
+        )
+        assert backend.deployed[changed.scenario_id] == "f" * 64
+        assert backend.restored == []
+        assert (
+            store.registry.scenario(changed.scenario_id).revision
+            == changed.legacy_revision + 1
+        )
 
 
 async def test_completed_receipt_failure_with_manual_edit_stays_prepared_and_blocked() -> None:
@@ -1435,8 +1467,8 @@ class ManagedSwitchMigrationServiceTest(unittest.IsolatedAsyncioTestCase):
     test_snapshot_binding_is_not_replayed_after_the_v3_migration = _as_unittest_case(
         test_snapshot_binding_is_not_replayed_after_the_v3_migration
     )
-    test_partial_restart_reconciles_new_source_without_redeploy = _as_unittest_case(
-        test_partial_restart_reconciles_new_source_without_redeploy
+    test_each_replace_crash_point_reconciles_without_redeploy = _as_unittest_case(
+        test_each_replace_crash_point_reconciles_without_redeploy
     )
     test_completed_registry_is_verified_without_any_mutation = _as_unittest_case(
         test_completed_registry_is_verified_without_any_mutation
@@ -1500,7 +1532,7 @@ for _test in (
     test_replace_source_staging_restores_exact_source_after_cas_conflict,
     test_staged_flows_are_recovered_when_the_registry_cas_changes,
     test_snapshot_binding_is_not_replayed_after_the_v3_migration,
-    test_partial_restart_reconciles_new_source_without_redeploy,
+    test_each_replace_crash_point_reconciles_without_redeploy,
     test_completed_registry_is_verified_without_any_mutation,
     test_final_verification_requires_one_cross_scenario_cas_snapshot,
     test_conflict_or_missing_target_causes_no_mutation,

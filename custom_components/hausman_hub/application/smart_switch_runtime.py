@@ -121,7 +121,7 @@ def validate_exact_device_trigger(
 
 def _semantic_intent(binding: str, subtype: str) -> str:
     if binding == "shower-cabinet":
-        return "release" if subtype == "toggle_b2_up" else "toggle"
+        return "upper_area" if subtype == "toggle_b2_up" else "toggle"
     return {"on_down": "on", "toggle_down": "toggle", "off_up": "off"}[subtype]
 
 
@@ -345,6 +345,11 @@ class SmartSwitchTriggerAdapter:
         if self._activation_latch is not None and not self._activation_latch.is_open:
             return False
         if not any(validate_exact_device_trigger(config, item) for item in _ALL_CONFIGS):
+            _LOGGER.info(
+                "smart_switch_trigger_skipped "
+                "code=SMART_SWITCH_TRIGGER_NOT_ALLOWLISTED "
+                "reason=unsupported_trigger_identity"
+            )
             return False
         async with self._receipt_lock:
             if _generation is not None and _generation.get("active") is not True:

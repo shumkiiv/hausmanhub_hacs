@@ -44,7 +44,8 @@ class ScenarioControlPolicyService:
         payload = await self._store.async_load()
         if payload is None:
             document = ScenarioControlDocument()
-            await self._store.async_save(scenario_control_document_to_payload(document))
+            payload = scenario_control_document_to_payload(document)
+            await self._store.async_save(payload)
         else:
             try:
                 document = scenario_control_document_from_payload(payload)
@@ -57,8 +58,10 @@ class ScenarioControlPolicyService:
                 document.policy_revision + 1,
                 replace(document.policy, storage_exhaust_target_id=None),
             )
-            await self._store.async_save(scenario_control_document_to_payload(document))
         self._validate_capabilities(document.policy)
+        canonical = scenario_control_document_to_payload(document)
+        if payload != canonical:
+            await self._store.async_save(canonical)
         self._current = document
 
     @property

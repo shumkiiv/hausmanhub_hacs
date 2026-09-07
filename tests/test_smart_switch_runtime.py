@@ -186,6 +186,30 @@ async def test_shower_alias_is_deduplicated_and_up_is_ignored() -> None:
 
 
 @pytest.mark.asyncio
+async def test_unconfirmed_shower_hold_is_skipped_with_fixed_reason(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    calls: list[dict[str, object]] = []
+    adapter = SmartSwitchTriggerAdapter(
+        SimpleNamespace(),
+        SimpleNamespace(async_run_typed_intent=lambda **item: calls.append(item)),
+        trigger_api=SimpleNamespace(),
+        state_store=MemoryStore(),
+    )
+    await adapter.async_load_state()
+
+    with caplog.at_level("INFO"):
+        accepted = await adapter.async_handle_trigger(
+            {**SHOWER_TRIGGER_CONFIGS[0], "subtype": "hold_b2"},
+            {},
+        )
+
+    assert not accepted
+    assert calls == []
+    assert "reason=unsupported_trigger_identity" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_concurrent_shower_aliases_dispatch_exactly_once() -> None:
     calls: list[dict[str, object]] = []
     dispositions: list[dict[str, object]] = []

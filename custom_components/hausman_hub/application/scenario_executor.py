@@ -1260,6 +1260,15 @@ class ScenarioExecutor:
         )
         source = trigger_context.get("source") if trigger_context else "automatic"
         automatic_source = source != "manual"
+        idempotent_actions = bool(
+            definition.safety_policy.idempotent_actions
+            and not (
+                scenario_id == "system-cabinet-light-controller"
+                and isinstance(trigger_context, Mapping)
+                and trigger_context.get("source") == "scenario_control"
+                and trigger_context.get("trigger_id") == "office_temperature_confirm"
+            )
+        )
         forbid_toggle = automatic_source or (
             definition.execution_backend is ScenarioExecutionBackend.NODE_RED
         )
@@ -1728,9 +1737,7 @@ class ScenarioExecutor:
                             dry_run=False,
                             defer_device_readback=True,
                             powered_sources=dict(powered_sources),
-                            idempotent_actions=(
-                                definition.safety_policy.idempotent_actions
-                            ),
+                            idempotent_actions=idempotent_actions,
                             evidence_age_seconds=(
                                 int(time.time() * 1000) - evidence_captured_at_ms
                             )
@@ -1765,7 +1772,7 @@ class ScenarioExecutor:
                     dry_run=dry_run,
                     defer_device_readback=True,
                     powered_sources=dict(powered_sources),
-                    idempotent_actions=definition.safety_policy.idempotent_actions,
+                    idempotent_actions=idempotent_actions,
                     evidence_age_seconds=(
                         int(time.time() * 1000) - evidence_captured_at_ms
                     )
@@ -1811,9 +1818,7 @@ class ScenarioExecutor:
                         next_visited,
                         powered_target_ids=powered_target_ids,
                         powered_sources=powered_sources,
-                        idempotent_actions=(
-                            definition.safety_policy.idempotent_actions
-                        ),
+                        idempotent_actions=idempotent_actions,
                         max_evidence_age_seconds=(
                             definition.safety_policy.max_evidence_age_seconds
                         ),

@@ -21,6 +21,23 @@ SCENARIOS = {
         "entity_9164132c7692d6f5": {"state": "open", "attributes": {"current_position": 40}},
     }, {}),
 }
+SERVER_ACTIONS = {
+    "toilet_controller.js": {
+        "targetId": "entity_5d95de599d2b5cec",
+        "actionId": "turn_on",
+        "value": None,
+    },
+    "bathroom_controller.js": {
+        "targetId": "entity_c15f5df5382ee180",
+        "actionId": "turn_on",
+        "value": None,
+    },
+    "cabinet_controller.js": {
+        "targetId": "entity_aeaf7c250c68e8c2",
+        "actionId": "set_brightness_percent",
+        "value": 65,
+    },
+}
 
 
 def _run_source(filename: str, request: dict) -> dict:
@@ -45,7 +62,21 @@ def test_all_new_production_sources_return_typed_positive_plans() -> None:
             for key, value in raw_inputs.items()
         }
         context = {"trigger": {"source": "manual", "trigger_id": "sunset"}}
-        if filename == "storage_controller.js":
+        if filename in SERVER_ACTIONS:
+            context = {
+                "trigger": {
+                    "source": "scenario_control",
+                    "trigger_id": "light_action",
+                },
+                "controls": {
+                    "state": {
+                        "ready": True,
+                        "transition": "light_action",
+                        "action": SERVER_ACTIONS[filename],
+                    }
+                },
+            }
+        elif filename == "storage_controller.js":
             context["controls"] = {
                 "policyRevision": 0,
                 "policy": {

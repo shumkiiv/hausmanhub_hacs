@@ -104,7 +104,7 @@ FULL_MIGRATION_MANIFEST: tuple[ManagedSwitchMigrationEntry, ...] = (
         "system-shower-comfort-controller", 4,
         "757bde711c85ebad4826c2ec0bf2695d0034f7dd820c9ec7c30816f3f37c1551",
         MANAGED_TOPOLOGY, _SHOWER_LEGACY_INPUTS, _SHOWER_INPUTS,
-        "757bde711c85ebad4826c2ec0bf2695d0034f7dd820c9ec7c30816f3f37c1551",
+        "53d8876b2b914bd438cdbd020b7dc85f3e9eb3d9a8ea17434ab290d852deea66",
         "shower_controller.js", expected_revision=4,
     ),
     ManagedSwitchMigrationEntry(
@@ -126,7 +126,7 @@ FULL_MIGRATION_MANIFEST: tuple[ManagedSwitchMigrationEntry, ...] = (
         "218fa449363cb8d69cf366a670bf207846a7def9846da6fa130fa4157efb279d",
         MANAGED_TOPOLOGY,
         _TOILET_INPUTS, _TOILET_INPUTS,
-        "218fa449363cb8d69cf366a670bf207846a7def9846da6fa130fa4157efb279d",
+        "2d91781cf6dd910dadd8e4774eb3d45ae4ae6002b6912dee65bf40ef33af513b",
         "toilet_controller.js", operation="create", expected_revision=None,
     ),
     ManagedSwitchMigrationEntry(
@@ -134,7 +134,7 @@ FULL_MIGRATION_MANIFEST: tuple[ManagedSwitchMigrationEntry, ...] = (
         "2b413c28d18f61f6730a3b31831bb73f98d690cb4d937ed75856f165475ebd74",
         MANAGED_TOPOLOGY,
         _BATHROOM_INPUTS, _BATHROOM_INPUTS,
-        "2b413c28d18f61f6730a3b31831bb73f98d690cb4d937ed75856f165475ebd74",
+        "235302aeaa38e0d82eae01f63015a5180f3d4098f495919a18a587c973902af6",
         "bathroom_controller.js", operation="create", expected_revision=None,
     ),
     ManagedSwitchMigrationEntry(
@@ -150,7 +150,7 @@ FULL_MIGRATION_MANIFEST: tuple[ManagedSwitchMigrationEntry, ...] = (
         "07e08025f24e98dfb67cef2f424a63a161b45b01d67dbe90456aad6055bf34ff",
         MANAGED_TOPOLOGY,
         _CABINET_INPUTS, _CABINET_INPUTS,
-        "07e08025f24e98dfb67cef2f424a63a161b45b01d67dbe90456aad6055bf34ff",
+        "ead4919d6c3d088fc45a26e0b240a4b0520b0a62ba7277476d143b650133468c",
         "cabinet_controller.js", operation="create", expected_revision=None,
     ),
     ManagedSwitchMigrationEntry(

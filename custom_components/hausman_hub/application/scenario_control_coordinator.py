@@ -40,6 +40,33 @@ SMALL_CORRIDOR_LUX_TARGET_ID = "entity_2e306a9650ac5728"
 SMALL_CORRIDOR_RELAY_TARGET_ID = "entity_4be32416634e6416"
 SMALL_CORRIDOR_CHANDELIER_TARGET_ID = "entity_9ed909332fdaa8fd"
 SUN_TARGET_ID = "entity_6b9ccdab9bb484b2"
+SHOWER_SCENARIO_ID = "system-shower-comfort-controller"
+SHOWER_PRESENCE_TARGET_ID = "entity_d1fb2cbf2a691bba"
+SHOWER_HUMIDITY_TARGET_ID = "entity_fd3945cf1a2110f8"
+SHOWER_MAIN_TARGET_ID = "entity_46174e1ff9913212"
+SHOWER_EXTRA_TARGET_ID = "entity_1fdcd8b244637246"
+SHOWER_FAN_TARGET_ID = "entity_afef5df0e0cae309"
+SHOWER_CABINET_TARGET_ID = "entity_e7a7c61eec7bdff8"
+TOILET_SCENARIO_ID = "system-toilet-comfort-controller"
+TOILET_MOTION_TARGET_IDS = (
+    "entity_ce73f88bda2e6812",
+    "entity_56650c782076ed4d",
+)
+TOILET_MAIN_TARGET_ID = "entity_5d95de599d2b5cec"
+TOILET_NIGHT_TARGET_ID = "entity_6667b3400bce7970"
+TOILET_FAN_TARGET_ID = "entity_9bbb3b0e8cd98627"
+TOILET_AWAY_TARGET_ID = "entity_3f343b8d6f58f5b4"
+BATHROOM_SCENARIO_ID = "system-bathroom-exhaust-controller"
+BATHROOM_LIGHT_TARGET_IDS = (
+    "entity_a591e035e3e5b34f",
+    "entity_d82766182d69dd51",
+)
+BATHROOM_HUMIDITY_TARGET_ID = "entity_436e12f71ce7b08b"
+BATHROOM_FAN_TARGET_ID = "entity_c15f5df5382ee180"
+OFFICE_SCENARIO_ID = "system-cabinet-light-controller"
+OFFICE_LIGHT_TARGET_ID = "entity_aeaf7c250c68e8c2"
+OFFICE_RELAY_TARGET_ID = "entity_7ff6d09cfa68fa5a"
+OFFICE_LUX_TARGET_ID = "entity_5f3b4436fb7b6f2b"
 _LIGHT_ACTION_IDS = frozenset(
     {"turn_on", "turn_off", "set_brightness_percent", "set_color_temperature"}
 )
@@ -77,6 +104,17 @@ _TRANSITIONS = frozenset(
         "brightness_sequence_completed",
         "controller_unknown",
         "controller_idle",
+        "shower_profile",
+        "shower_presence_pending",
+        "shower_absence_pending",
+        "toilet_profile",
+        "toilet_absence_pending",
+        "toilet_fan_off_pending",
+        "bathroom_hold",
+        "bathroom_day_off_pending",
+        "office_power_settle",
+        "office_program",
+        "office_profile_applied",
     }
 )
 
@@ -102,6 +140,9 @@ def _empty_storage_record(policy_revision: int) -> dict[str, object]:
         "manualAbsenceStartedAtMs": None,
         "luxCandidateSinceMs": None,
         "welcomeArmed": True,
+        "timerKind": None,
+        "ownedTargets": {},
+        "program": None,
     }
 
 
@@ -124,8 +165,9 @@ def _validated_storage_record(value: object) -> dict[str, object] | None:
         "luxCandidateSinceMs",
         "welcomeArmed",
     }
+    extended_keys = current_keys | {"timerKind", "ownedTargets", "program"}
     if not isinstance(value, Mapping) or (
-        set(value) != legacy_keys and set(value) != current_keys
+        frozenset(value) not in {frozenset(legacy_keys), frozenset(current_keys), frozenset(extended_keys)}
     ):
         return None
     normalized = dict(value)
@@ -135,6 +177,9 @@ def _validated_storage_record(value: object) -> dict[str, object] | None:
         ("manualAbsenceStartedAtMs", None),
         ("luxCandidateSinceMs", None),
         ("welcomeArmed", True),
+        ("timerKind", None),
+        ("ownedTargets", {}),
+        ("program", None),
     ):
         normalized.setdefault(key, default)
     value = normalized
@@ -183,6 +228,19 @@ def _validated_storage_record(value: object) -> dict[str, object] | None:
         return None
     if type(value.get("welcomeArmed")) is not bool:
         return None
+    timer_kind = value.get("timerKind")
+    if timer_kind is not None and timer_kind not in {
+        "shower_presence", "shower_absence", "toilet_absence",
+        "toilet_fan_off", "bathroom_day_off", "office_program",
+    }:
+        return None
+    owned_targets = value.get("ownedTargets")
+    if not isinstance(owned_targets, Mapping) or any(
+        not isinstance(key, str) or not key or len(key) > 128
+        or not isinstance(token, str) or not token or len(token) > 128
+        for key, token in owned_targets.items()
+    ):
+        return None
     action = value.get("action")
     if action is not None and (
         not isinstance(action, Mapping)
@@ -209,8 +267,30 @@ def _validated_storage_record(value: object) -> dict[str, object] | None:
         or any(not 0 <= int(sequence[key]) <= 100 for key in ("start", "target", "current"))
     ):
         return None
+    program = value.get("program")
+    if program is not None and (
+        not isinstance(program, Mapping)
+        or set(program) != {
+            "profile", "step", "deadlineMs", "brightness", "primeKelvin", "targetKelvin"
+        }
+        or not isinstance(program.get("profile"), str)
+        or not 1 <= len(str(program["profile"])) <= 64
+        or type(program.get("step")) is not int
+        or not 0 <= int(program["step"]) <= 3
+        or type(program.get("deadlineMs")) is not int
+        or not 0 <= int(program["deadlineMs"]) <= 2**63 - 1
+        or type(program.get("brightness")) is not int
+        or not 0 <= int(program["brightness"]) <= 100
+        or any(
+            type(program.get(key)) is not int or not 1500 <= int(program[key]) <= 6500
+            for key in ("primeKelvin", "targetKelvin")
+        )
+    ):
+        return None
     record = copy.deepcopy(dict(value))
     record["evidence"] = copy.deepcopy(dict(evidence))
+    record["ownedTargets"] = copy.deepcopy(dict(owned_targets))
+    record["program"] = copy.deepcopy(dict(program)) if isinstance(program, Mapping) else None
     record["fractionalRemainder"] = float(remainder)
     return record
 
@@ -222,11 +302,13 @@ def valid_scenario_control_state_payload(value: object) -> bool:
         return False
     if set(value) == {"version", "storage"}:
         return _validated_storage_record(value.get("storage")) is not None
+    legacy_complete = {"version", "storage", "tambur", "smallCorridor"}
+    complete = legacy_complete | {"shower", "toilet", "bathroom", "office"}
     return bool(
-        set(value) == {"version", "storage", "tambur", "smallCorridor"}
+        frozenset(value) in {frozenset(legacy_complete), frozenset(complete)}
         and all(
             _validated_storage_record(value.get(key)) is not None
-            for key in ("storage", "tambur", "smallCorridor")
+            for key in set(value) - {"version"}
         )
     )
 
@@ -263,6 +345,10 @@ class ScenarioControlCoordinator:
         self._storage = _empty_storage_record(0)
         self._tambur = _empty_storage_record(0)
         self._small_corridor = _empty_storage_record(0)
+        self._shower = _empty_storage_record(0)
+        self._toilet = _empty_storage_record(0)
+        self._bathroom = _empty_storage_record(0)
+        self._office = _empty_storage_record(0)
         self._light_task: asyncio.Task[None] | None = None
         self._exhaust_task: asyncio.Task[None] | None = None
         self._zone_tasks: dict[str, asyncio.Task[None]] = {}
@@ -278,7 +364,15 @@ class ScenarioControlCoordinator:
         """Scenario IDs whose device and clock triggers are coordinated here."""
 
         return frozenset(
-            {STORAGE_SCENARIO_ID, TAMBUR_SCENARIO_ID, SMALL_CORRIDOR_SCENARIO_ID}
+            {
+                STORAGE_SCENARIO_ID,
+                TAMBUR_SCENARIO_ID,
+                SMALL_CORRIDOR_SCENARIO_ID,
+                SHOWER_SCENARIO_ID,
+                TOILET_SCENARIO_ID,
+                BATHROOM_SCENARIO_ID,
+                OFFICE_SCENARIO_ID,
+            }
         )
 
     async def async_load(self) -> None:
@@ -288,6 +382,10 @@ class ScenarioControlCoordinator:
             self._storage = _empty_storage_record(document.policy_revision)
             self._tambur = _empty_storage_record(document.policy_revision)
             self._small_corridor = _empty_storage_record(document.policy_revision)
+            self._shower = _empty_storage_record(document.policy_revision)
+            self._toilet = _empty_storage_record(document.policy_revision)
+            self._bathroom = _empty_storage_record(document.policy_revision)
+            self._office = _empty_storage_record(document.policy_revision)
             await self._save()
         elif not valid_scenario_control_state_payload(payload):
             raise RuntimeError("scenario control state storage is invalid")
@@ -299,13 +397,24 @@ class ScenarioControlCoordinator:
             small = _validated_storage_record(payload.get("smallCorridor"))
             self._tambur = tambur or _empty_storage_record(document.policy_revision)
             self._small_corridor = small or _empty_storage_record(document.policy_revision)
-            if set(payload) == {"version", "storage"}:
+            self._shower = _validated_storage_record(payload.get("shower")) or _empty_storage_record(document.policy_revision)
+            self._toilet = _validated_storage_record(payload.get("toilet")) or _empty_storage_record(document.policy_revision)
+            self._bathroom = _validated_storage_record(payload.get("bathroom")) or _empty_storage_record(document.policy_revision)
+            self._office = _validated_storage_record(payload.get("office")) or _empty_storage_record(document.policy_revision)
+            if set(payload) != {
+                "version", "storage", "tambur", "smallCorridor",
+                "shower", "toilet", "bathroom", "office",
+            }:
                 await self._save()
         if getattr(self._store, "recovered_previous", False):
             for record in (
                 self._storage,
                 self._tambur,
                 self._small_corridor,
+                self._shower,
+                self._toilet,
+                self._bathroom,
+                self._office,
             ):
                 record.clear()
                 record.update(_empty_storage_record(document.policy_revision))
@@ -313,7 +422,7 @@ class ScenarioControlCoordinator:
             await self._save()
         elif any(
             record["policyRevision"] != document.policy_revision
-            for record in (self._storage, self._tambur, self._small_corridor)
+            for record in self._all_records()
         ):
             self._storage = self._next_record_for(
                 self._storage,
@@ -337,6 +446,10 @@ class ScenarioControlCoordinator:
                 clear_absence=True,
                 clear_sequence=True,
             )
+            self._shower = self._policy_reset(self._shower, document.policy_revision)
+            self._toilet = self._policy_reset(self._toilet, document.policy_revision)
+            self._bathroom = self._policy_reset(self._bathroom, document.policy_revision)
+            self._office = self._policy_reset(self._office, document.policy_revision)
             await self._save()
         self._remove_policy_observer = self._policy_service.add_observer(
             self._async_policy_changed
@@ -367,6 +480,14 @@ class ScenarioControlCoordinator:
                 )
             if entity_id in self._small_corridor_entity_ids():
                 await self.async_handle_small_corridor_change()
+            if entity_id in self._shower_entity_ids():
+                await self.async_handle_shower_change()
+            if entity_id in self._toilet_entity_ids():
+                await self.async_handle_toilet_change()
+            if entity_id in self._bathroom_entity_ids():
+                await self.async_handle_bathroom_change()
+            if entity_id in self._office_entity_ids():
+                await self.async_handle_office_change()
 
         unsubscribe = bus.async_listen("state_changed", state_changed)
         getattr(entry, "async_on_unload")(unsubscribe)
@@ -398,8 +519,12 @@ class ScenarioControlCoordinator:
                 recovery=True,
                 allow_activation=False,
             )
-            self._schedule_zone_due(TAMBUR_SCENARIO_ID)
-            self._schedule_zone_due(SMALL_CORRIDOR_SCENARIO_ID)
+            await self.async_handle_shower_change(recovery=True, allow_activation=False)
+            await self.async_handle_toilet_change(recovery=True, allow_activation=False)
+            await self.async_handle_bathroom_change(recovery=True, allow_activation=False)
+            await self.async_handle_office_change(recovery=True)
+            for scenario_id in self.owned_scenario_ids - {STORAGE_SCENARIO_ID}:
+                self._schedule_zone_due(scenario_id)
 
         create_task = getattr(self._hass, "async_create_task", None)
         coroutine = reconcile()
@@ -419,6 +544,10 @@ class ScenarioControlCoordinator:
             "storage": self.storage_state,
             "tambur": copy.deepcopy(self._tambur),
             "smallCorridor": copy.deepcopy(self._small_corridor),
+            "shower": copy.deepcopy(self._shower),
+            "toilet": copy.deepcopy(self._toilet),
+            "bathroom": copy.deepcopy(self._bathroom),
+            "office": copy.deepcopy(self._office),
         }
 
     @property
@@ -1318,6 +1447,631 @@ class ScenarioControlCoordinator:
                 clear_absence=True,
             )
 
+    async def async_handle_shower_change(
+        self, *, recovery: bool = False, allow_activation: bool = True
+    ) -> None:
+        """Apply the shower profile while keeping both long timers durable."""
+
+        async with self._decision_lock:
+            presence = self._target_state(SHOWER_PRESENCE_TARGET_ID)
+            humidity = self._target_numeric_state(SHOWER_HUMIDITY_TARGET_ID)
+            lights = tuple(
+                self._target_state(target)
+                for target in (SHOWER_MAIN_TARGET_ID, SHOWER_EXTRA_TARGET_ID, SHOWER_CABINET_TARGET_ID)
+            )
+            fan = self._target_state(SHOWER_FAN_TARGET_ID)
+            evidence = self._room_evidence(presence, humidity, lights, fan)
+            if self._room_dispatch_failed(self._shower):
+                return
+            if humidity is not None and humidity > 55 and fan == "off" and allow_activation:
+                if not await self._run_zone_action(
+                    SHOWER_SCENARIO_ID,
+                    SHOWER_FAN_TARGET_ID,
+                    "turn_on",
+                    None,
+                    evidence=evidence,
+                ):
+                    return
+                fan = "on"
+            if presence not in {"on", "off"}:
+                await self._room_hold(SHOWER_SCENARIO_ID, "controller_unknown", evidence)
+                return
+            if presence == "on":
+                if (
+                    recovery
+                    and fan == "off"
+                    and self._shower.get("timerKind") == "shower_presence"
+                    and type(self._shower.get("deadlineMs")) is int
+                ):
+                    self._schedule_zone_due(SHOWER_SCENARIO_ID)
+                    return
+                self._cancel_zone_task(SHOWER_SCENARIO_ID)
+                await self._set_zone_transition(
+                    SHOWER_SCENARIO_ID, "shower_profile", evidence=evidence,
+                    clear_absence=True, clear_timer=True,
+                )
+                shower_lights = (
+                    SHOWER_MAIN_TARGET_ID,
+                    SHOWER_EXTRA_TARGET_ID,
+                    SHOWER_CABINET_TARGET_ID,
+                )
+                if allow_activation and not self._manual_profile_active(
+                    SHOWER_SCENARIO_ID, shower_lights
+                ):
+                    desired = self._shower_profile()
+                    if desired is not None:
+                        for target, should_be_on in desired.items():
+                            current = self._target_state(target)
+                            if should_be_on and current == "off":
+                                if not await self._run_zone_action(
+                                    SHOWER_SCENARIO_ID, target, "turn_on", None, evidence=evidence
+                                ):
+                                    return
+                            elif not should_be_on and current == "on" and self._is_room_owned(
+                                SHOWER_SCENARIO_ID, target
+                            ):
+                                if not await self._run_zone_action(
+                                    SHOWER_SCENARIO_ID, target, "turn_off", None, evidence=evidence
+                                ):
+                                    return
+                if humidity is not None and humidity > 55:
+                    return
+                if fan == "off" and allow_activation:
+                    await self._ensure_room_timer(
+                        SHOWER_SCENARIO_ID,
+                        "shower_presence",
+                        self._policy_service.current.policy.shower_fan_presence_seconds,
+                        evidence,
+                    )
+                return
+
+            owned_lights = tuple(
+                target for target in (SHOWER_MAIN_TARGET_ID, SHOWER_EXTRA_TARGET_ID, SHOWER_CABINET_TARGET_ID)
+                if self._target_state(target) == "on" and self._is_room_owned(SHOWER_SCENARIO_ID, target)
+            )
+            fan_can_stop = bool(
+                fan == "on" and humidity is not None and humidity <= 55
+                and self._is_room_owned(SHOWER_SCENARIO_ID, SHOWER_FAN_TARGET_ID)
+            )
+            if not owned_lights and not fan_can_stop:
+                await self._room_hold(
+                    SHOWER_SCENARIO_ID,
+                    "controller_unknown" if fan == "on" and humidity is None else "controller_idle",
+                    evidence,
+                )
+                return
+            seconds = min(
+                self._policy_service.current.policy.shower_absence_seconds
+                if owned_lights else 3601,
+                self._policy_service.current.policy.shower_fan_off_seconds
+                if fan_can_stop else 3601,
+            )
+            await self._ensure_room_timer(
+                SHOWER_SCENARIO_ID, "shower_absence", seconds, evidence
+            )
+
+    async def async_handle_toilet_change(
+        self, *, recovery: bool = False, allow_activation: bool = True
+    ) -> None:
+        """Select one toilet light profile and manage its independent fan."""
+
+        del recovery
+        async with self._decision_lock:
+            motion = self._combined_target_state(TOILET_MOTION_TARGET_IDS)
+            main = self._target_state(TOILET_MAIN_TARGET_ID)
+            night = self._target_state(TOILET_NIGHT_TARGET_ID)
+            fan = self._target_state(TOILET_FAN_TARGET_ID)
+            evidence = self._room_evidence(motion, self._target_state(TOILET_AWAY_TARGET_ID), (main, night), fan)
+            if self._room_dispatch_failed(self._toilet):
+                return
+            if motion == "unknown":
+                if self._toilet_fan_window() and "on" in {main, night} and fan == "off" and allow_activation:
+                    if not await self._run_zone_action(
+                        TOILET_SCENARIO_ID,
+                        TOILET_FAN_TARGET_ID,
+                        "turn_on",
+                        None,
+                        evidence=evidence,
+                    ):
+                        return
+                await self._room_hold(TOILET_SCENARIO_ID, "controller_unknown", evidence)
+                return
+            if motion == "on":
+                self._cancel_zone_task(TOILET_SCENARIO_ID)
+                await self._set_zone_transition(
+                    TOILET_SCENARIO_ID, "toilet_profile", evidence=evidence,
+                    clear_absence=True, clear_timer=True,
+                )
+                if (
+                    self._target_state(TOILET_AWAY_TARGET_ID) != "on"
+                    and not self._manual_profile_active(
+                        TOILET_SCENARIO_ID,
+                        (TOILET_MAIN_TARGET_ID, TOILET_NIGHT_TARGET_ID)
+                    )
+                ):
+                    target = self._toilet_profile_target()
+                    if target is not None and allow_activation:
+                        other = TOILET_NIGHT_TARGET_ID if target == TOILET_MAIN_TARGET_ID else TOILET_MAIN_TARGET_ID
+                        if self._target_state(target) == "off" and not await self._run_zone_action(
+                            TOILET_SCENARIO_ID, target, "turn_on", None, evidence=evidence
+                        ):
+                            return
+                        if self._target_state(other) == "on" and self._is_room_owned(TOILET_SCENARIO_ID, other):
+                            if not await self._run_zone_action(
+                                TOILET_SCENARIO_ID, other, "turn_off", None, evidence=evidence
+                            ):
+                                return
+            else:
+                owned_lights = tuple(
+                    target for target in (TOILET_MAIN_TARGET_ID, TOILET_NIGHT_TARGET_ID)
+                    if self._target_state(target) == "on" and self._is_room_owned(TOILET_SCENARIO_ID, target)
+                )
+                if owned_lights:
+                    await self._ensure_room_timer(
+                        TOILET_SCENARIO_ID, "toilet_absence",
+                        self._policy_service.current.policy.toilet_absence_seconds,
+                        evidence,
+                    )
+                    return
+            if self._toilet_fan_window() and "on" in {
+                self._target_state(TOILET_MAIN_TARGET_ID), self._target_state(TOILET_NIGHT_TARGET_ID)
+            }:
+                if self._target_state(TOILET_FAN_TARGET_ID) == "off" and allow_activation:
+                    await self._run_zone_action(
+                        TOILET_SCENARIO_ID, TOILET_FAN_TARGET_ID, "turn_on", None,
+                        evidence=evidence,
+                    )
+                return
+            if (
+                self._target_state(TOILET_MAIN_TARGET_ID) == "off"
+                and self._target_state(TOILET_NIGHT_TARGET_ID) == "off"
+                and self._target_state(TOILET_FAN_TARGET_ID) == "on"
+                and self._is_room_owned(TOILET_SCENARIO_ID, TOILET_FAN_TARGET_ID)
+            ):
+                await self._ensure_room_timer(
+                    TOILET_SCENARIO_ID, "toilet_fan_off",
+                    self._policy_service.current.policy.toilet_fan_off_seconds,
+                    evidence,
+                )
+            elif motion == "off":
+                await self._room_hold(TOILET_SCENARIO_ID, "controller_idle", evidence)
+
+    async def async_handle_bathroom_change(
+        self, *, recovery: bool = False, allow_activation: bool = True
+    ) -> None:
+        """Control only the bathroom fan from two light inputs and humidity."""
+
+        del recovery
+        async with self._decision_lock:
+            light1, light2 = (self._target_state(target) for target in BATHROOM_LIGHT_TARGET_IDS)
+            humidity = self._target_numeric_state(BATHROOM_HUMIDITY_TARGET_ID)
+            fan = self._target_state(BATHROOM_FAN_TARGET_ID)
+            evidence = self._room_evidence(light1, light2, humidity, fan)
+            if self._room_dispatch_failed(self._bathroom):
+                return
+            band = self._bathroom_band()
+            should_on = (
+                band == "day" and humidity is not None
+                and humidity >= self._policy_service.current.policy.bathroom_humidity_threshold
+                and "on" in {light1, light2}
+                or band == "night" and "on" in {light1, light2}
+                or band == "quiet" and light1 == "on" and light2 == "off"
+            )
+            should_off_now = bool(
+                humidity is not None and fan == "on" and (
+                    band == "night" and light1 == light2 == "off"
+                    or band == "quiet" and (light2 == "on" or light1 == light2 == "off")
+                )
+            )
+            if should_on:
+                self._cancel_zone_task(BATHROOM_SCENARIO_ID)
+                await self._set_zone_transition(
+                    BATHROOM_SCENARIO_ID, "bathroom_hold", evidence=evidence,
+                    clear_absence=True, clear_timer=True,
+                )
+                if fan == "off" and allow_activation:
+                    if not await self._run_zone_action(
+                        BATHROOM_SCENARIO_ID, BATHROOM_FAN_TARGET_ID, "turn_on", None,
+                        evidence=evidence,
+                    ):
+                        return
+                return
+            if light1 not in {"on", "off"} or light2 not in {"on", "off"}:
+                await self._room_hold(BATHROOM_SCENARIO_ID, "controller_unknown", evidence)
+                return
+            if should_off_now and self._is_room_owned(BATHROOM_SCENARIO_ID, BATHROOM_FAN_TARGET_ID):
+                if not await self._run_zone_action(
+                    BATHROOM_SCENARIO_ID, BATHROOM_FAN_TARGET_ID, "turn_off", None,
+                    evidence=evidence,
+                ):
+                    return
+                await self._room_hold(BATHROOM_SCENARIO_ID, "controller_idle", evidence)
+                return
+            if (
+                band == "day" and light1 == light2 == "off" and fan == "on"
+                and humidity is not None
+                and humidity < self._policy_service.current.policy.bathroom_humidity_threshold
+                and self._is_room_owned(BATHROOM_SCENARIO_ID, BATHROOM_FAN_TARGET_ID)
+            ):
+                await self._ensure_room_timer(
+                    BATHROOM_SCENARIO_ID, "bathroom_day_off",
+                    self._policy_service.current.policy.bathroom_day_off_seconds,
+                    evidence,
+                )
+                return
+            await self._room_hold(
+                BATHROOM_SCENARIO_ID,
+                "controller_unknown" if fan == "on" and humidity is None else "bathroom_hold",
+                evidence,
+            )
+
+    async def async_handle_office_change(self, *, recovery: bool = False) -> None:
+        """Start or resume the exact seven-profile TS0502B program."""
+
+        async with self._decision_lock:
+            light = self._target_state(OFFICE_LIGHT_TARGET_ID)
+            relay = self._target_state(OFFICE_RELAY_TARGET_ID)
+            lux = self._target_numeric_state(OFFICE_LUX_TARGET_ID)
+            sun = self._target_state(SUN_TARGET_ID)
+            profile = self._office_profile(lux, sun)
+            evidence = self._room_evidence(light, relay, lux, sun)
+            if self._room_dispatch_failed(self._office):
+                return
+            if light != "on" or relay != "on" or profile is None:
+                await self._room_hold(
+                    OFFICE_SCENARIO_ID,
+                    "controller_unknown" if light not in {"on", "off"} or relay not in {"on", "off"} else "controller_idle",
+                    evidence,
+                    clear_program=True,
+                )
+                return
+            current = self._office.get("program")
+            if isinstance(current, Mapping) and current.get("profile") == profile[0]:
+                self._schedule_zone_due(OFFICE_SCENARIO_ID)
+                return
+            if recovery and self._office.get("transition") == "office_profile_applied" and self._office.get("evidence") == evidence:
+                return
+            target_kelvin = profile[2]
+            prime = target_kelvin - 100 if target_kelvin >= 4000 else target_kelvin + 100
+            program = {
+                "profile": profile[0], "step": 0,
+                "deadlineMs": self._now_ms() + self._policy_service.current.policy.office_power_settle_seconds * 1000,
+                "brightness": profile[1], "primeKelvin": prime,
+                "targetKelvin": target_kelvin,
+            }
+            await self._set_zone_transition(
+                OFFICE_SCENARIO_ID, "office_power_settle", evidence=evidence,
+                deadline_ms=int(program["deadlineMs"]), timer_kind="office_program",
+                program=program,
+            )
+            self._schedule_zone_due(OFFICE_SCENARIO_ID)
+
+    async def _async_reconcile_room_due(self, scenario_id: str) -> None:
+        record = self._record_for_scenario(scenario_id)
+        if record is None:
+            return
+        if str(record.get("transition", "")).endswith("failed"):
+            return
+        deadline = record.get("deadlineMs")
+        if type(deadline) is not int or self._now_ms() < deadline:
+            self._schedule_zone_due(scenario_id)
+            return
+        kind = record.get("timerKind")
+        if scenario_id == SHOWER_SCENARIO_ID:
+            await self._async_reconcile_shower_due(str(kind))
+        elif scenario_id == TOILET_SCENARIO_ID:
+            await self._async_reconcile_toilet_due(str(kind))
+        elif scenario_id == BATHROOM_SCENARIO_ID:
+            await self._async_reconcile_bathroom_due(str(kind))
+        elif scenario_id == OFFICE_SCENARIO_ID:
+            await self._async_reconcile_office_due()
+
+    async def _async_reconcile_shower_due(self, kind: str) -> None:
+        presence = self._target_state(SHOWER_PRESENCE_TARGET_ID)
+        humidity = self._target_numeric_state(SHOWER_HUMIDITY_TARGET_ID)
+        evidence = self._room_evidence(presence, humidity, tuple(
+            self._target_state(target) for target in (SHOWER_MAIN_TARGET_ID, SHOWER_EXTRA_TARGET_ID, SHOWER_CABINET_TARGET_ID)
+        ), self._target_state(SHOWER_FAN_TARGET_ID))
+        if kind == "shower_presence":
+            if presence == "on" and self._target_state(SHOWER_FAN_TARGET_ID) == "off":
+                if not await self._run_zone_action(
+                    SHOWER_SCENARIO_ID,
+                    SHOWER_FAN_TARGET_ID,
+                    "turn_on",
+                    None,
+                    evidence=evidence,
+                ):
+                    return
+            await self._room_hold(SHOWER_SCENARIO_ID, "occupied_hold", evidence)
+            return
+        if kind != "shower_absence" or presence != "off":
+            await self._room_hold(SHOWER_SCENARIO_ID, "controller_unknown" if presence not in {"on", "off"} else "controller_idle", evidence)
+            return
+        started = self._shower.get("absenceStartedAtMs")
+        elapsed = 0 if type(started) is not int else max(0, (self._now_ms() - started) // 1000)
+        policy = self._policy_service.current.policy
+        if elapsed >= policy.shower_absence_seconds:
+            for target in (SHOWER_MAIN_TARGET_ID, SHOWER_EXTRA_TARGET_ID, SHOWER_CABINET_TARGET_ID):
+                if self._target_state(target) == "on" and self._is_room_owned(SHOWER_SCENARIO_ID, target):
+                    if not await self._run_zone_action(SHOWER_SCENARIO_ID, target, "turn_off", None, evidence=evidence):
+                        return
+        fan_pending = bool(
+            self._target_state(SHOWER_FAN_TARGET_ID) == "on" and humidity is not None and humidity <= 55
+            and self._is_room_owned(SHOWER_SCENARIO_ID, SHOWER_FAN_TARGET_ID)
+        )
+        if fan_pending and elapsed >= policy.shower_fan_off_seconds:
+            if not await self._run_zone_action(SHOWER_SCENARIO_ID, SHOWER_FAN_TARGET_ID, "turn_off", None, evidence=evidence):
+                return
+            fan_pending = False
+        light_pending = any(
+            self._target_state(target) == "on" and self._is_room_owned(SHOWER_SCENARIO_ID, target)
+            for target in (SHOWER_MAIN_TARGET_ID, SHOWER_EXTRA_TARGET_ID, SHOWER_CABINET_TARGET_ID)
+        )
+        if light_pending or fan_pending:
+            remaining = min(
+                max(0, policy.shower_absence_seconds - elapsed) if light_pending else 3601,
+                max(0, policy.shower_fan_off_seconds - elapsed) if fan_pending else 3601,
+            )
+            await self._set_zone_transition(
+                SHOWER_SCENARIO_ID, "shower_absence_pending", evidence=evidence,
+                deadline_ms=self._now_ms() + remaining * 1000,
+                timer_kind="shower_absence",
+            )
+            self._schedule_zone_due(SHOWER_SCENARIO_ID)
+        else:
+            await self._room_hold(
+                SHOWER_SCENARIO_ID,
+                "controller_unknown"
+                if self._target_state(SHOWER_FAN_TARGET_ID) == "on"
+                and humidity is None
+                else "controller_idle",
+                evidence,
+            )
+
+    async def _async_reconcile_toilet_due(self, kind: str) -> None:
+        motion = self._combined_target_state(TOILET_MOTION_TARGET_IDS)
+        evidence = self._room_evidence(motion, self._target_state(TOILET_AWAY_TARGET_ID), (
+            self._target_state(TOILET_MAIN_TARGET_ID), self._target_state(TOILET_NIGHT_TARGET_ID)
+        ), self._target_state(TOILET_FAN_TARGET_ID))
+        if kind == "toilet_absence" and motion == "off":
+            for target in (TOILET_MAIN_TARGET_ID, TOILET_NIGHT_TARGET_ID):
+                if self._target_state(target) == "on" and self._is_room_owned(TOILET_SCENARIO_ID, target):
+                    if not await self._run_zone_action(TOILET_SCENARIO_ID, target, "turn_off", None, evidence=evidence):
+                        return
+            if self._target_state(TOILET_MAIN_TARGET_ID) == self._target_state(TOILET_NIGHT_TARGET_ID) == "off" and self._target_state(TOILET_FAN_TARGET_ID) == "on" and self._is_room_owned(TOILET_SCENARIO_ID, TOILET_FAN_TARGET_ID):
+                await self._set_zone_transition(
+                    TOILET_SCENARIO_ID, "toilet_fan_off_pending", evidence=evidence,
+                    absence_started_at_ms=self._now_ms(),
+                    deadline_ms=self._now_ms() + self._policy_service.current.policy.toilet_fan_off_seconds * 1000,
+                    timer_kind="toilet_fan_off",
+                )
+                self._schedule_zone_due(TOILET_SCENARIO_ID)
+                return
+        elif kind == "toilet_fan_off" and self._target_state(TOILET_MAIN_TARGET_ID) == self._target_state(TOILET_NIGHT_TARGET_ID) == "off":
+            if self._target_state(TOILET_FAN_TARGET_ID) == "on" and self._is_room_owned(TOILET_SCENARIO_ID, TOILET_FAN_TARGET_ID):
+                if not await self._run_zone_action(TOILET_SCENARIO_ID, TOILET_FAN_TARGET_ID, "turn_off", None, evidence=evidence):
+                    return
+        await self._room_hold(
+            TOILET_SCENARIO_ID,
+            "controller_unknown" if motion == "unknown" else "controller_idle",
+            evidence,
+        )
+
+    async def _async_reconcile_bathroom_due(self, kind: str) -> None:
+        light1, light2 = (self._target_state(target) for target in BATHROOM_LIGHT_TARGET_IDS)
+        humidity = self._target_numeric_state(BATHROOM_HUMIDITY_TARGET_ID)
+        fan = self._target_state(BATHROOM_FAN_TARGET_ID)
+        evidence = self._room_evidence(light1, light2, humidity, fan)
+        if (
+            kind == "bathroom_day_off" and self._bathroom_band() == "day"
+            and light1 == light2 == "off" and humidity is not None
+            and humidity < self._policy_service.current.policy.bathroom_humidity_threshold
+            and fan == "on" and self._is_room_owned(BATHROOM_SCENARIO_ID, BATHROOM_FAN_TARGET_ID)
+        ):
+            if not await self._run_zone_action(BATHROOM_SCENARIO_ID, BATHROOM_FAN_TARGET_ID, "turn_off", None, evidence=evidence):
+                return
+        await self._room_hold(
+            BATHROOM_SCENARIO_ID,
+            "controller_unknown" if humidity is None and fan == "on" else "controller_idle",
+            evidence,
+        )
+
+    async def _async_reconcile_office_due(self) -> None:
+        program = self._office.get("program")
+        if not isinstance(program, Mapping):
+            return
+        evidence = self._room_evidence(
+            self._target_state(OFFICE_LIGHT_TARGET_ID), self._target_state(OFFICE_RELAY_TARGET_ID),
+            self._target_numeric_state(OFFICE_LUX_TARGET_ID), self._target_state(SUN_TARGET_ID),
+        )
+        if self._target_state(OFFICE_LIGHT_TARGET_ID) != "on" or self._target_state(OFFICE_RELAY_TARGET_ID) != "on":
+            await self._room_hold(OFFICE_SCENARIO_ID, "controller_idle", evidence, clear_program=True)
+            return
+        step = int(program["step"])
+        if step == 0:
+            for action_id, value in (
+                ("set_brightness_percent", int(program["brightness"])),
+                ("set_color_temperature", int(program["primeKelvin"])),
+            ):
+                if not await self._run_zone_action(OFFICE_SCENARIO_ID, OFFICE_LIGHT_TARGET_ID, action_id, value, evidence=evidence):
+                    return
+            next_step = 1
+        elif step == 1:
+            if not await self._run_zone_action(OFFICE_SCENARIO_ID, OFFICE_LIGHT_TARGET_ID, "set_color_temperature", int(program["targetKelvin"]), evidence=evidence):
+                return
+            next_step = 2
+        else:
+            if not await self._run_zone_action(
+                OFFICE_SCENARIO_ID,
+                OFFICE_LIGHT_TARGET_ID,
+                "set_color_temperature",
+                int(program["targetKelvin"]),
+                evidence=evidence,
+                trigger_id="office_temperature_confirm",
+            ):
+                return
+            await self._set_zone_transition(
+                OFFICE_SCENARIO_ID, "office_profile_applied", evidence=evidence,
+                clear_absence=True, clear_timer=True, clear_program=True,
+            )
+            return
+        updated = dict(program)
+        updated["step"] = next_step
+        updated["deadlineMs"] = self._now_ms() + self._policy_service.current.policy.office_temperature_settle_seconds * 1000
+        await self._set_zone_transition(
+            OFFICE_SCENARIO_ID, "office_program", evidence=evidence,
+            deadline_ms=int(updated["deadlineMs"]), timer_kind="office_program",
+            program=updated,
+        )
+        self._schedule_zone_due(OFFICE_SCENARIO_ID)
+
+    async def _ensure_room_timer(
+        self, scenario_id: str, kind: str, seconds: int,
+        evidence: Mapping[str, object],
+    ) -> None:
+        record = self._record_for_scenario(scenario_id)
+        assert record is not None
+        if record.get("timerKind") == kind and type(record.get("deadlineMs")) is int:
+            self._schedule_zone_due(scenario_id)
+            return
+        now = self._now_ms()
+        transition = {
+            "shower_presence": "shower_presence_pending",
+            "shower_absence": "shower_absence_pending",
+            "toilet_absence": "toilet_absence_pending",
+            "toilet_fan_off": "toilet_fan_off_pending",
+            "bathroom_day_off": "bathroom_day_off_pending",
+        }[kind]
+        await self._set_zone_transition(
+            scenario_id, transition, evidence=evidence,
+            absence_started_at_ms=now, deadline_ms=now + seconds * 1000,
+            timer_kind=kind,
+        )
+        self._schedule_zone_due(scenario_id)
+
+    async def _room_hold(
+        self, scenario_id: str, transition: str, evidence: Mapping[str, object],
+        *, clear_program: bool = False,
+    ) -> None:
+        self._cancel_zone_task(scenario_id)
+        await self._set_zone_transition(
+            scenario_id, transition, evidence=evidence, clear_absence=True,
+            clear_timer=True, clear_program=clear_program,
+        )
+
+    def _is_room_owned(self, scenario_id: str, target_id: str) -> bool:
+        entity_id = self._target_entity_id(target_id)
+        if entity_id is not None and self._light_priority.is_owned(entity_id, self._hass):
+            return True
+        if target_id not in {
+            SHOWER_FAN_TARGET_ID,
+            TOILET_FAN_TARGET_ID,
+            BATHROOM_FAN_TARGET_ID,
+        }:
+            return False
+        record = self._record_for_scenario(scenario_id)
+        token = (
+            record.get("ownedTargets", {}).get(target_id)
+            if record is not None
+            and isinstance(record.get("ownedTargets"), Mapping)
+            else None
+        )
+        return isinstance(token, str) and token == self._target_state_revision(target_id)
+
+    def _manual_profile_active(
+        self, scenario_id: str, target_ids: tuple[str, ...]
+    ) -> bool:
+        """Treat any on light without current automation ownership as manual."""
+
+        return bool(
+            self._manual_claims(target_ids)
+            or any(
+                self._target_state(target_id) == "on"
+                and not self._is_room_owned(scenario_id, target_id)
+                for target_id in target_ids
+            )
+        )
+
+    @staticmethod
+    def _room_dispatch_failed(record: Mapping[str, object]) -> bool:
+        """Never repeat a room command whose physical outcome is uncertain."""
+
+        return str(record.get("transition", "")).endswith("failed")
+
+    def _target_state_revision(self, target_id: str) -> str | None:
+        state = self._target_state_object(target_id)
+        observed = getattr(state, "last_changed", None)
+        if not isinstance(observed, datetime):
+            return None
+        if observed.tzinfo is None:
+            observed = observed.replace(tzinfo=timezone.utc)
+        return observed.isoformat()
+
+    @staticmethod
+    def _room_evidence(*values: object) -> dict[str, object]:
+        encoded = [repr(value)[:256] for value in values]
+        encoded.extend([None] * (4 - len(encoded)))
+        return {
+            "motion": encoded[0], "presence": encoded[1],
+            "light": encoded[2], "ownershipRevision": encoded[3],
+        }
+
+    def _shower_profile(self) -> dict[str, bool] | None:
+        minute = self._now_minutes()
+        if minute >= 23 * 60 or minute < 9 * 60:
+            return {SHOWER_MAIN_TARGET_ID: False, SHOWER_EXTRA_TARGET_ID: False, SHOWER_CABINET_TARGET_ID: True}
+        sun = self._target_state(SUN_TARGET_ID)
+        if sun == "above_horizon":
+            return {SHOWER_MAIN_TARGET_ID: True, SHOWER_EXTRA_TARGET_ID: False, SHOWER_CABINET_TARGET_ID: True}
+        if sun == "below_horizon":
+            return {SHOWER_MAIN_TARGET_ID: False, SHOWER_EXTRA_TARGET_ID: True, SHOWER_CABINET_TARGET_ID: True}
+        return None
+
+    def _toilet_profile_target(self) -> str | None:
+        sun = self._target_state(SUN_TARGET_ID)
+        if sun == "above_horizon":
+            return TOILET_MAIN_TARGET_ID
+        minute = self._now_minutes()
+        if sun == "below_horizon":
+            return TOILET_NIGHT_TARGET_ID if minute >= 23 * 60 or minute < 12 * 60 else TOILET_MAIN_TARGET_ID
+        return None
+
+    def _toilet_fan_window(self) -> bool:
+        policy = self._policy_service.current.policy
+        minute = self._now_minutes()
+        return self._clock_minutes(policy.toilet_fan_start) <= minute < self._clock_minutes(policy.toilet_fan_end)
+
+    def _bathroom_band(self) -> str:
+        policy = self._policy_service.current.policy
+        minute = self._now_minutes()
+        quiet = self._clock_minutes(policy.bathroom_quiet_start)
+        day = self._clock_minutes(policy.bathroom_day_start)
+        night = self._clock_minutes(policy.bathroom_night_start)
+        if quiet <= minute < day:
+            return "quiet"
+        if day <= minute < night:
+            return "day"
+        return "night"
+
+    def _office_profile(self, lux: float | None, sun: object) -> tuple[str, int, int] | None:
+        if lux is None or sun not in {"above_horizon", "below_horizon"}:
+            return None
+        policy = self._policy_service.current.policy
+        if sun == "below_horizon" and self._now_minutes() < 12 * 60:
+            return "night", policy.office_night_brightness, policy.office_night_kelvin
+        level = "low" if lux < policy.office_low_lux_threshold else "bright" if lux >= policy.office_high_lux_threshold else "medium"
+        if sun == "above_horizon":
+            return {
+                "low": ("day_low", policy.office_day_low_brightness, policy.office_day_low_kelvin),
+                "medium": ("day_medium", policy.office_day_medium_brightness, policy.office_day_medium_kelvin),
+                "bright": ("day_bright", policy.office_day_bright_brightness, policy.office_day_bright_kelvin),
+            }[level]
+        return {
+            "low": ("evening_dark", policy.office_evening_dark_brightness, policy.office_evening_dark_kelvin),
+            "medium": ("evening_medium", policy.office_evening_medium_brightness, policy.office_evening_medium_kelvin),
+            "bright": ("evening_bright", policy.office_evening_bright_brightness, policy.office_evening_bright_kelvin),
+        }[level]
+
     async def _start_brightness_sequence(
         self,
         scenario_id: str,
@@ -1354,6 +2108,14 @@ class ScenarioControlCoordinator:
         async with self._decision_lock:
             record = self._record_for_scenario(scenario_id)
             if record is None or scenario_id == STORAGE_SCENARIO_ID:
+                return
+            if scenario_id in {
+                SHOWER_SCENARIO_ID,
+                TOILET_SCENARIO_ID,
+                BATHROOM_SCENARIO_ID,
+                OFFICE_SCENARIO_ID,
+            }:
+                await self._async_reconcile_room_due(scenario_id)
                 return
             sequence = record.get("sequence")
             if isinstance(sequence, Mapping):
@@ -1511,6 +2273,7 @@ class ScenarioControlCoordinator:
         value: int | None,
         *,
         evidence: Mapping[str, object] | None = None,
+        trigger_id: str = "light_action",
     ) -> bool:
         correlation = f"{scenario_id.rsplit('-', 2)[0]}.{uuid.uuid4().hex}"
         await self._set_zone_transition(
@@ -1526,7 +2289,7 @@ class ScenarioControlCoordinator:
                 correlation_id=correlation,
                 trigger_context={
                     "source": "scenario_control",
-                    "trigger_id": "light_action",
+                    "trigger_id": trigger_id,
                     "recovery": False,
                 },
             )
@@ -1544,6 +2307,25 @@ class ScenarioControlCoordinator:
                 evidence=evidence,
                 clear_sequence=True,
             )
+        elif action_id in {"turn_on", "turn_off"}:
+            async with self._lock:
+                record = self._record_for_scenario(scenario_id)
+                if record is not None:
+                    owned = dict(record.get("ownedTargets", {}))
+                    if action_id == "turn_on":
+                        revision = self._target_state_revision(target_id)
+                        if revision is not None:
+                            owned[target_id] = revision
+                    else:
+                        owned.pop(target_id, None)
+                    updated = self._next_record_for(
+                        record,
+                        transition=str(record.get("transition", "light_action")),
+                        evidence=evidence,
+                        owned_targets=owned,
+                    )
+                    self._assign_record(scenario_id, updated)
+                    await self._save()
         return completed
 
     async def _run_storage_transition(
@@ -1582,6 +2364,10 @@ class ScenarioControlCoordinator:
             self._cancel_exhaust_task()
             self._cancel_zone_task(TAMBUR_SCENARIO_ID)
             self._cancel_zone_task(SMALL_CORRIDOR_SCENARIO_ID)
+            self._cancel_zone_task(SHOWER_SCENARIO_ID)
+            self._cancel_zone_task(TOILET_SCENARIO_ID)
+            self._cancel_zone_task(BATHROOM_SCENARIO_ID)
+            self._cancel_zone_task(OFFICE_SCENARIO_ID)
             async with self._lock:
                 self._storage = self._next_record_for(
                     self._storage,
@@ -1609,6 +2395,10 @@ class ScenarioControlCoordinator:
                     clear_manual_absence=True,
                     clear_lux_candidate=True,
                 )
+                self._shower = self._policy_reset(self._shower, document.policy_revision)
+                self._toilet = self._policy_reset(self._toilet, document.policy_revision)
+                self._bathroom = self._policy_reset(self._bathroom, document.policy_revision)
+                self._office = self._policy_reset(self._office, document.policy_revision)
                 await self._save()
         if self._started:
             self._rearm_schedules()
@@ -1654,10 +2444,15 @@ class ScenarioControlCoordinator:
         manual_absence_started_at_ms: int | None = None,
         lux_candidate_since_ms: int | None = None,
         welcome_armed: bool | None = None,
+        timer_kind: str | None = None,
+        owned_targets: Mapping[str, str] | None = None,
+        program: Mapping[str, object] | None = None,
         clear_absence: bool = False,
         clear_sequence: bool = False,
         clear_manual_absence: bool = False,
         clear_lux_candidate: bool = False,
+        clear_timer: bool = False,
+        clear_program: bool = False,
     ) -> None:
         async with self._lock:
             current = self._record_for_scenario(scenario_id)
@@ -1675,15 +2470,17 @@ class ScenarioControlCoordinator:
                 manual_absence_started_at_ms=manual_absence_started_at_ms,
                 lux_candidate_since_ms=lux_candidate_since_ms,
                 welcome_armed=welcome_armed,
+                timer_kind=timer_kind,
+                owned_targets=owned_targets,
+                program=program,
                 clear_absence=clear_absence,
                 clear_sequence=clear_sequence,
                 clear_manual_absence=clear_manual_absence,
                 clear_lux_candidate=clear_lux_candidate,
+                clear_timer=clear_timer,
+                clear_program=clear_program,
             )
-            if scenario_id == TAMBUR_SCENARIO_ID:
-                self._tambur = updated
-            else:
-                self._small_corridor = updated
+            self._assign_record(scenario_id, updated)
             await self._save()
 
     def _next_record(
@@ -1728,11 +2525,16 @@ class ScenarioControlCoordinator:
         manual_absence_started_at_ms: int | None = None,
         lux_candidate_since_ms: int | None = None,
         welcome_armed: bool | None = None,
+        timer_kind: str | None = None,
+        owned_targets: Mapping[str, str] | None = None,
+        program: Mapping[str, object] | None = None,
         clear_absence: bool = False,
         clear_exhaust: bool = False,
         clear_sequence: bool = False,
         clear_manual_absence: bool = False,
         clear_lux_candidate: bool = False,
+        clear_timer: bool = False,
+        clear_program: bool = False,
     ) -> dict[str, object]:
         record = copy.deepcopy(dict(current))
         generation = int(record.get("generation", 0))
@@ -1775,6 +2577,16 @@ class ScenarioControlCoordinator:
             record["luxCandidateSinceMs"] = lux_candidate_since_ms
         if welcome_armed is not None:
             record["welcomeArmed"] = welcome_armed
+        if clear_timer:
+            record["timerKind"] = None
+        elif timer_kind is not None:
+            record["timerKind"] = timer_kind
+        if owned_targets is not None:
+            record["ownedTargets"] = dict(owned_targets)
+        if clear_program:
+            record["program"] = None
+        elif program is not None:
+            record["program"] = copy.deepcopy(dict(program))
         return record
 
     def _record_for_scenario(
@@ -1784,7 +2596,51 @@ class ScenarioControlCoordinator:
             STORAGE_SCENARIO_ID: self._storage,
             TAMBUR_SCENARIO_ID: self._tambur,
             SMALL_CORRIDOR_SCENARIO_ID: self._small_corridor,
+            SHOWER_SCENARIO_ID: self._shower,
+            TOILET_SCENARIO_ID: self._toilet,
+            BATHROOM_SCENARIO_ID: self._bathroom,
+            OFFICE_SCENARIO_ID: self._office,
         }.get(scenario_id)
+
+    def _assign_record(self, scenario_id: str, record: dict[str, object]) -> None:
+        attribute = {
+            TAMBUR_SCENARIO_ID: "_tambur",
+            SMALL_CORRIDOR_SCENARIO_ID: "_small_corridor",
+            SHOWER_SCENARIO_ID: "_shower",
+            TOILET_SCENARIO_ID: "_toilet",
+            BATHROOM_SCENARIO_ID: "_bathroom",
+            OFFICE_SCENARIO_ID: "_office",
+        }.get(scenario_id)
+        if attribute is None:
+            raise ValueError("zone scenario id is invalid")
+        setattr(self, attribute, record)
+
+    def _all_records(self) -> tuple[dict[str, object], ...]:
+        return (
+            self._storage,
+            self._tambur,
+            self._small_corridor,
+            self._shower,
+            self._toilet,
+            self._bathroom,
+            self._office,
+        )
+
+    def _policy_reset(
+        self, record: Mapping[str, object], policy_revision: int
+    ) -> dict[str, object]:
+        return self._next_record_for(
+            record,
+            transition="policy_changed",
+            policy_revision=policy_revision,
+            clear_absence=True,
+            clear_exhaust=True,
+            clear_sequence=True,
+            clear_manual_absence=True,
+            clear_lux_candidate=True,
+            clear_timer=True,
+            clear_program=True,
+        )
 
     async def async_validate_generation(
         self, scenario_id: str, correlation_id: str
@@ -1843,6 +2699,12 @@ class ScenarioControlCoordinator:
             | {
                 policy.tambur_main_off,
                 policy.small_corridor_main_off,
+                policy.toilet_fan_start,
+                policy.toilet_fan_end,
+                policy.bathroom_quiet_start,
+                policy.bathroom_day_start,
+                policy.bathroom_night_start,
+                "00:00",
                 policy.evening_latest,
                 "09:00",
                 "10:00",
@@ -1857,6 +2719,25 @@ class ScenarioControlCoordinator:
                     if scheduled in self._policy_service.current.policy.storage_exhaust_times:
                         await self.async_handle_storage_exhaust_schedule(scheduled)
                     await self.async_handle_controller_clock(scheduled)
+                    if scheduled in {
+                        self._policy_service.current.policy.toilet_fan_start,
+                        self._policy_service.current.policy.toilet_fan_end,
+                        "23:00",
+                        "00:00",
+                    }:
+                        await self.async_handle_toilet_change(
+                            recovery=True, allow_activation=True
+                        )
+                    if scheduled in {
+                        self._policy_service.current.policy.bathroom_quiet_start,
+                        self._policy_service.current.policy.bathroom_day_start,
+                        self._policy_service.current.policy.bathroom_night_start,
+                    }:
+                        await self.async_handle_bathroom_change(
+                            recovery=True, allow_activation=True
+                        )
+                    if scheduled == "00:00":
+                        await self.async_handle_office_change(recovery=True)
 
             self._schedule_unsubs.append(
                 async_track_time_change(
@@ -2204,7 +3085,15 @@ class ScenarioControlCoordinator:
         return max(0, math.ceil((deadline - now).total_seconds()))
 
     def _all_controller_entity_ids(self) -> frozenset[str]:
-        return self._storage_entity_ids() | self._tambur_entity_ids() | self._small_corridor_entity_ids()
+        return (
+            self._storage_entity_ids()
+            | self._tambur_entity_ids()
+            | self._small_corridor_entity_ids()
+            | self._shower_entity_ids()
+            | self._toilet_entity_ids()
+            | self._bathroom_entity_ids()
+            | self._office_entity_ids()
+        )
 
     def _tambur_entity_ids(self) -> frozenset[str]:
         return self._entity_ids_for_targets(
@@ -2230,6 +3119,32 @@ class ScenarioControlCoordinator:
                 SUN_TARGET_ID,
             )
         )
+
+    def _shower_entity_ids(self) -> frozenset[str]:
+        return self._entity_ids_for_targets((
+            SHOWER_PRESENCE_TARGET_ID, SHOWER_HUMIDITY_TARGET_ID, SUN_TARGET_ID,
+            SHOWER_MAIN_TARGET_ID, SHOWER_EXTRA_TARGET_ID,
+            SHOWER_CABINET_TARGET_ID, SHOWER_FAN_TARGET_ID,
+        ))
+
+    def _toilet_entity_ids(self) -> frozenset[str]:
+        return self._entity_ids_for_targets((
+            *TOILET_MOTION_TARGET_IDS, TOILET_MAIN_TARGET_ID,
+            TOILET_NIGHT_TARGET_ID, TOILET_FAN_TARGET_ID,
+            TOILET_AWAY_TARGET_ID, SUN_TARGET_ID,
+        ))
+
+    def _bathroom_entity_ids(self) -> frozenset[str]:
+        return self._entity_ids_for_targets((
+            *BATHROOM_LIGHT_TARGET_IDS, BATHROOM_HUMIDITY_TARGET_ID,
+            BATHROOM_FAN_TARGET_ID,
+        ))
+
+    def _office_entity_ids(self) -> frozenset[str]:
+        return self._entity_ids_for_targets((
+            OFFICE_LIGHT_TARGET_ID, OFFICE_RELAY_TARGET_ID,
+            OFFICE_LUX_TARGET_ID, SUN_TARGET_ID,
+        ))
 
     def _entity_ids_for_targets(self, target_ids: tuple[str, ...]) -> frozenset[str]:
         return frozenset(
@@ -2289,7 +3204,7 @@ class ScenarioControlCoordinator:
         if not self._schedule_tasks:
             return
         record = self._record_for_scenario(scenario_id)
-        if record is None:
+        if record is None or str(record.get("transition", "")).endswith("failed"):
             return
         sequence = record.get("sequence")
         deadline: int | None = None

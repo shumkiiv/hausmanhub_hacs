@@ -1,13 +1,15 @@
 // HAUSMAN_MANAGED_SCENARIO system-bathroom-exhaust-controller
-// Typed production plan: bathroom lights/fan follow OR occupancy evidence.
+// Bathroom lights are evidence only. The fan is the sole physical output.
 const r = msg.payload && typeof msg.payload === 'object' ? msg.payload : {};
-const i = r.inputs && typeof r.inputs === 'object' ? r.inputs : {};
-const s = id => i[id] && i[id].state != null ? String(i[id].state) : null;
-const occupancyIds = ['entity_a591e035e3e5b34f', 'entity_d82766182d69dd51'];
-const occupied = occupancyIds.some(id => ['on', 'true', 'occupied', 'detected'].includes(s(id)));
-const bindings = r.bindings && typeof r.bindings === 'object' ? r.bindings : {};
-const known = [['entity_a591e035e3e5b34f', 'Ванная: свет 1'], ['entity_d82766182d69dd51', 'Ванная: свет 2'], ['entity_c15f5df5382ee180', 'Ванная: вытяжка']];
-const actions = occupied ? known.filter(([id]) => s(id) !== 'on').map(([targetId, targetName]) => ({id: `turn_on_${targetId.slice(-4)}`, type: 'device_action', targetId, targetName, actionId: 'turn_on', actionTitle: 'Включить'})) : [];
+const context = r.context && typeof r.context === 'object' ? r.context : {};
+const trigger = context.trigger && typeof context.trigger === 'object' ? context.trigger : {};
+const controls = context.controls && typeof context.controls === 'object' ? context.controls : {};
+const state = controls.state && typeof controls.state === 'object' ? controls.state : {};
+const server = state.action && typeof state.action === 'object' ? state.action : null;
+const valid = trigger.source === 'scenario_control' && state.ready === true && server &&
+  Object.keys(server).sort().join(',') === 'actionId,targetId,value' &&
+  server.targetId === 'entity_c15f5df5382ee180' && ['turn_on', 'turn_off'].includes(server.actionId) && server.value === null;
+const action = valid ? {id: 'server_action', type: 'device_action', targetId: server.targetId, targetName: 'Управляемое устройство', actionId: server.actionId, actionTitle: 'Серверное действие'} : null;
 msg.statusCode = 200;
-msg.payload = {contract: {name: 'hausman-node-red-scenario-execution', version: 1}, correlationId: String(r.correlationId || ''), scenarioId: 'system-bathroom-exhaust-controller', status: actions.length ? 'completed' : 'skipped', selectedBranch: occupied ? 'occupied' : 'absent', actions, trace: [{id: 'occupancy_or', title: 'Сигналы ванной', status: occupied ? 'passed' : 'failed', actual: occupied, expected: 'motion OR presence', reason: null, bindingCount: Object.keys(bindings).length}]};
+msg.payload = {contract: {name: 'hausman-node-red-scenario-execution', version: 1}, correlationId: String(r.correlationId || ''), scenarioId: 'system-bathroom-exhaust-controller', status: action ? 'completed' : 'skipped', selectedBranch: action ? 'server_action' : 'server_hold', actions: action ? [action] : [], trace: [{id: 'server_decision', title: 'Решение сервера для ванной', status: action ? 'selected' : 'skipped', actual: state.transition || null, expected: 'ready fan action', reason: action ? null : 'server_hold'}]};
 return msg;

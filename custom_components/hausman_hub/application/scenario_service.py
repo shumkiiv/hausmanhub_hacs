@@ -1501,12 +1501,55 @@ class ScenarioService:
                 staged_replacement = self._managed_switch_replace_staging.get(
                     scenario_id
                 )
-                expected_deployed_hash = (
-                    staged_replacement[2]
-                    if staged_replacement is not None
-                    else metadata.source_hash
-                )
-                if evidence.get("source_hash") != expected_deployed_hash:
+                expected_deployed_hashes = {metadata.source_hash}
+                if staged_replacement is not None:
+                    expected_deployed_hashes = {staged_replacement[2]}
+                elif legacy_state and isinstance(journal, Mapping):
+                    operations = journal.get("operations")
+                    before = journal.get("before")
+                    before_flows = (
+                        before.get("flows")
+                        if isinstance(before, Mapping)
+                        else None
+                    )
+                    before_flow = (
+                        before_flows.get(scenario_id)
+                        if isinstance(before_flows, Mapping)
+                        else None
+                    )
+                    operation = (
+                        operations.get(scenario_id)
+                        if isinstance(operations, Mapping)
+                        else None
+                    )
+                    if (
+                        isinstance(operation, Mapping)
+                        and isinstance(before_flow, Mapping)
+                        and operation.get("kind") == "replace"
+                        and before_flow.get("state") == "present"
+                        and operation.get("flowId") == metadata.flow_id
+                        and before_flow.get("flowId") == metadata.flow_id
+                        and operation.get("expectedSourceHash")
+                        == metadata.source_hash
+                        and before_flow.get("sourceHash")
+                        == metadata.source_hash
+                        and operation.get("newSourceHash")
+                        == getattr(item, "new_source_hash", None)
+                        and operation.get("previousSource")
+                        == before_flow.get("source")
+                        and isinstance(before_flow.get("source"), str)
+                        and before_flow.get("topology")
+                        == getattr(item, "legacy_topology", None)
+                    ):
+                        if operation.get("state") == "intent":
+                            expected_deployed_hashes.add(
+                                str(getattr(item, "new_source_hash"))
+                            )
+                        elif operation.get("state") == "applied":
+                            expected_deployed_hashes = {
+                                str(getattr(item, "new_source_hash"))
+                            }
+                if evidence.get("source_hash") not in expected_deployed_hashes:
                     raise ScenarioRevisionConflictError(
                         scenario_id,
                         expected_revision=getattr(item, "expected_revision", None),
@@ -3245,7 +3288,7 @@ class ScenarioService:
             reason=(
                 "smart_switch_deduplicated"
                 if dedup_disposition == "deduplicated"
-                else "smart_switch_release_ignored"
+                else "smart_switch_upper_area_ignored"
             ),
             binding=binding,
             action=None,
@@ -3317,7 +3360,7 @@ class ScenarioService:
             "typed_intent": (
                 action
                 if action is not None
-                else "release"
+                else "upper_area"
                 if dedup_disposition == "ignored"
                 else "toggle"
             ),

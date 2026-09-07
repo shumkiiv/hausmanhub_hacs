@@ -146,7 +146,10 @@ def test_release_trust_allows_exact_previous_and_current_system_sources() -> Non
             {"c3097df8fefa2d09be4e57b059239bcb92fbb0302069500178fc0be1c8fc4800"}
         ),
         "system-shower-comfort-controller": frozenset(
-                {"757bde711c85ebad4826c2ec0bf2695d0034f7dd820c9ec7c30816f3f37c1551"}
+            {
+                "757bde711c85ebad4826c2ec0bf2695d0034f7dd820c9ec7c30816f3f37c1551",
+                "53d8876b2b914bd438cdbd020b7dc85f3e9eb3d9a8ea17434ab290d852deea66",
+            }
         ),
     }
 
@@ -428,10 +431,17 @@ def test_release_trust_hashes_match_managed_system_sources() -> None:
         "system-small-corridor-light-controller": "small_corridor_controller.js",
     }
     for scenario_id, filename in sources.items():
-        source = Path("tools/managed_scenarios", filename).read_text(encoding="utf-8")
+        source_root = (
+            "custom_components/hausman_hub/managed_scenarios"
+            if scenario_id == "system-shower-comfort-controller"
+            else "tools/managed_scenarios"
+        )
+        source = Path(source_root, filename).read_text(encoding="utf-8")
         trusted = scenario_node_red._TRUSTED_SYSTEM_SOURCE_HASHES[scenario_id]
         assert managed_source_hash(source) in trusted
-        assert len(trusted) == 1
+        assert len(trusted) == (
+            2 if scenario_id == "system-shower-comfort-controller" else 1
+        )
 
     assert (
         "9060257eaa344944611e3992b33591ab6ddb24ddd984137fce7aeeea6703b55c"
@@ -1959,34 +1969,31 @@ def test_system_branch_validator_rejects_mutated_values_order_unions_and_excess(
         "actionId": "set_brightness_percent",
         "value": 50,
     }
-    shower_source = Path("tools/managed_scenarios/shower_controller.js").read_text(encoding="utf-8")
-    shower_request = {
-        "inputs": {
-            "entity_d1fb2cbf2a691bba": {"state": "off", "attributes": {}},
-            "entity_fd3945cf1a2110f8": {"state": "45", "attributes": {}},
-            "entity_6b9ccdab9bb484b2": {"state": "above_horizon", "attributes": {}},
-            "entity_46174e1ff9913212": {"state": "on", "attributes": {}},
-            "entity_1fdcd8b244637246": {"state": "off", "attributes": {}},
-            "entity_afef5df0e0cae309": {"state": "on", "attributes": {}},
-            "entity_e7a7c61eec7bdff8": {"state": "off", "attributes": {}},
-        },
-        "context": {"timestampMs": 1_787_810_400_000},
-    }
-    shower_run = subprocess.run(
-        ["node", "-e", f"const msg={{payload:{json.dumps(shower_request)}}};\n(function(){{\n{shower_source}\n}})();\nconsole.log(JSON.stringify(msg.payload));"],
-        check=True, capture_output=True, text=True,
-    )
     shower = [
-        scenario_node_red._action_from_payload(item, "shower")  # noqa: SLF001
-        for item in json.loads(shower_run.stdout)["actions"]
+        ScenarioAction(
+            "server_action",
+            ScenarioActionType.DEVICE_ACTION,
+            target_id="entity_afef5df0e0cae309",
+            action_id="turn_off",
+        )
     ]
+    expected_shower = {
+        "targetId": "entity_afef5df0e0cae309",
+        "actionId": "turn_off",
+        "value": None,
+    }
     NodeRedScenarioBackend._validate_plan_envelope(  # noqa: SLF001
         "system-tambur-adaptive-controller",
         _definition(),
         tambur,
         expected_control_action=expected_tambur,
     )
-    NodeRedScenarioBackend._validate_plan_envelope("system-shower-comfort-controller", _definition(), shower)  # noqa: SLF001
+    NodeRedScenarioBackend._validate_plan_envelope(  # noqa: SLF001
+        "system-shower-comfort-controller",
+        _definition(),
+        shower,
+        expected_control_action=expected_shower,
+    )
     invalid = (
         ("system-tambur-adaptive-controller", [replace(tambur[0], value=51)]),
         ("system-tambur-adaptive-controller", [replace(tambur[0], value=float("nan"))]),
@@ -2006,7 +2013,7 @@ def test_system_branch_validator_rejects_mutated_values_order_unions_and_excess(
                 expected_control_action=(
                     expected_tambur
                     if scenario_id == "system-tambur-adaptive-controller"
-                    else None
+                    else expected_shower
                 ),
             )
 
@@ -2023,23 +2030,40 @@ def test_system_branch_validator_accepts_exhaustive_real_source_plans() -> None:
         return json.loads(result.stdout)
 
     shower_requests = []
-    for hour, sun, presence, humidity, main, extra, fan, cabinet in product(
-        (2, 12, 20), ("above_horizon", "below_horizon", "unknown"),
-        ("on", "off"), ("45", "60", "unknown"), ("on", "off"),
-        ("on", "off"), ("on", "off"), ("on", "off"),
+    shower_expected: list[dict[str, object]] = []
+    for target_id in (
+        "entity_46174e1ff9913212",
+        "entity_1fdcd8b244637246",
+        "entity_e7a7c61eec7bdff8",
+        "entity_afef5df0e0cae309",
     ):
-        shower_requests.append({"context": {"timestampMs": 1_787_760_000_000 + hour * 3_600_000}, "inputs": {
-            "entity_d1fb2cbf2a691bba": {"state": presence, "attributes": {}},
-            "entity_fd3945cf1a2110f8": {"state": humidity, "attributes": {}},
-            "entity_6b9ccdab9bb484b2": {"state": sun, "attributes": {}},
-            "entity_46174e1ff9913212": {"state": main, "attributes": {}},
-            "entity_1fdcd8b244637246": {"state": extra, "attributes": {}},
-            "entity_afef5df0e0cae309": {"state": fan, "attributes": {}},
-            "entity_e7a7c61eec7bdff8": {"state": cabinet, "attributes": {}},
-        }})
-    for payload in run_many("tools/managed_scenarios/shower_controller.js", shower_requests):
+        for action_id in ("turn_on", "turn_off"):
+            action = {"targetId": target_id, "actionId": action_id, "value": None}
+            shower_expected.append(action)
+            shower_requests.append({
+                "correlationId": f"{target_id}.{action_id}",
+                "scenarioId": "system-shower-comfort-controller",
+                "context": {
+                    "trigger": {"source": "scenario_control"},
+                    "controls": {"state": {"ready": True, "action": action}},
+                },
+                "inputs": {},
+            })
+    for payload, expected in zip(
+        run_many(
+            "custom_components/hausman_hub/managed_scenarios/shower_controller.js",
+            shower_requests,
+        ),
+        shower_expected,
+        strict=True,
+    ):
         actions = [scenario_node_red._action_from_payload(item, "shower") for item in payload["actions"]]  # noqa: SLF001
-        NodeRedScenarioBackend._validate_plan_envelope("system-shower-comfort-controller", _definition(), actions)  # noqa: SLF001
+        NodeRedScenarioBackend._validate_plan_envelope(  # noqa: SLF001
+            "system-shower-comfort-controller",
+            _definition(),
+            actions,
+            expected_control_action=expected,
+        )
 
     tambur_requests = []
     for hour, sun, presence, motion, chandelier, mirror in product(

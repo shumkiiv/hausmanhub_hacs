@@ -250,7 +250,35 @@ class ScenarioControlPolicy:
     presence_rise_seconds: int = 10
     storage_absence_seconds: int = 120
     shower_absence_seconds: int = 300
+    shower_fan_presence_seconds: int = 120
+    shower_fan_off_seconds: int = 300
     toilet_absence_seconds: int = 480
+    toilet_fan_off_seconds: int = 180
+    toilet_fan_start: str = "08:30"
+    toilet_fan_end: str = "22:30"
+    bathroom_humidity_threshold: int = 65
+    bathroom_day_off_seconds: int = 1800
+    bathroom_quiet_start: str = "06:00"
+    bathroom_day_start: str = "08:00"
+    bathroom_night_start: str = "22:00"
+    office_low_lux_threshold: int = 100
+    office_high_lux_threshold: int = 1000
+    office_day_low_brightness: int = 40
+    office_day_low_kelvin: int = 3000
+    office_day_medium_brightness: int = 65
+    office_day_medium_kelvin: int = 2500
+    office_day_bright_brightness: int = 85
+    office_day_bright_kelvin: int = 2200
+    office_evening_dark_brightness: int = 25
+    office_evening_dark_kelvin: int = 6500
+    office_evening_medium_brightness: int = 40
+    office_evening_medium_kelvin: int = 5700
+    office_evening_bright_brightness: int = 55
+    office_evening_bright_kelvin: int = 4800
+    office_night_brightness: int = 5
+    office_night_kelvin: int = 6500
+    office_power_settle_seconds: int = 3
+    office_temperature_settle_seconds: int = 1
     manual_release_seconds: int = 300
     manual_off_block_seconds: int = 300
     storage_exhaust_target_id: str | None = None
@@ -287,7 +315,35 @@ _POLICY_FIELDS = {
     "presenceRiseSeconds": "presence_rise_seconds",
     "storageAbsenceSeconds": "storage_absence_seconds",
     "showerAbsenceSeconds": "shower_absence_seconds",
+    "showerFanPresenceSeconds": "shower_fan_presence_seconds",
+    "showerFanOffSeconds": "shower_fan_off_seconds",
     "toiletAbsenceSeconds": "toilet_absence_seconds",
+    "toiletFanOffSeconds": "toilet_fan_off_seconds",
+    "toiletFanStart": "toilet_fan_start",
+    "toiletFanEnd": "toilet_fan_end",
+    "bathroomHumidityThreshold": "bathroom_humidity_threshold",
+    "bathroomDayOffSeconds": "bathroom_day_off_seconds",
+    "bathroomQuietStart": "bathroom_quiet_start",
+    "bathroomDayStart": "bathroom_day_start",
+    "bathroomNightStart": "bathroom_night_start",
+    "officeLowLuxThreshold": "office_low_lux_threshold",
+    "officeHighLuxThreshold": "office_high_lux_threshold",
+    "officeDayLowBrightness": "office_day_low_brightness",
+    "officeDayLowKelvin": "office_day_low_kelvin",
+    "officeDayMediumBrightness": "office_day_medium_brightness",
+    "officeDayMediumKelvin": "office_day_medium_kelvin",
+    "officeDayBrightBrightness": "office_day_bright_brightness",
+    "officeDayBrightKelvin": "office_day_bright_kelvin",
+    "officeEveningDarkBrightness": "office_evening_dark_brightness",
+    "officeEveningDarkKelvin": "office_evening_dark_kelvin",
+    "officeEveningMediumBrightness": "office_evening_medium_brightness",
+    "officeEveningMediumKelvin": "office_evening_medium_kelvin",
+    "officeEveningBrightBrightness": "office_evening_bright_brightness",
+    "officeEveningBrightKelvin": "office_evening_bright_kelvin",
+    "officeNightBrightness": "office_night_brightness",
+    "officeNightKelvin": "office_night_kelvin",
+    "officePowerSettleSeconds": "office_power_settle_seconds",
+    "officeTemperatureSettleSeconds": "office_temperature_settle_seconds",
     "manualReleaseSeconds": "manual_release_seconds",
     "manualOffBlockSeconds": "manual_off_block_seconds",
     "storageExhaustTargetId": "storage_exhaust_target_id",
@@ -310,6 +366,38 @@ _POLICY_FIELDS = {
     "kitchenCoverCapPercent": "kitchen_cover_cap_percent",
     "cabinetCoverCapPercent": "cabinet_cover_cap_percent",
 }
+_ROOM_POLICY_FIELDS = frozenset(
+    {
+        "showerFanPresenceSeconds",
+        "showerFanOffSeconds",
+        "toiletFanOffSeconds",
+        "toiletFanStart",
+        "toiletFanEnd",
+        "bathroomHumidityThreshold",
+        "bathroomDayOffSeconds",
+        "bathroomQuietStart",
+        "bathroomDayStart",
+        "bathroomNightStart",
+        "officeLowLuxThreshold",
+        "officeHighLuxThreshold",
+        "officeDayLowBrightness",
+        "officeDayLowKelvin",
+        "officeDayMediumBrightness",
+        "officeDayMediumKelvin",
+        "officeDayBrightBrightness",
+        "officeDayBrightKelvin",
+        "officeEveningDarkBrightness",
+        "officeEveningDarkKelvin",
+        "officeEveningMediumBrightness",
+        "officeEveningMediumKelvin",
+        "officeEveningBrightBrightness",
+        "officeEveningBrightKelvin",
+        "officeNightBrightness",
+        "officeNightKelvin",
+        "officePowerSettleSeconds",
+        "officeTemperatureSettleSeconds",
+    }
+)
 
 
 def validate_scenario_control_policy(policy: ScenarioControlPolicy) -> None:
@@ -326,6 +414,11 @@ def validate_scenario_control_policy(policy: ScenarioControlPolicy) -> None:
             "evening_latest",
             "tambur_main_off",
             "small_corridor_main_off",
+            "toilet_fan_start",
+            "toilet_fan_end",
+            "bathroom_quiet_start",
+            "bathroom_day_start",
+            "bathroom_night_start",
         }
     }
     if any(type(value) is not int for value in integer_fields.values()):
@@ -338,8 +431,70 @@ def validate_scenario_control_policy(policy: ScenarioControlPolicy) -> None:
         raise ValueError("storage absence must include the confirmation interval")
     if not policy.absence_confirmation_seconds <= policy.shower_absence_seconds <= 3600:
         raise ValueError("shower absence must include the confirmation interval")
+    if not 1 <= policy.shower_fan_presence_seconds <= 3600:
+        raise ValueError("shower fan presence time is outside its supported range")
+    if not policy.absence_confirmation_seconds <= policy.shower_fan_off_seconds <= 3600:
+        raise ValueError("shower fan off time must include the confirmation interval")
     if not policy.absence_confirmation_seconds <= policy.toilet_absence_seconds <= 3600:
         raise ValueError("toilet absence must include the confirmation interval")
+    if not 1 <= policy.toilet_fan_off_seconds <= 3600:
+        raise ValueError("toilet fan off time is outside its supported range")
+    if not 1 <= policy.bathroom_humidity_threshold <= 100:
+        raise ValueError("bathroom humidity threshold is outside its supported range")
+    if not 1 <= policy.bathroom_day_off_seconds <= 7200:
+        raise ValueError("bathroom fan off time is outside its supported range")
+    if not 1 <= policy.office_low_lux_threshold < policy.office_high_lux_threshold <= 100_000:
+        raise ValueError("office lux thresholds are invalid")
+    brightness_fields = (
+        policy.office_day_low_brightness,
+        policy.office_day_medium_brightness,
+        policy.office_day_bright_brightness,
+        policy.office_evening_dark_brightness,
+        policy.office_evening_medium_brightness,
+        policy.office_evening_bright_brightness,
+        policy.office_night_brightness,
+    )
+    if any(not 0 <= value <= 100 for value in brightness_fields):
+        raise ValueError("office brightness is outside its supported range")
+    kelvin_fields = (
+        policy.office_day_low_kelvin,
+        policy.office_day_medium_kelvin,
+        policy.office_day_bright_kelvin,
+        policy.office_evening_dark_kelvin,
+        policy.office_evening_medium_kelvin,
+        policy.office_evening_bright_kelvin,
+        policy.office_night_kelvin,
+    )
+    if any(not 1500 <= value <= 6500 for value in kelvin_fields):
+        raise ValueError("office temperature is outside its supported range")
+    if not 1 <= policy.office_power_settle_seconds <= 30:
+        raise ValueError("office power settle time is outside its supported range")
+    if not 1 <= policy.office_temperature_settle_seconds <= 30:
+        raise ValueError("office temperature settle time is outside its supported range")
+    if not (
+        policy.office_day_low_brightness
+        <= policy.office_day_medium_brightness
+        <= policy.office_day_bright_brightness
+    ):
+        raise ValueError("office day brightness profiles must be ordered")
+    if not (
+        policy.office_evening_dark_brightness
+        <= policy.office_evening_medium_brightness
+        <= policy.office_evening_bright_brightness
+    ):
+        raise ValueError("office evening brightness profiles must be ordered")
+    if not (
+        policy.office_day_low_kelvin
+        >= policy.office_day_medium_kelvin
+        >= policy.office_day_bright_kelvin
+    ):
+        raise ValueError("office day temperatures must preserve the device inversion")
+    if not (
+        policy.office_evening_dark_kelvin
+        >= policy.office_evening_medium_kelvin
+        >= policy.office_evening_bright_kelvin
+    ):
+        raise ValueError("office evening temperatures must preserve the device inversion")
     if not 0 <= policy.manual_release_seconds <= 3600:
         raise ValueError("manual release is outside its supported range")
     if not 0 <= policy.manual_off_block_seconds <= 3600:
@@ -387,9 +542,25 @@ def validate_scenario_control_policy(policy: ScenarioControlPolicy) -> None:
         policy.evening_latest,
         policy.tambur_main_off,
         policy.small_corridor_main_off,
+        policy.toilet_fan_start,
+        policy.toilet_fan_end,
+        policy.bathroom_quiet_start,
+        policy.bathroom_day_start,
+        policy.bathroom_night_start,
     ):
         if not isinstance(value, str) or _CLOCK_TIME.fullmatch(value) is None:
             raise ValueError("scenario control schedule time is invalid")
+    def to_minutes(value: str) -> int:
+        return int(value[:2]) * 60 + int(value[3:])
+
+    if to_minutes(policy.toilet_fan_start) >= to_minutes(policy.toilet_fan_end):
+        raise ValueError("toilet fan schedule must be ordered")
+    if not (
+        to_minutes(policy.bathroom_quiet_start)
+        < to_minutes(policy.bathroom_day_start)
+        < to_minutes(policy.bathroom_night_start)
+    ):
+        raise ValueError("bathroom schedule must be ordered")
     if not 1 <= policy.kitchen_cover_cap_percent <= 100:
         raise ValueError("kitchen cover cap is outside its supported range")
     if not 1 <= policy.cabinet_cover_cap_percent <= 100:
@@ -412,9 +583,16 @@ def scenario_control_policy_to_payload(
 def scenario_control_policy_from_payload(value: object) -> ScenarioControlPolicy:
     """Parse only the exact versioned policy surface."""
 
-    if not isinstance(value, Mapping) or set(value) != set(_POLICY_FIELDS):
+    if not isinstance(value, Mapping) or frozenset(value) not in {
+        frozenset(_POLICY_FIELDS),
+        frozenset(_POLICY_FIELDS) - _ROOM_POLICY_FIELDS,
+    }:
         raise ValueError("scenario control policy fields are invalid")
-    kwargs = {field: value[external] for external, field in _POLICY_FIELDS.items()}
+    defaults = ScenarioControlPolicy()
+    kwargs = {
+        field: value[external] if external in value else getattr(defaults, field)
+        for external, field in _POLICY_FIELDS.items()
+    }
     exhaust_times = kwargs["storage_exhaust_times"]
     if not isinstance(exhaust_times, list) or not all(
         isinstance(item, str) for item in exhaust_times

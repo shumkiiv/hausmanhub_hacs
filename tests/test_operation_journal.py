@@ -257,6 +257,40 @@ class OperationJournalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("off", normalized["scenario"]["trigger"]["old_value"])
         self.assertEqual("off", normalized["scenario"]["trigger"]["new_value"])
 
+    def test_shower_upper_area_is_not_relabelled_as_release(self) -> None:
+        normalized = scenario_operation_receipt(
+            {
+                "scenario_id": "system-shower-comfort-controller",
+                "run_id": "receipt.upper-area",
+                "execution_mode": "restart",
+                "command_mode": "live",
+                "status": "skipped",
+                "reason": "smart_switch_upper_area_ignored",
+                "evidence_revision": None,
+                "condition_results": [],
+                "receipts": [],
+                "accepted": False,
+                "confirmed": False,
+                "trigger_context": {
+                    "source": "manual",
+                    "trigger_id": "toggle_b2_up",
+                    "recovery": False,
+                    "binding": "shower-cabinet",
+                    "typed_intent": "upper_area",
+                    "direct_user_intent": "none",
+                    "intent_receipt_id": "receipt.upper-area",
+                    "raw_subtype": "toggle_b2_up",
+                    "dedup_disposition": "ignored",
+                    "correlation_id": "receipt.upper-area",
+                },
+            }
+        )
+
+        self.assertEqual(
+            "upper_area", normalized["scenario"]["trigger"]["old_value"]
+        )
+        self.assertEqual("none", normalized["scenario"]["trigger"]["new_value"])
+
     def test_release_owned_trace_drops_unbounded_or_non_allowlisted_fields(self) -> None:
         secret = "SECRET\nentity_id=light.private"
         normalized = scenario_operation_receipt(

@@ -1,15 +1,16 @@
 // HAUSMAN_MANAGED_SCENARIO system-cabinet-light-controller
-// Office light uses explicit trusted IDs from the system light catalog.
+// Office profile selection and its restart-safe settle sequence live on the server.
 const r = msg.payload && typeof msg.payload === 'object' ? msg.payload : {};
-const i = r.inputs && typeof r.inputs === 'object' ? r.inputs : {};
-const s = id => i[id] && i[id].state != null ? String(i[id].state) : null;
-const bindings = r.bindings && typeof r.bindings === 'object' ? r.bindings : {};
-const light = bindings.light === 'entity_aeaf7c250c68e8c2' ? bindings.light : null;
-const sensors = ['entity_5f3b4436fb7b6f2b'];
-const occupied = sensors.some(id => ['on', 'true', 'occupied', 'detected'].includes(s(id)));
-const manual = r.context && r.context.trigger && r.context.trigger.source === 'manual';
-const actions = light && (manual || occupied) && s(light) !== 'on' ? [{id: 'cabinet_light_on', type: 'device_action', targetId: light, targetName: 'Люстра кабинет', actionId: 'turn_on', actionTitle: 'Включить'}] : [];
-if (manual) actions.push({id: 'cabinet_neutral', type: 'device_action', targetId: light, targetName: 'Люстра кабинет', actionId: 'set_color_temperature', actionTitle: 'Нейтральная температура', value: 4000}, {id: 'cabinet_full_brightness', type: 'device_action', targetId: light, targetName: 'Люстра кабинет', actionId: 'set_brightness_percent', actionTitle: '100%', value: 100});
+const context = r.context && typeof r.context === 'object' ? r.context : {};
+const trigger = context.trigger && typeof context.trigger === 'object' ? context.trigger : {};
+const controls = context.controls && typeof context.controls === 'object' ? context.controls : {};
+const state = controls.state && typeof controls.state === 'object' ? controls.state : {};
+const server = state.action && typeof state.action === 'object' ? state.action : null;
+const valid = trigger.source === 'scenario_control' && state.ready === true && server &&
+  Object.keys(server).sort().join(',') === 'actionId,targetId,value' && server.targetId === 'entity_aeaf7c250c68e8c2' &&
+  (server.actionId === 'set_brightness_percent' ? Number.isInteger(server.value) && server.value >= 0 && server.value <= 100 :
+    server.actionId === 'set_color_temperature' ? Number.isInteger(server.value) && server.value >= 1500 && server.value <= 6500 : false);
+const action = valid ? {id: 'server_action', type: 'device_action', targetId: server.targetId, targetName: 'Управляемое устройство', actionId: server.actionId, actionTitle: 'Серверное действие', value: server.value} : null;
 msg.statusCode = 200;
-msg.payload = {contract: {name: 'hausman-node-red-scenario-execution', version: 1}, correlationId: String(r.correlationId || ''), scenarioId: 'system-cabinet-light-controller', status: actions.length ? 'completed' : 'skipped', selectedBranch: manual ? 'manual' : occupied ? 'occupied' : 'absent', actions, trace: [{id: 'manual_priority', title: 'Ручной приоритет кабинета', status: manual ? 'selected' : 'skipped', actual: manual, expected: true, reason: null}, {id: 'occupancy_or', title: 'Сигналы кабинета', status: occupied ? 'passed' : 'failed', actual: occupied, expected: 'motion OR presence', reason: null}]};
+msg.payload = {contract: {name: 'hausman-node-red-scenario-execution', version: 1}, correlationId: String(r.correlationId || ''), scenarioId: 'system-cabinet-light-controller', status: action ? 'completed' : 'skipped', selectedBranch: action ? 'server_action' : 'server_hold', actions: action ? [action] : [], trace: [{id: 'server_decision', title: 'Решение сервера для кабинета', status: action ? 'selected' : 'skipped', actual: state.transition || null, expected: 'ready profile action', reason: action ? null : 'server_hold'}]};
 return msg;

@@ -713,7 +713,7 @@ def _validated_scenario_trigger(
                 and {"on_down": "on", "toggle_down": "toggle", "off_up": "off"}.get(trigger_id) == typed_intent
                 or binding == "shower-cabinet"
                 and trigger_id == "toggle_b2_up"
-                and typed_intent == "release"
+                and typed_intent == "upper_area"
             )
             or value.get("dedup_disposition") == "ignored"
             and not (trigger_id == "toggle_b2_up" and value.get("direct_user_intent") == "none")

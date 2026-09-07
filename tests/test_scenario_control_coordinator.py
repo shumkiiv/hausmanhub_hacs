@@ -447,11 +447,17 @@ async def test_runtime_wiring_uses_shared_latch_state_events_and_exact_policy_cl
     await coordinator.async_start(entry, latch)
 
     assert [(hour, minute, second) for hour, minute, second, _ in schedules] == [
+        (0, 0, 0),
+        (6, 0, 0),
+        (8, 0, 0),
+        (8, 30, 0),
         (9, 0, 0),
         (10, 0, 0),
         (11, 0, 0),
         (20, 0, 0),
         (21, 0, 0),
+        (22, 0, 0),
+        (22, 30, 0),
         (23, 0, 0),
         (23, 30, 0),
     ]

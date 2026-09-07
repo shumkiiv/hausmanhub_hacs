@@ -55,6 +55,7 @@ _TRUSTED_SYSTEM_SOURCE_HASHES = {
     "system-shower-comfort-controller": frozenset(
         {
             "757bde711c85ebad4826c2ec0bf2695d0034f7dd820c9ec7c30816f3f37c1551",
+            "53d8876b2b914bd438cdbd020b7dc85f3e9eb3d9a8ea17434ab290d852deea66",
         }
     ),
     "system-small-corridor-light-controller": frozenset(
@@ -62,10 +63,10 @@ _TRUSTED_SYSTEM_SOURCE_HASHES = {
     ),
 }
 _TRUSTED_ADDITIONAL_SYSTEM_SOURCE_HASHES = {
-    "system-toilet-comfort-controller": frozenset({"218fa449363cb8d69cf366a670bf207846a7def9846da6fa130fa4157efb279d"}),
-    "system-bathroom-exhaust-controller": frozenset({"2b413c28d18f61f6730a3b31831bb73f98d690cb4d937ed75856f165475ebd74"}),
+    "system-toilet-comfort-controller": frozenset({"2d91781cf6dd910dadd8e4774eb3d45ae4ae6002b6912dee65bf40ef33af513b"}),
+    "system-bathroom-exhaust-controller": frozenset({"235302aeaa38e0d82eae01f63015a5180f3d4098f495919a18a587c973902af6"}),
     "system-storage-light-controller": frozenset({"3190e744c05403f496d5399ee56c4ff1a199461df0e51040afe5a7244d424fd0"}),
-    "system-cabinet-light-controller": frozenset({"07e08025f24e98dfb67cef2f424a63a161b45b01d67dbe90456aad6055bf34ff"}),
+    "system-cabinet-light-controller": frozenset({"ead4919d6c3d088fc45a26e0b240a4b0520b0a62ba7277476d143b650133468c"}),
     "system-curtains-privacy-controller": frozenset({"d60c10c32f0f689a7f0fe1a31466d4825454cdec00a67590a10bcfdc44cf54cc"}),
 }
 
@@ -78,16 +79,18 @@ _SYSTEM_PLAN_ENVELOPES = {
     "system-toilet-comfort-controller": {
         "actions": {
             ("entity_6667b3400bce7970", "turn_on"): 1,
+            ("entity_6667b3400bce7970", "turn_off"): 1,
             ("entity_5d95de599d2b5cec", "turn_on"): 1,
+            ("entity_5d95de599d2b5cec", "turn_off"): 1,
             ("entity_9bbb3b0e8cd98627", "turn_on"): 1,
+            ("entity_9bbb3b0e8cd98627", "turn_off"): 1,
         }, "delays": {}, "runScenarios": {},
     },
     "system-bathroom-exhaust-controller": {
         "actions": {
-            ("entity_a591e035e3e5b34f", "turn_on"): 1,
-            ("entity_d82766182d69dd51", "turn_on"): 1,
             ("entity_c15f5df5382ee180", "turn_on"): 1,
-        }, "delays": {1800: 1}, "runScenarios": {},
+            ("entity_c15f5df5382ee180", "turn_off"): 1,
+        }, "delays": {}, "runScenarios": {},
     },
     "system-storage-light-controller": {
         "actions": {
@@ -122,7 +125,7 @@ _SYSTEM_PLAN_ENVELOPES = {
             ("entity_afef5df0e0cae309", "turn_on"): 1,
             ("entity_afef5df0e0cae309", "turn_off"): 1,
         },
-        "delays": {120: 1, 300: 1},
+        "delays": {},
         "runScenarios": {},
     },
     "system-tambur-adaptive-controller": {
@@ -2445,59 +2448,36 @@ def _validate_system_branch(
                 "Node-RED small corridor action differs from the server decision"
             )
         return
-    targets = {"main": "entity_46174e1ff9913212", "extra": "entity_1fdcd8b244637246", "cabinet": "entity_e7a7c61eec7bdff8", "fan": "entity_afef5df0e0cae309"}
-    cursor = 0
-    profiles = (
-        ("main", "off", "extra", "off", "cabinet", "on"),
-        ("main", "on", "extra", "off", "cabinet", "off"),
-        ("main", "off", "extra", "on", "cabinet", "off"),
-        ("main", "on", "extra", "off", "cabinet", "on"),
-        ("main", "off", "extra", "on", "cabinet", "on"),
+    if not actions:
+        return
+    targets = {
+        "system-shower-comfort-controller": {
+            "entity_46174e1ff9913212", "entity_1fdcd8b244637246",
+            "entity_e7a7c61eec7bdff8", "entity_afef5df0e0cae309",
+        },
+        "system-toilet-comfort-controller": {
+            "entity_5d95de599d2b5cec", "entity_6667b3400bce7970",
+            "entity_9bbb3b0e8cd98627",
+        },
+        "system-bathroom-exhaust-controller": {"entity_c15f5df5382ee180"},
+        "system-cabinet-light-controller": {"entity_aeaf7c250c68e8c2"},
+    }.get(scenario_id)
+    if targets is None:
+        raise NodeRedBackendError("Node-RED system controller has no exact branch validator")
+    typed_cabinet = bool(
+        scenario_id == "system-shower-comfort-controller"
+        and isinstance(trigger_context, Mapping)
+        and trigger_context.get("source") == "manual"
+        and trigger_context.get("binding") == "shower-cabinet"
     )
-    for profile in profiles:
-        expected = [(profile[index], profile[index + 1]) for index in range(0, len(profile), 2)]
-        prefix = 0
-        while prefix < len(actions) and actions[prefix].id.startswith(("set_main_", "set_extra_", "set_cabinet_")):
-            prefix += 1
-        actual = actions[:prefix]
-        ordered = 0
-        valid = True
-        for candidate in actual:
-            while ordered < len(expected) and not device(candidate, f"set_{expected[ordered][0]}_{expected[ordered][1]}", targets[expected[ordered][0]], f"turn_{expected[ordered][1]}"):
-                ordered += 1
-            if ordered == len(expected):
-                valid = False
-                break
-            ordered += 1
-        forced = next(f"set_{name}_{state}" for name, state in expected if state == "on")
-        if valid and any(item.id == forced for item in actual):
-            cursor = prefix
-            break
-            break
-    profile_actions = cursor
-    presence_fan = False
-    immediate_fan = False
-    if cursor < len(actions) and delay(actions[cursor], "fan_presence_wait", 120):
-        if cursor + 1 >= len(actions) or not device(actions[cursor + 1], "set_fan_on", targets["fan"], "turn_on"):
-            raise NodeRedBackendError("Node-RED shower fan delay exceeds release source")
-        cursor += 2
-        presence_fan = True
-    elif cursor < len(actions) and device(actions[cursor], "set_fan_on", targets["fan"], "turn_on"):
-        cursor += 1
-        immediate_fan = True
-    if cursor < len(actions):
-        if profile_actions or presence_fan:
-            raise NodeRedBackendError("Node-RED shower branch combines exclusive states")
-        if not delay(actions[cursor], "absence_wait", 300):
-            raise NodeRedBackendError("Node-RED shower branch order exceeds release source")
-        cursor += 1
-        start = cursor
-        for name in ("main", "extra", "cabinet", "fan"):
-            if cursor < len(actions) and device(actions[cursor], f"set_{name}_off", targets[name], "turn_off"):
-                cursor += 1
-        if cursor == start:
-            raise NodeRedBackendError("Node-RED shower absence branch must turn something off")
-        if immediate_fan and any(item.id == "set_fan_off" for item in actions[start:cursor]):
-            raise NodeRedBackendError("Node-RED shower cannot turn fan on and off in one absence branch")
-    if cursor != len(actions):
-        raise NodeRedBackendError("Node-RED shower branch exceeds release source")
+    if typed_cabinet and len(actions) == 1 and device(
+        actions[0],
+        f"set_cabinet_{trigger_context.get('direct_user_intent')}",
+        "entity_e7a7c61eec7bdff8",
+        f"turn_{trigger_context.get('direct_user_intent')}",
+    ):
+        return
+    if actions and not _matches_control_action(actions, expected_control_action, targets):
+        raise NodeRedBackendError(
+            "Node-RED room action differs from the durable server decision"
+        )
