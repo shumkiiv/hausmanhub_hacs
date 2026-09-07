@@ -62,11 +62,25 @@ _TAMBUR_INPUTS = (
 
 # Only stable catalog IDs may cross the scenario boundary.  Unknown live
 # bindings remain absent and make that controller safely skip until bound.
-_TOILET_INPUTS = ("entity_6667b3400bce7970", "entity_5d95de599d2b5cec")
-_BATHROOM_INPUTS = ("entity_a591e035e3e5b34f", "entity_d82766182d69dd51")
-_STORAGE_INPUTS = ("entity_0ec37ef18b4b39a6",)
-_CABINET_INPUTS = ("entity_0123456789abcdef",)
-_CURTAIN_INPUTS = ()
+_TOILET_INPUTS = (
+    "entity_ce73f88bda2e6812", "entity_56650c782076ed4d",
+    "entity_5d95de599d2b5cec", "entity_6667b3400bce7970",
+    "entity_9bbb3b0e8cd98627", "entity_6b9ccdab9bb484b2",
+    "entity_3f343b8d6f58f5b4",
+)
+_BATHROOM_INPUTS = (
+    "entity_a591e035e3e5b34f", "entity_d82766182d69dd51",
+    "entity_436e12f71ce7b08b", "entity_c15f5df5382ee180",
+)
+_STORAGE_INPUTS = ("entity_00dcf0ebdc0bc6cb", "entity_0ec37ef18b4b39a6")
+_CABINET_INPUTS = (
+    "entity_aeaf7c250c68e8c2", "entity_7ff6d09cfa68fa5a",
+    "entity_5f3b4436fb7b6f2b", "entity_6b9ccdab9bb484b2",
+)
+_CURTAIN_INPUTS = (
+    "entity_8746cfd7f6f7103d", "entity_2da2065add6e2168",
+    "entity_1e0b476b7d082cc0", "entity_9164132c7692d6f5",
+)
 
 FULL_MIGRATION_MANIFEST: tuple[ManagedSwitchMigrationEntry, ...] = (
     ManagedSwitchMigrationEntry(
@@ -93,31 +107,31 @@ FULL_MIGRATION_MANIFEST: tuple[ManagedSwitchMigrationEntry, ...] = (
     ManagedSwitchMigrationEntry(
         "system-toilet-comfort-controller", 1, "0" * 64, MANAGED_TOPOLOGY,
         _TOILET_INPUTS, _TOILET_INPUTS,
-        "2bbb3d66ce65b3938602992dbc93902004d43eaa3d9e561b48a043dd8502ef85",
+        "d46cae51f74459a617aff70b8d056f0bca961968f9d173b1d17b5769b2351579",
         "toilet_controller.js",
     ),
     ManagedSwitchMigrationEntry(
         "system-bathroom-exhaust-controller", 1, "1" * 64, MANAGED_TOPOLOGY,
         _BATHROOM_INPUTS, _BATHROOM_INPUTS,
-        "67a6ea3ee8c62198e07dce7e75bf379eb95a0a459f74890d5a494212c9ff85ff",
+        "588864e71c899dd6d57c42f3040393be5793b57ebec243bf609ec407dc92f8ad",
         "bathroom_controller.js",
     ),
     ManagedSwitchMigrationEntry(
         "system-storage-light-controller", 1, "2" * 64, MANAGED_TOPOLOGY,
         _STORAGE_INPUTS, _STORAGE_INPUTS,
-        "256c29b62141d152e222c0c13bdb812cabd891041769921bd8cf9b6dcb6b9556",
+        "b46671a5f83c5fba9e7dd5fcfbd15f0132d5b5ca68c2291f1817fa3e1f03d4db",
         "storage_controller.js",
     ),
     ManagedSwitchMigrationEntry(
         "system-cabinet-light-controller", 1, "3" * 64, MANAGED_TOPOLOGY,
         _CABINET_INPUTS, _CABINET_INPUTS,
-        "8c5223a0b858ee1d408eb6b25128ac9ac32bd3aa3b14735419e9bde3e3dbdeef",
+        "d6f7d43bf964a1bc565b905427239d730f57650effd51dfca1b4e2eb7702bc78",
         "cabinet_controller.js",
     ),
     ManagedSwitchMigrationEntry(
         "system-curtains-privacy-controller", 1, "4" * 64, MANAGED_TOPOLOGY,
         _CURTAIN_INPUTS, _CURTAIN_INPUTS,
-        "9e3053290bd0c409ecb0c89f8445793ed56319237396673417b97a14ed96339e",
+        "d60c10c32f0f689a7f0fe1a31466d4825454cdec00a67590a10bcfdc44cf54cc",
         "curtains_controller.js",
     ),
 )

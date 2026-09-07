@@ -438,7 +438,7 @@ def test_release_sources_are_loaded_through_executor_boundary() -> None:
         )
 
         assert len(jobs) == 1
-        assert len(entries) == 3
+        assert len(entries) == 8
         assert all(entry.source for entry in entries)
 
     asyncio.run(exercise())

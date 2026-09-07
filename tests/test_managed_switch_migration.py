@@ -63,24 +63,29 @@ class Service:
             and self.verifications == self.verification_drift_at
         ):
             raise RuntimeError(f"final drift: {self.verification_drift}")
-        assert len(entries) == 3
+        assert len(entries) == 8
         return "revision.final"
 
     async def async_finalize_managed_switch_migration(self, entries):
-        assert len(entries) == 3
+        assert len(entries) == 8
         self.finalizations += 1
 
     async def async_rollback_managed_switch_migration(self, entries):
-        assert len(entries) == 3
+        assert len(entries) == 8
         self.rollbacks += 1
         return self.rollback_complete
 
 
-def test_manifest_contains_exact_three_protected_scenarios_and_sources() -> None:
+def test_manifest_contains_exact_eight_protected_scenarios_and_sources() -> None:
     assert set(LEGACY_MANAGED_SWITCHES) == {
         "system-shower-comfort-controller",
         "system-small-corridor-light-controller",
         "system-tambur-adaptive-controller",
+        "system-toilet-comfort-controller",
+        "system-bathroom-exhaust-controller",
+        "system-storage-light-controller",
+        "system-cabinet-light-controller",
+        "system-curtains-privacy-controller",
     }
     for item in MIGRATION_MANIFEST:
         assert item.legacy_topology == "managed-three-node-v1"
@@ -94,7 +99,7 @@ def test_migration_persists_prepared_before_cas_and_completed_after() -> None:
     assert asyncio.run(ManagedSwitchMigration(service, store).async_apply()) == "completed"
     assert [item["state"] for item in store.saved] == ["prepared", "completed"]
     assert all(valid_managed_switch_migration_payload(item) for item in store.saved)
-    assert len(service.calls[0]) == 3
+    assert len(service.calls[0]) == 8
     assert all(item.source for item in service.calls[0])
     assert service.finalizations == 1
     assert service.rollbacks == 0

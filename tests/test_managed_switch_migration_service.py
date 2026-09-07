@@ -13,6 +13,34 @@ from custom_components.hausman_hub.application.managed_switch_migration import (
     ManagedSwitchMigration,
     ManagedSwitchMigrationConflict,
 )
+
+
+def test_full_manifest_uses_exact_verified_binding_ids() -> None:
+    assert len(MIGRATION_MANIFEST) == 8
+    by_id = {entry.scenario_id: entry for entry in MIGRATION_MANIFEST}
+    assert by_id["system-bathroom-exhaust-controller"].input_target_ids == (
+        "entity_a591e035e3e5b34f",
+        "entity_d82766182d69dd51",
+        "entity_436e12f71ce7b08b",
+        "entity_c15f5df5382ee180",
+    )
+    assert by_id["system-storage-light-controller"].input_target_ids == (
+        "entity_00dcf0ebdc0bc6cb",
+        "entity_0ec37ef18b4b39a6",
+    )
+    assert by_id["system-cabinet-light-controller"].input_target_ids == (
+        "entity_aeaf7c250c68e8c2",
+        "entity_7ff6d09cfa68fa5a",
+        "entity_5f3b4436fb7b6f2b",
+        "entity_6b9ccdab9bb484b2",
+    )
+    assert by_id["system-curtains-privacy-controller"].input_target_ids == (
+        "entity_8746cfd7f6f7103d",
+        "entity_2da2065add6e2168",
+        "entity_1e0b476b7d082cc0",
+        "entity_9164132c7692d6f5",
+    )
+    assert all("0123456789abcdef" not in target for entry in MIGRATION_MANIFEST for target in entry.input_target_ids)
 from custom_components.hausman_hub.application.managed_switch_binding_migration import (
     BINDING_MIGRATION_MANIFEST,
 )

@@ -61,11 +61,11 @@ _TRUSTED_SYSTEM_SOURCE_HASHES = {
     ),
 }
 _TRUSTED_ADDITIONAL_SYSTEM_SOURCE_HASHES = {
-    "system-toilet-comfort-controller": frozenset({"2bbb3d66ce65b3938602992dbc93902004d43eaa3d9e561b48a043dd8502ef85"}),
-    "system-bathroom-exhaust-controller": frozenset({"67a6ea3ee8c62198e07dce7e75bf379eb95a0a459f74890d5a494212c9ff85ff"}),
-    "system-storage-light-controller": frozenset({"256c29b62141d152e222c0c13bdb812cabd891041769921bd8cf9b6dcb6b9556"}),
-    "system-cabinet-light-controller": frozenset({"8c5223a0b858ee1d408eb6b25128ac9ac32bd3aa3b14735419e9bde3e3dbdeef"}),
-    "system-curtains-privacy-controller": frozenset({"9e3053290bd0c409ecb0c89f8445793ed56319237396673417b97a14ed96339e"}),
+    "system-toilet-comfort-controller": frozenset({"d46cae51f74459a617aff70b8d056f0bca961968f9d173b1d17b5769b2351579"}),
+    "system-bathroom-exhaust-controller": frozenset({"588864e71c899dd6d57c42f3040393be5793b57ebec243bf609ec407dc92f8ad"}),
+    "system-storage-light-controller": frozenset({"b46671a5f83c5fba9e7dd5fcfbd15f0132d5b5ca68c2291f1817fa3e1f03d4db"}),
+    "system-cabinet-light-controller": frozenset({"d6f7d43bf964a1bc565b905427239d730f57650effd51dfca1b4e2eb7702bc78"}),
+    "system-curtains-privacy-controller": frozenset({"d60c10c32f0f689a7f0fe1a31466d4825454cdec00a67590a10bcfdc44cf54cc"}),
 }
 
 def _trusted_hashes(scenario_id: str) -> frozenset[str]:
@@ -78,12 +78,14 @@ _SYSTEM_PLAN_ENVELOPES = {
         "actions": {
             ("entity_6667b3400bce7970", "turn_on"): 1,
             ("entity_5d95de599d2b5cec", "turn_on"): 1,
+            ("entity_9bbb3b0e8cd98627", "turn_on"): 1,
         }, "delays": {}, "runScenarios": {},
     },
     "system-bathroom-exhaust-controller": {
         "actions": {
             ("entity_a591e035e3e5b34f", "turn_on"): 1,
             ("entity_d82766182d69dd51", "turn_on"): 1,
+            ("entity_c15f5df5382ee180", "turn_on"): 1,
         }, "delays": {1800: 1}, "runScenarios": {},
     },
     "system-storage-light-controller": {
@@ -92,15 +94,17 @@ _SYSTEM_PLAN_ENVELOPES = {
     },
     "system-cabinet-light-controller": {
         "actions": {
-            ("entity_0123456789abcdef", "turn_on"): 1,
-            ("entity_0123456789abcdef", "set_brightness_percent"): 1,
-            ("entity_0123456789abcdef", "set_color_temperature"): 1,
+            ("entity_aeaf7c250c68e8c2", "turn_on"): 1,
+            ("entity_aeaf7c250c68e8c2", "set_brightness_percent"): 1,
+            ("entity_aeaf7c250c68e8c2", "set_color_temperature"): 1,
         }, "delays": {}, "runScenarios": {},
     },
     "system-curtains-privacy-controller": {
         "actions": {
-            ("cover.shtory_gostinaia", "set_position"): 1,
-            ("cover.0xa4c1385a4bcce3d6", "set_position"): 1,
+            ("entity_8746cfd7f6f7103d", "set_position"): 1,
+            ("entity_2da2065add6e2168", "set_position"): 1,
+            ("entity_1e0b476b7d082cc0", "set_position"): 1,
+            ("entity_9164132c7692d6f5", "set_position"): 1,
         }, "delays": {}, "runScenarios": {},
     },
     "system-shower-comfort-controller": {
@@ -145,7 +149,7 @@ _SYSTEM_PLAN_ENVELOPES = {
     },
 }
 _SYSTEM_BINDING_ALLOWLIST = {
-    "system-cabinet-light-controller": {"light": "entity_0123456789abcdef"},
+    "system-cabinet-light-controller": {"light": "entity_aeaf7c250c68e8c2"},
     "system-curtains-privacy-controller": {},
     "system-storage-light-controller": {},
 }

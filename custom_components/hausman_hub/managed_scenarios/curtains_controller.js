@@ -3,7 +3,7 @@
 const r = msg.payload && typeof msg.payload === 'object' ? msg.payload : {};
 const i = r.inputs && typeof r.inputs === 'object' ? r.inputs : {};
 const s = id => i[id] && i[id].state != null ? String(i[id].state) : null;
-const configured = [['cover.shtory_gostinaia', 'Шторы гостиная', 100], ['cover.0xa4c1385a4bcce3d6', 'Шторы кухня', 80]];
+const configured = [['entity_8746cfd7f6f7103d', 'Шторы гостиная', 100], ['entity_2da2065add6e2168', 'Шторы кухня', 80], ['entity_1e0b476b7d082cc0', 'Шторы Алисы', 100], ['entity_9164132c7692d6f5', 'Шторы кабинет', 90]];
 const trigger = r.context && r.context.trigger && r.context.trigger.trigger_id;
 const manual = r.context && r.context.trigger && r.context.trigger.source === 'manual';
 const opening = trigger === 'sunrise' || trigger === 'manual_open_all';
