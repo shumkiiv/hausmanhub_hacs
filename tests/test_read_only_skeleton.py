@@ -2406,6 +2406,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             self.assertEqual(
                 {
                     "scenario_controls",
+                    "curtain_scale_confirmation",
                     "climate_registry",
                     "climate_connection",
                     "climate_migration",
@@ -2417,6 +2418,14 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             self.assertEqual(
                 {"scenario_control_policy_json"},
                 set(steps["scenario_controls"]["data"]),
+            )
+            self.assertEqual(
+                {"curtain_scale_action"},
+                set(steps["curtain_scale_confirmation"]["data"]),
+            )
+            self.assertEqual(
+                {"confirm", "revoke"},
+                set(content["selector"]["curtain_scale_action"]["options"]),
             )
             self.assertIn(
                 "scenario_controls_unavailable", content["options"]["error"]

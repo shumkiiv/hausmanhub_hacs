@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import importlib
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
 import unittest
+from unittest.mock import AsyncMock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -442,6 +443,7 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [
                 "scenario_controls",
+                "curtain_scale_confirmation",
                 "climate_registry",
                 "climate_connection",
                 "climate_migration",
@@ -449,6 +451,209 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
                 "test_switch",
             ],
             result["menu_options"],
+        )
+
+    async def test_office_scale_confirmation_uses_server_form_cas_only(self) -> None:
+        from custom_components.hausman_hub.application.curtain_command_policy import (
+            OFFICE_CURTAIN_TARGET,
+        )
+        from custom_components.hausman_hub.application.curtain_scale_confirmation import (
+            OFFICE_CURTAIN_ENTITY_ID,
+            CurtainScaleConfirmation,
+            CurtainScaleIdentity,
+        )
+        from custom_components.hausman_hub.application.scenario_control_policy import (
+            ScenarioControlPolicyService,
+        )
+
+        class Store:
+            payload = None
+            saves = 0
+
+            async def async_load(self):
+                return self.payload
+
+            async def async_save(self, payload):
+                self.payload = payload
+                self.saves += 1
+
+        current = [CurtainScaleIdentity.create(
+            target_id=OFFICE_CURTAIN_TARGET,
+            entity_id=OFFICE_CURTAIN_ENTITY_ID,
+            entity_unique_id="0x0011223344556677_cover_zigbee2mqtt",
+            device_id="device-office",
+            device_identifiers=(("mqtt", "zigbee2mqtt_0x0011223344556677"),),
+        )]
+        store = Store()
+        policy_store = Store()
+        policy_service = ScenarioControlPolicyService(policy_store)
+        await policy_service.async_load()
+        service = CurtainScaleConfirmation(
+            store,
+            entry_id="entry-1",
+            identity_resolver=lambda _target_id: current[0],
+            now_ms=lambda: 100,
+        )
+        await service.async_load()
+        flow = self.config_flow.HausmanHubOptionsFlow()
+        flow.config_entry = FakeConfigEntry({"mode": "read-only"}, {"kept": True})
+        flow.hass = SimpleNamespace(
+            data={self.config_flow.DOMAIN: {
+                "curtain_scale_confirmation": service,
+                "scenario_control_policy_service": policy_service,
+            }}
+        )
+
+        policy_form = await flow.async_step_scenario_controls()
+        policy_field = next(iter(policy_form["schema"].fields))
+        await flow.async_step_scenario_controls(
+            {"scenario_control_policy_json": policy_field.default}
+        )
+        self.assertFalse(
+            service.authorization_snapshot(OFFICE_CURTAIN_TARGET).confirmed
+        )
+        self.assertEqual(0, store.saves)
+
+        form = await flow.async_step_curtain_scale_confirmation()
+        field = next(iter(form["schema"].fields))
+        self.assertEqual("curtain_scale_action", field.key)
+        self.assertEqual("confirm", field.default)
+        self.assertEqual(OFFICE_CURTAIN_TARGET, form["description_placeholders"]["target_id"])
+        self.assertEqual(OFFICE_CURTAIN_ENTITY_ID, form["description_placeholders"]["entity_id"])
+
+        injected = await flow.async_step_curtain_scale_confirmation(
+            {"curtain_scale_action": "confirm", "targetId": OFFICE_CURTAIN_TARGET}
+        )
+        self.assertEqual(
+            {"base": "invalid_curtain_scale_confirmation"}, injected["errors"]
+        )
+        self.assertEqual(0, store.saves)
+
+        refreshed = await flow.async_step_curtain_scale_confirmation()
+        current[0] = CurtainScaleIdentity.create(
+            target_id=OFFICE_CURTAIN_TARGET,
+            entity_id=OFFICE_CURTAIN_ENTITY_ID,
+            entity_unique_id="replacement_cover_zigbee2mqtt",
+            device_id="device-replacement",
+            device_identifiers=(("mqtt", "zigbee2mqtt_replacement"),),
+        )
+        stale = await flow.async_step_curtain_scale_confirmation(
+            {"curtain_scale_action": "confirm"}
+        )
+        self.assertEqual(
+            {"base": "stale_curtain_scale_confirmation"}, stale["errors"]
+        )
+        self.assertEqual(0, store.saves)
+
+        current[0] = service.office_confirmation_view().identity
+        fresh = await flow.async_step_curtain_scale_confirmation()
+        saved = await flow.async_step_curtain_scale_confirmation(
+            {"curtain_scale_action": "confirm"}
+        )
+        self.assertEqual("form", fresh["type"])
+        self.assertEqual("create_entry", saved["type"])
+        self.assertEqual({"kept": True}, saved["data"])
+        self.assertTrue(
+            service.authorization_snapshot(OFFICE_CURTAIN_TARGET).confirmed
+        )
+
+        restarted_service = CurtainScaleConfirmation(
+            store,
+            entry_id="entry-1",
+            identity_resolver=lambda _target_id: current[0],
+            now_ms=lambda: 200,
+        )
+        await restarted_service.async_load()
+        from custom_components.hausman_hub.application.curtain_command_policy import (
+            CurtainCommandPolicy,
+        )
+        from custom_components.hausman_hub.application.scenario_executor import (
+            ScenarioExecutor,
+        )
+        from custom_components.hausman_hub.application.scenarios import (
+            ScenarioCatalog,
+            ScenarioDeviceAction,
+            ScenarioDeviceEntry,
+        )
+
+        before = datetime.now(timezone.utc) - timedelta(seconds=2)
+        state = SimpleNamespace(
+            state="closed",
+            attributes={"current_position": 0},
+            last_updated=before,
+        )
+        runtime_hass = SimpleNamespace(
+            states=SimpleNamespace(get=lambda _entity_id: state),
+            services=SimpleNamespace(async_call=AsyncMock()),
+        )
+
+        async def apply_position(_domain, _service, data, **_kwargs):
+            state.state = "open"
+            state.attributes = {"current_position": data["position"]}
+            state.last_updated = datetime.now(timezone.utc)
+
+        runtime_hass.services.async_call.side_effect = apply_position
+        actions = (
+            ScenarioDeviceAction(
+                action_id="set_position",
+                title="Положение",
+                domain="cover",
+                service="set_cover_position",
+                allowed_fields=frozenset({"value"}),
+            ),
+        )
+        catalog = ScenarioCatalog(
+            devices={
+                OFFICE_CURTAIN_TARGET: ScenarioDeviceEntry(
+                    target_id=OFFICE_CURTAIN_TARGET,
+                    name="Шторы кабинет",
+                    entity_id=OFFICE_CURTAIN_ENTITY_ID,
+                    actions=actions,
+                )
+            },
+            scenarios={},
+        )
+
+        async def nested(_scenario_id, **_kwargs):
+            return {"status": "completed", "receipts": []}
+
+        executor = ScenarioExecutor(
+            runtime_hass,
+            catalog,
+            nested,
+            readback_window_seconds=0.02,
+            readback_interval_seconds=0.01,
+            curtain_command_policy=CurtainCommandPolicy(
+                scale_authorization_provider=(
+                    restarted_service.authorization_snapshot
+                )
+            ),
+        )
+        receipt = await executor.async_execute_device_action(
+            OFFICE_CURTAIN_TARGET,
+            "set_position",
+            100,
+        )
+        self.assertTrue(receipt["confirmed"])
+        runtime_hass.services.async_call.assert_awaited_once_with(
+            "cover",
+            "set_cover_position",
+            {"entity_id": OFFICE_CURTAIN_ENTITY_ID, "position": 90},
+            blocking=True,
+        )
+
+        revoke_flow = self.config_flow.HausmanHubOptionsFlow()
+        revoke_flow.config_entry = flow.config_entry
+        revoke_flow.hass = flow.hass
+        revoke_form = await revoke_flow.async_step_curtain_scale_confirmation()
+        revoke_field = next(iter(revoke_form["schema"].fields))
+        self.assertEqual("revoke", revoke_field.default)
+        revoked = await revoke_flow.async_step_curtain_scale_confirmation(
+            {"curtain_scale_action": "revoke"}
+        )
+        self.assertEqual("create_entry", revoked["type"])
+        self.assertFalse(
+            service.authorization_snapshot(OFFICE_CURTAIN_TARGET).confirmed
         )
 
     def assert_general_settings_fields(

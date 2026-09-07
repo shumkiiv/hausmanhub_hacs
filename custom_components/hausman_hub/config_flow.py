@@ -173,6 +173,7 @@ TEMPORARY_TEMPERATURE_CLEAR_CONFIRM_FIELD = "confirm_temporary_temperature_clear
 TEMPORARY_TEMPERATURE_RESULT_CLOSE_FIELD = "close_temporary_temperature_result"
 CLIMATE_REGISTRY_JSON_FIELD = "climate_registry_json"
 SCENARIO_CONTROL_POLICY_JSON_FIELD = "scenario_control_policy_json"
+CURTAIN_SCALE_ACTION_FIELD = "curtain_scale_action"
 CLIMATE_REGISTRY_CONFIRM_FIELD = "confirm_registry_save"
 CLIMATE_REGISTRY_ACTION_FIELD = "climate_registry_action"
 CLIMATE_ROOM_ID_FIELD = "climate_room_id"
@@ -412,6 +413,12 @@ NATIVE_CLIMATE_MODE_SELECTOR = SelectSelector(
     SelectSelectorConfig(
         options=[mode.value for mode in NativeClimateMode],
         translation_key="native_climate_mode",
+    )
+)
+CURTAIN_SCALE_ACTION_SELECTOR = SelectSelector(
+    SelectSelectorConfig(
+        options=["confirm", "revoke"],
+        translation_key="curtain_scale_action",
     )
 )
 OUTDOOR_TEMPERATURE_ENTITY_SELECTOR = EntitySelector(
@@ -929,6 +936,17 @@ def _scenario_control_policy_json_schema(default: str) -> vol.Schema:
             ): TextSelector(
                 TextSelectorConfig(multiline=True, type=TextSelectorType.TEXT)
             )
+        }
+    )
+
+
+def _curtain_scale_confirmation_schema(default: str) -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(
+                CURTAIN_SCALE_ACTION_FIELD,
+                default=default,
+            ): CURTAIN_SCALE_ACTION_SELECTOR,
         }
     )
 
@@ -1492,6 +1510,8 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
     _temporary_temperature_until: str | None = None
     _temporary_temperature_request_id: str | None = None
     _temporary_temperature_receipt: Mapping[str, Any] | None = None
+    _curtain_scale_form_revision: int | None = None
+    _curtain_scale_form_identity_digest: str | None = None
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Show one short menu instead of mixing unrelated settings."""
@@ -1516,12 +1536,100 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
             step_id="advanced_settings",
             menu_options=[
                 "scenario_controls",
+                "curtain_scale_confirmation",
                 "climate_registry",
                 "climate_connection",
                 "climate_migration",
                 "native_climate",
                 "test_switch",
             ],
+        )
+
+    async def async_step_curtain_scale_confirmation(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Confirm or revoke only the exact server-resolved office curtain."""
+
+        from .application.curtain_scale_confirmation import (
+            CurtainScaleConfirmationConflict,
+        )
+
+        service = self._curtain_scale_confirmation_service()
+        errors: dict[str, str] = {}
+        if service is None:
+            errors["base"] = "curtain_scale_confirmation_unavailable"
+        elif user_input is not None:
+            if set(user_input) != {CURTAIN_SCALE_ACTION_FIELD} or user_input.get(
+                CURTAIN_SCALE_ACTION_FIELD
+            ) not in {"confirm", "revoke"}:
+                errors["base"] = "invalid_curtain_scale_confirmation"
+            elif self._curtain_scale_form_revision is None:
+                errors["base"] = "stale_curtain_scale_confirmation"
+            else:
+                try:
+                    if user_input[CURTAIN_SCALE_ACTION_FIELD] == "confirm":
+                        if self._curtain_scale_form_identity_digest is None:
+                            raise CurtainScaleConfirmationConflict(
+                                "scale confirmation identity is missing"
+                            )
+                        await service.async_confirm_office(
+                            self._curtain_scale_form_revision,
+                            self._curtain_scale_form_identity_digest,
+                        )
+                    else:
+                        await service.async_revoke(
+                            self._curtain_scale_form_revision
+                        )
+                except CurtainScaleConfirmationConflict:
+                    errors["base"] = "stale_curtain_scale_confirmation"
+                except Exception:
+                    errors["base"] = "curtain_scale_confirmation_unavailable"
+                else:
+                    return self.async_create_entry(
+                        title="", data=dict(self.config_entry.options)
+                    )
+
+        placeholders = {
+            "target_id": "недоступно",
+            "entity_id": "недоступно",
+            "unique_id": "недоступно",
+            "device_identifiers": "недоступно",
+            "identity_digest": "недоступно",
+            "state": "не подтверждена",
+        }
+        default = "confirm"
+        if service is not None:
+            try:
+                view = service.office_confirmation_view()
+            except Exception:
+                errors["base"] = "curtain_scale_confirmation_unavailable"
+            else:
+                self._curtain_scale_form_revision = view.authorization.revision
+                self._curtain_scale_form_identity_digest = (
+                    view.identity.identity_digest
+                )
+                default = "revoke" if view.authorization.confirmed else "confirm"
+                placeholders = {
+                    "target_id": view.identity.target_id,
+                    "entity_id": view.identity.entity_id,
+                    "unique_id": view.identity.entity_unique_id,
+                    "device_identifiers": ", ".join(
+                        f"{domain}:{identifier}"
+                        for domain, identifier in view.identity.device_identifiers
+                    ),
+                    "identity_digest": view.identity.identity_digest,
+                    "state": (
+                        "подтверждена"
+                        if view.authorization.confirmed
+                        else "не подтверждена"
+                    ),
+                }
+        return self.async_show_form(
+            step_id="curtain_scale_confirmation",
+            data_schema=_curtain_scale_confirmation_schema(default),
+            errors=errors,
+            description_placeholders=placeholders,
         )
 
     async def async_step_scenario_controls(
@@ -4539,6 +4647,18 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
 
         service = domain_data.get("scenario_control_policy_service")
         return service if isinstance(service, ScenarioControlPolicyService) else None
+
+    def _curtain_scale_confirmation_service(self) -> Any | None:
+        hass = getattr(self, "hass", None)
+        domain_data = getattr(hass, "data", {}).get(DOMAIN)
+        if not isinstance(domain_data, Mapping):
+            return None
+        from .application.curtain_scale_confirmation import (
+            CurtainScaleConfirmation,
+        )
+
+        service = domain_data.get("curtain_scale_confirmation")
+        return service if isinstance(service, CurtainScaleConfirmation) else None
 
     def _preview_placeholders(self) -> dict[str, str]:
         preview = self._registry_preview or {}

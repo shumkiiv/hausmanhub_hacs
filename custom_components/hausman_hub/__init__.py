@@ -457,6 +457,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         lambda: scenario_control_policy.current.policy.manual_off_block_seconds
     )
     domain_data["scenario_control_policy_service"] = scenario_control_policy
+    from .application.curtain_scale_confirmation import CurtainScaleConfirmation
+    from .curtain_scale_confirmation_storage import (
+        HomeAssistantCurtainScaleConfirmationStore,
+        resolve_office_curtain_identity,
+    )
+
+    curtain_scale_confirmation = CurtainScaleConfirmation(
+        HomeAssistantCurtainScaleConfirmationStore(hass, entry.entry_id),
+        entry_id=entry.entry_id,
+        identity_resolver=lambda target_id: resolve_office_curtain_identity(
+            hass,
+            lambda requested: scenario_service.current_catalog().device(requested),
+            target_id,
+        ),
+    )
+    await curtain_scale_confirmation.async_load()
+    domain_data["curtain_scale_confirmation"] = curtain_scale_confirmation
     from .application.managed_switch_migration import (
         HomeAssistantManagedSwitchMigrationStore,
         FULL_MIGRATION_MANIFEST,
@@ -577,7 +594,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         command_contexts=scenario_command_contexts,
         manual_light_off_protection=manual_light_off_protection,
         curtain_command_policy=CurtainCommandPolicy(
-            lambda: scenario_control_policy.current
+            lambda: scenario_control_policy.current,
+            scale_authorization_provider=(
+                curtain_scale_confirmation.authorization_snapshot
+            ),
         ),
         curtain_protection=curtain_protection,
     )

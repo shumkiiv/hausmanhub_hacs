@@ -833,6 +833,114 @@ async def test_policy_generation_change_before_dispatch_fails_closed() -> None:
     hass.services.async_call.assert_not_awaited()
 
 
+def test_dynamic_scale_authority_is_exact_and_part_of_policy_revision() -> None:
+    authority = {
+        "value": SimpleNamespace(
+            confirmed=True,
+            revision=7,
+            identity_digest="office-identity-v1",
+        )
+    }
+    policy = CurtainCommandPolicy(
+        scale_authorization_provider=lambda target_id: (
+            authority["value"]
+            if target_id == OFFICE_CURTAIN_TARGET
+            else SimpleNamespace(confirmed=False, revision=7, identity_digest=None)
+        )
+    )
+
+    office = policy.plan(
+        device=_device(target_id=OFFICE_CURTAIN_TARGET),
+        action_id="set_position",
+        requested=100,
+        current_state=_state(0),
+    )
+    assert office is not None
+    assert office.applied == 90
+    assert "office-identity-v1" not in office.policy_revision
+
+    with pytest.raises(CurtainPolicyError, match="curtain_scale_unconfirmed"):
+        policy.plan(
+            device=_device(target_id=KITCHEN_CURTAIN_TARGET),
+            action_id="open_cover",
+            requested=None,
+            current_state=_state(0),
+        )
+
+    authority["value"] = SimpleNamespace(
+        confirmed=False,
+        revision=8,
+        identity_digest="office-identity-v1",
+    )
+    with pytest.raises(CurtainPolicyError, match="curtain_scale_unconfirmed"):
+        policy.plan(
+            device=_device(target_id=OFFICE_CURTAIN_TARGET),
+            action_id="open_cover",
+            requested=None,
+            current_state=_state(0),
+        )
+
+
+def test_broken_scale_authority_blocks_open_but_not_emergency_stop() -> None:
+    def broken_authority(_target_id: str) -> object:
+        raise RuntimeError("synthetic authority failure")
+
+    policy = CurtainCommandPolicy(
+        scale_authorization_provider=broken_authority,
+    )
+    with pytest.raises(CurtainPolicyError, match="curtain_scale_unconfirmed"):
+        policy.plan(
+            device=_device(target_id=OFFICE_CURTAIN_TARGET),
+            action_id="open_cover",
+            requested=None,
+            current_state=_state(0),
+        )
+    stopped = policy.plan(
+        device=_device(target_id=OFFICE_CURTAIN_TARGET),
+        action_id="stop_cover",
+        requested=None,
+        current_state=_state(None),
+    )
+    assert stopped is not None
+    assert stopped.service == "stop_cover"
+
+
+@pytest.mark.asyncio
+async def test_scale_revoke_after_planning_prevents_physical_dispatch() -> None:
+    authority = {
+        "value": SimpleNamespace(
+            confirmed=True,
+            revision=1,
+            identity_digest="office-identity-v1",
+        )
+    }
+    policy = CurtainCommandPolicy(
+        scale_authorization_provider=lambda _target_id: authority["value"],
+    )
+    executor, hass, _state_value, _devices = _executor_for_target(
+        target_id=OFFICE_CURTAIN_TARGET,
+        policy=policy,
+    )
+
+    async def revoke() -> None:
+        authority["value"] = SimpleNamespace(
+            confirmed=False,
+            revision=2,
+            identity_digest="office-identity-v1",
+        )
+
+    receipt = await executor.async_execute_device_action(
+        OFFICE_CURTAIN_TARGET,
+        "set_position",
+        100,
+        before_dispatch=revoke,
+    )
+
+    assert receipt["accepted"] is False
+    assert receipt["error"] == "curtain_dispatch_plan_changed"
+    hass.services.async_call.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_similar_target_uses_its_catalog_descriptor_without_limit() -> None:
     similar = f"{KITCHEN_CURTAIN_TARGET}-copy"

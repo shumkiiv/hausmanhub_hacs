@@ -157,6 +157,7 @@ class CurtainCommandPolicy:
         control_document_provider: Callable[[], ScenarioControlDocument] | None = None,
         *,
         confirmed_scale_targets: frozenset[str] = frozenset(),
+        scale_authorization_provider: Callable[[str], object] | None = None,
     ) -> None:
         unknown = set(confirmed_scale_targets).difference(_SCALE_DEPENDENT_TARGETS)
         if unknown:
@@ -167,6 +168,7 @@ class CurtainCommandPolicy:
             else lambda: ScenarioControlDocument()
         )
         self._confirmed_scale_targets = confirmed_scale_targets
+        self._scale_authorization_provider = scale_authorization_provider
 
     @classmethod
     def with_confirmed_scales(
@@ -420,6 +422,7 @@ class CurtainCommandPolicy:
             ALICE_CURTAIN_TARGET: 100,
             OFFICE_CURTAIN_TARGET: policy.cabinet_cover_cap_percent,
         }
+        authorizations = self._scale_authorizations()
         targets = MappingProxyType(
             {
                 target_id: CurtainTargetPolicy(
@@ -428,6 +431,7 @@ class CurtainCommandPolicy:
                     scale_confirmed=(
                         target_id not in _SCALE_DEPENDENT_TARGETS
                         or target_id in self._confirmed_scale_targets
+                        or authorizations[target_id][0]
                     ),
                     generation=document.policy_revision,
                 )
@@ -441,6 +445,10 @@ class CurtainCommandPolicy:
                     policy.kitchen_cover_cap_percent,
                     policy.cabinet_cover_cap_percent,
                     sorted(self._confirmed_scale_targets),
+                    [
+                        [target_id, *authorizations[target_id]]
+                        for target_id in sorted(_SCALE_DEPENDENT_TARGETS)
+                    ],
                 ],
                 separators=(",", ":"),
             ).encode("utf-8")
@@ -448,6 +456,44 @@ class CurtainCommandPolicy:
         return targets, (
             f"scenario-control.{document.policy_revision}.curtain.{digest[:24]}"
         )
+
+    def _scale_authorizations(
+        self,
+    ) -> dict[str, tuple[bool, int, str | None]]:
+        """Read exact per-target authority without trusting request payloads."""
+
+        result: dict[str, tuple[bool, int, str | None]] = {}
+        for target_id in _SCALE_DEPENDENT_TARGETS:
+            if target_id in self._confirmed_scale_targets:
+                result[target_id] = (True, 0, "test-confirmed-scale")
+                continue
+            try:
+                snapshot = (
+                    self._scale_authorization_provider(target_id)
+                    if self._scale_authorization_provider is not None
+                    else None
+                )
+                confirmed = getattr(snapshot, "confirmed", None)
+                revision = getattr(snapshot, "revision", None)
+                identity_digest = getattr(snapshot, "identity_digest", None)
+                if (
+                    type(confirmed) is not bool
+                    or type(revision) is not int
+                    or not 0 <= revision < 2**31
+                    or (
+                        identity_digest is not None
+                        and (
+                            not isinstance(identity_digest, str)
+                            or not identity_digest
+                            or len(identity_digest) > 256
+                        )
+                    )
+                ):
+                    raise ValueError("invalid curtain scale authority")
+                result[target_id] = (confirmed, revision, identity_digest)
+            except Exception:  # noqa: BLE001
+                result[target_id] = (False, 0, None)
+        return result
 
 
 def _position(value: object) -> int:
