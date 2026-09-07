@@ -1,0 +1,846 @@
+{
+  "contract": {
+    "name": "hausmanhub-native-automation-snapshot",
+    "version": 1
+  },
+  "automations": [
+    {
+      "entity_id": "automation.vykliuchenie_sveta_po_nazhatiiu_knopki",
+      "state": "on",
+      "definition": {
+        "id": "1715696143987",
+        "alias": "Выключение света по нажатию кнопки",
+        "description": "",
+        "trigger": [
+          {
+            "platform": "device",
+            "domain": "mqtt",
+            "device_id": "55a8ca61f5f7c2da6b308b2d6e6eea4e",
+            "type": "action",
+            "subtype": "single"
+          }
+        ],
+        "condition": [
+          {
+            "condition": "or",
+            "conditions": [
+              {
+                "condition": "device",
+                "type": "is_on",
+                "device_id": "68b663b42bd83b74223f6192182e9aab",
+                "entity_id": "6b0f4584f9dbbc062622523404507ea7",
+                "domain": "switch"
+              },
+              {
+                "condition": "device",
+                "type": "is_on",
+                "device_id": "68b663b42bd83b74223f6192182e9aab",
+                "entity_id": "f4b4d9aa46893c2d28c591e8209d5c14",
+                "domain": "switch"
+              }
+            ]
+          }
+        ],
+        "action": [
+          {
+            "type": "turn_off",
+            "device_id": "68b663b42bd83b74223f6192182e9aab",
+            "entity_id": "6b0f4584f9dbbc062622523404507ea7",
+            "domain": "switch"
+          },
+          {
+            "type": "turn_off",
+            "device_id": "68b663b42bd83b74223f6192182e9aab",
+            "entity_id": "f4b4d9aa46893c2d28c591e8209d5c14",
+            "domain": "switch"
+          }
+        ],
+        "mode": "single"
+      }
+    },
+    {
+      "entity_id": "automation.vkliuchenie_sveta_po_knopke_detskaia",
+      "state": "on",
+      "definition": {
+        "id": "1715696249639",
+        "alias": "Включение света по кнопке детская",
+        "description": "",
+        "trigger": [
+          {
+            "platform": "device",
+            "domain": "mqtt",
+            "device_id": "55a8ca61f5f7c2da6b308b2d6e6eea4e",
+            "type": "action",
+            "subtype": "single"
+          }
+        ],
+        "condition": [
+          {
+            "condition": "device",
+            "type": "is_off",
+            "device_id": "68b663b42bd83b74223f6192182e9aab",
+            "entity_id": "6b0f4584f9dbbc062622523404507ea7",
+            "domain": "switch"
+          },
+          {
+            "condition": "device",
+            "type": "is_off",
+            "device_id": "68b663b42bd83b74223f6192182e9aab",
+            "entity_id": "f4b4d9aa46893c2d28c591e8209d5c14",
+            "domain": "switch"
+          }
+        ],
+        "action": [
+          {
+            "type": "turn_on",
+            "device_id": "68b663b42bd83b74223f6192182e9aab",
+            "entity_id": "6b0f4584f9dbbc062622523404507ea7",
+            "domain": "switch"
+          },
+          {
+            "type": "turn_on",
+            "device_id": "68b663b42bd83b74223f6192182e9aab",
+            "entity_id": "f4b4d9aa46893c2d28c591e8209d5c14",
+            "domain": "switch"
+          }
+        ],
+        "mode": "single"
+      }
+    },
+    {
+      "entity_id": "automation.obnaruzhenie_protechki_tualet",
+      "state": "off",
+      "definition": {
+        "id": "1716009214484",
+        "alias": "Обнаружение протечки туалет",
+        "description": "",
+        "trigger": [
+          {
+            "type": "moist",
+            "platform": "device",
+            "device_id": "d9bef83d49fb982141d53eb341a54880",
+            "entity_id": "8de30138870f774d83d0b05bb32686a7",
+            "domain": "binary_sensor"
+          }
+        ],
+        "condition": [],
+        "action": [
+          {
+            "service": "notify.me",
+            "metadata": {},
+            "data": {
+              "title": "Внимание ❗️❗️❗️❗️",
+              "message": "🆘 Протечка туалет❗️❗️❗️🆘"
+            }
+          }
+        ],
+        "mode": "single"
+      }
+    },
+    {
+      "entity_id": "automation.perezapusk_ha",
+      "state": "off",
+      "definition": {
+        "id": "1735193005877",
+        "alias": "Перезапуск HA",
+        "description": "",
+        "triggers": [
+          {
+            "trigger": "time",
+            "at": "02:00:00"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "action": "homeassistant.restart"
+          }
+        ],
+        "mode": "single"
+      }
+    },
+    {
+      "entity_id": "automation.datchik_protechki_kukhnia",
+      "state": "off",
+      "definition": {
+        "id": "1767412144158",
+        "alias": "Датчик протечки кухня",
+        "description": "",
+        "triggers": [
+          {
+            "type": "moist",
+            "device_id": "e9ee1c7f0f0a78970d4ddd627b69783d",
+            "entity_id": "c1f3b41da1a1cb2025b32aaf60d52ad7",
+            "domain": "binary_sensor",
+            "trigger": "device"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "metadata": {},
+            "data": {
+              "title": "Внимание ❗️❗️❗️❗️",
+              "message": "🆘 Протечка кухня❗️❗️❗️🆘"
+            },
+            "action": "notify.me"
+          }
+        ],
+        "mode": "single"
+      }
+    },
+    {
+      "entity_id": "automation.datchik_protechki_tualet",
+      "state": "off",
+      "definition": {
+        "id": "1767412233902",
+        "alias": "Датчик протечки туалет",
+        "description": "",
+        "triggers": [
+          {
+            "type": "moist",
+            "device_id": "f03d08223e47512f2b160519819dde29",
+            "entity_id": "2b8d75817ac79c556c4e0e6ff81887ea",
+            "domain": "binary_sensor",
+            "trigger": "device"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "metadata": {},
+            "data": {
+              "title": "Внимание ❗️❗️❗️❗️",
+              "message": "🆘 Протечка ванна❗️❗️❗️🆘"
+            },
+            "action": "notify.me"
+          }
+        ],
+        "mode": "single"
+      }
+    },
+    {
+      "entity_id": "automation.vneshnii_datchik_temperatury_termogolovki_gostinnaia",
+      "state": "on",
+      "definition": {
+        "id": "1767417411927",
+        "alias": "Внешний датчик температуры термоголовки гостинная",
+        "description": "",
+        "use_blueprint": {
+          "path": "photomoose/sonoff-trvzb-external-temperature-sensor-calibration.yaml",
+          "input": {
+            "external_temperature_sensor": "sensor.0xa4c138999277e5ea_temperature",
+            "trv_external_temperature_input": [
+              "number.0x8c73dafffe237e63_external_temperature_input"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "entity_id": "automation.novaia_avtomatizatsiia",
+      "state": "on",
+      "definition": {
+        "id": "1767419808340",
+        "alias": "Внешний датчик температуры термоголовки кухня",
+        "description": "",
+        "use_blueprint": {
+          "path": "photomoose/sonoff-trvzb-external-temperature-sensor-calibration.yaml",
+          "input": {
+            "external_temperature_sensor": "sensor.0xa4c138802a9dc76e_temperature",
+            "trv_external_temperature_input": [
+              "number.0x8c73dafffe1173c4_external_temperature_input"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "entity_id": "automation.novaia_avtomatizatsiia_2",
+      "state": "on",
+      "definition": {
+        "id": "1767459525210",
+        "alias": "Внешний датчик температуры термоголовки детская",
+        "description": "",
+        "use_blueprint": {
+          "path": "photomoose/sonoff-trvzb-external-temperature-sensor-calibration.yaml",
+          "input": {
+            "external_temperature_sensor": "sensor.0xa4c1389ecebec375_temperature",
+            "trv_external_temperature_input": [
+              "number.0xe456acfffe55bb53_external_temperature_input"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "entity_id": "automation.malyi_koridor_nochiu_vykliuchit_svet_cherez_3_minuty_otsutstviia",
+      "state": "on",
+      "definition": {
+        "id": "hausman_night_absence_small_corridor_light_off",
+        "alias": "Малый коридор: ночью выключить свет через 3 минуты отсутствия",
+        "description": "После 23:00 и до рассвета выключает люстру и её питание, если движение отсутствует 3 минуты.",
+        "triggers": [
+          {
+            "platform": "template",
+            "value_template": "{{ ((now().hour >= 23) or (now().hour < 12 and is_state(\"sun.sun\", \"below_horizon\"))) and is_state(\"binary_sensor.0xf044d3fffebaf11b_occupancy\", \"off\") }}",
+            "for": "00:03:00"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "action": "light.turn_off",
+            "target": {
+              "entity_id": "light.0xa4c138d69d102803"
+            }
+          },
+          {
+            "action": "switch.turn_off",
+            "target": {
+              "entity_id": "switch.0x603d61fffe75c334_1"
+            }
+          }
+        ],
+        "mode": "restart",
+        "max_exceeded": "silent"
+      }
+    },
+    {
+      "entity_id": "automation.tambur_nochiu_vykliuchit_svet_cherez_3_minuty_otsutstviia",
+      "state": "on",
+      "definition": {
+        "id": "hausman_night_absence_tambur_light_off",
+        "alias": "Тамбур: ночью выключить свет через 3 минуты отсутствия",
+        "description": "После 23:00 и до рассвета выключает люстру, точки и зеркало, если датчики присутствия и движения устойчиво не видят человека 3 минуты.",
+        "triggers": [
+          {
+            "platform": "template",
+            "value_template": "{{ ((now().hour >= 23) or (now().hour < 12 and is_state(\"sun.sun\", \"below_horizon\"))) and is_state(\"binary_sensor.0xf044d3fffe0160c0_occupancy\", \"off\") and is_state(\"binary_sensor.0xf044d3fffe11964d_occupancy\", \"off\") }}",
+            "for": "00:03:00"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "action": "light.turn_off",
+            "target": {
+              "entity_id": "light.0xa4c138784e5cbcd1"
+            }
+          },
+          {
+            "action": "switch.turn_off",
+            "target": {
+              "entity_id": [
+                "switch.0x603d61fffe761c63_1",
+                "switch.0xa4c138ffecbc07b5_l1"
+              ]
+            }
+          }
+        ],
+        "mode": "restart",
+        "max_exceeded": "silent"
+      }
+    },
+    {
+      "entity_id": "automation.dushevaia_vykliuchit_podsvetku_shkafa_pri_otsutstvii",
+      "state": "on",
+      "definition": {
+        "id": "hausman_shower_cabinet_off_absence_failsafe",
+        "alias": "Душевая: выключить подсветку шкафа при отсутствии",
+        "description": "Страховочное выключение подсветки шкафа после 5 минут устойчивого отсутствия, независимо от обновлений влажности.",
+        "triggers": [
+          {
+            "platform": "state",
+            "entity_id": "binary_sensor.0xf044d3fffe1a2303_occupancy",
+            "to": "off",
+            "for": "00:05:00"
+          }
+        ],
+        "conditions": [
+          {
+            "condition": "state",
+            "entity_id": "binary_sensor.0xf044d3fffe1a2303_occupancy",
+            "state": "off"
+          }
+        ],
+        "actions": [
+          {
+            "action": "switch.turn_off",
+            "target": {
+              "entity_id": "switch.0xa4c1385af46163eb"
+            }
+          }
+        ],
+        "mode": "restart",
+        "max_exceeded": "silent"
+      }
+    },
+    {
+      "entity_id": "automation.dushevaia_vkliuchit_vytiazhku_po_vysokoi_vlazhnosti",
+      "state": "on",
+      "definition": {
+        "id": "hausman_shower_fan_humidity_on_failsafe",
+        "alias": "Душевая: включить вытяжку по высокой влажности",
+        "description": "Включает вытяжку при влажности выше 55%, даже если человека уже нет.",
+        "triggers": [
+          {
+            "platform": "numeric_state",
+            "entity_id": "sensor.0xa4c138f42365236e_humidity",
+            "above": 55
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "action": "switch.turn_on",
+            "target": {
+              "entity_id": "switch.0xacbac0fffebbe3c4_2"
+            }
+          }
+        ],
+        "mode": "restart",
+        "max_exceeded": "silent"
+      }
+    },
+    {
+      "entity_id": "automation.dushevaia_vykliuchit_vytiazhku_pri_otsutstvii_i_normalnoi_vlazhnosti",
+      "state": "on",
+      "definition": {
+        "id": "hausman_shower_fan_off_absence_normal_humidity",
+        "alias": "Душевая: выключить вытяжку при отсутствии и нормальной влажности",
+        "description": "Выключает вытяжку, когда человека нет и влажность не выше 55% непрерывно 5 минут.",
+        "triggers": [
+          {
+            "platform": "template",
+            "value_template": "{{ is_state(\"binary_sensor.0xf044d3fffe1a2303_occupancy\", \"off\") and states(\"sensor.0xa4c138f42365236e_humidity\") | float(999) <= 55 }}",
+            "for": "00:05:00"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "action": "switch.turn_off",
+            "target": {
+              "entity_id": "switch.0xacbac0fffebbe3c4_2"
+            }
+          }
+        ],
+        "mode": "restart",
+        "max_exceeded": "silent"
+      }
+    },
+    {
+      "entity_id": "automation.tambur_svet_po_liuboi_klavishe_vykliuchatelia_zerkala",
+      "state": "on",
+      "definition": {
+        "id": "hausman_tambur_mirror_switch_all_keys",
+        "alias": "Тамбур: левая клавиша - зеркало",
+        "description": "Одиночное или двойное нажатие левой клавиши переключает подсветку зеркала. Правая клавиша зарезервирована для безопасного мастер-выключателя.",
+        "triggers": [
+          {
+            "platform": "device",
+            "domain": "mqtt",
+            "device_id": "9ca80bc371a9bbb4021c5639b10363d5",
+            "type": "action",
+            "subtype": "1_single"
+          },
+          {
+            "platform": "device",
+            "domain": "mqtt",
+            "device_id": "9ca80bc371a9bbb4021c5639b10363d5",
+            "type": "action",
+            "subtype": "1_double"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "action": "switch.toggle",
+            "target": {
+              "entity_id": "switch.0xa4c138ffecbc07b5_l1"
+            }
+          }
+        ],
+        "mode": "single",
+        "max_exceeded": "silent"
+      }
+    },
+    {
+      "entity_id": "automation.hausman_dushevaia_golosovaia_trevoga_iandeks",
+      "state": "on",
+      "definition": {
+        "id": "hausmanhub_shower_leak_yandex_alert",
+        "alias": "Hausman: душевая - голосовая тревога Яндекс",
+        "description": "При протечке от любого из трёх датчиков душевой перекрывает горячую и холодную воду, отправляет Telegram и сообщает о тревоге на доступных Яндекс Станциях. Планшет Hausman реагирует на состояние датчика напрямую.",
+        "triggers": [
+          {
+            "trigger": "state",
+            "entity_id": "binary_sensor.0x983268fffe63cb6c_water_leak",
+            "to": "on"
+          },
+          {
+            "trigger": "state",
+            "entity_id": "binary_sensor.0x8c73dafffe292427_water_leak",
+            "to": "on"
+          },
+          {
+            "trigger": "state",
+            "entity_id": "binary_sensor.0x8c73dafffec850cc_water_leak",
+            "to": "on"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "delay": "00:00:03"
+          },
+          {
+            "condition": "template",
+            "value_template": "{{ expand([\n  'binary_sensor.0x983268fffe63cb6c_water_leak',\n  'binary_sensor.0x8c73dafffe292427_water_leak',\n  'binary_sensor.0x8c73dafffec850cc_water_leak'\n]) | selectattr('state', 'eq', 'on') | list | count > 0 }}"
+          },
+          {
+            "parallel": [
+              {
+                "sequence": [
+                  {
+                    "action": "switch.turn_off",
+                    "continue_on_error": true,
+                    "target": {
+                      "entity_id": "switch.0x54ef441001301a68"
+                    }
+                  }
+                ]
+              },
+              {
+                "sequence": [
+                  {
+                    "action": "switch.turn_off",
+                    "continue_on_error": true,
+                    "target": {
+                      "entity_id": "switch.0x54ef44100130084b"
+                    }
+                  }
+                ]
+              },
+              {
+                "sequence": [
+                  {
+                    "action": "tts.yandex_station_say",
+                    "continue_on_error": true,
+                    "data": {
+                      "entity_id": [
+                        "media_player.yandex_station_lp0000000000006605730000f6075695",
+                        "media_player.yandex_station_m00h89900gxvxk",
+                        "media_player.yandex_station_l01a0wg002dabn",
+                        "media_player.yandex_station_l01rd8k009sw4b",
+                        "media_player.yandex_station_l00690e0047jpp",
+                        "media_player.yandex_station_x00jqh000p7nqb"
+                      ],
+                      "message": "{% set active = expand([\n  'binary_sensor.0x983268fffe63cb6c_water_leak',\n  'binary_sensor.0x8c73dafffe292427_water_leak',\n  'binary_sensor.0x8c73dafffec850cc_water_leak'\n]) | selectattr('state', 'eq', 'on')\n   | map(attribute='attributes.friendly_name') | list %}\nВнимание. Обнаружена протечка в душевой. {{ active | join(', ') }}. Вода перекрывается автоматически."
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "wait_template": "{{ is_state('switch.0x54ef441001301a68', 'off') and\n   is_state('switch.0x54ef44100130084b', 'off') }}",
+            "timeout": "00:00:15",
+            "continue_on_timeout": true
+          },
+          {
+            "if": [
+              {
+                "condition": "template",
+                "value_template": "{{ not (is_state('switch.0x54ef441001301a68', 'off') and\n        is_state('switch.0x54ef44100130084b', 'off')) }}"
+              }
+            ],
+            "then": [
+              {
+                "action": "tts.yandex_station_say",
+                "continue_on_error": true,
+                "data": {
+                  "entity_id": [
+                    "media_player.yandex_station_lp0000000000006605730000f6075695",
+                    "media_player.yandex_station_m00h89900gxvxk",
+                    "media_player.yandex_station_l01a0wg002dabn",
+                    "media_player.yandex_station_l01rd8k009sw4b",
+                    "media_player.yandex_station_l00690e0047jpp",
+                    "media_player.yandex_station_x00jqh000p7nqb"
+                  ],
+                  "message": "Внимание. Не удалось подтвердить перекрытие воды после протечки в душевой. Перекройте горячую и холодную воду вручную."
+                }
+              }
+            ]
+          }
+        ],
+        "mode": "queued",
+        "max": 3
+      }
+    },
+    {
+      "entity_id": "automation.hausmanhub_dialog_alisy_cherez_assist",
+      "state": "off",
+      "definition": {
+        "id": "hausmanhub_yandex_dialog_conversation",
+        "alias": "HausmanHub: диалог Алисы через Assist",
+        "description": "Передает запросы приватного навыка Хаусман Хаб в Home Assistant Conversation API",
+        "trigger": [
+          {
+            "platform": "event",
+            "event_type": "yandex_intent"
+          }
+        ],
+        "condition": [],
+        "action": [
+          {
+            "variables": {
+              "request_text": "{{ trigger.event.data.text | default('', true) | lower }}",
+              "room_key": "{% if 'гостин' in request_text %}living {% elif 'кухн' in request_text %}kitchen {% elif 'детск' in request_text %}kids {% elif 'спальн' in request_text %}bedroom {% elif 'ванн' in request_text %}bathroom {% elif 'туалет' in request_text %}toilet {% elif 'прихож' in request_text %}hallway {% else %}none{% endif %}",
+              "room_phrase": "{% if room_key == 'living' %}в гостиной {% elif room_key == 'kitchen' %}на кухне {% elif room_key == 'kids' %}в детской {% elif room_key == 'bedroom' %}в спальне {% elif room_key == 'bathroom' %}в ванной {% elif room_key == 'toilet' %}в туалете {% elif room_key == 'hallway' %}в прихожей {% else %}в доме{% endif %}",
+              "temperature_entity": "{% if room_key == 'living' %}sensor.0xa4c138999277e5ea_temperature {% elif room_key == 'kitchen' %}sensor.0xa4c138802a9dc76e_temperature {% elif room_key == 'kids' %}sensor.0xa4c1389ecebec375_temperature {% else %}{% endif %}",
+              "humidity_entity": "{% if room_key == 'living' %}sensor.0xa4c138999277e5ea_humidity {% elif room_key == 'kitchen' %}sensor.0xa4c138802a9dc76e_humidity {% elif room_key == 'kids' %}sensor.0xa4c1389ecebec375_humidity {% else %}{% endif %}",
+              "co2_value": "{{ states('sensor.0xa4c138ccc1c6de73_co2') | int(0) }}",
+              "air_label": "{% if co2_value | int(0) == 0 %}не определено {% elif co2_value | int(0) < 800 %}хорошее {% elif co2_value | int(0) < 1200 %}допустимое {% else %}требует проветривания{% endif %}"
+            }
+          },
+          {
+            "choose": [
+              {
+                "conditions": "{{ 'приветствие при возвращении домой' in request_text }}",
+                "sequence": [
+                  {
+                    "event": "yandex_intent_response",
+                    "event_data": {
+                      "text": "Добро пожаловать домой. В гостиной {{ states('sensor.0xa4c138999277e5ea_temperature') | replace('.', ',') }} градуса, влажность {{ states('sensor.0xa4c138999277e5ea_humidity') }}%. Уровень CO₂ {{ co2_value }} ppm, качество воздуха {{ air_label }}. Что ещё рассказать?",
+                      "end_session": false
+                    }
+                  }
+                ]
+              },
+              {
+                "conditions": "{{ 'что происходит дома' in request_text or 'состояние дома' in request_text or 'сводк' in request_text }}",
+                "sequence": [
+                  {
+                    "event": "yandex_intent_response",
+                    "event_data": {
+                      "text": "Дома всё спокойно. В гостиной {{ states('sensor.0xa4c138999277e5ea_temperature') | replace('.', ',') }} градуса и влажность {{ states('sensor.0xa4c138999277e5ea_humidity') }}%. На кухне {{ states('sensor.0xa4c138802a9dc76e_temperature') | replace('.', ',') }} градуса, в детской {{ states('sensor.0xa4c1389ecebec375_temperature') | replace('.', ',') }} градуса. Уровень CO₂ {{ co2_value }} ppm, качество воздуха {{ air_label }}.",
+                      "end_session": false
+                    }
+                  }
+                ]
+              },
+              {
+                "conditions": "{{ 'что ты умеешь' in request_text or 'что можно спросить' in request_text or 'помощ' in request_text }}",
+                "sequence": [
+                  {
+                    "event": "yandex_intent_response",
+                    "event_data": {
+                      "text": "Я могу дать сводку по дому, назвать температуру и влажность в гостиной, на кухне и в детской, оценить качество воздуха, проверить протечки, открытые двери и окна, безопасность и устройства с критически низким зарядом.",
+                      "end_session": false
+                    }
+                  }
+                ]
+              },
+              {
+                "conditions": "{{ 'протеч' in request_text or 'вода на полу' in request_text }}",
+                "sequence": [
+                  {
+                    "event": "yandex_intent_response",
+                    "event_data": {
+                      "text": "{% set ns = namespace(items=[]) %} {% for item in states.binary_sensor %}\n  {% if item.attributes.device_class == 'moisture' and item.state == 'on' %}\n    {% set ns.items = ns.items + [(item.attributes.friendly_name | default(item.entity_id, true)) | replace(' Дверь', '') | replace(' Окно', '')] %}\n  {% endif %}\n{% endfor %} {% if ns.items | count == 0 %}\n  Активных протечек не обнаружено.\n{% else %}\n  Внимание. Обнаружена протечка: {{ ns.items | join(', ') }}.\n{% endif %}",
+                      "end_session": false
+                    }
+                  }
+                ]
+              },
+              {
+                "conditions": "{{ ('что' in request_text and 'открыт' in request_text) or 'двер' in request_text or 'окн' in request_text }}",
+                "sequence": [
+                  {
+                    "event": "yandex_intent_response",
+                    "event_data": {
+                      "text": "{% set ns = namespace(items=[]) %} {% for item in states.binary_sensor %}\n  {% if item.attributes.device_class in ['door', 'window', 'opening'] and item.state == 'on' and 'шторк' not in (item.attributes.friendly_name | default('', true) | lower) and 'кондиционер' not in (item.attributes.friendly_name | default('', true) | lower) %}\n    {% set ns.items = ns.items + [(item.attributes.friendly_name | default(item.entity_id, true)) | replace(' Дверь', '') | replace(' Окно', '')] %}\n  {% endif %}\n{% endfor %} {% if ns.items | count == 0 %}\n  Все контролируемые двери и окна закрыты.\n{% else %}\n  Сейчас открыто: {{ ns.items[:5] | join(', ') }}.\n  {% if ns.items | count > 5 %}И ещё {{ ns.items | count - 5 }}.{% endif %}\n{% endif %}",
+                      "end_session": false
+                    }
+                  }
+                ]
+              },
+              {
+                "conditions": "{{ 'батаре' in request_text or 'заряд' in request_text }}",
+                "sequence": [
+                  {
+                    "event": "yandex_intent_response",
+                    "event_data": {
+                      "text": "{% set ns = namespace(items=[]) %} {% for item in states.sensor %}\n  {% if item.attributes.device_class == 'battery'\n        and item.state not in ['unknown', 'unavailable']\n        and item.state | float(100) < 8 %}\n    {% set ns.items = ns.items + [(item.attributes.friendly_name | default(item.entity_id, true)) ~ ' ' ~ item.state ~ '%'] %}\n  {% endif %}\n{% endfor %} {% if ns.items | count == 0 %}\n  Устройств с зарядом ниже восьми процентов нет.\n{% else %}\n  Критически низкий заряд: {{ ns.items[:5] | join(', ') }}.\n  {% if ns.items | count > 5 %}И ещё {{ ns.items | count - 5 }}.{% endif %}\n{% endif %}",
+                      "end_session": false
+                    }
+                  }
+                ]
+              },
+              {
+                "conditions": "{{ 'безопасност' in request_text or 'всё ли спокойно' in request_text or 'все ли спокойно' in request_text }}",
+                "sequence": [
+                  {
+                    "event": "yandex_intent_response",
+                    "event_data": {
+                      "text": "{% set ns = namespace(leaks=[], hazards=[], openings=[]) %} {% for item in states.binary_sensor %}\n  {% if item.state == 'on' and item.attributes.device_class == 'moisture' %}\n    {% set ns.leaks = ns.leaks + [(item.attributes.friendly_name | default(item.entity_id, true)) | replace(' Дверь', '') | replace(' Окно', '')] %}\n  {% elif item.state == 'on' and item.attributes.device_class in ['smoke', 'gas'] %}\n    {% set ns.hazards = ns.hazards + [(item.attributes.friendly_name | default(item.entity_id, true)) | replace(' Дверь', '') | replace(' Окно', '')] %}\n  {% elif item.state == 'on' and item.attributes.device_class in ['door', 'window', 'opening'] and 'шторк' not in (item.attributes.friendly_name | default('', true) | lower) and 'кондиционер' not in (item.attributes.friendly_name | default('', true) | lower) %}\n    {% set ns.openings = ns.openings + [(item.attributes.friendly_name | default(item.entity_id, true)) | replace(' Дверь', '') | replace(' Окно', '')] %}\n  {% endif %}\n{% endfor %} {% if ns.leaks | count == 0 and ns.hazards | count == 0 %}\n  Протечек, дыма и газа не обнаружено.\n{% else %}\n  Внимание.\n  {% if ns.leaks | count > 0 %}Протечка: {{ ns.leaks | join(', ') }}.{% endif %}\n  {% if ns.hazards | count > 0 %}Тревога: {{ ns.hazards | join(', ') }}.{% endif %}\n{% endif %} {% if ns.openings | count == 0 %}\n  Контролируемые двери и окна закрыты.\n{% else %}\n  Открыто: {{ ns.openings[:4] | join(', ') }}.\n{% endif %}",
+                      "end_session": false
+                    }
+                  }
+                ]
+              },
+              {
+                "conditions": "{{ 'co2' in request_text or 'co₂' in request_text or 'углекисл' in request_text or 'качество воздуха' in request_text }}",
+                "sequence": [
+                  {
+                    "event": "yandex_intent_response",
+                    "event_data": {
+                      "text": "Уровень CO₂ {{ co2_value }} ppm. Качество воздуха {{ air_label }}.",
+                      "end_session": false
+                    }
+                  }
+                ]
+              },
+              {
+                "conditions": "{{ room_key != 'none' and temperature_entity | trim != '' and ('климат' in request_text or ('температур' in request_text and 'влажност' in request_text)) }}",
+                "sequence": [
+                  {
+                    "event": "yandex_intent_response",
+                    "event_data": {
+                      "text": "{{ room_phrase | capitalize }} {{ states(temperature_entity | trim) | replace('.', ',') }} градуса, влажность {{ states(humidity_entity | trim) }}%.",
+                      "end_session": false
+                    }
+                  }
+                ]
+              },
+              {
+                "conditions": "{{ 'температур' in request_text and room_key != 'none' and temperature_entity | trim != '' }}",
+                "sequence": [
+                  {
+                    "event": "yandex_intent_response",
+                    "event_data": {
+                      "text": "Температура {{ room_phrase }} {{ states(temperature_entity | trim) | replace('.', ',') }} градуса.",
+                      "end_session": false
+                    }
+                  }
+                ]
+              },
+              {
+                "conditions": "{{ 'влажност' in request_text and room_key != 'none' and humidity_entity | trim != '' }}",
+                "sequence": [
+                  {
+                    "event": "yandex_intent_response",
+                    "event_data": {
+                      "text": "Влажность {{ room_phrase }} {{ states(humidity_entity | trim) }}%.",
+                      "end_session": false
+                    }
+                  }
+                ]
+              },
+              {
+                "conditions": "{{ room_key != 'none' and temperature_entity | trim == '' and ('температур' in request_text or 'влажност' in request_text or 'климат' in request_text) }}",
+                "sequence": [
+                  {
+                    "event": "yandex_intent_response",
+                    "event_data": {
+                      "text": "Для этой комнаты пока не найден доступный климатический датчик.",
+                      "end_session": false
+                    }
+                  }
+                ]
+              },
+              {
+                "conditions": "{{ 'температур' in request_text and room_key == 'none' }}",
+                "sequence": [
+                  {
+                    "event": "yandex_intent_response",
+                    "event_data": {
+                      "text": "В гостиной {{ states('sensor.0xa4c138999277e5ea_temperature') | replace('.', ',') }} градуса, на кухне {{ states('sensor.0xa4c138802a9dc76e_temperature') | replace('.', ',') }} градуса, в детской {{ states('sensor.0xa4c1389ecebec375_temperature') | replace('.', ',') }} градуса.",
+                      "end_session": false
+                    }
+                  }
+                ]
+              },
+              {
+                "conditions": "{{ 'влажност' in request_text and room_key == 'none' }}",
+                "sequence": [
+                  {
+                    "event": "yandex_intent_response",
+                    "event_data": {
+                      "text": "В гостиной влажность {{ states('sensor.0xa4c138999277e5ea_humidity') }}%, на кухне {{ states('sensor.0xa4c138802a9dc76e_humidity') }}%, в детской {{ states('sensor.0xa4c1389ecebec375_humidity') }}%.",
+                      "end_session": false
+                    }
+                  }
+                ]
+              }
+            ],
+            "default": [
+              {
+                "service": "conversation.process",
+                "data": {
+                  "text": "{{ trigger.event.data.text }}",
+                  "language": "ru"
+                },
+                "response_variable": "agent_response"
+              },
+              {
+                "event": "yandex_intent_response",
+                "event_data": {
+                  "text": "{{ agent_response.response.speech.plain.speech | default('Не удалось получить ответ от Home Assistant', true) }}",
+                  "end_session": false
+                }
+              }
+            ]
+          }
+        ],
+        "mode": "queued",
+        "max": 5
+      }
+    },
+    {
+      "entity_id": "automation.hausmanhub_privetstvie_pri_vozvrashchenii_domoi",
+      "state": "off",
+      "definition": {
+        "id": "hausmanhub_yandex_welcome_home",
+        "alias": "HausmanHub: приветствие при возвращении домой",
+        "description": "Через три секунды после снятия режима Никого нет дома запускает приватный навык на Станции Мини в гостиной",
+        "trigger": [
+          {
+            "platform": "state",
+            "entity_id": "input_boolean.away_from_home",
+            "from": "on",
+            "to": "off"
+          }
+        ],
+        "condition": [
+          {
+            "condition": "template",
+            "value_template": "{{ states('media_player.yandex_station_m00h89900gxvxk') not in ['unknown', 'unavailable'] }}"
+          }
+        ],
+        "action": [
+          {
+            "delay": "00:00:03"
+          },
+          {
+            "condition": "state",
+            "entity_id": "input_boolean.away_from_home",
+            "state": "off"
+          },
+          {
+            "service": "yandex_station.send_command",
+            "target": {
+              "entity_id": "media_player.yandex_station_m00h89900gxvxk"
+            },
+            "data": {
+              "text": "попроси Хаусман Хаб приветствие при возвращении домой"
+            }
+          }
+        ],
+        "mode": "restart"
+      }
+    }
+  ]
+}

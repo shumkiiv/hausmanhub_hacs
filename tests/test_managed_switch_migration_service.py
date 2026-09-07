@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 from functools import wraps
+import hashlib
+import json
+from pathlib import Path
 import unittest
 from types import SimpleNamespace
 
@@ -12,6 +15,7 @@ from custom_components.hausman_hub.application.managed_switch_migration import (
     MIGRATION_MANIFEST,
     ManagedSwitchMigration,
     ManagedSwitchMigrationConflict,
+    _initial_journal,
 )
 
 
@@ -67,9 +71,13 @@ from custom_components.hausman_hub.domain.scenarios import (
 )
 
 
-def _registry(*, migrated: set[str] = frozenset()) -> ScenarioRegistry:
+def _registry(
+    *, migrated: set[str] = frozenset(), include_creates: bool = False
+) -> ScenarioRegistry:
     scenarios = []
     for entry in MIGRATION_MANIFEST:
+        if entry.operation == "create" and not include_creates:
+            continue
         done = entry.scenario_id in migrated
         metadata = ScenarioNodeRedMetadata(
             flow_id=f"flow-{entry.scenario_id}", flow_revision=8,
@@ -100,9 +108,25 @@ def _registry(*, migrated: set[str] = frozenset()) -> ScenarioRegistry:
         )
         scenarios.append(Scenario.from_definition(
             entry.scenario_id, entry.scenario_id, definition, group="system",
-            revision=entry.legacy_revision + (1 if done else 0), protected=True,
+            enabled=False if entry.operation == "create" else True,
+            revision=(
+                0
+                if entry.operation == "create"
+                else entry.legacy_revision + (1 if done else 0)
+            ),
+            protected=True,
         ))
     return ScenarioRegistry(scenarios=tuple(scenarios))
+
+
+def _registry_from_inventory58() -> ScenarioRegistry:
+    payload = json.loads(
+        (Path(__file__).parents[1] / "fixtures" / "hausmanhub_scenario_consolidation_v1" / "scenarios58.json").read_text()
+    )
+    registry = ScenarioRegistry.from_storage(payload)
+    assert len(registry.scenarios) == 58
+    assert sum(item.enabled for item in registry.scenarios) == 46
+    return registry
 
 
 class RegistryStore:
@@ -128,14 +152,52 @@ class RegistryStore:
 class Backend:
     def __init__(self, deployed=None):
         self.deployed = deployed or {
-            item.scenario_id: item.legacy_source_hash for item in MIGRATION_MANIFEST
+            item.scenario_id: item.legacy_source_hash
+            for item in MIGRATION_MANIFEST
+            if item.operation == "replace"
         }
         self.updated = []
         self.restored = []
+        self.deleted = []
         self.commits = 0
-        self.revisions = {
-            item.scenario_id: "revision.stable" for item in MIGRATION_MANIFEST
+        self.revisions = {scenario_id: "revision.stable" for scenario_id in self.deployed}
+        self.sources = {
+            scenario_id: f"legacy:{scenario_id}"
+            for scenario_id in self.deployed
         }
+
+    async def async_read_source(self, scenario_id, _flow_id):
+        return {
+            "source_hash": self.deployed[scenario_id],
+            "source": self.sources[scenario_id],
+        }
+
+    async def async_reconcile_created_release_source(
+        self, scenario_id, expected_source_hash
+    ):
+        if scenario_id not in self.deployed:
+            return None
+        assert self.deployed[scenario_id] == expected_source_hash
+        return {
+            "flow_id": f"flow-{scenario_id}",
+            "flow_revision": 1,
+            "global_revision": "revision.stable",
+        }
+
+    async def async_prepare_new_release_source(self, scenario_id, _title, source, expected):
+        assert scenario_id not in self.deployed
+        assert expected
+        self.deployed[scenario_id] = expected
+        self.sources[scenario_id] = source
+        self.revisions[scenario_id] = "revision.stable"
+        self.updated.append(scenario_id)
+        return {"flow_id": f"flow-{scenario_id}", "flow_revision": 1}
+
+    async def async_delete_managed_flow(self, scenario_id, _flow_id, *, expected_source_hash):
+        assert self.deployed[scenario_id] == expected_source_hash
+        del self.deployed[scenario_id]
+        self.sources.pop(scenario_id, None)
+        self.deleted.append(scenario_id)
 
     async def async_verify_managed_topology(self, scenario_id, _flow_id):
         return {
@@ -148,14 +210,29 @@ class Backend:
         assert not validate_only and self.deployed[scenario_id] == expected
         entry = next(item for item in MIGRATION_MANIFEST if item.scenario_id == scenario_id)
         self.deployed[scenario_id] = entry.new_source_hash
+        self.sources[scenario_id] = source
         self.updated.append(scenario_id)
         return {"saved": True, "proposed_source_hash": entry.new_source_hash, "previous_source": f"legacy:{scenario_id}"}
+
+    async def async_prepare_release_source(
+        self, scenario_id, definition, flow_id, source, expected, catalog
+    ):
+        return await self.async_update_source(
+            scenario_id,
+            definition,
+            flow_id,
+            source,
+            expected,
+            catalog,
+            validate_only=False,
+        )
 
     async def async_restore_source(self, scenario_id, _flow_id, _source, *, expected_current_hash):
         if self.deployed[scenario_id] != expected_current_hash:
             raise NodeRedSourceConflict(expected_current_hash, self.deployed[scenario_id])
         entry = next(item for item in MIGRATION_MANIFEST if item.scenario_id == scenario_id)
         self.deployed[scenario_id] = entry.legacy_source_hash
+        self.sources[scenario_id] = _source
         self.restored.append(scenario_id)
 
     async def async_commit_last_prepare(self):
@@ -228,16 +305,208 @@ async def test_batch_migration_updates_three_sources_and_registry_once() -> None
     service = _service(store, backend)
     await service.async_load()
     assert await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST) == "completed"
-    assert set(backend.updated) == {item.scenario_id for item in MIGRATION_MANIFEST}
+    assert set(backend.updated) == {
+        item.scenario_id for item in MIGRATION_MANIFEST if item.operation == "create"
+    }
     assert len(store.saved) == 1
     assert backend.commits == 0
     for entry in MIGRATION_MANIFEST:
         scenario = store.registry.scenario(entry.scenario_id)
-        assert scenario.revision == entry.legacy_revision + 1
+        assert scenario.revision == (
+            0 if entry.operation == "create" else entry.legacy_revision + 1
+        )
         assert scenario.definition.node_red.source_hash == entry.new_source_hash
         assert scenario.definition.node_red.input_target_ids == entry.input_target_ids
     await service.async_finalize_managed_switch_migration(MIGRATION_MANIFEST)
+    await service.async_commit_managed_switch_migration(MIGRATION_MANIFEST)
     assert backend.commits == 1
+
+
+async def test_snapshot_three_to_eight_creates_only_absent_controllers_disabled() -> None:
+    store = RegistryStore(_registry_from_inventory58())
+    backend = Backend({
+        item.scenario_id: item.legacy_source_hash
+        for item in MIGRATION_MANIFEST
+        if item.operation == "replace"
+    })
+    service = _service(store, backend)
+    await service.async_load()
+
+    await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
+
+    created = [item for item in MIGRATION_MANIFEST if item.operation == "create"]
+    assert {item.scenario_id for item in created} <= set(backend.updated)
+    for entry in created:
+        scenario = store.registry.scenario(entry.scenario_id)
+        assert scenario is not None
+        assert scenario.enabled is False
+        assert scenario.definition.node_red is not None
+        assert scenario.definition.node_red.flow_id == f"flow-{entry.scenario_id}"
+
+
+async def test_create_failure_compensates_only_previously_created_flows() -> None:
+    class FailSecondCreate(Backend):
+        async def async_prepare_new_release_source(self, scenario_id, title, source, expected):
+            if self.updated:
+                raise RuntimeError("Node-RED unavailable")
+            return await super().async_prepare_new_release_source(scenario_id, title, source, expected)
+
+    store = RegistryStore(_registry_from_inventory58())
+    backend = FailSecondCreate({
+        item.scenario_id: item.legacy_source_hash
+        for item in MIGRATION_MANIFEST
+        if item.operation == "replace"
+    })
+    service = _service(store, backend)
+    await service.async_load()
+
+    with unittest.TestCase().assertRaisesRegex(RuntimeError, "Node-RED unavailable"):
+        await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
+
+    assert backend.deleted == ["system-toilet-comfort-controller"]
+    assert store.registry == _registry_from_inventory58()
+
+
+async def test_replace_source_preparation_runs_outside_registry_lock() -> None:
+    original = MIGRATION_MANIFEST[0]
+    new_source = "// replacement source"
+    replacement = replace(
+        original,
+        source=new_source,
+        new_source_hash=hashlib.sha256(new_source.encode()).hexdigest(),
+    )
+    entries = (replacement, *MIGRATION_MANIFEST[1:])
+
+    class SourceReplaceBackend(Backend):
+        async def async_prepare_release_source(
+            self, scenario_id, _definition, _flow_id, source, expected, _catalog
+        ):
+            assert not service._lock.locked()
+            assert scenario_id == replacement.scenario_id
+            assert source == new_source
+            assert self.deployed[scenario_id] == expected
+            previous_source = self.sources[scenario_id]
+            self.deployed[scenario_id] = replacement.new_source_hash
+            self.sources[scenario_id] = source
+            self.updated.append(scenario_id)
+            return {
+                "saved": True,
+                "proposed_source_hash": replacement.new_source_hash,
+                "previous_source": previous_source,
+            }
+
+    store = RegistryStore(_registry())
+    backend = SourceReplaceBackend()
+    service = _service(store, backend)
+    await service.async_load()
+
+    await service.async_apply_managed_switch_migration(entries)
+
+    assert replacement.scenario_id in backend.updated
+    migrated = store.registry.scenario(replacement.scenario_id)
+    assert migrated is not None and migrated.definition.node_red is not None
+    assert migrated.definition.node_red.source_hash == replacement.new_source_hash
+    assert service._managed_switch_replace_staging[replacement.scenario_id][1] == f"legacy:{replacement.scenario_id}"
+
+
+async def test_replace_source_staging_restores_exact_source_after_cas_conflict() -> None:
+    original = MIGRATION_MANIFEST[0]
+    new_source = "// replacement source"
+    replacement = replace(
+        original,
+        source=new_source,
+        new_source_hash=hashlib.sha256(new_source.encode()).hexdigest(),
+    )
+    entries = (replacement, *MIGRATION_MANIFEST[1:])
+
+    class SourceReplaceBackend(Backend):
+        async def async_prepare_release_source(
+            self, scenario_id, _definition, _flow_id, _source, expected, _catalog
+        ):
+            assert self.deployed[scenario_id] == expected
+            previous_source = self.sources[scenario_id]
+            self.deployed[scenario_id] = replacement.new_source_hash
+            self.sources[scenario_id] = _source
+            return {
+                "saved": True,
+                "proposed_source_hash": replacement.new_source_hash,
+                "previous_source": previous_source,
+            }
+
+    original_registry = _registry()
+    store = RegistryStore(original_registry)
+    backend = SourceReplaceBackend()
+    service = _service(store, backend)
+    await service.async_load()
+    journal = _initial_journal(
+        await service.async_capture_managed_switch_migration(entries),
+        entries,
+    )
+    await service.async_stage_managed_switch_migration(
+        entries,
+        journal=journal,
+    )
+    scenario = original_registry.scenario(replacement.scenario_id)
+    assert scenario is not None
+    service._registry = ScenarioRegistry(scenarios=tuple(
+        replace(item, revision=99) if item.id == scenario.id else item
+        for item in original_registry.scenarios
+    ))
+
+    with unittest.TestCase().assertRaises(ScenarioRevisionConflictError):
+        await service.async_apply_managed_switch_migration(
+            entries,
+            journal=journal,
+        )
+
+    assert backend.deployed[replacement.scenario_id] == replacement.legacy_source_hash
+    assert backend.restored == [replacement.scenario_id]
+    assert service._managed_switch_replace_staging == {}
+
+
+async def test_staged_flows_are_recovered_when_the_registry_cas_changes() -> None:
+    """External preparation must not leave orphan flows after a CAS conflict."""
+
+    original = _registry_from_inventory58()
+    store = RegistryStore(original)
+    backend = Backend({
+        item.scenario_id: item.legacy_source_hash
+        for item in MIGRATION_MANIFEST
+        if item.operation == "replace"
+    })
+    service = _service(store, backend)
+    await service.async_load()
+
+    journal = _initial_journal(
+        await service.async_capture_managed_switch_migration(
+            MIGRATION_MANIFEST
+        ),
+        MIGRATION_MANIFEST,
+    )
+    await service.async_stage_managed_switch_migration(
+        MIGRATION_MANIFEST,
+        journal=journal,
+    )
+    first = original.scenario("system-shower-comfort-controller")
+    assert first is not None
+    service._registry = ScenarioRegistry(scenarios=(
+        *(
+            replace(item, revision=99) if item.id == first.id else item
+            for item in original.scenarios
+        ),
+    ))
+
+    with unittest.TestCase().assertRaises(ScenarioRevisionConflictError):
+        await service.async_apply_managed_switch_migration(
+            MIGRATION_MANIFEST,
+            journal=journal,
+        )
+
+    assert set(backend.deleted) == {
+        item.scenario_id for item in MIGRATION_MANIFEST if item.operation == "create"
+    }
+    assert service._managed_switch_create_staging == {}
+    assert store.registry == original
 
 
 async def test_prepared_restart_normalizes_permuted_legacy_inputs() -> None:
@@ -253,12 +522,16 @@ async def test_prepared_restart_normalizes_permuted_legacy_inputs() -> None:
     backend = Backend()
     service = _service(registry_store, backend)
     await service.async_load()
+    before = await service.async_capture_managed_switch_migration(
+        MIGRATION_MANIFEST
+    )
     receipt_store = MigrationReceiptStore(
         {
             "migrationId": "managed-switches",
-            "version": 2,
+            "version": 3,
             "state": "prepared",
             "manifestHash": MANIFEST_HASH,
+            "journal": _initial_journal(before, MIGRATION_MANIFEST),
         }
     )
 
@@ -266,16 +539,14 @@ async def test_prepared_restart_normalizes_permuted_legacy_inputs() -> None:
 
     migrated = registry_store.registry.scenario(tambur.scenario_id)
     assert migrated is not None and migrated.definition.node_red is not None
-    assert migrated.revision == 8
+    assert migrated.revision == 9
     assert migrated.definition.node_red.input_target_ids == tambur.input_target_ids
-    assert receipt_store.saved == [
-        {
-            "migrationId": "managed-switches",
-            "version": 2,
-            "state": "completed",
-            "manifestHash": MANIFEST_HASH,
-        }
-    ]
+    assert all(
+        receipt["state"] == "prepared" for receipt in receipt_store.saved[:-1]
+    )
+    assert receipt_store.saved[-1]["state"] == "completed"
+    assert receipt_store.saved[-1]["journal"]["before"]["registry"]["scenarios"]
+    assert receipt_store.saved[-1]["journal"]["after"]["registry"]["scenarios"]
 
 
 async def test_permuted_legacy_inputs_with_wrong_member_fail_before_mutation() -> None:
@@ -303,7 +574,11 @@ async def test_permuted_legacy_inputs_with_wrong_member_fail_before_mutation() -
 
 
 async def test_permuted_migrated_inputs_remain_a_strict_conflict() -> None:
-    migrated_ids = {item.scenario_id for item in MIGRATION_MANIFEST}
+    migrated_ids = {
+        item.scenario_id
+        for item in MIGRATION_MANIFEST
+        if item.operation == "replace"
+    }
     tambur = next(
         item
         for item in MIGRATION_MANIFEST
@@ -318,7 +593,11 @@ async def test_permuted_migrated_inputs_remain_a_strict_conflict() -> None:
         )
     )
     backend = Backend(
-        {item.scenario_id: item.new_source_hash for item in MIGRATION_MANIFEST}
+        {
+            item.scenario_id: item.new_source_hash
+            for item in MIGRATION_MANIFEST
+            if item.operation == "replace"
+        }
     )
     service = _service(registry_store, backend)
     await service.async_load()
@@ -330,34 +609,17 @@ async def test_permuted_migrated_inputs_remain_a_strict_conflict() -> None:
     assert registry_store.saved == []
 
 
-async def test_legacy_phase_a_then_binding_phase_b_reaches_revision_three() -> None:
+async def test_snapshot_binding_is_not_replayed_after_the_v3_migration() -> None:
     store = RegistryStore(_registry())
     backend = Backend()
     service = _service(store, backend)
     await service.async_load()
 
     await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
-    await service.async_finalize_managed_switch_migration(MIGRATION_MANIFEST)
-    await service.async_apply_managed_switch_binding_migration(
-        BINDING_MIGRATION_MANIFEST
-    )
-    await service.async_finalize_managed_switch_binding_migration(
-        BINDING_MIGRATION_MANIFEST
-    )
-
-    small = store.registry.scenario("system-small-corridor-light-controller")
-    assert small.revision == 3
-    assert next(
-        trigger
-        for trigger in small.definition.triggers
-        if trigger.id == "manual_chandelier_on"
-    ).target_id == "entity_4be32416634e6416"
-    assert store.registry.scenario("system-shower-comfort-controller").revision == 4
-    assert store.registry.scenario("system-tambur-adaptive-controller").revision == 8
-
-    await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
+    await service.async_verify_managed_switch_migration(MIGRATION_MANIFEST)
     await service.async_verify_managed_switch_migration(MIGRATION_MANIFEST)
     await service.async_finalize_managed_switch_migration(MIGRATION_MANIFEST)
+    await service.async_commit_managed_switch_migration(MIGRATION_MANIFEST)
 
 
 async def test_partial_restart_reconciles_new_source_without_redeploy() -> None:
@@ -365,6 +627,7 @@ async def test_partial_restart_reconciles_new_source_without_redeploy() -> None:
     backend = Backend({
         item.scenario_id: partial.new_source_hash if item is partial else item.legacy_source_hash
         for item in MIGRATION_MANIFEST
+        if item.operation == "replace"
     })
     store = RegistryStore(_registry())
     service = _service(store, backend)
@@ -377,14 +640,22 @@ async def test_partial_restart_reconciles_new_source_without_redeploy() -> None:
 
 
 async def test_completed_registry_is_verified_without_any_mutation() -> None:
-    migrated = {item.scenario_id for item in MIGRATION_MANIFEST}
-    backend = Backend({item.scenario_id: item.new_source_hash for item in MIGRATION_MANIFEST})
-    store = RegistryStore(_registry(migrated=migrated))
+    backend = Backend()
+    store = RegistryStore(_registry())
     service = _service(store, backend)
     await service.async_load()
-    assert await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST) == "completed"
-    assert backend.updated == []
-    assert store.saved == []
+    receipt = MigrationReceiptStore(None)
+    assert await ManagedSwitchMigration(service, receipt).async_apply() == "completed"
+    updated = list(backend.updated)
+    registry_saves = len(store.saved)
+    receipt_saves = len(receipt.saved)
+
+    restarted = _service(store, backend)
+    await restarted.async_load()
+    assert await ManagedSwitchMigration(restarted, receipt).async_apply() == "completed"
+    assert backend.updated == updated
+    assert len(store.saved) == registry_saves
+    assert len(receipt.saved) == receipt_saves
 
 
 async def test_final_verification_requires_one_cross_scenario_cas_snapshot() -> None:
@@ -393,7 +664,9 @@ async def test_final_verification_requires_one_cross_scenario_cas_snapshot() -> 
         {item.scenario_id: item.new_source_hash for item in MIGRATION_MANIFEST}
     )
     backend.revisions[MIGRATION_MANIFEST[-1].scenario_id] = "revision.drifted"
-    service = _service(RegistryStore(_registry(migrated=migrated)), backend)
+    service = _service(
+        RegistryStore(_registry(migrated=migrated, include_creates=True)), backend
+    )
     await service.async_load()
 
     with unittest.TestCase().assertRaisesRegex(ScenarioServiceError, "snapshot changed"):
@@ -487,20 +760,13 @@ async def test_registry_failure_compensates_sources_and_later_manual_edit_blocks
     await service.async_load()
     with unittest.TestCase().assertRaisesRegex(ScenarioServiceError, "write failed"):
         await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
-    assert set(backend.restored) == {item.scenario_id for item in MIGRATION_MANIFEST}
+    assert set(backend.deleted) == {
+        item.scenario_id for item in MIGRATION_MANIFEST if item.operation == "create"
+    }
 
-    backend = Backend()
-    first = MIGRATION_MANIFEST[0]
-    store = RegistryStore(
-        _registry(), fail=True,
-        before_fail=lambda: backend.deployed.__setitem__(first.scenario_id, "f" * 64),
-    )
-    service = _service(store, backend)
-    await service.async_load()
-    with unittest.TestCase().assertRaisesRegex(
-        ScenarioServiceError, "CAS rollback was rejected"
-    ):
-        await service.async_apply_managed_switch_migration(MIGRATION_MANIFEST)
+    # The fixture already has the exact three live source hashes.  No replace
+    # source is written in this phase, so an unrelated edit cannot turn a
+    # create-only compensation into an overwrite attempt.
 
 
 async def test_cancellation_after_first_source_mutation_restores_exact_source() -> None:
@@ -509,28 +775,14 @@ async def test_cancellation_after_first_source_mutation_restores_exact_source() 
             super().__init__()
             self.second_update_started = asyncio.Event()
 
-        async def async_update_source(
-            self,
-            scenario_id,
-            definition,
-            flow_id,
-            source,
-            expected,
-            catalog,
-            *,
-            validate_only,
+        async def async_prepare_new_release_source(
+            self, scenario_id, title, source, expected
         ):
             if self.updated:
                 self.second_update_started.set()
                 await asyncio.Event().wait()
-            return await super().async_update_source(
-                scenario_id,
-                definition,
-                flow_id,
-                source,
-                expected,
-                catalog,
-                validate_only=validate_only,
+            return await super().async_prepare_new_release_source(
+                scenario_id, title, source, expected
             )
 
     original = _registry()
@@ -548,7 +800,7 @@ async def test_cancellation_after_first_source_mutation_restores_exact_source() 
         await migration
 
     assert len(backend.updated) == 1
-    assert backend.restored == backend.updated
+    assert backend.deleted == backend.updated
     assert store.registry == original
     assert service._managed_switch_migration_transaction is None
 
@@ -567,8 +819,8 @@ async def test_final_snapshot_drift_can_restore_exact_sources_and_registry() -> 
 
     assert await service.async_rollback_managed_switch_migration(MIGRATION_MANIFEST)
     assert store.registry == original
-    assert set(backend.restored) == {
-        item.scenario_id for item in MIGRATION_MANIFEST
+    assert set(backend.deleted) == {
+        item.scenario_id for item in MIGRATION_MANIFEST if item.operation == "create"
     }
     assert backend.commits == 1
 
@@ -621,6 +873,279 @@ async def test_completed_receipt_failure_with_manual_edit_stays_prepared_and_blo
     assert backend.restored == []
 
 
+async def test_replace_intent_contains_exact_rollback_source_before_write() -> None:
+    original = MIGRATION_MANIFEST[0]
+    source = "// durable replacement"
+    replacement = replace(
+        original,
+        source=source,
+        new_source_hash=hashlib.sha256(source.encode()).hexdigest(),
+    )
+    entries = (replacement, *MIGRATION_MANIFEST[1:])
+    store = RegistryStore(_registry())
+    snapshots = []
+
+    class InspectIntentBackend(Backend):
+        async def async_prepare_release_source(
+            self, scenario_id, definition, flow_id, source, expected, catalog
+        ):
+            operation = snapshots[-1][scenario_id]
+            assert operation == {
+                "kind": "replace",
+                "state": "intent",
+                "flowId": flow_id,
+                "flowRevision": None,
+                "expectedSourceHash": expected,
+                "newSourceHash": replacement.new_source_hash,
+                "previousSource": f"legacy:{scenario_id}",
+            }
+            assert self.deployed[scenario_id] == expected
+            self.deployed[scenario_id] = replacement.new_source_hash
+            self.sources[scenario_id] = source
+            self.updated.append(scenario_id)
+            return {
+                "saved": True,
+                "proposed_source_hash": replacement.new_source_hash,
+                "previous_source": f"legacy:{scenario_id}",
+            }
+
+    backend = InspectIntentBackend()
+    service = _service(store, backend)
+    await service.async_load()
+    before = await service.async_capture_managed_switch_migration(entries)
+    journal = _initial_journal(before, entries)
+
+    async def persist(operations):
+        snapshots.append(json.loads(json.dumps(operations)))
+
+    await service.async_stage_managed_switch_migration(
+        entries, journal=journal, on_staged=persist
+    )
+    assert snapshots
+
+
+async def test_exact_foreign_create_without_durable_intent_is_not_adopted_or_deleted() -> None:
+    store = RegistryStore(_registry())
+    backend = Backend()
+    service = _service(store, backend)
+    await service.async_load()
+    before = await service.async_capture_managed_switch_migration(
+        MIGRATION_MANIFEST
+    )
+    journal = _initial_journal(before, MIGRATION_MANIFEST)
+    create_entry = next(
+        item for item in MIGRATION_MANIFEST if item.operation == "create"
+    )
+    backend.deployed[create_entry.scenario_id] = create_entry.new_source_hash
+    backend.sources[create_entry.scenario_id] = "foreign exact release source"
+    backend.revisions[create_entry.scenario_id] = "revision.foreign"
+
+    with unittest.TestCase().assertRaisesRegex(
+        ScenarioServiceError, "without intent|conflicts"
+    ):
+        await service.async_stage_managed_switch_migration(
+            MIGRATION_MANIFEST, journal=journal
+        )
+
+    assert create_entry.scenario_id in backend.deployed
+    assert backend.deleted == []
+
+
+async def test_before_capture_rejects_existing_create_endpoint() -> None:
+    store = RegistryStore(_registry())
+    backend = Backend()
+    create_entry = next(
+        item for item in MIGRATION_MANIFEST if item.operation == "create"
+    )
+    backend.deployed[create_entry.scenario_id] = create_entry.new_source_hash
+    backend.sources[create_entry.scenario_id] = "foreign exact release source"
+    backend.revisions[create_entry.scenario_id] = "revision.foreign"
+    service = _service(store, backend)
+    await service.async_load()
+
+    with unittest.TestCase().assertRaisesRegex(
+        ScenarioServiceError, "endpoint already exists"
+    ):
+        await service.async_capture_managed_switch_migration(
+            MIGRATION_MANIFEST
+        )
+
+    assert create_entry.scenario_id in backend.deployed
+    assert backend.deleted == []
+
+
+async def test_prepared_create_intent_adopts_lost_response_and_keeps_original_before() -> None:
+    registry_store = RegistryStore(_registry())
+    backend = Backend()
+    service = _service(registry_store, backend)
+    await service.async_load()
+    before = await service.async_capture_managed_switch_migration(
+        MIGRATION_MANIFEST
+    )
+    journal = _initial_journal(before, MIGRATION_MANIFEST)
+    create_entry = next(
+        item for item in MIGRATION_MANIFEST if item.operation == "create"
+    )
+    journal["operations"][create_entry.scenario_id]["state"] = "intent"
+    backend.deployed[create_entry.scenario_id] = create_entry.new_source_hash
+    backend.sources[create_entry.scenario_id] = "lost create response"
+    backend.revisions[create_entry.scenario_id] = "revision.stable"
+    receipt = MigrationReceiptStore(
+        {
+            "migrationId": "managed-switches",
+            "version": 3,
+            "state": "prepared",
+            "manifestHash": MANIFEST_HASH,
+            "journal": journal,
+        }
+    )
+
+    await ManagedSwitchMigration(service, receipt).async_apply()
+
+    assert receipt.value["state"] == "completed"
+    assert receipt.value["journal"]["before"] == before
+    assert create_entry.scenario_id not in backend.updated
+
+
+async def test_registry_write_has_durable_intent_and_lost_reply_is_reconciled() -> None:
+    receipt = MigrationReceiptStore(None)
+
+    class LostReplyRegistryStore(RegistryStore):
+        def __init__(self, registry):
+            super().__init__(registry)
+            self.calls = 0
+
+        async def async_save(self, value):
+            self.calls += 1
+            registry_record = receipt.value["journal"]["registry"]
+            assert registry_record["state"] == "intent"
+            assert isinstance(registry_record["afterHash"], str)
+            self.registry = value
+            self.saved.append(value)
+            if self.calls == 1:
+                raise OSError("registry response lost")
+
+    registry_store = LostReplyRegistryStore(_registry())
+    backend = Backend()
+    service = _service(registry_store, backend)
+    await service.async_load()
+
+    assert await ManagedSwitchMigration(service, receipt).async_apply() == "completed"
+    assert receipt.value["state"] == "completed"
+
+
+async def test_cancellation_after_registry_write_rolls_back_exactly_and_can_retry() -> None:
+    receipt = MigrationReceiptStore(None)
+
+    class CancelAfterRegistryWrite(RegistryStore):
+        def __init__(self, registry):
+            super().__init__(registry)
+            self.cancelled = False
+
+        async def async_save(self, value):
+            registry_record = receipt.value["journal"]["registry"]
+            assert registry_record["state"] == "intent"
+            self.registry = value
+            self.saved.append(value)
+            if not self.cancelled:
+                self.cancelled = True
+                raise asyncio.CancelledError
+
+    before_registry = _registry()
+    registry_store = CancelAfterRegistryWrite(before_registry)
+    backend = Backend()
+    service = _service(registry_store, backend)
+    await service.async_load()
+
+    with unittest.TestCase().assertRaises(asyncio.CancelledError):
+        await ManagedSwitchMigration(service, receipt).async_apply()
+
+    assert registry_store.registry == before_registry
+    assert receipt.value["state"] == "prepared"
+    assert receipt.value["journal"]["registry"]["state"] == "pending"
+    assert service._stopping is False
+    assert service._managed_switch_blocked_runs == set()
+    assert await ManagedSwitchMigration(service, receipt).async_apply() == "completed"
+
+
+async def test_completed_replay_detects_drift_in_unaffected_registry_entry() -> None:
+    registry_store = RegistryStore(_registry_from_inventory58())
+    backend = Backend()
+    service = _service(registry_store, backend)
+    await service.async_load()
+    receipt = MigrationReceiptStore(None)
+    await ManagedSwitchMigration(service, receipt).async_apply()
+    managed_ids = {item.scenario_id for item in MIGRATION_MANIFEST}
+    preserved = next(
+        item for item in registry_store.registry.scenarios
+        if item.id not in managed_ids
+    )
+    registry_store.registry = ScenarioRegistry(
+        scenarios=tuple(
+            replace(item, favorite=not item.favorite)
+            if item.id == preserved.id
+            else item
+            for item in registry_store.registry.scenarios
+        )
+    )
+    restarted = _service(registry_store, backend)
+    await restarted.async_load()
+
+    with unittest.TestCase().assertRaisesRegex(
+        ManagedSwitchMigrationConflict, "completed image drifted"
+    ):
+        await ManagedSwitchMigration(restarted, receipt).async_apply()
+
+
+async def test_staging_drains_affected_run_and_blocks_overlap_only() -> None:
+    class Executor:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+
+        def new_run_id(self):
+            return "run-test"
+
+        async def async_execute(self, _definition, _run_id, *, scenario_id, **_kwargs):
+            if scenario_id == "system-bathroom-fan-off-night":
+                self.started.set()
+                await asyncio.Event().wait()
+            return {"status": "completed", "receipts": []}
+
+    registry_store = RegistryStore(_registry_from_inventory58())
+    backend = Backend()
+    executor = Executor()
+    service = _service(registry_store, backend)
+    service._executor = executor
+    await service.async_load()
+    running = asyncio.create_task(
+        service.async_run_scenario("system-bathroom-fan-off-night")
+    )
+    await executor.started.wait()
+    before = await service.async_capture_managed_switch_migration(
+        MIGRATION_MANIFEST
+    )
+    journal = _initial_journal(before, MIGRATION_MANIFEST)
+
+    await service.async_stage_managed_switch_migration(
+        MIGRATION_MANIFEST, journal=journal
+    )
+    with unittest.TestCase().assertRaises(asyncio.CancelledError):
+        await running
+    with unittest.TestCase().assertRaisesRegex(
+        ScenarioServiceError, "closed during migration"
+    ):
+        await service.async_run_scenario("system-bathroom-fan-off-night")
+
+    unrelated = next(
+        item
+        for item in registry_store.registry.scenarios
+        if item.enabled
+        and item.id not in service._managed_switch_blocked_runs
+    )
+    result = await service.async_run_scenario(unrelated.id)
+    assert result["status"] == "completed"
+
+
 def _as_unittest_case(test):
     @wraps(test)
     async def run() -> None:
@@ -635,6 +1160,15 @@ class ManagedSwitchMigrationServiceTest(unittest.IsolatedAsyncioTestCase):
     test_batch_migration_updates_three_sources_and_registry_once = _as_unittest_case(
         test_batch_migration_updates_three_sources_and_registry_once
     )
+    test_replace_source_preparation_runs_outside_registry_lock = _as_unittest_case(
+        test_replace_source_preparation_runs_outside_registry_lock
+    )
+    test_replace_source_staging_restores_exact_source_after_cas_conflict = _as_unittest_case(
+        test_replace_source_staging_restores_exact_source_after_cas_conflict
+    )
+    test_staged_flows_are_recovered_when_the_registry_cas_changes = _as_unittest_case(
+        test_staged_flows_are_recovered_when_the_registry_cas_changes
+    )
     test_prepared_restart_normalizes_permuted_legacy_inputs = _as_unittest_case(
         test_prepared_restart_normalizes_permuted_legacy_inputs
     )
@@ -644,8 +1178,8 @@ class ManagedSwitchMigrationServiceTest(unittest.IsolatedAsyncioTestCase):
     test_permuted_migrated_inputs_remain_a_strict_conflict = _as_unittest_case(
         test_permuted_migrated_inputs_remain_a_strict_conflict
     )
-    test_legacy_phase_a_then_binding_phase_b_reaches_revision_three = _as_unittest_case(
-        test_legacy_phase_a_then_binding_phase_b_reaches_revision_three
+    test_snapshot_binding_is_not_replayed_after_the_v3_migration = _as_unittest_case(
+        test_snapshot_binding_is_not_replayed_after_the_v3_migration
     )
     test_partial_restart_reconciles_new_source_without_redeploy = _as_unittest_case(
         test_partial_restart_reconciles_new_source_without_redeploy
@@ -680,11 +1214,38 @@ class ManagedSwitchMigrationServiceTest(unittest.IsolatedAsyncioTestCase):
     test_completed_receipt_failure_with_manual_edit_stays_prepared_and_blocked = _as_unittest_case(
         test_completed_receipt_failure_with_manual_edit_stays_prepared_and_blocked
     )
+    test_replace_intent_contains_exact_rollback_source_before_write = _as_unittest_case(
+        test_replace_intent_contains_exact_rollback_source_before_write
+    )
+    test_exact_foreign_create_without_durable_intent_is_not_adopted_or_deleted = _as_unittest_case(
+        test_exact_foreign_create_without_durable_intent_is_not_adopted_or_deleted
+    )
+    test_before_capture_rejects_existing_create_endpoint = _as_unittest_case(
+        test_before_capture_rejects_existing_create_endpoint
+    )
+    test_prepared_create_intent_adopts_lost_response_and_keeps_original_before = _as_unittest_case(
+        test_prepared_create_intent_adopts_lost_response_and_keeps_original_before
+    )
+    test_registry_write_has_durable_intent_and_lost_reply_is_reconciled = _as_unittest_case(
+        test_registry_write_has_durable_intent_and_lost_reply_is_reconciled
+    )
+    test_cancellation_after_registry_write_rolls_back_exactly_and_can_retry = _as_unittest_case(
+        test_cancellation_after_registry_write_rolls_back_exactly_and_can_retry
+    )
+    test_completed_replay_detects_drift_in_unaffected_registry_entry = _as_unittest_case(
+        test_completed_replay_detects_drift_in_unaffected_registry_entry
+    )
+    test_staging_drains_affected_run_and_blocks_overlap_only = _as_unittest_case(
+        test_staging_drains_affected_run_and_blocks_overlap_only
+    )
 
 
 for _test in (
     test_batch_migration_updates_three_sources_and_registry_once,
-    test_legacy_phase_a_then_binding_phase_b_reaches_revision_three,
+    test_replace_source_preparation_runs_outside_registry_lock,
+    test_replace_source_staging_restores_exact_source_after_cas_conflict,
+    test_staged_flows_are_recovered_when_the_registry_cas_changes,
+    test_snapshot_binding_is_not_replayed_after_the_v3_migration,
     test_partial_restart_reconciles_new_source_without_redeploy,
     test_completed_registry_is_verified_without_any_mutation,
     test_final_verification_requires_one_cross_scenario_cas_snapshot,
@@ -696,5 +1257,13 @@ for _test in (
     test_final_snapshot_drift_can_restore_exact_sources_and_registry,
     test_manual_source_edit_rejects_final_rollback_without_overwrite,
     test_completed_receipt_failure_with_manual_edit_stays_prepared_and_blocked,
+    test_replace_intent_contains_exact_rollback_source_before_write,
+    test_exact_foreign_create_without_durable_intent_is_not_adopted_or_deleted,
+    test_before_capture_rejects_existing_create_endpoint,
+    test_prepared_create_intent_adopts_lost_response_and_keeps_original_before,
+    test_registry_write_has_durable_intent_and_lost_reply_is_reconciled,
+    test_cancellation_after_registry_write_rolls_back_exactly_and_can_retry,
+    test_completed_replay_detects_drift_in_unaffected_registry_entry,
+    test_staging_drains_affected_run_and_blocks_overlap_only,
 ):
     _test.__test__ = False

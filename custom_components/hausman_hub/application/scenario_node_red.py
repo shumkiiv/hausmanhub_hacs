@@ -1455,6 +1455,96 @@ class NodeRedScenarioBackend:
             }
         return result
 
+    async def async_prepare_new_release_source(
+        self,
+        scenario_id: str,
+        title: str,
+        source: str,
+        expected_source_hash: str,
+    ) -> dict[str, object]:
+        """Create one release-owned endpoint after checking its exact source."""
+
+        self._last_prepare_operation = None
+        if managed_source_hash(source) != expected_source_hash:
+            raise NodeRedBackendError("Release-owned source hash mismatch")
+        flow_id, flow_revision, global_revision = (
+            await self._async_create_managed_flow(
+                scenario_id, title, source, expected_source_hash
+            )
+        )
+        self._last_prepare_operation = {
+            "kind": "create",
+            "scenarioId": scenario_id,
+            "flowId": flow_id,
+            "sourceHash": expected_source_hash,
+            "globalRevision": global_revision,
+        }
+        return {"flow_id": flow_id, "flow_revision": flow_revision}
+
+    @staticmethod
+    def expected_release_flow_id(scenario_id: str) -> str:
+        """Return the deterministic ID named by a durable create intent."""
+
+        return _managed_flow_id(scenario_id)
+
+    async def async_reconcile_created_release_source(
+        self, scenario_id: str, expected_source_hash: str
+    ) -> dict[str, object] | None:
+        """Adopt an exact lost create only after the caller proves ownership.
+
+        This method deliberately does not decide whether the graph belongs to
+        the migration.  Its caller must hold a durable create intent whose
+        before-image proves that the endpoint and reserved IDs were absent.
+        """
+
+        revision, global_flows = await self._async_global_snapshot()
+        provisional_id = _managed_flow_id(scenario_id)
+        try:
+            self._validate_new_flow_snapshot(
+                scenario_id, provisional_id, global_flows
+            )
+        except NodeRedBackendError:
+            flow_id = self._created_flow_id_from_global(
+                scenario_id,
+                global_flows,
+            )
+            current = await self.async_read_source(scenario_id, flow_id)
+            if current["source_hash"] != expected_source_hash:
+                raise NodeRedBackendError(
+                    "Node-RED prepared flow source conflicts with create intent"
+                )
+            _execution_topology_hash(
+                scenario_id, flow_id, current["flow"], expected_source_hash
+            )
+            return {
+                "flow_id": flow_id,
+                "flow_revision": 1,
+                "global_revision": revision,
+            }
+        return None
+
+    async def _async_adopt_exact_prepared_managed_flow(
+        self, scenario_id: str, expected_source_hash: str
+    ) -> tuple[str, int, str] | None:
+        """Recognize only the deterministic flow left by an interrupted create."""
+
+        revision, global_flows = await self._async_global_snapshot()
+        try:
+            flow_id = self._created_flow_id_from_global(
+                scenario_id,
+                global_flows,
+                expected_flow_id=_managed_flow_id(scenario_id),
+            )
+            current = await self.async_read_source(scenario_id, flow_id)
+            if current["source_hash"] != expected_source_hash:
+                return None
+            _execution_topology_hash(
+                scenario_id, flow_id, current["flow"], expected_source_hash
+            )
+        except NodeRedBackendError:
+            return None
+        return flow_id, 1, revision
+
     async def async_restore_source(
         self,
         scenario_id: str,

@@ -1,0 +1,142 @@
+{
+  "contract": {
+    "name": "hausmanhub-scenario-consolidation-inventory",
+    "version": 1
+  },
+  "scenarioCount": 58,
+  "enabledCount": 46,
+  "managed": [
+    {
+      "id": "system-shower-comfort-controller",
+      "revision": 4,
+      "enabled": true,
+      "flowId": "7b130de5189e22e5",
+      "sourceHash": "757bde711c85ebad4826c2ec0bf2695d0034f7dd820c9ec7c30816f3f37c1551",
+      "topology": "managed-three-node-v1",
+      "endpoint": "/hausman/scenarios/system-shower-comfort-controller",
+      "inputTargetIds": [
+        "entity_d1fb2cbf2a691bba",
+        "entity_fd3945cf1a2110f8",
+        "entity_6b9ccdab9bb484b2",
+        "entity_46174e1ff9913212",
+        "entity_1fdcd8b244637246",
+        "entity_afef5df0e0cae309",
+        "entity_e7a7c61eec7bdff8"
+      ]
+    },
+    {
+      "id": "system-small-corridor-light-controller",
+      "revision": 3,
+      "enabled": true,
+      "flowId": "503cc37cebba8777",
+      "sourceHash": "bc9a2c7883046e568a428e355af312953d70f0f504393b063130f516fe5052b1",
+      "topology": "managed-three-node-v1",
+      "endpoint": "/hausman/scenarios/system-small-corridor-light-controller",
+      "inputTargetIds": [
+        "entity_90417aada6a33491",
+        "entity_6b9ccdab9bb484b2",
+        "entity_5f3b4436fb7b6f2b",
+        "entity_c9d6bc67f172f30d",
+        "entity_4be32416634e6416",
+        "entity_9ed909332fdaa8fd"
+      ]
+    },
+    {
+      "id": "system-tambur-adaptive-controller",
+      "revision": 8,
+      "enabled": true,
+      "flowId": "a7a6f6b13cc83ca0",
+      "sourceHash": "4daef9ac2de8dc1c95dd2da6887e178751a65d0e47bcf48443635f68eb1ba5dc",
+      "topology": "managed-three-node-v1",
+      "endpoint": "/hausman/scenarios/system-tambur-adaptive-controller",
+      "inputTargetIds": [
+        "entity_156050daca86aa6c",
+        "entity_10b78187426f8485",
+        "entity_6b9ccdab9bb484b2",
+        "entity_5f3b4436fb7b6f2b",
+        "entity_71859313239a14e4",
+        "entity_cd0098e5ff95da46",
+        "entity_fbdf27871edb89bf",
+        "entity_b47991988cc6b9f3",
+        "entity_170c7a4e2505b803"
+      ]
+    }
+  ],
+  "absentManagedIds": [
+    "system-toilet-comfort-controller",
+    "system-bathroom-exhaust-controller",
+    "system-storage-light-controller",
+    "system-cabinet-light-controller",
+    "system-curtains-privacy-controller"
+  ],
+  "native": {
+    "disable": [
+      "hausman_night_absence_tambur_light_off",
+      "hausman_night_absence_small_corridor_light_off",
+      "hausman_shower_cabinet_off_absence_failsafe",
+      "hausman_shower_fan_humidity_on_failsafe",
+      "hausman_shower_fan_off_absence_normal_humidity"
+    ],
+    "preserveCount": 13
+  },
+  "snapshotScenarioIds": [
+    "system-bathroom-fan-off-night",
+    "system-bathroom-fan-off-day-sustained",
+    "system-bathroom-fan-day-light-1",
+    "system-bathroom-fan-day-light-2",
+    "system-bathroom-fan-night-light-1",
+    "system-bathroom-fan-night-light-2",
+    "system-bathroom-fan-morning-light-1",
+    "system-bathroom-fan-morning-quiet",
+    "scenario_manual_lights_off",
+    "scenario_manual_away",
+    "scenario_manual_ac_off",
+    "system-leak-extra-bathroom-alert",
+    "system-shower-comfort-controller",
+    "scenario_manual_water_close",
+    "scenario_manual_curtains_close",
+    "scenario_msirqdih",
+    "system-office-curtain-auto-close",
+    "system-office-evening-bright",
+    "system-office-evening-dark",
+    "system-office-evening-medium",
+    "system-office-day-medium",
+    "system-office-day-bright",
+    "scenario-office-curtain-living-lights-close",
+    "scenario-office-curtain-service-lights-close",
+    "system-office-night-light",
+    "system-office-day-low",
+    "system-storage-light-on-presence",
+    "system-storage-light-off-timer",
+    "system-storage-light-off-confirmed",
+    "scenario_kitchen_ac_off_2200",
+    "scenario_small_corridor_motion_low_light",
+    "system-small-corridor-light-controller",
+    "system-small-corridor-ambient-night-bright",
+    "scenario_small_corridor_motion_after_sunset",
+    "system-small-corridor-ambient-dark",
+    "system-small-corridor-ambient-dark-bright",
+    "scenario_mssvmo6v",
+    "system-small-corridor-ambient-dusk",
+    "system-small-corridor-ambient-dusk-bright",
+    "system-away-turn-off",
+    "scenario_manual_water_open",
+    "scenario_manual_curtains_open",
+    "system-leak-bathroom-alert",
+    "system-leak-kitchen-alert",
+    "system-leak-toilet-alert",
+    "scenario_manual_good_night",
+    "system-twilight-curtains-close",
+    "system-tambur-adaptive-controller",
+    "system-toilet-fan-off-delay",
+    "system-toilet-fan-day",
+    "system-toilet-light-motion-night",
+    "system-toilet-light-motion-evening",
+    "system-toilet-light-motion",
+    "scenario_kitchen_curtains_sunrise",
+    "system-kitchen-curtains-open-weekday",
+    "system-kitchen-curtains-open-weekend",
+    "scenario_curtains_lights_living",
+    "scenario_curtains_lights_service"
+  ]
+}

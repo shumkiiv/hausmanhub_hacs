@@ -75,6 +75,50 @@ def _global_revision(
     return {"rev": revision, "flows": [dict(node) for node in nodes]}
 
 
+async def test_only_explicit_reconciliation_adopts_exact_interrupted_create() -> None:
+    """A caller-owned intent is required to adopt an interrupted create."""
+
+    scenario_id = "test_interrupted_create"
+    source = f"// HAUSMAN_MANAGED_SCENARIO {scenario_id}\nreturn msg;"
+    flow_id = scenario_node_red._managed_flow_id(scenario_id)  # noqa: SLF001
+    deployed = build_managed_flow(scenario_id, "Тест", source, flow_id=flow_id)
+    posts = 0
+
+    async def adapter(method, path, headers, payload):
+        nonlocal posts
+        del headers, payload
+        if method == "GET" and path.endswith("/flows"):
+            return 200, _global_revision(deployed, "rev-interrupted")
+        if method == "GET" and path.endswith(f"/flow/{flow_id}"):
+            return 200, deployed
+        if method == "POST":
+            posts += 1
+        raise AssertionError((method, path))
+
+    backend = NodeRedScenarioBackend(
+        SimpleNamespace(states=SimpleNamespace(get=lambda _: None)),
+        request_adapter=adapter,
+    )
+    backend._ingress_token = "token"  # noqa: SLF001
+    backend._ingress_session = "session"  # noqa: SLF001
+
+    with pytest.raises(NodeRedBackendError, match="conflicts"):
+        await backend.async_prepare_new_release_source(
+            scenario_id, "Тест", source, managed_source_hash(source)
+        )
+
+    result = await backend.async_reconcile_created_release_source(
+        scenario_id, managed_source_hash(source)
+    )
+
+    assert result == {
+        "flow_id": flow_id,
+        "flow_revision": 1,
+        "global_revision": "rev-interrupted",
+    }
+    assert posts == 0
+
+
 def test_release_trust_allows_exact_previous_and_current_system_sources() -> None:
     assert scenario_node_red._TRUSTED_SYSTEM_SOURCE_HASHES == {  # noqa: SLF001
         "system-tambur-adaptive-controller": frozenset(

@@ -435,12 +435,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ManagedSwitchStartupCoordinator,
         async_load_managed_switch_migration_entries,
     )
+    from .application.native_automation_migration import (
+        HomeAssistantNativeAutomationAdapter,
+        HomeAssistantNativeAutomationMigrationStore,
+        NativeAutomationMigration,
+    )
 
     managed_switch_migration = ManagedSwitchMigration(
         scenario_service,
         HomeAssistantManagedSwitchMigrationStore(hass, entry.entry_id),
         source_loader=lambda: async_load_managed_switch_migration_entries(
             hass.async_add_executor_job, FULL_MIGRATION_MANIFEST
+        ),
+        native_automation_migration=NativeAutomationMigration(
+            HomeAssistantNativeAutomationAdapter(hass),
+            HomeAssistantNativeAutomationMigrationStore(hass, entry.entry_id),
         ),
         manifest=FULL_MIGRATION_MANIFEST,
     )

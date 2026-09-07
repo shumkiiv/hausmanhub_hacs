@@ -1,0 +1,5369 @@
+{
+  "scenarios": [
+    {
+      "id": "system-bathroom-fan-off-night",
+      "title": "Ванная: выключить вытяжку ночью",
+      "group": "system",
+      "description": "ночью оба погасших канала выключают вытяжку сразу.",
+      "icon": "mdi:fan-off",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1787803571574,
+      "revision": 3,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "t1",
+            "type": "device_state",
+            "targetId": "entity_a591e035e3e5b34f",
+            "targetName": "Выключатель ванная · Выключатель ванная 1",
+            "property": "state",
+            "comparison": "equals",
+            "value": "off"
+          },
+          {
+            "id": "t2",
+            "type": "device_state",
+            "targetId": "entity_d82766182d69dd51",
+            "targetName": "Выключатель ванная · Выключатель ванная 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "off"
+          },
+          {
+            "id": "t_start",
+            "type": "time",
+            "value": "22:00"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "c1",
+            "type": "device_state",
+            "targetId": "entity_a591e035e3e5b34f",
+            "targetName": "Выключатель ванная · Выключатель ванная 1",
+            "property": "state",
+            "comparison": "equals",
+            "value": "off"
+          },
+          {
+            "id": "c2",
+            "type": "device_state",
+            "targetId": "entity_d82766182d69dd51",
+            "targetName": "Выключатель ванная · Выключатель ванная 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "off"
+          },
+          {
+            "id": "c_window",
+            "type": "time_window",
+            "value": "22:00-08:00"
+          }
+        ],
+        "actions": [
+          {
+            "id": "a1",
+            "type": "device_action",
+            "targetId": "entity_c15f5df5382ee180",
+            "targetName": "Вытяжка ванна",
+            "actionId": "turn_off"
+          }
+        ]
+      },
+      "roomId": "vannaia",
+      "roomIds": [
+        "vannaia"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-bathroom-fan-off-day-sustained",
+      "title": "Ванная: выключить вытяжку после света",
+      "group": "system",
+      "description": "днём вытяжка выключается, если оба канала света оставались выключенными 30 минут.",
+      "icon": "mdi:fan-off",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1787803571675,
+      "revision": 3,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "t1",
+            "type": "device_state",
+            "targetId": "entity_a591e035e3e5b34f",
+            "targetName": "Выключатель ванная · Выключатель ванная 1",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "t2",
+            "type": "device_state",
+            "targetId": "entity_d82766182d69dd51",
+            "targetName": "Выключатель ванная · Выключатель ванная 2",
+            "property": "state",
+            "comparison": "changed"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "c1",
+            "type": "device_state",
+            "targetId": "entity_a591e035e3e5b34f",
+            "targetName": "Выключатель ванная · Выключатель ванная 1",
+            "property": "state",
+            "comparison": "equals",
+            "value": "off"
+          },
+          {
+            "id": "c2",
+            "type": "device_state",
+            "targetId": "entity_d82766182d69dd51",
+            "targetName": "Выключатель ванная · Выключатель ванная 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "off"
+          },
+          {
+            "id": "c_window",
+            "type": "time_window",
+            "value": "08:00-22:00"
+          }
+        ],
+        "actions": [
+          {
+            "id": "a1",
+            "type": "delay",
+            "delaySeconds": 1800
+          },
+          {
+            "id": "a2",
+            "type": "device_action",
+            "targetId": "entity_c15f5df5382ee180",
+            "targetName": "Вытяжка ванна",
+            "actionId": "turn_off"
+          }
+        ]
+      },
+      "roomId": "vannaia",
+      "roomIds": [
+        "vannaia"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-bathroom-fan-day-light-1",
+      "title": "Ванная: вытяжка днём, линия 1",
+      "group": "system",
+      "description": "днём линия 1 включает вытяжку только при влажности не ниже 65%.",
+      "icon": "mdi:fan",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1787803571773,
+      "revision": 2,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "t_humidity",
+            "type": "device_state",
+            "targetId": "entity_436e12f71ce7b08b",
+            "targetName": "Климат ванна · Климат ванна Влажность",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "t_light",
+            "type": "device_state",
+            "targetId": "entity_a591e035e3e5b34f",
+            "targetName": "Выключатель ванная · Выключатель ванная 1",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "t_start",
+            "type": "time",
+            "value": "08:00"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "c_window",
+            "type": "time_window",
+            "value": "08:00-22:00"
+          },
+          {
+            "id": "c_humidity",
+            "type": "device_state",
+            "targetId": "entity_436e12f71ce7b08b",
+            "targetName": "Климат ванна · Климат ванна Влажность",
+            "property": "state",
+            "comparison": "above",
+            "value": 64.999
+          },
+          {
+            "id": "c_light",
+            "type": "device_state",
+            "targetId": "entity_a591e035e3e5b34f",
+            "targetName": "Выключатель ванная · Выключатель ванная 1",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "actions": [
+          {
+            "id": "a1",
+            "type": "device_action",
+            "targetId": "entity_c15f5df5382ee180",
+            "targetName": "Вытяжка ванна",
+            "actionId": "turn_on"
+          }
+        ]
+      },
+      "roomId": "vannaia",
+      "roomIds": [
+        "vannaia"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-bathroom-fan-day-light-2",
+      "title": "Ванная: вытяжка днём, линия 2",
+      "group": "system",
+      "description": "днём линия 2 включает вытяжку только при влажности не ниже 65%.",
+      "icon": "mdi:fan",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1787803571877,
+      "revision": 2,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "t_humidity",
+            "type": "device_state",
+            "targetId": "entity_436e12f71ce7b08b",
+            "targetName": "Климат ванна · Климат ванна Влажность",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "t_light",
+            "type": "device_state",
+            "targetId": "entity_d82766182d69dd51",
+            "targetName": "Выключатель ванная · Выключатель ванная 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "t_start",
+            "type": "time",
+            "value": "08:00"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "c_window",
+            "type": "time_window",
+            "value": "08:00-22:00"
+          },
+          {
+            "id": "c_humidity",
+            "type": "device_state",
+            "targetId": "entity_436e12f71ce7b08b",
+            "targetName": "Климат ванна · Климат ванна Влажность",
+            "property": "state",
+            "comparison": "above",
+            "value": 64.999
+          },
+          {
+            "id": "c_light",
+            "type": "device_state",
+            "targetId": "entity_d82766182d69dd51",
+            "targetName": "Выключатель ванная · Выключатель ванная 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "actions": [
+          {
+            "id": "a1",
+            "type": "device_action",
+            "targetId": "entity_c15f5df5382ee180",
+            "targetName": "Вытяжка ванна",
+            "actionId": "turn_on"
+          }
+        ]
+      },
+      "roomId": "vannaia",
+      "roomIds": [
+        "vannaia"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-bathroom-fan-night-light-1",
+      "title": "Ванная: вытяжка ночью, линия 1",
+      "group": "system",
+      "description": "линия 1 включает вытяжку с 22:00 до 06:00.",
+      "icon": "mdi:fan",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1787803571976,
+      "revision": 2,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "t_light",
+            "type": "device_state",
+            "targetId": "entity_a591e035e3e5b34f",
+            "targetName": "Выключатель ванная · Выключатель ванная 1",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "t_start",
+            "type": "time",
+            "value": "22:00"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "c_window",
+            "type": "time_window",
+            "value": "22:00-06:00"
+          },
+          {
+            "id": "c_light",
+            "type": "device_state",
+            "targetId": "entity_a591e035e3e5b34f",
+            "targetName": "Выключатель ванная · Выключатель ванная 1",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "actions": [
+          {
+            "id": "a1",
+            "type": "device_action",
+            "targetId": "entity_c15f5df5382ee180",
+            "targetName": "Вытяжка ванна",
+            "actionId": "turn_on"
+          }
+        ]
+      },
+      "roomId": "vannaia",
+      "roomIds": [
+        "vannaia"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-bathroom-fan-night-light-2",
+      "title": "Ванная: вытяжка ночью, линия 2",
+      "group": "system",
+      "description": "линия 2 включает вытяжку с 22:00 до 06:00.",
+      "icon": "mdi:fan",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1787803572132,
+      "revision": 2,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "t_light",
+            "type": "device_state",
+            "targetId": "entity_d82766182d69dd51",
+            "targetName": "Выключатель ванная · Выключатель ванная 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "t_start",
+            "type": "time",
+            "value": "22:00"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "c_window",
+            "type": "time_window",
+            "value": "22:00-06:00"
+          },
+          {
+            "id": "c_light",
+            "type": "device_state",
+            "targetId": "entity_d82766182d69dd51",
+            "targetName": "Выключатель ванная · Выключатель ванная 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "actions": [
+          {
+            "id": "a1",
+            "type": "device_action",
+            "targetId": "entity_c15f5df5382ee180",
+            "targetName": "Вытяжка ванна",
+            "actionId": "turn_on"
+          }
+        ]
+      },
+      "roomId": "vannaia",
+      "roomIds": [
+        "vannaia"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-bathroom-fan-morning-light-1",
+      "title": "Ванная: вытяжка утром, линия 1",
+      "group": "system",
+      "description": "с 06:00 до 08:00 линия 1 включает вытяжку, только когда линия 2 выключена.",
+      "icon": "mdi:fan",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1787803572253,
+      "revision": 2,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "t_light_1",
+            "type": "device_state",
+            "targetId": "entity_a591e035e3e5b34f",
+            "targetName": "Выключатель ванная · Выключатель ванная 1",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "t_light_2",
+            "type": "device_state",
+            "targetId": "entity_d82766182d69dd51",
+            "targetName": "Выключатель ванная · Выключатель ванная 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "off"
+          },
+          {
+            "id": "t_start",
+            "type": "time",
+            "value": "06:00"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "c_window",
+            "type": "time_window",
+            "value": "06:00-08:00"
+          },
+          {
+            "id": "c_light_1",
+            "type": "device_state",
+            "targetId": "entity_a591e035e3e5b34f",
+            "targetName": "Выключатель ванная · Выключатель ванная 1",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "c_light_2",
+            "type": "device_state",
+            "targetId": "entity_d82766182d69dd51",
+            "targetName": "Выключатель ванная · Выключатель ванная 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "off"
+          }
+        ],
+        "actions": [
+          {
+            "id": "a1",
+            "type": "device_action",
+            "targetId": "entity_c15f5df5382ee180",
+            "targetName": "Вытяжка ванна",
+            "actionId": "turn_on"
+          }
+        ]
+      },
+      "roomId": "vannaia",
+      "roomIds": [
+        "vannaia"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-bathroom-fan-morning-quiet",
+      "title": "Ванная: тихое утро, линия 2",
+      "group": "system",
+      "description": "с 06:00 до 08:00 линия 2 не оставляет вытяжку включённой.",
+      "icon": "mdi:fan-off",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1787803572351,
+      "revision": 2,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "t_light",
+            "type": "device_state",
+            "targetId": "entity_d82766182d69dd51",
+            "targetName": "Выключатель ванная · Выключатель ванная 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "t_start",
+            "type": "time",
+            "value": "06:00"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "c_window",
+            "type": "time_window",
+            "value": "06:00-08:00"
+          },
+          {
+            "id": "c_light",
+            "type": "device_state",
+            "targetId": "entity_d82766182d69dd51",
+            "targetName": "Выключатель ванная · Выключатель ванная 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "actions": [
+          {
+            "id": "a1",
+            "type": "device_action",
+            "targetId": "entity_c15f5df5382ee180",
+            "targetName": "Вытяжка ванна",
+            "actionId": "turn_off"
+          }
+        ]
+      },
+      "roomId": "vannaia",
+      "roomIds": [
+        "vannaia"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "scenario_manual_lights_off",
+      "title": "Весь свет выключить",
+      "group": "Свет",
+      "description": "Выключает все осветительные каналы дома, включая кладовку, душевую и тамбур.",
+      "icon": "mdi:lightbulb-off",
+      "enabled": true,
+      "favorite": true,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1788624395318,
+      "revision": 3,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "trigger_manual",
+            "type": "manual"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "id": "action-1",
+            "type": "device_action",
+            "targetId": "entity_e42c658fecb403d3",
+            "targetName": "Выключатель кабинет · Выключатель кабинет 1",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-2",
+            "type": "device_action",
+            "targetId": "entity_7ff6d09cfa68fa5a",
+            "targetName": "Выключатель кабинет · Выключатель кабинет 2",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-3",
+            "type": "device_action",
+            "targetId": "entity_7b74c1fbb21b1eb2",
+            "targetName": "Люстра прибор",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-4",
+            "type": "device_action",
+            "targetId": "entity_1ec01be616272273",
+            "targetName": "Выключатель комната Алисы · Выключатель комната Алисы 1",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-5",
+            "type": "device_action",
+            "targetId": "entity_528aea0b1ac18c1d",
+            "targetName": "Выключатель комната Алисы · Выключатель комната Алисы 2",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-6",
+            "type": "device_action",
+            "targetId": "entity_dd1b95149844a12f",
+            "targetName": "Выключатель комната Игоря · Выключатель комната Игоря Left",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-7",
+            "type": "device_action",
+            "targetId": "entity_15841ed823fca4bf",
+            "targetName": "Выключатель комната Игоря · Выключатель комната Игоря Right",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-8",
+            "type": "device_action",
+            "targetId": "entity_c7d2c2c49fa585c2",
+            "targetName": "Выключатель кухня · Выключатель кухня Center",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-9",
+            "type": "device_action",
+            "targetId": "entity_bd52eaf46116d96d",
+            "targetName": "Выключатель кухня · Выключатель кухня Left",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-10",
+            "type": "device_action",
+            "targetId": "entity_969e3b1ee543b55f",
+            "targetName": "Выключатель кухня · Выключатель кухня Right",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-11",
+            "type": "device_action",
+            "targetId": "entity_0c7068c26367a184",
+            "targetName": "Выключатель гостинная · Выключатель гостинная Left",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-12",
+            "type": "device_action",
+            "targetId": "entity_874a09c0653bb697",
+            "targetName": "Выключатель гостинная · Выключатель гостинная Right",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-13",
+            "type": "device_action",
+            "targetId": "entity_3f19b04562a06373",
+            "targetName": "Ночник у двери",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-14",
+            "type": "device_action",
+            "targetId": "entity_a09aec8dfbf0a055",
+            "targetName": "Ночник у окна",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-15",
+            "type": "device_action",
+            "targetId": "entity_a591e035e3e5b34f",
+            "targetName": "Выключатель ванная · Выключатель ванная 1",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-16",
+            "type": "device_action",
+            "targetId": "entity_d82766182d69dd51",
+            "targetName": "Выключатель ванная · Выключатель ванная 2",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-17",
+            "type": "device_action",
+            "targetId": "entity_1fdcd8b244637246",
+            "targetName": "Выключатель душевая доп свет · Выключатель душевая доп свет 1",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-18",
+            "type": "device_action",
+            "targetId": "entity_afef5df0e0cae309",
+            "targetName": "Выключатель душевая доп свет · Выключатель душевая доп свет 2",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-19",
+            "type": "device_action",
+            "targetId": "entity_46174e1ff9913212",
+            "targetName": "Выключатель душевая · Выключатель душевая 1",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-20",
+            "type": "device_action",
+            "targetId": "entity_e6c37f413b2e20ee",
+            "targetName": "Выключатель коридор · Выключатель коридор Left",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-21",
+            "type": "device_action",
+            "targetId": "entity_69094124524afb2c",
+            "targetName": "Выключатель коридор · Выключатель коридор Right",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-22",
+            "type": "device_action",
+            "targetId": "entity_4be32416634e6416",
+            "targetName": "Выключатель малый коридор · Выключатель малый коридор 1",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-23",
+            "type": "device_action",
+            "targetId": "entity_71859313239a14e4",
+            "targetName": "Люстра тамбур · Люстра тамбур Люстра тамбур",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-24",
+            "type": "device_action",
+            "targetId": "entity_6667b3400bce7970",
+            "targetName": "Выключатель туалет · Выключатель туалет 1",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-25",
+            "type": "device_action",
+            "targetId": "entity_5d95de599d2b5cec",
+            "targetName": "Выключатель туалет · Выключатель туалет 2",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-26",
+            "type": "device_action",
+            "targetId": "entity_0ec37ef18b4b39a6",
+            "targetName": "Выключатель кладовка · 1",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-27",
+            "type": "device_action",
+            "targetId": "entity_ffd37843ede77a40",
+            "targetName": "Выключатель кладовка · 2",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-28",
+            "type": "device_action",
+            "targetId": "entity_e7a7c61eec7bdff8",
+            "targetName": "Подсветка шкафа душевая",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-29",
+            "type": "device_action",
+            "targetId": "entity_cd0098e5ff95da46",
+            "targetName": "Точки тамбура",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-30",
+            "type": "device_action",
+            "targetId": "entity_fbdf27871edb89bf",
+            "targetName": "Подсветка зеркала тамбура",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          }
+        ]
+      },
+      "roomId": "kabinet",
+      "roomIds": [
+        "kabinet",
+        "komnata_alisy",
+        "detskaia",
+        "kukhnia",
+        "gostinaia",
+        "vannaia",
+        "dop_vanna",
+        "prikhozhaia",
+        "malyi_koridor",
+        "tambur",
+        "tualet",
+        "kladovka"
+      ],
+      "activationKind": "manual",
+      "protected": false
+    },
+    {
+      "id": "scenario_manual_away",
+      "title": "Вне дома",
+      "group": "Дом",
+      "description": "Выключает весь свет, кондиционеры, чайник, вытяжки, увлажнители и телевизоры, затем закрывает горячую и холодную воду. Охрана, сеть, холодильники, датчики протечки и голосовые оповещения остаются включёнными.",
+      "icon": "mdi:home-export-outline",
+      "enabled": true,
+      "favorite": true,
+      "danger": false,
+      "requiresConfirmation": true,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1788100864356,
+      "revision": 2,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "trigger_manual",
+            "type": "manual"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "id": "action-1",
+            "type": "run_scenario",
+            "scenarioId": "scenario_manual_lights_off"
+          },
+          {
+            "id": "action-2",
+            "type": "run_scenario",
+            "scenarioId": "scenario_manual_ac_off"
+          },
+          {
+            "id": "action-3",
+            "type": "device_action",
+            "targetId": "entity_e3941765c1f247c5",
+            "targetName": "Редуктор горячей воды",
+            "actionId": "turn_off",
+            "actionTitle": "Закрыть"
+          },
+          {
+            "id": "action-4",
+            "type": "device_action",
+            "targetId": "entity_cadf80670b42abc3",
+            "targetName": "Редуктор холодной воды",
+            "actionId": "turn_off",
+            "actionTitle": "Закрыть"
+          },
+          {
+            "id": "action-5",
+            "type": "device_action",
+            "targetId": "entity_1929f5766eb37632",
+            "targetName": "Чайник",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-6",
+            "type": "device_action",
+            "targetId": "entity_f7c56c54b5872cd0",
+            "targetName": "Чайник: поддержание тепла",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-7",
+            "type": "device_action",
+            "targetId": "entity_18cba8b8b6798386",
+            "targetName": "Чайник: подсветка",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-8",
+            "type": "device_action",
+            "targetId": "entity_1d0edefa372ab4c8",
+            "targetName": "Увлажнитель гостиная",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-9",
+            "type": "device_action",
+            "targetId": "entity_f341cfc6d724ca93",
+            "targetName": "Увлажнитель детская",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-10",
+            "type": "device_action",
+            "targetId": "entity_d6f6c2698d860d63",
+            "targetName": "Телевизор гостиная",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-11",
+            "type": "device_action",
+            "targetId": "entity_4622da28d846f25d",
+            "targetName": "Телевизор кухня",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-12",
+            "type": "device_action",
+            "targetId": "entity_9bbb3b0e8cd98627",
+            "targetName": "Вытяжка туалет",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-13",
+            "type": "device_action",
+            "targetId": "entity_c15f5df5382ee180",
+            "targetName": "Вытяжка ванна",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          }
+        ]
+      },
+      "roomId": "kabinet",
+      "roomIds": [
+        "kabinet",
+        "komnata_alisy",
+        "detskaia",
+        "kukhnia",
+        "gostinaia",
+        "vannaia",
+        "dop_vanna",
+        "prikhozhaia",
+        "malyi_koridor",
+        "tambur",
+        "tualet",
+        "kladovka"
+      ],
+      "activationKind": "manual",
+      "protected": false
+    },
+    {
+      "id": "scenario_manual_ac_off",
+      "title": "Все кондиционеры выключить",
+      "group": "Климат",
+      "description": "Выключает все пять кондиционеров.",
+      "icon": "mdi:air-conditioner",
+      "enabled": true,
+      "favorite": true,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1787757309521,
+      "revision": 1,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "trigger_manual",
+            "type": "manual"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "id": "action-1",
+            "type": "device_action",
+            "targetId": "entity_3cf6c8bd528bf5cf",
+            "targetName": "Кондиционер детская",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-2",
+            "type": "device_action",
+            "targetId": "entity_59e30610a2e855b0",
+            "targetName": "Кондиционер Алиса",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-3",
+            "type": "device_action",
+            "targetId": "entity_b19046b1cbc9a1e1",
+            "targetName": "Кондиционер кабинет",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-4",
+            "type": "device_action",
+            "targetId": "entity_b40df43ddb513167",
+            "targetName": "Кондиционер кухня",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-5",
+            "type": "device_action",
+            "targetId": "entity_69b664f6e5108c33",
+            "targetName": "Кондиционер гостиная",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          }
+        ]
+      },
+      "roomId": "detskaia",
+      "roomIds": [
+        "detskaia",
+        "komnata_alisy",
+        "kabinet",
+        "kukhnia",
+        "gostinaia"
+      ],
+      "activationKind": "manual",
+      "protected": false
+    },
+    {
+      "id": "system-leak-extra-bathroom-alert",
+      "title": "Душевая: аварийная защита от протечки",
+      "group": "system",
+      "description": "Любой из трёх датчиков протечки душевой запускает резервное перекрытие горячей и холодной воды. Telegram обслуживает аварийный контур Hausman, звуковую тревогу показывает планшет, голосовое сообщение отправляется на Яндекс Станции.",
+      "icon": "mdi:water-alert",
+      "enabled": true,
+      "favorite": true,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "Перекрыть горячую и холодную воду",
+      "updatedAt": 1787765177882,
+      "revision": 2,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "t_under_sink",
+            "type": "device_state",
+            "targetId": "entity_7def02153a86d8ff",
+            "targetName": "Датчик протечки душевая под раковиной",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "t_under_boiler",
+            "type": "device_state",
+            "targetId": "entity_e4672df64d3d012b",
+            "targetName": "Датчик протечки душевая под бойлером",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "t_hatch",
+            "type": "device_state",
+            "targetId": "entity_db1fb3e0f4fbb7cc",
+            "targetName": "Датчик протечки душевая люк",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "id": "a_close_water",
+            "type": "run_scenario",
+            "scenarioId": "scenario_manual_water_close"
+          }
+        ]
+      },
+      "roomId": "dop_vanna",
+      "roomIds": [
+        "dop_vanna"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-shower-comfort-controller",
+      "title": "Душевая: свет и вытяжка",
+      "group": "system",
+      "description": "Единый алгоритм душевой: свет по времени суток и солнцу, вытяжка по влажности выше 55% или после 2 минут присутствия. Выключение вытяжки с выдержкой 5 минут после ухода при нормальной влажности.",
+      "icon": "mdi:shower-head",
+      "enabled": true,
+      "favorite": true,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Присутствие, влажность, 09:00, закат, 23:00 и рассвет",
+      "conditionDescription": "Ветвление выполняет управляемая функция Node-RED",
+      "actionDescription": "Основной, дополнительный свет, подсветка шкафа и вытяжка",
+      "updatedAt": 1788624366270,
+      "revision": 4,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "presence_changed",
+            "type": "device_state",
+            "targetId": "entity_d1fb2cbf2a691bba",
+            "targetName": "Датчик присутствия душевая",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "humidity_changed",
+            "type": "device_state",
+            "targetId": "entity_fd3945cf1a2110f8",
+            "targetName": "Климат Kojima душевая Влажность",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "morning_0900",
+            "type": "time",
+            "value": "09:00"
+          },
+          {
+            "id": "sunrise_profile",
+            "type": "sunrise"
+          },
+          {
+            "id": "sunset_profile",
+            "type": "sunset"
+          },
+          {
+            "id": "night_2300",
+            "type": "time",
+            "value": "23:00"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "id": "safe_placeholder",
+            "type": "delay",
+            "delaySeconds": 1
+          }
+        ],
+        "executionBackend": "node_red",
+        "nodeRed": {
+          "flowRevision": 4,
+          "generatedBy": "hausman",
+          "syncStatus": "synced",
+          "inputTargetIds": [
+            "entity_d1fb2cbf2a691bba",
+            "entity_fd3945cf1a2110f8",
+            "entity_6b9ccdab9bb484b2",
+            "entity_46174e1ff9913212",
+            "entity_1fdcd8b244637246",
+            "entity_afef5df0e0cae309",
+            "entity_e7a7c61eec7bdff8"
+          ],
+          "flowId": "7b130de5189e22e5",
+          "sourceHash": "757bde711c85ebad4826c2ec0bf2695d0034f7dd820c9ec7c30816f3f37c1551"
+        }
+      },
+      "roomId": "dop_vanna",
+      "roomIds": [
+        "dop_vanna"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "scenario_manual_water_close",
+      "title": "Закрыть воду",
+      "group": "Вода",
+      "description": "Закрывает редукторы горячей и холодной воды.",
+      "icon": "mdi:water-off",
+      "enabled": true,
+      "favorite": true,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1787757309576,
+      "revision": 1,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "trigger_manual",
+            "type": "manual"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "id": "action-1",
+            "type": "device_action",
+            "targetId": "entity_e3941765c1f247c5",
+            "targetName": "Редуктор горячей воды",
+            "actionId": "turn_off",
+            "actionTitle": "Закрыть"
+          },
+          {
+            "id": "action-2",
+            "type": "device_action",
+            "targetId": "entity_cadf80670b42abc3",
+            "targetName": "Редуктор холодной воды",
+            "actionId": "turn_off",
+            "actionTitle": "Закрыть"
+          }
+        ]
+      },
+      "roomId": "dop_vanna",
+      "roomIds": [
+        "dop_vanna"
+      ],
+      "activationKind": "manual",
+      "protected": false
+    },
+    {
+      "id": "scenario_manual_curtains_close",
+      "title": "Закрыть все шторы",
+      "group": "Шторы",
+      "description": "Закрывает шторы гостиной и кухни.",
+      "icon": "mdi:curtains-closed",
+      "enabled": true,
+      "favorite": true,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1787757309627,
+      "revision": 1,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "trigger_manual",
+            "type": "manual"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "id": "action-1",
+            "type": "device_action",
+            "targetId": "entity_8746cfd7f6f7103d",
+            "targetName": "Шторы гостиная",
+            "actionId": "close_cover",
+            "actionTitle": "Закрыть"
+          },
+          {
+            "id": "action-2",
+            "type": "device_action",
+            "targetId": "entity_2da2065add6e2168",
+            "targetName": "Шторы кухня",
+            "actionId": "close_cover",
+            "actionTitle": "Закрыть"
+          }
+        ]
+      },
+      "roomId": "gostinaia",
+      "roomIds": [
+        "gostinaia",
+        "kukhnia"
+      ],
+      "activationKind": "manual",
+      "protected": false
+    },
+    {
+      "id": "scenario_msirqdih",
+      "title": "Закрыть шторы",
+      "group": "Закрытие штор",
+      "description": "Закрывает все шторы при закате или когда уличная освещённость опускается ниже 400 лк.",
+      "icon": "mdi:curtains",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1788102551094,
+      "revision": 4,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "trigger-sunset",
+            "type": "sunset",
+            "value": 0
+          },
+          {
+            "id": "trigger-low-light",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света улица · Освещённость",
+            "property": "state",
+            "comparison": "below",
+            "value": 400
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "id": "action-1",
+            "type": "device_action",
+            "targetId": "entity_8746cfd7f6f7103d",
+            "targetName": "Шторы гостиная",
+            "actionId": "close_cover",
+            "actionTitle": "Закрыть"
+          },
+          {
+            "id": "action-2",
+            "type": "device_action",
+            "targetId": "entity_2da2065add6e2168",
+            "targetName": "Шторы кухня",
+            "actionId": "close_cover",
+            "actionTitle": "Закрыть"
+          },
+          {
+            "id": "action-4",
+            "type": "device_action",
+            "targetId": "entity_1e0b476b7d082cc0",
+            "targetName": "Шторы комната Алисы",
+            "actionId": "close_cover",
+            "actionTitle": "Закрыть"
+          }
+        ]
+      },
+      "roomId": null,
+      "roomIds": [],
+      "activationKind": "automatic",
+      "protected": false
+    },
+    {
+      "id": "system-office-curtain-auto-close",
+      "title": "Кабинет: безопасное вечернее закрытие",
+      "group": "Закрытие штор",
+      "description": "Закрывает штору кабинета на закате или при освещённости ниже 400 лк, только если она открыта больше чем на 20%.",
+      "icon": "mdi:curtains-closed",
+      "enabled": false,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "Позиция шторы кабинета выше 20%.",
+      "actionDescription": "Закрыть штору кабинета до нижнего упора.",
+      "updatedAt": 1788107842780,
+      "revision": 3,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "trigger-sunset",
+            "type": "sunset",
+            "value": 0
+          },
+          {
+            "id": "trigger-low-light",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света улица · Освещённость",
+            "property": "state",
+            "comparison": "below",
+            "value": 400
+          }
+        ],
+        "conditions": [
+          {
+            "id": "office-position-open",
+            "type": "device_state",
+            "targetId": "entity_9164132c7692d6f5",
+            "targetName": "Шторы кабинет",
+            "property": "current_position",
+            "comparison": "above",
+            "value": 20
+          }
+        ],
+        "actions": [
+          {
+            "id": "office-close-position",
+            "type": "device_action",
+            "targetId": "entity_9164132c7692d6f5",
+            "targetName": "Шторы кабинет",
+            "actionId": "close_cover",
+            "actionTitle": "Закрыть"
+          }
+        ]
+      },
+      "roomId": null,
+      "roomIds": [],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-office-evening-bright",
+      "title": "Кабинет: вечер, нейтральный свет",
+      "group": "system",
+      "description": "После заката до полуночи при 1000 лк и выше: 55%, 4800 K.",
+      "icon": "mdi:ceiling-light",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Включение люстры, изменение солнца или уличной освещённости",
+      "conditionDescription": "Люстра включена; проверка времени суток и уличного света",
+      "actionDescription": "После возврата питания: пауза, яркость и принудительное закрепление температуры",
+      "updatedAt": 1787803932063,
+      "revision": 5,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "light-on",
+            "type": "device_state",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "outdoor-changed",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света улица",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "sun-changed",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "targetName": "Солнце",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "power-source-on",
+            "type": "device_state",
+            "targetId": "entity_7ff6d09cfa68fa5a",
+            "targetName": "Выключатель кабинет 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "light-is-on",
+            "type": "device_state",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "sun",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "targetName": "Солнце",
+            "property": "state",
+            "comparison": "equals",
+            "value": "below_horizon"
+          },
+          {
+            "id": "evening",
+            "type": "time_window",
+            "value": "12:00-23:59"
+          },
+          {
+            "id": "lux-above",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света улица",
+            "property": "state",
+            "comparison": "above",
+            "value": 999
+          }
+        ],
+        "actions": [
+          {
+            "id": "power-settle",
+            "type": "delay",
+            "delaySeconds": 3
+          },
+          {
+            "id": "brightness",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_brightness_percent",
+            "value": 55
+          },
+          {
+            "id": "temperature-prime",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_color_temperature",
+            "value": 4700
+          },
+          {
+            "id": "temperature-prime-settle",
+            "type": "delay",
+            "delaySeconds": 1
+          },
+          {
+            "id": "temperature",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_color_temperature",
+            "value": 4800
+          },
+          {
+            "id": "temperature-settle",
+            "type": "delay",
+            "delaySeconds": 1
+          },
+          {
+            "id": "temperature-confirm",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_color_temperature",
+            "value": 4800
+          }
+        ]
+      },
+      "roomId": "kabinet",
+      "roomIds": [
+        "kabinet"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-office-evening-dark",
+      "title": "Кабинет: вечер, тёплый приглушённый свет",
+      "group": "system",
+      "description": "После заката до полуночи при освещённости ниже 100 лк: 25%, 6500 K.",
+      "icon": "mdi:ceiling-light",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Включение люстры, изменение солнца или уличной освещённости",
+      "conditionDescription": "Люстра включена; проверка времени суток и уличного света",
+      "actionDescription": "После возврата питания: пауза, яркость и принудительное закрепление температуры",
+      "updatedAt": 1787803932144,
+      "revision": 5,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "light-on",
+            "type": "device_state",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "outdoor-changed",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света улица",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "sun-changed",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "targetName": "Солнце",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "power-source-on",
+            "type": "device_state",
+            "targetId": "entity_7ff6d09cfa68fa5a",
+            "targetName": "Выключатель кабинет 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "light-is-on",
+            "type": "device_state",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "sun",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "targetName": "Солнце",
+            "property": "state",
+            "comparison": "equals",
+            "value": "below_horizon"
+          },
+          {
+            "id": "evening",
+            "type": "time_window",
+            "value": "12:00-23:59"
+          },
+          {
+            "id": "lux-below",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света улица",
+            "property": "state",
+            "comparison": "below",
+            "value": 100
+          }
+        ],
+        "actions": [
+          {
+            "id": "power-settle",
+            "type": "delay",
+            "delaySeconds": 3
+          },
+          {
+            "id": "brightness",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_brightness_percent",
+            "value": 25
+          },
+          {
+            "id": "temperature-prime",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_color_temperature",
+            "value": 6400
+          },
+          {
+            "id": "temperature-prime-settle",
+            "type": "delay",
+            "delaySeconds": 1
+          },
+          {
+            "id": "temperature",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_color_temperature",
+            "value": 6500
+          },
+          {
+            "id": "temperature-settle",
+            "type": "delay",
+            "delaySeconds": 1
+          },
+          {
+            "id": "temperature-confirm",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_color_temperature",
+            "value": 6500
+          }
+        ]
+      },
+      "roomId": "kabinet",
+      "roomIds": [
+        "kabinet"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-office-evening-medium",
+      "title": "Кабинет: вечер, тёплый свет",
+      "group": "system",
+      "description": "После заката до полуночи при 100-999 лк: 40%, 5700 K.",
+      "icon": "mdi:ceiling-light",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Включение люстры, изменение солнца или уличной освещённости",
+      "conditionDescription": "Люстра включена; проверка времени суток и уличного света",
+      "actionDescription": "После возврата питания: пауза, яркость и принудительное закрепление температуры",
+      "updatedAt": 1787803932227,
+      "revision": 5,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "light-on",
+            "type": "device_state",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "outdoor-changed",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света улица",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "sun-changed",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "targetName": "Солнце",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "power-source-on",
+            "type": "device_state",
+            "targetId": "entity_7ff6d09cfa68fa5a",
+            "targetName": "Выключатель кабинет 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "light-is-on",
+            "type": "device_state",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "sun",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "targetName": "Солнце",
+            "property": "state",
+            "comparison": "equals",
+            "value": "below_horizon"
+          },
+          {
+            "id": "evening",
+            "type": "time_window",
+            "value": "12:00-23:59"
+          },
+          {
+            "id": "lux-above",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света улица",
+            "property": "state",
+            "comparison": "above",
+            "value": 99
+          },
+          {
+            "id": "lux-below",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света улица",
+            "property": "state",
+            "comparison": "below",
+            "value": 1000
+          }
+        ],
+        "actions": [
+          {
+            "id": "power-settle",
+            "type": "delay",
+            "delaySeconds": 3
+          },
+          {
+            "id": "brightness",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_brightness_percent",
+            "value": 40
+          },
+          {
+            "id": "temperature-prime",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_color_temperature",
+            "value": 5600
+          },
+          {
+            "id": "temperature-prime-settle",
+            "type": "delay",
+            "delaySeconds": 1
+          },
+          {
+            "id": "temperature",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_color_temperature",
+            "value": 5700
+          },
+          {
+            "id": "temperature-settle",
+            "type": "delay",
+            "delaySeconds": 1
+          },
+          {
+            "id": "temperature-confirm",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_color_temperature",
+            "value": 5700
+          }
+        ]
+      },
+      "roomId": "kabinet",
+      "roomIds": [
+        "kabinet"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-office-day-medium",
+      "title": "Кабинет: день, нейтральный свет",
+      "group": "system",
+      "description": "После рассвета при 100-999 лк: 65%, 2500 K.",
+      "icon": "mdi:ceiling-light",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Включение люстры, изменение солнца или уличной освещённости",
+      "conditionDescription": "Люстра включена; проверка времени суток и уличного света",
+      "actionDescription": "После возврата питания: пауза, яркость и принудительное закрепление температуры",
+      "updatedAt": 1787803932279,
+      "revision": 4,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "light-on",
+            "type": "device_state",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "outdoor-changed",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света улица",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "sun-changed",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "targetName": "Солнце",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "power-source-on",
+            "type": "device_state",
+            "targetId": "entity_7ff6d09cfa68fa5a",
+            "targetName": "Выключатель кабинет 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "light-is-on",
+            "type": "device_state",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "sun",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "targetName": "Солнце",
+            "property": "state",
+            "comparison": "equals",
+            "value": "above_horizon"
+          },
+          {
+            "id": "lux-above",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света улица",
+            "property": "state",
+            "comparison": "above",
+            "value": 99
+          },
+          {
+            "id": "lux-below",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света улица",
+            "property": "state",
+            "comparison": "below",
+            "value": 1000
+          }
+        ],
+        "actions": [
+          {
+            "id": "power-settle",
+            "type": "delay",
+            "delaySeconds": 3
+          },
+          {
+            "id": "brightness",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_brightness_percent",
+            "value": 65
+          },
+          {
+            "id": "temperature-prime",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_color_temperature",
+            "value": 2600
+          },
+          {
+            "id": "temperature-prime-settle",
+            "type": "delay",
+            "delaySeconds": 1
+          },
+          {
+            "id": "temperature",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_color_temperature",
+            "value": 2500
+          },
+          {
+            "id": "temperature-settle",
+            "type": "delay",
+            "delaySeconds": 1
+          },
+          {
+            "id": "temperature-confirm",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_color_temperature",
+            "value": 2500
+          }
+        ]
+      },
+      "roomId": "kabinet",
+      "roomIds": [
+        "kabinet"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-office-day-bright",
+      "title": "Кабинет: день, яркий свет",
+      "group": "system",
+      "description": "После рассвета при 1000 лк и выше: 85%, 2200 K.",
+      "icon": "mdi:ceiling-light",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Включение люстры, изменение солнца или уличной освещённости",
+      "conditionDescription": "Люстра включена; проверка времени суток и уличного света",
+      "actionDescription": "После возврата питания: пауза, яркость и принудительное закрепление температуры",
+      "updatedAt": 1787803932333,
+      "revision": 4,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "light-on",
+            "type": "device_state",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "outdoor-changed",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света улица",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "sun-changed",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "targetName": "Солнце",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "power-source-on",
+            "type": "device_state",
+            "targetId": "entity_7ff6d09cfa68fa5a",
+            "targetName": "Выключатель кабинет 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "light-is-on",
+            "type": "device_state",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "sun",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "targetName": "Солнце",
+            "property": "state",
+            "comparison": "equals",
+            "value": "above_horizon"
+          },
+          {
+            "id": "lux-above",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света улица",
+            "property": "state",
+            "comparison": "above",
+            "value": 999
+          }
+        ],
+        "actions": [
+          {
+            "id": "power-settle",
+            "type": "delay",
+            "delaySeconds": 3
+          },
+          {
+            "id": "brightness",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_brightness_percent",
+            "value": 85
+          },
+          {
+            "id": "temperature-prime",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_color_temperature",
+            "value": 2300
+          },
+          {
+            "id": "temperature-prime-settle",
+            "type": "delay",
+            "delaySeconds": 1
+          },
+          {
+            "id": "temperature",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_color_temperature",
+            "value": 2200
+          },
+          {
+            "id": "temperature-settle",
+            "type": "delay",
+            "delaySeconds": 1
+          },
+          {
+            "id": "temperature-confirm",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_color_temperature",
+            "value": 2200
+          }
+        ]
+      },
+      "roomId": "kabinet",
+      "roomIds": [
+        "kabinet"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "scenario-office-curtain-living-lights-close",
+      "title": "Кабинет: закрытие по свету в комнатах",
+      "group": "Закрытие штор",
+      "description": "При освещённости ниже 400 лк закрывает штору кабинета после включения света в комнатах, только если штора открыта больше чем на 20%.",
+      "icon": "mdi:curtains-closed",
+      "enabled": false,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "Позиция шторы кабинета выше 20%.",
+      "actionDescription": "Закрыть штору кабинета до нижнего упора.",
+      "updatedAt": 1788107842827,
+      "revision": 3,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "light-1",
+            "type": "device_state",
+            "targetId": "entity_e42c658fecb403d3",
+            "targetName": "Выключатель кабинет · Выключатель кабинет 1",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-2",
+            "type": "device_state",
+            "targetId": "entity_7ff6d09cfa68fa5a",
+            "targetName": "Выключатель кабинет · Выключатель кабинет 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-3",
+            "type": "device_state",
+            "targetId": "entity_7b74c1fbb21b1eb2",
+            "targetName": "Люстра прибор",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-4",
+            "type": "device_state",
+            "targetId": "entity_1ec01be616272273",
+            "targetName": "Выключатель комната Алисы · Выключатель комната Алисы 1",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-5",
+            "type": "device_state",
+            "targetId": "entity_528aea0b1ac18c1d",
+            "targetName": "Выключатель комната Алисы · Выключатель комната Алисы 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-6",
+            "type": "device_state",
+            "targetId": "entity_dd1b95149844a12f",
+            "targetName": "Выключатель комната Игоря · Выключатель комната Игоря Left",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-7",
+            "type": "device_state",
+            "targetId": "entity_15841ed823fca4bf",
+            "targetName": "Выключатель комната Игоря · Выключатель комната Игоря Right",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-8",
+            "type": "device_state",
+            "targetId": "entity_c7d2c2c49fa585c2",
+            "targetName": "Выключатель кухня · Выключатель кухня Center",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-9",
+            "type": "device_state",
+            "targetId": "entity_bd52eaf46116d96d",
+            "targetName": "Выключатель кухня · Выключатель кухня Left",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-10",
+            "type": "device_state",
+            "targetId": "entity_969e3b1ee543b55f",
+            "targetName": "Выключатель кухня · Выключатель кухня Right",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-11",
+            "type": "device_state",
+            "targetId": "entity_0c7068c26367a184",
+            "targetName": "Выключатель гостинная · Выключатель гостинная Left",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-12",
+            "type": "device_state",
+            "targetId": "entity_874a09c0653bb697",
+            "targetName": "Выключатель гостинная · Выключатель гостинная Right",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-13",
+            "type": "device_state",
+            "targetId": "entity_3f19b04562a06373",
+            "targetName": "Ночник у двери",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-14",
+            "type": "device_state",
+            "targetId": "entity_a09aec8dfbf0a055",
+            "targetName": "Ночник у окна",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "condition-low-light",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света улица · Освещённость",
+            "property": "state",
+            "comparison": "below",
+            "value": 400
+          },
+          {
+            "id": "office-position-open",
+            "type": "device_state",
+            "targetId": "entity_9164132c7692d6f5",
+            "targetName": "Шторы кабинет",
+            "property": "current_position",
+            "comparison": "above",
+            "value": 20
+          }
+        ],
+        "actions": [
+          {
+            "id": "office-close-position",
+            "type": "device_action",
+            "targetId": "entity_9164132c7692d6f5",
+            "targetName": "Шторы кабинет",
+            "actionId": "close_cover",
+            "actionTitle": "Закрыть"
+          }
+        ]
+      },
+      "roomId": null,
+      "roomIds": [],
+      "activationKind": "automatic",
+      "protected": false
+    },
+    {
+      "id": "scenario-office-curtain-service-lights-close",
+      "title": "Кабинет: закрытие по свету в общих зонах",
+      "group": "Закрытие штор",
+      "description": "При освещённости ниже 400 лк закрывает штору кабинета после включения света в общих зонах, только если штора открыта больше чем на 20%.",
+      "icon": "mdi:curtains-closed",
+      "enabled": false,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "Позиция шторы кабинета выше 20%.",
+      "actionDescription": "Закрыть штору кабинета до нижнего упора.",
+      "updatedAt": 1788624410663,
+      "revision": 4,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "light-1",
+            "type": "device_state",
+            "targetId": "entity_a591e035e3e5b34f",
+            "targetName": "Выключатель ванная · Выключатель ванная 1",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-2",
+            "type": "device_state",
+            "targetId": "entity_d82766182d69dd51",
+            "targetName": "Выключатель ванная · Выключатель ванная 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-3",
+            "type": "device_state",
+            "targetId": "entity_1fdcd8b244637246",
+            "targetName": "Выключатель душевая доп свет · Выключатель душевая доп свет 1",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-4",
+            "type": "device_state",
+            "targetId": "entity_afef5df0e0cae309",
+            "targetName": "Выключатель душевая доп свет · Выключатель душевая доп свет 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-5",
+            "type": "device_state",
+            "targetId": "entity_46174e1ff9913212",
+            "targetName": "Выключатель душевая · Выключатель душевая 1",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-6",
+            "type": "device_state",
+            "targetId": "entity_e6c37f413b2e20ee",
+            "targetName": "Выключатель коридор · Выключатель коридор Left",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-7",
+            "type": "device_state",
+            "targetId": "entity_69094124524afb2c",
+            "targetName": "Выключатель коридор · Выключатель коридор Right",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-8",
+            "type": "device_state",
+            "targetId": "entity_4be32416634e6416",
+            "targetName": "Выключатель малый коридор · Выключатель малый коридор 1",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-9",
+            "type": "device_state",
+            "targetId": "entity_9ed909332fdaa8fd",
+            "targetName": "Люстра малый коридор · Люстра малый коридор Люстра малый коридор",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-10",
+            "type": "device_state",
+            "targetId": "entity_71859313239a14e4",
+            "targetName": "Люстра тамбур · Люстра тамбур Люстра тамбур",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-11",
+            "type": "device_state",
+            "targetId": "entity_6667b3400bce7970",
+            "targetName": "Выключатель туалет · Выключатель туалет 1",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-12",
+            "type": "device_state",
+            "targetId": "entity_5d95de599d2b5cec",
+            "targetName": "Выключатель туалет · Выключатель туалет 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "condition-low-light",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света улица · Освещённость",
+            "property": "state",
+            "comparison": "below",
+            "value": 400
+          },
+          {
+            "id": "office-position-open",
+            "type": "device_state",
+            "targetId": "entity_9164132c7692d6f5",
+            "targetName": "Шторы кабинет",
+            "property": "current_position",
+            "comparison": "above",
+            "value": 20
+          }
+        ],
+        "actions": [
+          {
+            "id": "office-close-position",
+            "type": "device_action",
+            "targetId": "entity_9164132c7692d6f5",
+            "targetName": "Шторы кабинет",
+            "actionId": "close_cover",
+            "actionTitle": "Закрыть"
+          }
+        ]
+      },
+      "roomId": null,
+      "roomIds": [],
+      "activationKind": "automatic",
+      "protected": false
+    },
+    {
+      "id": "system-office-night-light",
+      "title": "Кабинет: ночная люстра",
+      "group": "system",
+      "description": "С полуночи до рассвета при ручном включении задаёт люстре 5% и 6500 K.",
+      "icon": "mdi:ceiling-light",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Включение люстры, изменение солнца или уличной освещённости",
+      "conditionDescription": "Люстра включена; проверка времени суток и уличного света",
+      "actionDescription": "После возврата питания: пауза, яркость и принудительное закрепление температуры",
+      "updatedAt": 1787803932401,
+      "revision": 6,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "light-on",
+            "type": "device_state",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "outdoor-changed",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света улица",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "sun-changed",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "targetName": "Солнце",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "midnight",
+            "type": "time",
+            "value": "00:00"
+          },
+          {
+            "id": "power-source-on",
+            "type": "device_state",
+            "targetId": "entity_7ff6d09cfa68fa5a",
+            "targetName": "Выключатель кабинет 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "light-is-on",
+            "type": "device_state",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "after-midnight",
+            "type": "time_window",
+            "value": "00:00-12:00"
+          },
+          {
+            "id": "night",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "targetName": "Солнце",
+            "property": "state",
+            "comparison": "equals",
+            "value": "below_horizon"
+          }
+        ],
+        "actions": [
+          {
+            "id": "power-settle",
+            "type": "delay",
+            "delaySeconds": 3
+          },
+          {
+            "id": "brightness",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_brightness_percent",
+            "value": 5
+          },
+          {
+            "id": "temperature-prime",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_color_temperature",
+            "value": 6400
+          },
+          {
+            "id": "temperature-prime-settle",
+            "type": "delay",
+            "delaySeconds": 1
+          },
+          {
+            "id": "temperature",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_color_temperature",
+            "value": 6500
+          },
+          {
+            "id": "temperature-settle",
+            "type": "delay",
+            "delaySeconds": 1
+          },
+          {
+            "id": "temperature-confirm",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_color_temperature",
+            "value": 6500
+          }
+        ]
+      },
+      "roomId": "kabinet",
+      "roomIds": [
+        "kabinet"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-office-day-low",
+      "title": "Кабинет: утро, мягкий свет",
+      "group": "system",
+      "description": "После рассвета при освещённости ниже 100 лк: 40%, 3000 K.",
+      "icon": "mdi:ceiling-light",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Включение люстры, изменение солнца или уличной освещённости",
+      "conditionDescription": "Люстра включена; проверка времени суток и уличного света",
+      "actionDescription": "После возврата питания: пауза, яркость и принудительное закрепление температуры",
+      "updatedAt": 1787803932506,
+      "revision": 4,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "light-on",
+            "type": "device_state",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "outdoor-changed",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света улица",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "sun-changed",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "targetName": "Солнце",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "power-source-on",
+            "type": "device_state",
+            "targetId": "entity_7ff6d09cfa68fa5a",
+            "targetName": "Выключатель кабинет 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "light-is-on",
+            "type": "device_state",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "sun",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "targetName": "Солнце",
+            "property": "state",
+            "comparison": "equals",
+            "value": "above_horizon"
+          },
+          {
+            "id": "lux-below",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света улица",
+            "property": "state",
+            "comparison": "below",
+            "value": 100
+          }
+        ],
+        "actions": [
+          {
+            "id": "power-settle",
+            "type": "delay",
+            "delaySeconds": 3
+          },
+          {
+            "id": "brightness",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_brightness_percent",
+            "value": 40
+          },
+          {
+            "id": "temperature-prime",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_color_temperature",
+            "value": 3100
+          },
+          {
+            "id": "temperature-prime-settle",
+            "type": "delay",
+            "delaySeconds": 1
+          },
+          {
+            "id": "temperature",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_color_temperature",
+            "value": 3000
+          },
+          {
+            "id": "temperature-settle",
+            "type": "delay",
+            "delaySeconds": 1
+          },
+          {
+            "id": "temperature-confirm",
+            "type": "device_action",
+            "targetId": "entity_aeaf7c250c68e8c2",
+            "targetName": "Люстра кабинет",
+            "actionId": "set_color_temperature",
+            "value": 3000
+          }
+        ]
+      },
+      "roomId": "kabinet",
+      "roomIds": [
+        "kabinet"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-storage-light-on-presence",
+      "title": "Кладовка: включить свет при присутствии",
+      "group": "system",
+      "description": "Сразу включает свет, когда датчик обнаруживает присутствие в кладовке.",
+      "icon": "mdi:lightbulb-on",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Датчик присутствия кладовка обнаружил человека",
+      "conditionDescription": "Без дополнительных условий",
+      "actionDescription": "Включить свет кладовки",
+      "updatedAt": 1787766175212,
+      "revision": 0,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "presence-on",
+            "type": "device_state",
+            "targetId": "entity_00dcf0ebdc0bc6cb",
+            "targetName": "Датчик присутствия кладовка",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "id": "light-on",
+            "type": "device_action",
+            "targetId": "entity_0ec37ef18b4b39a6",
+            "targetName": "Свет кладовки",
+            "actionId": "turn_on",
+            "actionTitle": "Свет кладовки · Включить"
+          }
+        ]
+      },
+      "roomId": "kladovka",
+      "roomIds": [
+        "kladovka"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-storage-light-off-timer",
+      "title": "Кладовка: выдержать 5 минут после ухода",
+      "group": "system",
+      "description": "Перезапускает пятиминутный таймер при каждом изменении присутствия и затем проверяет, что человек не вернулся.",
+      "icon": "mdi:timer-outline",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Изменение присутствия в кладовке",
+      "conditionDescription": "Без дополнительных условий",
+      "actionDescription": "Подождать 5 минут и проверить отсутствие",
+      "updatedAt": 1787766175300,
+      "revision": 0,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "presence-changed",
+            "type": "device_state",
+            "targetId": "entity_00dcf0ebdc0bc6cb",
+            "targetName": "Датчик присутствия кладовка",
+            "property": "state",
+            "comparison": "changed"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "id": "wait-five-minutes",
+            "type": "delay",
+            "delaySeconds": 300
+          },
+          {
+            "id": "confirm-absence",
+            "type": "run_scenario",
+            "scenarioId": "system-storage-light-off-confirmed"
+          }
+        ]
+      },
+      "roomId": "kladovka",
+      "roomIds": [
+        "kladovka"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-storage-light-off-confirmed",
+      "title": "Кладовка: выключить свет после 5 минут отсутствия",
+      "group": "system",
+      "description": "Проверяет, что спустя 5 минут в кладовке по-прежнему никого нет, и только после этого выключает свет.",
+      "icon": "mdi:lightbulb-off",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Контроль отсутствия через 5 минут",
+      "conditionDescription": "Датчик присутствия кладовка всё ещё не видит человека",
+      "actionDescription": "Выключить свет кладовки",
+      "updatedAt": 1787766174995,
+      "revision": 0,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "manual",
+            "type": "manual"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "absence",
+            "type": "device_state",
+            "targetId": "entity_00dcf0ebdc0bc6cb",
+            "targetName": "Датчик присутствия кладовка",
+            "property": "state",
+            "comparison": "equals",
+            "value": "off"
+          }
+        ],
+        "actions": [
+          {
+            "id": "light-off",
+            "type": "device_action",
+            "targetId": "entity_0ec37ef18b4b39a6",
+            "targetName": "Свет кладовки",
+            "actionId": "turn_off",
+            "actionTitle": "Свет кладовки · Выключить"
+          }
+        ]
+      },
+      "roomId": "kladovka",
+      "roomIds": [
+        "kladovka"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "scenario_kitchen_ac_off_2200",
+      "title": "Кондиционер кухни: выключение в 22:00",
+      "group": "Климат",
+      "description": "Ежедневно в 22:00 выключает кондиционер кухни.",
+      "icon": "mdi:air-conditioner",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1787757309736,
+      "revision": 1,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "trigger_2200",
+            "type": "time",
+            "value": "22:00"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "id": "action-1",
+            "type": "device_action",
+            "targetId": "entity_b40df43ddb513167",
+            "targetName": "Кондиционер кухня",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          }
+        ]
+      },
+      "roomId": "kukhnia",
+      "roomIds": [
+        "kukhnia"
+      ],
+      "activationKind": "automatic",
+      "protected": false
+    },
+    {
+      "id": "scenario_small_corridor_motion_low_light",
+      "title": "Малый коридор: движение при слабом свете",
+      "group": "Системные сценарии",
+      "description": "До заката запускает адаптивное освещение малого коридора, если уличный датчик показывает не более 400 лк.",
+      "icon": "mdi:brightness-4",
+      "enabled": false,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Движение в малом коридоре",
+      "conditionDescription": "До заката и освещённость не более 400 лк",
+      "actionDescription": "Запустить адаптивный свет малого коридора",
+      "updatedAt": 1788098500983,
+      "revision": 2,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "trigger_motion",
+            "type": "device_state",
+            "targetId": "entity_90417aada6a33491",
+            "targetName": "Датчик движения малого коридора",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "condition_before_sunset",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "targetName": "Солнце",
+            "property": "state",
+            "comparison": "not_equals",
+            "value": "below_horizon"
+          },
+          {
+            "id": "condition_low_light",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света на улице",
+            "property": "state",
+            "comparison": "below",
+            "value": 401
+          }
+        ],
+        "actions": [
+          {
+            "id": "action_run_light",
+            "type": "run_scenario",
+            "scenarioId": "scenario_mssvmo6v"
+          }
+        ]
+      },
+      "roomId": "malyi_koridor",
+      "roomIds": [
+        "malyi_koridor"
+      ],
+      "activationKind": "automatic",
+      "protected": false
+    },
+    {
+      "id": "system-small-corridor-light-controller",
+      "title": "Малый коридор: единый свет",
+      "group": "system",
+      "description": "Один контроллер движения: дневной и вечерний профиль, 5 минут после прохода, плавное выключение и ночная блокировка.",
+      "icon": "mdi:lightbulb-auto",
+      "enabled": true,
+      "favorite": true,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Движение, физический выключатель, освещённость, рассвет, закат и полночь",
+      "conditionDescription": "С 00:00 до рассвета автоматическое включение запрещено, ручной свет имеет приоритет",
+      "actionDescription": "Включить люстру, выдержать 5 минут отсутствия, плавно погасить и снять питание",
+      "updatedAt": 1788624367465,
+      "revision": 3,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "motion_changed",
+            "type": "device_state",
+            "targetId": "entity_90417aada6a33491",
+            "targetName": "Датчик движения малого коридора",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "manual_chandelier_on",
+            "type": "device_state",
+            "targetId": "entity_4be32416634e6416",
+            "targetName": "Выключатель малого коридора",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "outside_lux_changed",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света на улице",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "local_light_changed",
+            "type": "device_state",
+            "targetId": "entity_c9d6bc67f172f30d",
+            "targetName": "Датчик освещённости малого коридора",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "sunrise",
+            "type": "sunrise",
+            "value": 0
+          },
+          {
+            "id": "sunset",
+            "type": "sunset",
+            "value": 0
+          },
+          {
+            "id": "midnight_cutoff",
+            "type": "time",
+            "value": "00:00"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "id": "safe_placeholder",
+            "type": "delay",
+            "delaySeconds": 1
+          }
+        ],
+        "executionBackend": "node_red",
+        "nodeRed": {
+          "flowRevision": 3,
+          "generatedBy": "hausman",
+          "syncStatus": "synced",
+          "inputTargetIds": [
+            "entity_90417aada6a33491",
+            "entity_6b9ccdab9bb484b2",
+            "entity_5f3b4436fb7b6f2b",
+            "entity_c9d6bc67f172f30d",
+            "entity_4be32416634e6416",
+            "entity_9ed909332fdaa8fd"
+          ],
+          "flowId": "503cc37cebba8777",
+          "sourceHash": "bc9a2c7883046e568a428e355af312953d70f0f504393b063130f516fe5052b1"
+        }
+      },
+      "roomId": "malyi_koridor",
+      "roomIds": [
+        "malyi_koridor"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-small-corridor-ambient-night-bright",
+      "title": "Малый коридор: ночь, есть свет",
+      "group": "Малый коридор",
+      "description": "Улица менее 20 лк, но датчик видит свет: 20%, 2400 K.",
+      "icon": "mdi:motion-sensor",
+      "enabled": false,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Движение в малом коридоре",
+      "conditionDescription": "После заката, по уличной и локальной освещённости",
+      "actionDescription": "Включить на 5 минут: 20% и 2400 K",
+      "updatedAt": 1788624426374,
+      "revision": 2,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "motion",
+            "type": "device_state",
+            "targetId": "entity_90417aada6a33491",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "after_sunset",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "below_horizon"
+          },
+          {
+            "id": "outside_under_20",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "property": "state",
+            "comparison": "below",
+            "value": 20
+          },
+          {
+            "id": "local_bright",
+            "type": "device_state",
+            "targetId": "entity_c9d6bc67f172f30d",
+            "property": "state",
+            "comparison": "equals",
+            "value": "bright"
+          }
+        ],
+        "actions": [
+          {
+            "id": "relay_on",
+            "type": "device_action",
+            "targetId": "entity_4be32416634e6416",
+            "targetName": "Выключатель малый коридор · Выключатель малый коридор 1",
+            "actionId": "turn_on",
+            "actionTitle": "Включить"
+          },
+          {
+            "id": "brightness",
+            "type": "device_action",
+            "targetId": "entity_9ed909332fdaa8fd",
+            "actionId": "set_brightness_percent",
+            "actionTitle": "Яркость, %",
+            "value": 20
+          },
+          {
+            "id": "warmth",
+            "type": "device_action",
+            "targetId": "entity_9ed909332fdaa8fd",
+            "actionId": "set_color_temperature",
+            "actionTitle": "Температура света",
+            "value": 2400
+          },
+          {
+            "id": "wait",
+            "type": "delay",
+            "delaySeconds": 300
+          },
+          {
+            "id": "relay_off",
+            "type": "device_action",
+            "targetId": "entity_4be32416634e6416",
+            "targetName": "Выключатель малый коридор · Выключатель малый коридор 1",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          }
+        ]
+      },
+      "roomId": "malyi_koridor",
+      "roomIds": [
+        "malyi_koridor"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "scenario_small_corridor_motion_after_sunset",
+      "title": "Малый коридор: ночь, темно",
+      "group": "Малый коридор",
+      "description": "Улица менее 20 лк и датчик движения не видит яркий свет: 10%, 2200 K.",
+      "icon": "mdi:motion-sensor",
+      "enabled": false,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Движение в малом коридоре",
+      "conditionDescription": "После заката, по уличной и локальной освещённости",
+      "actionDescription": "Включить на 5 минут: 10% и 2200 K",
+      "updatedAt": 1788624433844,
+      "revision": 6,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "motion",
+            "type": "device_state",
+            "targetId": "entity_90417aada6a33491",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "after_sunset",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "below_horizon"
+          },
+          {
+            "id": "outside_under_20",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "property": "state",
+            "comparison": "below",
+            "value": 20
+          },
+          {
+            "id": "local_dark",
+            "type": "device_state",
+            "targetId": "entity_c9d6bc67f172f30d",
+            "property": "state",
+            "comparison": "equals",
+            "value": "dark"
+          }
+        ],
+        "actions": [
+          {
+            "id": "relay_on",
+            "type": "device_action",
+            "targetId": "entity_4be32416634e6416",
+            "targetName": "Выключатель малый коридор · Выключатель малый коридор 1",
+            "actionId": "turn_on",
+            "actionTitle": "Включить"
+          },
+          {
+            "id": "brightness",
+            "type": "device_action",
+            "targetId": "entity_9ed909332fdaa8fd",
+            "actionId": "set_brightness_percent",
+            "actionTitle": "Яркость, %",
+            "value": 10
+          },
+          {
+            "id": "warmth",
+            "type": "device_action",
+            "targetId": "entity_9ed909332fdaa8fd",
+            "actionId": "set_color_temperature",
+            "actionTitle": "Температура света",
+            "value": 2200
+          },
+          {
+            "id": "wait",
+            "type": "delay",
+            "delaySeconds": 300
+          },
+          {
+            "id": "relay_off",
+            "type": "device_action",
+            "targetId": "entity_4be32416634e6416",
+            "targetName": "Выключатель малый коридор · Выключатель малый коридор 1",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          }
+        ]
+      },
+      "roomId": "malyi_koridor",
+      "roomIds": [
+        "malyi_koridor"
+      ],
+      "activationKind": "automatic",
+      "protected": false
+    },
+    {
+      "id": "system-small-corridor-ambient-dark",
+      "title": "Малый коридор: поздний вечер",
+      "group": "Малый коридор",
+      "description": "Улица 20-99 лк и датчик не видит яркий свет: 20%, 2400 K.",
+      "icon": "mdi:motion-sensor",
+      "enabled": false,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Движение в малом коридоре",
+      "conditionDescription": "После заката, по уличной и локальной освещённости",
+      "actionDescription": "Включить на 5 минут: 20% и 2400 K",
+      "updatedAt": 1788624441456,
+      "revision": 4,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "motion",
+            "type": "device_state",
+            "targetId": "entity_90417aada6a33491",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "after_sunset",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "below_horizon"
+          },
+          {
+            "id": "outside_above_19",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "property": "state",
+            "comparison": "above",
+            "value": 19
+          },
+          {
+            "id": "outside_under_100",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "property": "state",
+            "comparison": "below",
+            "value": 100
+          },
+          {
+            "id": "local_dark",
+            "type": "device_state",
+            "targetId": "entity_c9d6bc67f172f30d",
+            "property": "state",
+            "comparison": "equals",
+            "value": "dark"
+          }
+        ],
+        "actions": [
+          {
+            "id": "relay_on",
+            "type": "device_action",
+            "targetId": "entity_4be32416634e6416",
+            "targetName": "Выключатель малый коридор · Выключатель малый коридор 1",
+            "actionId": "turn_on",
+            "actionTitle": "Включить"
+          },
+          {
+            "id": "brightness",
+            "type": "device_action",
+            "targetId": "entity_9ed909332fdaa8fd",
+            "actionId": "set_brightness_percent",
+            "actionTitle": "Яркость, %",
+            "value": 20
+          },
+          {
+            "id": "warmth",
+            "type": "device_action",
+            "targetId": "entity_9ed909332fdaa8fd",
+            "actionId": "set_color_temperature",
+            "actionTitle": "Температура света",
+            "value": 2400
+          },
+          {
+            "id": "wait",
+            "type": "delay",
+            "delaySeconds": 300
+          },
+          {
+            "id": "relay_off",
+            "type": "device_action",
+            "targetId": "entity_4be32416634e6416",
+            "targetName": "Выключатель малый коридор · Выключатель малый коридор 1",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          }
+        ]
+      },
+      "roomId": "malyi_koridor",
+      "roomIds": [
+        "malyi_koridor"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-small-corridor-ambient-dark-bright",
+      "title": "Малый коридор: поздний вечер, есть свет",
+      "group": "Малый коридор",
+      "description": "Улица 20-99 лк, датчик видит свет: 30%, 2700 K.",
+      "icon": "mdi:motion-sensor",
+      "enabled": false,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Движение в малом коридоре",
+      "conditionDescription": "После заката, по уличной и локальной освещённости",
+      "actionDescription": "Включить на 5 минут: 30% и 2700 K",
+      "updatedAt": 1788624448928,
+      "revision": 2,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "motion",
+            "type": "device_state",
+            "targetId": "entity_90417aada6a33491",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "after_sunset",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "below_horizon"
+          },
+          {
+            "id": "outside_above_19",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "property": "state",
+            "comparison": "above",
+            "value": 19
+          },
+          {
+            "id": "outside_under_100",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "property": "state",
+            "comparison": "below",
+            "value": 100
+          },
+          {
+            "id": "local_bright",
+            "type": "device_state",
+            "targetId": "entity_c9d6bc67f172f30d",
+            "property": "state",
+            "comparison": "equals",
+            "value": "bright"
+          }
+        ],
+        "actions": [
+          {
+            "id": "relay_on",
+            "type": "device_action",
+            "targetId": "entity_4be32416634e6416",
+            "targetName": "Выключатель малый коридор · Выключатель малый коридор 1",
+            "actionId": "turn_on",
+            "actionTitle": "Включить"
+          },
+          {
+            "id": "brightness",
+            "type": "device_action",
+            "targetId": "entity_9ed909332fdaa8fd",
+            "actionId": "set_brightness_percent",
+            "actionTitle": "Яркость, %",
+            "value": 30
+          },
+          {
+            "id": "warmth",
+            "type": "device_action",
+            "targetId": "entity_9ed909332fdaa8fd",
+            "actionId": "set_color_temperature",
+            "actionTitle": "Температура света",
+            "value": 2700
+          },
+          {
+            "id": "wait",
+            "type": "delay",
+            "delaySeconds": 300
+          },
+          {
+            "id": "relay_off",
+            "type": "device_action",
+            "targetId": "entity_4be32416634e6416",
+            "targetName": "Выключатель малый коридор · Выключатель малый коридор 1",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          }
+        ]
+      },
+      "roomId": "malyi_koridor",
+      "roomIds": [
+        "malyi_koridor"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "scenario_mssvmo6v",
+      "title": "Малый коридор: свет при слабом дневном освещении",
+      "group": "Малый коридор",
+      "description": "До заката включается при слабом уличном свете. После заката работают шесть уровней, учитывающих улицу и датчик движения.",
+      "icon": "mdi:motion-sensor",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Запуск из проверенных условий движения",
+      "conditionDescription": "Условия проверяют входные сценарии",
+      "actionDescription": "Включить, задать мягкую яркость и тёплый свет, ждать 5 минут, выключить",
+      "updatedAt": 1788624418667,
+      "revision": 3,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "trigger_manual",
+            "type": "manual"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "id": "action_relay_on",
+            "type": "device_action",
+            "targetId": "entity_4be32416634e6416",
+            "targetName": "Выключатель малый коридор · Выключатель малый коридор 1",
+            "actionId": "turn_on",
+            "actionTitle": "Включить"
+          },
+          {
+            "id": "action_adaptive_brightness",
+            "type": "device_action",
+            "targetId": "entity_9ed909332fdaa8fd",
+            "targetName": "Люстра малого коридора",
+            "actionId": "set_adaptive_brightness",
+            "actionTitle": "Яркость по времени суток",
+            "value": 25
+          },
+          {
+            "id": "action_warm_color",
+            "type": "device_action",
+            "targetId": "entity_9ed909332fdaa8fd",
+            "targetName": "Люстра малого коридора",
+            "actionId": "set_color_temperature",
+            "actionTitle": "Температура света",
+            "value": 2700
+          },
+          {
+            "id": "action_wait_five_minutes",
+            "type": "delay",
+            "delaySeconds": 300
+          },
+          {
+            "id": "action_relay_off",
+            "type": "device_action",
+            "targetId": "entity_4be32416634e6416",
+            "targetName": "Выключатель малый коридор · Выключатель малый коридор 1",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          }
+        ]
+      },
+      "roomId": "malyi_koridor",
+      "roomIds": [
+        "malyi_koridor"
+      ],
+      "activationKind": "manual",
+      "protected": false
+    },
+    {
+      "id": "system-small-corridor-ambient-dusk",
+      "title": "Малый коридор: сумерки",
+      "group": "Малый коридор",
+      "description": "Улица от 100 лк и датчик не видит яркий свет: 35%, 2700 K.",
+      "icon": "mdi:motion-sensor",
+      "enabled": false,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Движение в малом коридоре",
+      "conditionDescription": "После заката, по уличной и локальной освещённости",
+      "actionDescription": "Включить на 5 минут: 35% и 2700 K",
+      "updatedAt": 1788624456606,
+      "revision": 5,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "motion",
+            "type": "device_state",
+            "targetId": "entity_90417aada6a33491",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "after_sunset",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "below_horizon"
+          },
+          {
+            "id": "outside_above_99",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "property": "state",
+            "comparison": "above",
+            "value": 99
+          },
+          {
+            "id": "local_dark",
+            "type": "device_state",
+            "targetId": "entity_c9d6bc67f172f30d",
+            "property": "state",
+            "comparison": "equals",
+            "value": "dark"
+          }
+        ],
+        "actions": [
+          {
+            "id": "relay_on",
+            "type": "device_action",
+            "targetId": "entity_4be32416634e6416",
+            "targetName": "Выключатель малый коридор · Выключатель малый коридор 1",
+            "actionId": "turn_on",
+            "actionTitle": "Включить"
+          },
+          {
+            "id": "brightness",
+            "type": "device_action",
+            "targetId": "entity_9ed909332fdaa8fd",
+            "actionId": "set_brightness_percent",
+            "actionTitle": "Яркость, %",
+            "value": 35
+          },
+          {
+            "id": "warmth",
+            "type": "device_action",
+            "targetId": "entity_9ed909332fdaa8fd",
+            "actionId": "set_color_temperature",
+            "actionTitle": "Температура света",
+            "value": 2700
+          },
+          {
+            "id": "wait",
+            "type": "delay",
+            "delaySeconds": 300
+          },
+          {
+            "id": "relay_off",
+            "type": "device_action",
+            "targetId": "entity_4be32416634e6416",
+            "targetName": "Выключатель малый коридор · Выключатель малый коридор 1",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          }
+        ]
+      },
+      "roomId": "malyi_koridor",
+      "roomIds": [
+        "malyi_koridor"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-small-corridor-ambient-dusk-bright",
+      "title": "Малый коридор: сумерки, есть свет",
+      "group": "Малый коридор",
+      "description": "Улица от 100 лк, датчик видит свет: 45%, 3000 K.",
+      "icon": "mdi:motion-sensor",
+      "enabled": false,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Движение в малом коридоре",
+      "conditionDescription": "После заката, по уличной и локальной освещённости",
+      "actionDescription": "Включить на 5 минут: 45% и 3000 K",
+      "updatedAt": 1788624464158,
+      "revision": 4,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "motion",
+            "type": "device_state",
+            "targetId": "entity_90417aada6a33491",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "after_sunset",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "below_horizon"
+          },
+          {
+            "id": "outside_above_99",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "property": "state",
+            "comparison": "above",
+            "value": 99
+          },
+          {
+            "id": "local_bright",
+            "type": "device_state",
+            "targetId": "entity_c9d6bc67f172f30d",
+            "property": "state",
+            "comparison": "equals",
+            "value": "bright"
+          }
+        ],
+        "actions": [
+          {
+            "id": "relay_on",
+            "type": "device_action",
+            "targetId": "entity_4be32416634e6416",
+            "targetName": "Выключатель малый коридор · Выключатель малый коридор 1",
+            "actionId": "turn_on",
+            "actionTitle": "Включить"
+          },
+          {
+            "id": "brightness",
+            "type": "device_action",
+            "targetId": "entity_9ed909332fdaa8fd",
+            "actionId": "set_brightness_percent",
+            "actionTitle": "Яркость, %",
+            "value": 45
+          },
+          {
+            "id": "warmth",
+            "type": "device_action",
+            "targetId": "entity_9ed909332fdaa8fd",
+            "actionId": "set_color_temperature",
+            "actionTitle": "Температура света",
+            "value": 3000
+          },
+          {
+            "id": "wait",
+            "type": "delay",
+            "delaySeconds": 300
+          },
+          {
+            "id": "relay_off",
+            "type": "device_action",
+            "targetId": "entity_4be32416634e6416",
+            "targetName": "Выключатель малый коридор · Выключатель малый коридор 1",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          }
+        ]
+      },
+      "roomId": "malyi_koridor",
+      "roomIds": [
+        "malyi_koridor"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-away-turn-off",
+      "title": "Не дома: выключить свет и климат",
+      "group": "system",
+      "description": "Aqara A100 подтверждает режим «Никого нет дома» 3 секунды, затем запускает единый сценарий «Вне дома». Физические команды выполняет и подтверждает Hausman.",
+      "icon": "mdi:home-export-outline",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1788100864577,
+      "revision": 4,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "a100_away",
+            "type": "device_state",
+            "targetId": "entity_3f343b8d6f58f5b4",
+            "targetName": "A100 Away",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on",
+            "forSeconds": 3
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "id": "run_away",
+            "type": "run_scenario",
+            "scenarioId": "scenario_manual_away"
+          },
+          {
+            "id": "a99",
+            "type": "notification",
+            "message": "Режим «не дома»: свет, климат и бытовые нагрузки выключены, вода закрыта."
+          }
+        ]
+      },
+      "roomId": "detskaia",
+      "roomIds": [
+        "detskaia",
+        "komnata_alisy",
+        "kabinet",
+        "gostinaia",
+        "tambur",
+        "malyi_koridor",
+        "prikhozhaia",
+        "kukhnia",
+        "tualet",
+        "vannaia"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "scenario_manual_water_open",
+      "title": "Открыть воду",
+      "group": "Вода",
+      "description": "Открывает редукторы горячей и холодной воды.",
+      "icon": "mdi:water",
+      "enabled": true,
+      "favorite": true,
+      "danger": false,
+      "requiresConfirmation": true,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1787757309944,
+      "revision": 1,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "trigger_manual",
+            "type": "manual"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "id": "action-1",
+            "type": "device_action",
+            "targetId": "entity_e3941765c1f247c5",
+            "targetName": "Редуктор горячей воды",
+            "actionId": "turn_on",
+            "actionTitle": "Открыть"
+          },
+          {
+            "id": "action-2",
+            "type": "device_action",
+            "targetId": "entity_cadf80670b42abc3",
+            "targetName": "Редуктор холодной воды",
+            "actionId": "turn_on",
+            "actionTitle": "Открыть"
+          }
+        ]
+      },
+      "roomId": "dop_vanna",
+      "roomIds": [
+        "dop_vanna"
+      ],
+      "activationKind": "manual",
+      "protected": false
+    },
+    {
+      "id": "scenario_manual_curtains_open",
+      "title": "Открыть все шторы",
+      "group": "Шторы",
+      "description": "Открывает шторы гостиной и кухни.",
+      "icon": "mdi:curtains",
+      "enabled": true,
+      "favorite": true,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1787757309995,
+      "revision": 1,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "trigger_manual",
+            "type": "manual"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "id": "action-1",
+            "type": "device_action",
+            "targetId": "entity_8746cfd7f6f7103d",
+            "targetName": "Шторы гостиная",
+            "actionId": "open_cover",
+            "actionTitle": "Открыть"
+          },
+          {
+            "id": "action-2",
+            "type": "device_action",
+            "targetId": "entity_2da2065add6e2168",
+            "targetName": "Шторы кухня",
+            "actionId": "open_cover",
+            "actionTitle": "Открыть"
+          }
+        ]
+      },
+      "roomId": "gostinaia",
+      "roomIds": [
+        "gostinaia",
+        "kukhnia"
+      ],
+      "activationKind": "manual",
+      "protected": false
+    },
+    {
+      "id": "system-leak-bathroom-alert",
+      "title": "Протечка ванная: оповещение",
+      "group": "system",
+      "description": "Перенос из Node-RED: датчик протечки ванной сообщил о воде.",
+      "icon": "mdi:water-alert",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1787757310046,
+      "revision": 1,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "t1",
+            "type": "device_state",
+            "targetId": "entity_f2584edec7a5af3a",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "id": "a1",
+            "type": "notification",
+            "message": "Протечка в ванной: датчик сообщил о воде. Проверьте сантехнику."
+          }
+        ]
+      },
+      "roomId": "vannaia",
+      "roomIds": [
+        "vannaia"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-leak-kitchen-alert",
+      "title": "Протечка кухня: оповещение",
+      "group": "system",
+      "description": "Перенос из Node-RED: датчик протечки кухни сообщил о воде.",
+      "icon": "mdi:water-alert",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1787757310149,
+      "revision": 1,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "t1",
+            "type": "device_state",
+            "targetId": "entity_125cfcf5e8d49215",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "id": "a1",
+            "type": "notification",
+            "message": "Протечка на кухне: датчик сообщил о воде. Проверьте сантехнику."
+          }
+        ]
+      },
+      "roomId": "kukhnia",
+      "roomIds": [
+        "kukhnia"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-leak-toilet-alert",
+      "title": "Протечка туалет: оповещение",
+      "group": "system",
+      "description": "Перенос из Node-RED: датчик протечки туалета сообщил о воде.",
+      "icon": "mdi:water-alert",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1787757310202,
+      "revision": 1,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "t1",
+            "type": "device_state",
+            "targetId": "entity_7ea14f4e0dfbfe3a",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "id": "a1",
+            "type": "notification",
+            "message": "Протечка в туалете: датчик сообщил о воде. Проверьте сантехнику."
+          }
+        ]
+      },
+      "roomId": "tualet",
+      "roomIds": [
+        "tualet"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "scenario_manual_good_night",
+      "title": "Спокойной ночи",
+      "group": "Дом",
+      "description": "Выключает весь свет и телевизоры, закрывает шторы.",
+      "icon": "mdi:weather-night",
+      "enabled": true,
+      "favorite": true,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1787757310339,
+      "revision": 1,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "trigger_manual",
+            "type": "manual"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "id": "action-1",
+            "type": "run_scenario",
+            "scenarioId": "scenario_manual_lights_off"
+          },
+          {
+            "id": "action-2",
+            "type": "device_action",
+            "targetId": "entity_91f49a61b4854ad4",
+            "targetName": "Телевизор в гостиной",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-3",
+            "type": "device_action",
+            "targetId": "entity_6534ce19d5b2767e",
+            "targetName": "Телевизор на кухне",
+            "actionId": "turn_off",
+            "actionTitle": "Выключить"
+          },
+          {
+            "id": "action-4",
+            "type": "run_scenario",
+            "scenarioId": "scenario_manual_curtains_close"
+          }
+        ]
+      },
+      "roomId": "gostinaia",
+      "roomIds": [
+        "gostinaia",
+        "kukhnia"
+      ],
+      "activationKind": "manual",
+      "protected": false
+    },
+    {
+      "id": "system-twilight-curtains-close",
+      "title": "Сумерки: закрыть шторы",
+      "group": "system",
+      "description": "На закате закрывает все шторы дома.",
+      "icon": "mdi:blinds",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1788102551164,
+      "revision": 3,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "t1",
+            "type": "sunset"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "id": "a1",
+            "type": "device_action",
+            "targetId": "entity_8746cfd7f6f7103d",
+            "targetName": "Шторы гостиная",
+            "actionId": "close_cover"
+          },
+          {
+            "id": "a2",
+            "type": "device_action",
+            "targetId": "entity_2da2065add6e2168",
+            "targetName": "Шторы кухня",
+            "actionId": "close_cover"
+          },
+          {
+            "id": "a4",
+            "type": "device_action",
+            "targetId": "entity_1e0b476b7d082cc0",
+            "targetName": "Шторы комната Алисы",
+            "actionId": "close_cover"
+          }
+        ]
+      },
+      "roomId": null,
+      "roomIds": [],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-tambur-adaptive-controller",
+      "title": "Тамбур: адаптивный свет",
+      "group": "system",
+      "description": "Единый контроллер люстры, точек и зеркала: движение, присутствие, открытие входной двери, уличная освещённость, ручной приоритет и плавное выключение.",
+      "icon": "mdi:lightbulb-auto",
+      "enabled": true,
+      "favorite": true,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Движение, присутствие, физический выключатель, рассвет, закат и границы 23:00-01:00",
+      "conditionDescription": "Недостоверные датчики запрещают автоматическое выключение, ручной свет имеет приоритет",
+      "actionDescription": "Люстра и точки по присутствию, зеркало только по своему расписанию",
+      "updatedAt": 1788624366855,
+      "revision": 8,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "presence_changed",
+            "type": "device_state",
+            "targetId": "entity_156050daca86aa6c",
+            "targetName": "Датчик присутствия тамбур 2",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "motion_changed",
+            "type": "device_state",
+            "targetId": "entity_10b78187426f8485",
+            "targetName": "Датчик движения тамбур",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "manual_chandelier_on",
+            "type": "device_state",
+            "targetId": "entity_b47991988cc6b9f3",
+            "targetName": "Физический выключатель люстры тамбура",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "outside_lux_changed",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света на улице",
+            "property": "state",
+            "comparison": "changed"
+          },
+          {
+            "id": "sunrise",
+            "type": "sunrise",
+            "value": 0
+          },
+          {
+            "id": "sunset",
+            "type": "sunset",
+            "value": 0
+          },
+          {
+            "id": "mirror_window_start",
+            "type": "time",
+            "value": "23:00"
+          },
+          {
+            "id": "mirror_window_midnight",
+            "type": "time",
+            "value": "00:00"
+          },
+          {
+            "id": "mirror_window_end",
+            "type": "time",
+            "value": "01:00"
+          },
+          {
+            "id": "entry_door_unlocked",
+            "type": "device_state",
+            "targetId": "entity_170c7a4e2505b803",
+            "targetName": "Входная дверь Aqara A100",
+            "property": "state",
+            "comparison": "equals",
+            "value": "unlocked"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "id": "safe_placeholder",
+            "type": "delay",
+            "delaySeconds": 1
+          }
+        ],
+        "executionBackend": "node_red",
+        "nodeRed": {
+          "flowRevision": 8,
+          "generatedBy": "hausman",
+          "syncStatus": "synced",
+          "inputTargetIds": [
+            "entity_156050daca86aa6c",
+            "entity_10b78187426f8485",
+            "entity_6b9ccdab9bb484b2",
+            "entity_5f3b4436fb7b6f2b",
+            "entity_71859313239a14e4",
+            "entity_cd0098e5ff95da46",
+            "entity_fbdf27871edb89bf",
+            "entity_b47991988cc6b9f3",
+            "entity_170c7a4e2505b803"
+          ],
+          "flowId": "a7a6f6b13cc83ca0",
+          "sourceHash": "4daef9ac2de8dc1c95dd2da6887e178751a65d0e47bcf48443635f68eb1ba5dc"
+        }
+      },
+      "roomId": "tambur",
+      "roomIds": [
+        "tambur"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-toilet-fan-off-delay",
+      "title": "Туалет: вытяжка off после света",
+      "group": "system",
+      "description": "Перенос из Node-RED: свет погас - вытяжка выключается через 3 минуты. Если свет включился снова, вытяжку вернёт сценарий «вытяжка днём со светом» (отмены таймера в движке нет).",
+      "icon": "mdi:fan-off",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1787757310583,
+      "revision": 1,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "t1",
+            "type": "device_state",
+            "targetId": "entity_6667b3400bce7970",
+            "property": "state",
+            "comparison": "equals",
+            "value": "off"
+          },
+          {
+            "id": "t2",
+            "type": "device_state",
+            "targetId": "entity_5d95de599d2b5cec",
+            "property": "state",
+            "comparison": "equals",
+            "value": "off"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "c1",
+            "type": "device_state",
+            "targetId": "entity_6667b3400bce7970",
+            "property": "state",
+            "comparison": "equals",
+            "value": "off"
+          },
+          {
+            "id": "c2",
+            "type": "device_state",
+            "targetId": "entity_5d95de599d2b5cec",
+            "property": "state",
+            "comparison": "equals",
+            "value": "off"
+          }
+        ],
+        "actions": [
+          {
+            "id": "a1",
+            "type": "delay",
+            "delaySeconds": 180
+          },
+          {
+            "id": "a2",
+            "type": "device_action",
+            "targetId": "entity_9bbb3b0e8cd98627",
+            "actionId": "turn_off"
+          }
+        ]
+      },
+      "roomId": "tualet",
+      "roomIds": [
+        "tualet"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-toilet-fan-day",
+      "title": "Туалет: вытяжка днём со светом",
+      "group": "system",
+      "description": "Перенос из Node-RED: свет в туалете включает вытяжку, но не в тихие часы 22:30-08:30.",
+      "icon": "mdi:fan",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1787757310668,
+      "revision": 1,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "t1",
+            "type": "device_state",
+            "targetId": "entity_6667b3400bce7970",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "t2",
+            "type": "device_state",
+            "targetId": "entity_5d95de599d2b5cec",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "c1",
+            "type": "time_window",
+            "value": "08:30-22:30"
+          }
+        ],
+        "actions": [
+          {
+            "id": "a1",
+            "type": "device_action",
+            "targetId": "entity_9bbb3b0e8cd98627",
+            "actionId": "turn_on"
+          }
+        ]
+      },
+      "roomId": "tualet",
+      "roomIds": [
+        "tualet"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-toilet-light-motion-night",
+      "title": "Туалет: дополнительный свет ночью",
+      "group": "system",
+      "description": "После 23:00 и до рассвета движение включает только дополнительный свет на 8 минут.",
+      "icon": "mdi:motion-sensor",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Движение в туалете",
+      "conditionDescription": "Время суток, солнце и режим дома",
+      "actionDescription": "Свет на 8 минут",
+      "updatedAt": 1787757310728,
+      "revision": 1,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "t1",
+            "type": "device_state",
+            "targetId": "entity_ce73f88bda2e6812",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "t2",
+            "type": "device_state",
+            "targetId": "entity_56650c782076ed4d",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "c1",
+            "type": "time_window",
+            "value": "23:00-12:00"
+          },
+          {
+            "id": "c2",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "below_horizon"
+          },
+          {
+            "id": "c3",
+            "type": "device_state",
+            "targetId": "entity_3f343b8d6f58f5b4",
+            "property": "state",
+            "comparison": "equals",
+            "value": "off"
+          }
+        ],
+        "actions": [
+          {
+            "id": "a1",
+            "type": "device_action",
+            "targetId": "entity_6667b3400bce7970",
+            "actionId": "turn_on"
+          },
+          {
+            "id": "a2",
+            "type": "delay",
+            "delaySeconds": 480
+          },
+          {
+            "id": "a3",
+            "type": "device_action",
+            "targetId": "entity_6667b3400bce7970",
+            "actionId": "turn_off"
+          },
+          {
+            "id": "a4",
+            "type": "device_action",
+            "targetId": "entity_5d95de599d2b5cec",
+            "actionId": "turn_off"
+          }
+        ]
+      },
+      "roomId": "tualet",
+      "roomIds": [
+        "tualet"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-toilet-light-motion-evening",
+      "title": "Туалет: основной свет вечером",
+      "group": "system",
+      "description": "После заката и до 23:00 движение включает только основной свет на 8 минут.",
+      "icon": "mdi:motion-sensor",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Движение в туалете",
+      "conditionDescription": "Время суток, солнце и режим дома",
+      "actionDescription": "Свет на 8 минут",
+      "updatedAt": 1787757310780,
+      "revision": 1,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "t1",
+            "type": "device_state",
+            "targetId": "entity_ce73f88bda2e6812",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "t2",
+            "type": "device_state",
+            "targetId": "entity_56650c782076ed4d",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "c1",
+            "type": "time_window",
+            "value": "12:00-22:59"
+          },
+          {
+            "id": "c2",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "below_horizon"
+          },
+          {
+            "id": "c3",
+            "type": "device_state",
+            "targetId": "entity_3f343b8d6f58f5b4",
+            "property": "state",
+            "comparison": "equals",
+            "value": "off"
+          }
+        ],
+        "actions": [
+          {
+            "id": "a1",
+            "type": "device_action",
+            "targetId": "entity_5d95de599d2b5cec",
+            "actionId": "turn_on"
+          },
+          {
+            "id": "a2",
+            "type": "delay",
+            "delaySeconds": 480
+          },
+          {
+            "id": "a3",
+            "type": "device_action",
+            "targetId": "entity_6667b3400bce7970",
+            "actionId": "turn_off"
+          },
+          {
+            "id": "a4",
+            "type": "device_action",
+            "targetId": "entity_5d95de599d2b5cec",
+            "actionId": "turn_off"
+          }
+        ]
+      },
+      "roomId": "tualet",
+      "roomIds": [
+        "tualet"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-toilet-light-motion",
+      "title": "Туалет: основной свет днём",
+      "group": "system",
+      "description": "От рассвета до заката движение включает только основной свет на 8 минут.",
+      "icon": "mdi:motion-sensor",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "Движение в туалете",
+      "conditionDescription": "Время суток, солнце и режим дома",
+      "actionDescription": "Свет на 8 минут",
+      "updatedAt": 1787757310836,
+      "revision": 1,
+      "definition": {
+        "version": 1,
+        "executionMode": "restart",
+        "triggers": [
+          {
+            "id": "t1",
+            "type": "device_state",
+            "targetId": "entity_ce73f88bda2e6812",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "t2",
+            "type": "device_state",
+            "targetId": "entity_56650c782076ed4d",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "c1",
+            "type": "device_state",
+            "targetId": "entity_6b9ccdab9bb484b2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "above_horizon"
+          },
+          {
+            "id": "c2",
+            "type": "device_state",
+            "targetId": "entity_3f343b8d6f58f5b4",
+            "property": "state",
+            "comparison": "equals",
+            "value": "off"
+          }
+        ],
+        "actions": [
+          {
+            "id": "a1",
+            "type": "device_action",
+            "targetId": "entity_5d95de599d2b5cec",
+            "actionId": "turn_on"
+          },
+          {
+            "id": "a2",
+            "type": "delay",
+            "delaySeconds": 480
+          },
+          {
+            "id": "a3",
+            "type": "device_action",
+            "targetId": "entity_6667b3400bce7970",
+            "actionId": "turn_off"
+          },
+          {
+            "id": "a4",
+            "type": "device_action",
+            "targetId": "entity_5d95de599d2b5cec",
+            "actionId": "turn_off"
+          }
+        ]
+      },
+      "roomId": "tualet",
+      "roomIds": [
+        "tualet"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "scenario_kitchen_curtains_sunrise",
+      "title": "Шторы кухня: открыть на рассвете",
+      "group": "Мои сценарии",
+      "description": "Открыть шторы кухни на 80% на рассвете.",
+      "icon": "mdi:blinds-open",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "На рассвете",
+      "conditionDescription": "Без дополнительных условий",
+      "actionDescription": "Открыть шторы кухни на 80%",
+      "updatedAt": 1788081561857,
+      "revision": 0,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "sunrise",
+            "type": "sunrise"
+          }
+        ],
+        "conditions": [],
+        "actions": [
+          {
+            "id": "open_kitchen_curtains",
+            "type": "device_action",
+            "targetId": "entity_2da2065add6e2168",
+            "actionId": "set_position",
+            "value": 80
+          }
+        ]
+      },
+      "roomId": "kukhnia",
+      "roomIds": [
+        "kukhnia"
+      ],
+      "activationKind": "automatic",
+      "protected": false
+    },
+    {
+      "id": "system-kitchen-curtains-open-weekday",
+      "title": "Шторы кухня: утро будни",
+      "group": "system",
+      "description": "Перенос из Node-RED: открыть шторы кухни на 80% не раньше 07:00 в будни. Праздничный календарь Node-RED не переносится.",
+      "icon": "mdi:blinds-open",
+      "enabled": false,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1788081561965,
+      "revision": 2,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "t1",
+            "type": "time",
+            "value": "07:00"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "c1",
+            "type": "weekday",
+            "value": "пн, вт, ср, чт, пт"
+          }
+        ],
+        "actions": [
+          {
+            "id": "a1",
+            "type": "device_action",
+            "targetId": "entity_2da2065add6e2168",
+            "actionId": "set_position",
+            "value": 80
+          }
+        ]
+      },
+      "roomId": "kukhnia",
+      "roomIds": [
+        "kukhnia"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "system-kitchen-curtains-open-weekend",
+      "title": "Шторы кухня: утро выходных",
+      "group": "system",
+      "description": "Перенос из Node-RED: открыть шторы кухни на 80% не раньше 09:30 в выходные. Праздничный календарь Node-RED не переносится.",
+      "icon": "mdi:blinds-open",
+      "enabled": false,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1788081562045,
+      "revision": 2,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "t1",
+            "type": "time",
+            "value": "09:30"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "c1",
+            "type": "weekday",
+            "value": "сб, вс"
+          }
+        ],
+        "actions": [
+          {
+            "id": "a1",
+            "type": "device_action",
+            "targetId": "entity_2da2065add6e2168",
+            "actionId": "set_position",
+            "value": 80
+          }
+        ]
+      },
+      "roomId": "kukhnia",
+      "roomIds": [
+        "kukhnia"
+      ],
+      "activationKind": "system",
+      "protected": true
+    },
+    {
+      "id": "scenario_curtains_lights_living",
+      "title": "Шторы: вечерний свет в комнатах",
+      "group": "Закрытие штор",
+      "description": "При освещённости ниже 400 лк включение комнатного света закрывает все шторы. Кладовка исключена.",
+      "icon": "mdi:curtains-closed",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1788102551218,
+      "revision": 4,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "light-1",
+            "type": "device_state",
+            "targetId": "entity_e42c658fecb403d3",
+            "targetName": "Выключатель кабинет · Выключатель кабинет 1",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-2",
+            "type": "device_state",
+            "targetId": "entity_7ff6d09cfa68fa5a",
+            "targetName": "Выключатель кабинет · Выключатель кабинет 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-3",
+            "type": "device_state",
+            "targetId": "entity_7b74c1fbb21b1eb2",
+            "targetName": "Люстра прибор",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-4",
+            "type": "device_state",
+            "targetId": "entity_1ec01be616272273",
+            "targetName": "Выключатель комната Алисы · Выключатель комната Алисы 1",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-5",
+            "type": "device_state",
+            "targetId": "entity_528aea0b1ac18c1d",
+            "targetName": "Выключатель комната Алисы · Выключатель комната Алисы 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-6",
+            "type": "device_state",
+            "targetId": "entity_dd1b95149844a12f",
+            "targetName": "Выключатель комната Игоря · Выключатель комната Игоря Left",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-7",
+            "type": "device_state",
+            "targetId": "entity_15841ed823fca4bf",
+            "targetName": "Выключатель комната Игоря · Выключатель комната Игоря Right",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-8",
+            "type": "device_state",
+            "targetId": "entity_c7d2c2c49fa585c2",
+            "targetName": "Выключатель кухня · Выключатель кухня Center",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-9",
+            "type": "device_state",
+            "targetId": "entity_bd52eaf46116d96d",
+            "targetName": "Выключатель кухня · Выключатель кухня Left",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-10",
+            "type": "device_state",
+            "targetId": "entity_969e3b1ee543b55f",
+            "targetName": "Выключатель кухня · Выключатель кухня Right",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-11",
+            "type": "device_state",
+            "targetId": "entity_0c7068c26367a184",
+            "targetName": "Выключатель гостинная · Выключатель гостинная Left",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-12",
+            "type": "device_state",
+            "targetId": "entity_874a09c0653bb697",
+            "targetName": "Выключатель гостинная · Выключатель гостинная Right",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-13",
+            "type": "device_state",
+            "targetId": "entity_3f19b04562a06373",
+            "targetName": "Ночник у двери",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-14",
+            "type": "device_state",
+            "targetId": "entity_a09aec8dfbf0a055",
+            "targetName": "Ночник у окна",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "condition-low-light",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света улица · Освещённость",
+            "property": "state",
+            "comparison": "below",
+            "value": 400
+          }
+        ],
+        "actions": [
+          {
+            "id": "close-curtain-1",
+            "type": "device_action",
+            "targetId": "entity_8746cfd7f6f7103d",
+            "targetName": "Шторы гостиная",
+            "actionId": "close_cover",
+            "actionTitle": "Закрыть"
+          },
+          {
+            "id": "close-curtain-2",
+            "type": "device_action",
+            "targetId": "entity_2da2065add6e2168",
+            "targetName": "Шторы кухня",
+            "actionId": "close_cover",
+            "actionTitle": "Закрыть"
+          },
+          {
+            "id": "close-curtain-4",
+            "type": "device_action",
+            "targetId": "entity_1e0b476b7d082cc0",
+            "targetName": "Шторы комната Алисы",
+            "actionId": "close_cover",
+            "actionTitle": "Закрыть"
+          }
+        ]
+      },
+      "roomId": null,
+      "roomIds": [],
+      "activationKind": "automatic",
+      "protected": false
+    },
+    {
+      "id": "scenario_curtains_lights_service",
+      "title": "Шторы: вечерний свет в общих зонах",
+      "group": "Закрытие штор",
+      "description": "При освещённости ниже 400 лк включение света в общих и санитарных зонах закрывает все шторы. Кладовка исключена.",
+      "icon": "mdi:curtains-closed",
+      "enabled": true,
+      "favorite": false,
+      "danger": false,
+      "requiresConfirmation": false,
+      "triggerDescription": "",
+      "conditionDescription": "",
+      "actionDescription": "",
+      "updatedAt": 1788624402789,
+      "revision": 5,
+      "definition": {
+        "version": 1,
+        "executionMode": "single",
+        "triggers": [
+          {
+            "id": "light-1",
+            "type": "device_state",
+            "targetId": "entity_a591e035e3e5b34f",
+            "targetName": "Выключатель ванная · Выключатель ванная 1",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-2",
+            "type": "device_state",
+            "targetId": "entity_d82766182d69dd51",
+            "targetName": "Выключатель ванная · Выключатель ванная 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-3",
+            "type": "device_state",
+            "targetId": "entity_1fdcd8b244637246",
+            "targetName": "Выключатель душевая доп свет · Выключатель душевая доп свет 1",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-4",
+            "type": "device_state",
+            "targetId": "entity_afef5df0e0cae309",
+            "targetName": "Выключатель душевая доп свет · Выключатель душевая доп свет 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-5",
+            "type": "device_state",
+            "targetId": "entity_46174e1ff9913212",
+            "targetName": "Выключатель душевая · Выключатель душевая 1",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-6",
+            "type": "device_state",
+            "targetId": "entity_e6c37f413b2e20ee",
+            "targetName": "Выключатель коридор · Выключатель коридор Left",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-7",
+            "type": "device_state",
+            "targetId": "entity_69094124524afb2c",
+            "targetName": "Выключатель коридор · Выключатель коридор Right",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-8",
+            "type": "device_state",
+            "targetId": "entity_4be32416634e6416",
+            "targetName": "Выключатель малый коридор · Выключатель малый коридор 1",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-9",
+            "type": "device_state",
+            "targetId": "entity_9ed909332fdaa8fd",
+            "targetName": "Люстра малый коридор · Люстра малый коридор Люстра малый коридор",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-10",
+            "type": "device_state",
+            "targetId": "entity_71859313239a14e4",
+            "targetName": "Люстра тамбур · Люстра тамбур Люстра тамбур",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-11",
+            "type": "device_state",
+            "targetId": "entity_6667b3400bce7970",
+            "targetName": "Выключатель туалет · Выключатель туалет 1",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          },
+          {
+            "id": "light-12",
+            "type": "device_state",
+            "targetId": "entity_5d95de599d2b5cec",
+            "targetName": "Выключатель туалет · Выключатель туалет 2",
+            "property": "state",
+            "comparison": "equals",
+            "value": "on"
+          }
+        ],
+        "conditions": [
+          {
+            "id": "condition-low-light",
+            "type": "device_state",
+            "targetId": "entity_5f3b4436fb7b6f2b",
+            "targetName": "Датчик света улица · Освещённость",
+            "property": "state",
+            "comparison": "below",
+            "value": 400
+          }
+        ],
+        "actions": [
+          {
+            "id": "close-curtain-1",
+            "type": "device_action",
+            "targetId": "entity_8746cfd7f6f7103d",
+            "targetName": "Шторы гостиная",
+            "actionId": "close_cover",
+            "actionTitle": "Закрыть"
+          },
+          {
+            "id": "close-curtain-2",
+            "type": "device_action",
+            "targetId": "entity_2da2065add6e2168",
+            "targetName": "Шторы кухня",
+            "actionId": "close_cover",
+            "actionTitle": "Закрыть"
+          },
+          {
+            "id": "close-curtain-4",
+            "type": "device_action",
+            "targetId": "entity_1e0b476b7d082cc0",
+            "targetName": "Шторы комната Алисы",
+            "actionId": "close_cover",
+            "actionTitle": "Закрыть"
+          }
+        ]
+      },
+      "roomId": null,
+      "roomIds": [],
+      "activationKind": "automatic",
+      "protected": false
+    }
+  ],
+  "version": 1
+}

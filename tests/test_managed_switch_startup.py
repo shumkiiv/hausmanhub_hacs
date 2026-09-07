@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from custom_components.hausman_hub.application.managed_switch_migration import (
     MIGRATION_MANIFEST,
@@ -10,6 +10,9 @@ from custom_components.hausman_hub.application.managed_switch_migration import (
     async_load_managed_switch_migration_entries,
 )
 from custom_components.hausman_hub.application.activation_latch import ActivationLatch
+from custom_components.hausman_hub.application.native_automation_migration import (
+    NativeAutomationNotReady,
+)
 
 
 @dataclass(frozen=True)
@@ -77,6 +80,28 @@ def _required_targets() -> tuple[str, ...]:
     )
 
 
+def _ready_manifest():
+    return tuple(replace(item, activation_ready=True) for item in MIGRATION_MANIFEST)
+
+
+def test_incomplete_controller_content_blocks_runtime_activation() -> None:
+    async def exercise() -> None:
+        states = []
+        service = _Service(_Catalog(_required_targets()))
+        migration = _Migration()
+        coordinator = ManagedSwitchStartupCoordinator(
+            service, migration, lambda: asyncio.sleep(0), status_publisher=states.append
+        )
+
+        await coordinator.async_start()
+
+        assert states == [{"state": "blocked", "reason": "managed_controller_content_incomplete"}]
+        assert migration.calls == 0
+        assert coordinator.ready is False
+
+    asyncio.run(exercise())
+
+
 def test_incomplete_initial_catalog_activates_once_after_later_snapshot() -> None:
     async def exercise() -> None:
         states = []
@@ -93,6 +118,7 @@ def test_incomplete_initial_catalog_activates_once_after_later_snapshot() -> Non
             migration,
             activate,
             status_publisher=states.append,
+            manifest=_ready_manifest(),
         )
 
         await coordinator.async_start()
@@ -132,7 +158,7 @@ def test_unload_while_waiting_removes_listener_and_prevents_activation() -> None
 
         service = _Service(_Catalog(()))
         migration = _Migration()
-        coordinator = ManagedSwitchStartupCoordinator(service, migration, activate)
+        coordinator = ManagedSwitchStartupCoordinator(service, migration, activate, manifest=_ready_manifest())
 
         await coordinator.async_start()
         coordinator.cancel()
@@ -167,6 +193,7 @@ def test_unload_during_migration_prevents_late_activation() -> None:
             service,
             _PendingMigration(),
             activate,
+            manifest=_ready_manifest(),
         )
         await coordinator.async_start()
 
@@ -210,6 +237,7 @@ def test_unload_during_activation_revokes_authority_and_removes_listeners() -> N
             service,
             _Migration(),
             activate,
+            manifest=_ready_manifest(),
         )
         await coordinator.async_start()
 
@@ -285,7 +313,8 @@ def test_activation_commit_gates_all_runtime_callbacks_and_cleanup_once() -> Non
             raise RuntimeError("late adapter attach failed")
 
         failed = ManagedSwitchStartupCoordinator(
-            _Service(_Catalog(_required_targets())), _Migration(), late_attach_failure
+            _Service(_Catalog(_required_targets())), _Migration(), late_attach_failure,
+            manifest=_ready_manifest(),
         )
         startup = asyncio.create_task(failed.async_start())
         await prepared.wait()
@@ -304,7 +333,8 @@ def test_activation_commit_gates_all_runtime_callbacks_and_cleanup_once() -> Non
             return _Activation(cleanup, latch.open, revoke)
 
         coordinator = ManagedSwitchStartupCoordinator(
-            _Service(_Catalog(_required_targets())), _Migration(), activate
+            _Service(_Catalog(_required_targets())), _Migration(), activate,
+            manifest=_ready_manifest(),
         )
         await coordinator.async_start()
         assert coordinator.ready is True
@@ -350,7 +380,8 @@ def test_activation_commit_gates_all_runtime_callbacks_and_cleanup_once() -> Non
             )
 
         completed = ManagedSwitchStartupCoordinator(
-            _Service(_Catalog(_required_targets())), _Migration(), completed_activation
+            _Service(_Catalog(_required_targets())), _Migration(), completed_activation,
+            manifest=_ready_manifest(),
         )
         await completed.async_start()
         assert completed.ready is False
@@ -376,6 +407,7 @@ def test_final_incomplete_snapshot_exhausts_retry_without_mutation() -> None:
             migration,
             activate,
             status_publisher=states.append,
+            manifest=_ready_manifest(),
         )
 
         await coordinator.async_start()
@@ -409,6 +441,7 @@ def test_non_catalog_migration_failure_is_terminal_and_fails_closed() -> None:
             migration,
             activate,
             status_publisher=states.append,
+            manifest=_ready_manifest(),
         )
 
         await coordinator.async_start()
@@ -421,6 +454,46 @@ def test_non_catalog_migration_failure_is_terminal_and_fails_closed() -> None:
         assert activations == 0
         assert service.observers == []
         assert coordinator.ready is False
+
+    asyncio.run(exercise())
+
+
+def test_native_runtime_not_ready_retries_only_until_final_without_writes() -> None:
+    async def exercise() -> None:
+        states = []
+        writes = []
+        service = _Service(_Catalog(_required_targets()))
+
+        class NotReadyMigration(_Migration):
+            async def async_apply(self) -> str:
+                self.calls += 1
+                raise NativeAutomationNotReady("automation component warming")
+
+        migration = NotReadyMigration()
+        coordinator = ManagedSwitchStartupCoordinator(
+            service,
+            migration,
+            lambda: asyncio.sleep(0),
+            status_publisher=states.append,
+            manifest=_ready_manifest(),
+        )
+
+        await coordinator.async_start()
+        assert states[-1] == {
+            "state": "waiting",
+            "reason": "native_automation_warmup",
+        }
+        assert writes == []
+        assert len(service.observers) == 1
+
+        await service.publish(_Catalog(_required_targets()), final=True)
+        assert states[-1] == {
+            "state": "blocked",
+            "reason": "native_automation_retry_exhausted",
+        }
+        assert migration.calls == 2
+        assert writes == []
+        assert service.observers == []
 
     asyncio.run(exercise())
 
@@ -465,6 +538,7 @@ def test_binding_phase_completes_before_runtime_activation() -> None:
             OrderedMigration("managed-switches"),
             activate,
             binding_migration=OrderedMigration("managed-switch-bindings"),
+            manifest=_ready_manifest(),
         )
 
         await coordinator.async_start()
@@ -496,6 +570,7 @@ def test_binding_phase_failure_blocks_runtime_after_phase_a() -> None:
             activate,
             binding_migration=phase_b,
             status_publisher=states.append,
+            manifest=_ready_manifest(),
         )
 
         await coordinator.async_start()

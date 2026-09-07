@@ -9148,6 +9148,11 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual(200, response.status)
 
     def test_setup_keeps_switch_runtime_unavailable_when_attach_cleanup_fails(self) -> None:
+        from dataclasses import replace
+
+        from custom_components.hausman_hub.application import (
+            managed_switch_migration as migration_module,
+        )
         from custom_components.hausman_hub.application.managed_switch_migration import (
             ManagedSwitchMigration,
             ManagedSwitchStartupCoordinator,
@@ -9178,9 +9183,18 @@ class LocalSummaryAccessTest(unittest.TestCase):
             "synthetic-switch-cleanup-failure",
         )
         hass.config_entries.entries = [entry]
+        ready_manifest = tuple(
+            replace(item, activation_ready=True)
+            for item in migration_module.FULL_MIGRATION_MANIFEST
+        )
 
         with self.assertLogs("custom_components.hausman_hub", level="ERROR") as logs:
             with (
+                patch.object(
+                    migration_module,
+                    "FULL_MIGRATION_MANIFEST",
+                    ready_manifest,
+                ),
                 patch.object(ManagedSwitchMigration, "async_apply", migration_ready),
                 patch.object(
                     ManagedSwitchBindingMigration,
@@ -9208,7 +9222,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertIn("Smart switch device trigger cleanup failed", rendered_logs)
         self.assertNotIn("private details", rendered_logs)
 
-    def test_setup_waits_for_late_switch_catalog_without_starting_runtime(self) -> None:
+    def test_setup_blocks_incomplete_controller_content_before_runtime(self) -> None:
         hass = FakeHomeAssistant()
         entry = FakeEntry(
             {
@@ -9223,11 +9237,17 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(hass, entry)))
 
         self.assertEqual(
-            {"state": "waiting", "reason": "catalog_warmup"},
+            {
+                "state": "blocked",
+                "reason": "managed_controller_content_incomplete",
+            },
             hass.data["hausman_hub"]["managed_switch_migration"],
         )
         self.assertEqual(
-            {"state": "waiting", "reason": "verified_migration_pending"},
+            {
+                "state": "unavailable",
+                "reason": "managed_controller_content_incomplete",
+            },
             hass.data["hausman_hub"]["smart_switch_runtime"],
         )
 

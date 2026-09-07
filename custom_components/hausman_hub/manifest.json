@@ -10,6 +10,7 @@
   "integration_type": "hub",
   "single_config_entry": true,
   "after_dependencies": [
+    "automation",
     "recorder",
     "weather"
   ],

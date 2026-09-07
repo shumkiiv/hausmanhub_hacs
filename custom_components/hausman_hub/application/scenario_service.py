@@ -20,9 +20,13 @@ from ..domain.scenarios import (
     ScenarioDefinition,
     ScenarioExecutionBackend,
     ScenarioExecutionMode,
+    ScenarioAction,
+    ScenarioActionType,
     ScenarioNodeRedGeneratedBy,
+    ScenarioNodeRedMetadata,
     ScenarioNodeRedSyncStatus,
     ScenarioRegistry,
+    ScenarioTrigger,
     ScenarioTriggerType,
     ScenarioViolation,
     _scenario_to_payload,
@@ -33,6 +37,7 @@ from .electrical_breakers import (
 )
 from .intercom_release_obligation import IntercomReleaseObligation
 from .operation_journal import scenario_operation_receipt
+from .scenario_consolidation_inventory import REGISTRY_SCENARIO_IDS_TO_DRAIN
 from .scenario_node_red import (
     NodeRedBackendError,
     NodeRedScenarioBackend,
@@ -76,6 +81,43 @@ _HEALTH_RECOMMENDATIONS = {
     "value_out_of_range": "correct_value",
     "recursive_reference": "break_recursion",
 }
+
+_MANAGED_SWITCH_TITLES = {
+    "system-toilet-comfort-controller": "Туалет: свет и вытяжка",
+    "system-bathroom-exhaust-controller": "Ванная: вытяжка",
+    "system-storage-light-controller": "Кладовка: свет",
+    "system-cabinet-light-controller": "Кабинет: свет",
+    "system-curtains-privacy-controller": "Шторы: приватность",
+}
+
+
+def _new_managed_switch_scenario(item: object, metadata: ScenarioNodeRedMetadata) -> Scenario:
+    """Build an inactive, protected controller before activation is authorized."""
+
+    scenario_id = str(getattr(item, "scenario_id"))
+    return Scenario.from_definition(
+        scenario_id,
+        _MANAGED_SWITCH_TITLES[scenario_id],
+        ScenarioDefinition(
+            version=1,
+            execution_mode=ScenarioExecutionMode.RESTART,
+            execution_backend=ScenarioExecutionBackend.NODE_RED,
+            node_red=metadata,
+            triggers=(ScenarioTrigger("manual", ScenarioTriggerType.MANUAL),),
+            conditions=(),
+            actions=(
+                ScenarioAction(
+                    "staged", ScenarioActionType.NOTIFICATION,
+                    message="Контроллер подготовлен и ожидает безопасной активации.",
+                ),
+            ),
+        ),
+        enabled=False,
+        group="system",
+        description="Защищённый контроллер Hausman.",
+        icon="mdi:script",
+        protected=True,
+    )
 
 
 def _default_call_later(
@@ -466,6 +508,7 @@ class _ManagedSwitchMigrationTransaction:
     previous_registry: ScenarioRegistry
     migrated_registry: ScenarioRegistry
     changed_sources: tuple[tuple[str, str, str, str], ...]
+    created_sources: tuple[tuple[str, str, str], ...]
     scenario_ids: frozenset[str]
 
 
@@ -597,6 +640,8 @@ class ScenarioService:
         self._managed_switch_migration_transaction: (
             _ManagedSwitchMigrationTransaction | None
         ) = None
+        self._managed_switch_create_staging: dict[str, tuple[str, int, str]] = {}
+        self._managed_switch_replace_staging: dict[str, tuple[str, str, str]] = {}
         self._managed_switch_binding_migration_transaction: (
             _ManagedSwitchBindingMigrationTransaction | None
         ) = None
@@ -612,7 +657,9 @@ class ScenarioService:
         self._run_lock = asyncio.Lock()
         self._stopping = False
         self._active_run_calls: set[asyncio.Task[Any]] = set()
+        self._active_run_scenarios: dict[asyncio.Task[Any], set[str]] = {}
         self._run_tasks: dict[str, asyncio.Task[dict[str, Any]]] = {}
+        self._managed_switch_blocked_runs: set[str] = set()
         self._queue_locks: dict[str, asyncio.Lock] = {}
         self._queue_waiters: dict[str, int] = {}
         self._catalog_refresh_lock = asyncio.Lock()
@@ -922,6 +969,56 @@ class ScenarioService:
         finally:
             self._record_path_latency("storage", started)
 
+    async def _async_save_managed_migration_registry(
+        self,
+        registry: ScenarioRegistry,
+        *,
+        expected: ScenarioRegistry,
+    ) -> None:
+        """Write one journal-owned CAS image and reconcile a lost reply."""
+
+        save = getattr(self._store, "async_save", None)
+        load = getattr(self._store, "async_load", None)
+        if not callable(save) or not callable(load):
+            raise ScenarioServiceError(
+                "Managed migration storage is unavailable", status=500
+            )
+        started = self._monotonic()
+        try:
+            try:
+                await save(registry)
+            except BaseException as error:
+                try:
+                    loaded = await asyncio.shield(load())
+                    if isinstance(loaded, ScenarioRegistry):
+                        current = loaded
+                    elif isinstance(loaded, Mapping):
+                        current = ScenarioRegistry.from_storage(loaded)
+                    else:
+                        current = ScenarioRegistry()
+                except BaseException as load_error:
+                    raise ScenarioServiceError(
+                        "Managed migration storage outcome is unavailable",
+                        status=503,
+                    ) from load_error
+                if current == registry:
+                    if isinstance(error, asyncio.CancelledError):
+                        raise
+                    return
+                if current == expected:
+                    if isinstance(error, asyncio.CancelledError):
+                        raise
+                    raise ScenarioServiceError(
+                        "Managed migration storage write failed",
+                        status=503,
+                    ) from error
+                raise ScenarioServiceError(
+                    "Managed migration storage outcome is ambiguous",
+                    status=503,
+                ) from error
+        finally:
+            self._record_path_latency("storage", started)
+
     async def async_reset(self) -> None:
         """Remove every user scenario without executing it."""
 
@@ -1207,8 +1304,478 @@ class ScenarioService:
                 "verification": result["verification"],
             }
 
-    async def async_apply_managed_switch_migration(
+    def _ensure_managed_switch_execution_allowed(self, scenario_id: str) -> None:
+        if scenario_id in self._managed_switch_blocked_runs:
+            raise ScenarioServiceError(
+                "Managed scenario execution is closed during migration.",
+                status=409,
+            )
+
+    async def _async_close_managed_switch_execution(
+        self, scenario_ids: Iterable[str]
+    ) -> None:
+        """Close only affected scenario entry points and quiesce their runs."""
+
+        blocked = {str(scenario_id) for scenario_id in scenario_ids}
+        current = asyncio.current_task()
+        async with self._run_lock:
+            self._managed_switch_blocked_runs.update(blocked)
+            running = {
+                task
+                for scenario_id, task in self._run_tasks.items()
+                if scenario_id in blocked
+                and task is not current
+                and not task.done()
+            }
+            running.update(
+                task
+                for task, active_ids in self._active_run_scenarios.items()
+                if active_ids & blocked
+                and task is not current
+                and not task.done()
+            )
+            for task in running:
+                task.cancel()
+        if running:
+            await asyncio.gather(*running, return_exceptions=True)
+
+    async def async_open_managed_switch_execution(
         self, entries: tuple[object, ...]
+    ) -> None:
+        """Open affected entry points after the durable final verification."""
+
+        scenario_ids = {
+            str(getattr(item, "scenario_id", "")) for item in entries
+        } | set(REGISTRY_SCENARIO_IDS_TO_DRAIN)
+        async with self._run_lock:
+            self._managed_switch_blocked_runs.difference_update(scenario_ids)
+
+    async def async_stage_managed_switch_migration(
+        self,
+        entries: tuple[object, ...],
+        *,
+        journal: Mapping[str, object] | None = None,
+        on_staged: Callable[[Mapping[str, object]], Awaitable[None]] | None = None,
+    ) -> None:
+        """Prepare release flows outside the registry coordinator lock."""
+
+        self._require_running()
+        entry_state: dict[
+            str, tuple[object, Scenario | None, ScenarioNodeRedMetadata | None]
+        ] = {}
+        async with self._lock:
+            if self._managed_switch_migration_transaction is not None:
+                raise ScenarioServiceError(
+                    "Managed switch migration recovery is required.", status=409
+                )
+            registry = self._ensure_loaded()
+            backend = self._node_red_backend
+            if backend is None:
+                raise ScenarioServiceError("Node-RED backend is unavailable.", status=503)
+            scenario_ids = [str(getattr(item, "scenario_id", "")) for item in entries]
+            if not scenario_ids or len(scenario_ids) != len(set(scenario_ids)):
+                raise ScenarioServiceError("Managed switch migration manifest is invalid.", status=500)
+            for item in entries:
+                for target_id in tuple(getattr(item, "input_target_ids")):
+                    device = self._catalog.device(target_id)
+                    if device is None or getattr(device, "target_id", None) != target_id:
+                        raise ScenarioServiceError(
+                            "Managed switch migration target is missing.", status=409
+                        )
+                scenario_id = str(getattr(item, "scenario_id"))
+                scenario = registry.scenario(scenario_id)
+                metadata = scenario.definition.node_red if scenario is not None else None
+                if getattr(item, "operation", "replace") == "create":
+                    if scenario is not None and (
+                        scenario.revision != 0
+                        or scenario.enabled
+                        or not scenario.protected
+                        or metadata is None
+                        or metadata.source_hash
+                        != str(getattr(item, "new_source_hash"))
+                    ):
+                        raise ScenarioRevisionConflictError(
+                            scenario_id,
+                            expected_revision=None,
+                            current_revision=scenario.revision,
+                            changed_fields=("scenario",),
+                            current_room_ids=scenario.room_ids,
+                            current_action_ids=tuple(
+                                action.id for action in scenario.definition.actions
+                            ),
+                        )
+                    entry_state[scenario_id] = (item, scenario, metadata)
+                    continue
+                legacy_state = bool(
+                    scenario is not None
+                    and scenario.revision == getattr(item, "expected_revision", None)
+                    and metadata is not None
+                    and metadata.source_hash == getattr(item, "legacy_source_hash", None)
+                    and _legacy_input_target_ids_match(
+                        metadata.input_target_ids,
+                        tuple(getattr(item, "legacy_input_target_ids")),
+                    )
+                )
+                migrated_state = bool(
+                    scenario is not None
+                    and scenario.revision == int(getattr(item, "expected_revision")) + 1
+                    and metadata is not None
+                    and metadata.source_hash == getattr(item, "new_source_hash", None)
+                    and metadata.input_target_ids == tuple(getattr(item, "input_target_ids"))
+                )
+                if scenario is None:
+                    raise ScenarioRevisionConflictError(
+                        scenario_id,
+                        expected_revision=getattr(item, "expected_revision", None),
+                        current_revision=None,
+                        changed_fields=("definition.nodeRed",),
+                        current_room_ids=(),
+                        current_action_ids=(),
+                    )
+                if not scenario.protected:
+                    raise ScenarioProtectedError(scenario_id)
+                if (
+                    scenario.definition.execution_backend is not ScenarioExecutionBackend.NODE_RED
+                    or metadata is None
+                    or not metadata.flow_id
+                    or not (legacy_state or migrated_state)
+                ):
+                    raise ScenarioRevisionConflictError(
+                        scenario_id,
+                        expected_revision=getattr(item, "expected_revision", None),
+                        current_revision=scenario.revision if scenario is not None else None,
+                        changed_fields=("definition.nodeRed",),
+                        current_room_ids=scenario.room_ids if scenario is not None else (),
+                        current_action_ids=(
+                            tuple(action.id for action in scenario.definition.actions)
+                            if scenario is not None else ()
+                        ),
+                    )
+                evidence = await backend.async_verify_managed_topology(scenario_id, metadata.flow_id)
+                if evidence.get("topology") != getattr(item, "legacy_topology"):
+                    raise ScenarioServiceError("Protected scenario topology changed.", status=409)
+                if evidence.get("source_hash") != metadata.source_hash:
+                    raise ScenarioRevisionConflictError(
+                        scenario_id,
+                        expected_revision=getattr(item, "expected_revision", None),
+                        current_revision=scenario.revision,
+                        changed_fields=("definition.nodeRed.source",),
+                        current_room_ids=scenario.room_ids,
+                        current_action_ids=tuple(action.id for action in scenario.definition.actions),
+                    )
+                entry_state[scenario_id] = (item, scenario, metadata)
+            if self._managed_switch_create_staging or self._managed_switch_replace_staging:
+                return
+        create = getattr(backend, "async_prepare_new_release_source", None)
+        prepare = getattr(backend, "async_prepare_release_source", None)
+        delete = getattr(backend, "async_delete_managed_flow", None)
+        reconcile_create = getattr(
+            backend, "async_reconcile_created_release_source", None
+        )
+        read_source = getattr(backend, "async_read_source", None)
+        if not all(
+            callable(method)
+            for method in (
+                create,
+                delete,
+                prepare,
+                reconcile_create,
+                read_source,
+            )
+        ):
+            raise ScenarioServiceError("Managed source staging is unavailable.", status=503)
+        if journal is None:
+            from .managed_switch_migration import _initial_journal  # noqa: PLC0415
+
+            journal = _initial_journal(
+                await self.async_capture_managed_switch_migration(entries),
+                entries,
+            )
+        await self._async_close_managed_switch_execution(
+            set(scenario_ids) | set(REGISTRY_SCENARIO_IDS_TO_DRAIN)
+        )
+        staged: dict[str, tuple[str, int, str]] = {}
+        staged_replacements: dict[str, tuple[str, str, str]] = {}
+        if not isinstance(journal, Mapping) or not isinstance(
+            journal.get("operations"), Mapping
+        ):
+            raise ScenarioServiceError(
+                "Managed migration durable operations are unavailable.", status=503
+            )
+        operations = json.loads(json.dumps(journal["operations"]))
+
+        async def persist() -> None:
+            if on_staged is not None:
+                await on_staged(operations)
+
+        async def deployed_source(
+            scenario_id: str, flow_id: str
+        ) -> Mapping[str, object]:
+            current = await read_source(scenario_id, flow_id)
+            if not isinstance(current, Mapping):
+                raise ScenarioServiceError(
+                    "Managed source evidence is unavailable.", status=503
+                )
+            return current
+
+        try:
+            for item in entries:
+                scenario_id = str(getattr(item, "scenario_id"))
+                scenario = entry_state[scenario_id][1]
+                metadata = entry_state[scenario_id][2]
+                operation = operations.get(scenario_id)
+                if not isinstance(operation, dict) or operation.get("kind") != getattr(
+                    item, "operation", "replace"
+                ):
+                    raise ScenarioServiceError(
+                        "Managed migration durable operation is invalid.", status=409
+                    )
+                new_hash = str(getattr(item, "new_source_hash"))
+                if operation["kind"] == "replace":
+                    if scenario is None or metadata is None or not metadata.flow_id:
+                        raise ScenarioServiceError(
+                            "Managed replacement evidence is unavailable.", status=409
+                        )
+                    flow_id = str(operation.get("flowId") or "")
+                    old_hash = str(operation.get("expectedSourceHash") or "")
+                    previous_source = operation.get("previousSource")
+                    if (
+                        flow_id != metadata.flow_id
+                        or not old_hash
+                        or not isinstance(previous_source, str)
+                    ):
+                        raise ScenarioServiceError(
+                            "Managed replacement intent is invalid.", status=409
+                        )
+                    current = await deployed_source(scenario_id, flow_id)
+                    current_hash = current.get("source_hash")
+                    if operation.get("state") == "pending":
+                        if (
+                            current_hash != old_hash
+                            or current.get("source") != previous_source
+                        ):
+                            raise ScenarioServiceError(
+                                "Managed source changed before durable intent.", status=409
+                            )
+                        operation["state"] = "intent"
+                        await persist()
+                    if operation.get("state") == "intent":
+                        current = await deployed_source(scenario_id, flow_id)
+                        current_hash = current.get("source_hash")
+                        if current_hash == old_hash and old_hash == new_hash:
+                            if current.get("source") != previous_source:
+                                raise ScenarioServiceError(
+                                    "Managed previous source changed.", status=409
+                                )
+                        elif current_hash == old_hash:
+                            if current.get("source") != previous_source:
+                                raise ScenarioServiceError(
+                                    "Managed previous source changed.", status=409
+                                )
+                            result = await prepare(
+                                scenario_id,
+                                scenario.definition,
+                                flow_id,
+                                str(getattr(item, "source")),
+                                old_hash,
+                                self._catalog,
+                            )
+                            if (
+                                not isinstance(result, Mapping)
+                                or result.get("saved") is not True
+                                or result.get("proposed_source_hash") != new_hash
+                                or result.get("previous_source") != previous_source
+                            ):
+                                raise ScenarioServiceError(
+                                    "Managed source update was not confirmed.", status=503
+                                )
+                        elif current_hash != new_hash:
+                            raise ScenarioServiceError(
+                                "Managed source update outcome is ambiguous.", status=409
+                            )
+                        operation["state"] = "applied"
+                        await persist()
+                    current = await deployed_source(scenario_id, flow_id)
+                    if current.get("source_hash") != new_hash:
+                        raise ScenarioServiceError(
+                            "Managed replacement final source changed.", status=409
+                        )
+                    if old_hash != new_hash:
+                        staged_replacements[scenario_id] = (
+                            flow_id, previous_source, new_hash
+                        )
+                    continue
+
+                if operation.get("state") == "pending":
+                    if scenario is not None:
+                        raise ScenarioServiceError(
+                            "Managed create target already exists without intent.",
+                            status=409,
+                        )
+                    existing = await reconcile_create(scenario_id, new_hash)
+                    if existing is not None:
+                        raise ScenarioServiceError(
+                            "Managed create target conflicts with an existing flow.",
+                            status=409,
+                        )
+                    operation["state"] = "intent"
+                    await persist()
+                if operation.get("state") == "intent":
+                    recovered = await reconcile_create(scenario_id, new_hash)
+                    if recovered is None:
+                        result = await create(
+                            scenario_id,
+                            _MANAGED_SWITCH_TITLES[scenario_id],
+                            str(getattr(item, "source")),
+                            new_hash,
+                        )
+                    else:
+                        result = recovered
+                    flow_id = result.get("flow_id") if isinstance(result, Mapping) else None
+                    flow_revision = result.get("flow_revision") if isinstance(result, Mapping) else None
+                    if not isinstance(flow_id, str) or not flow_id or not isinstance(flow_revision, int):
+                        raise ScenarioServiceError("Managed source creation was not confirmed.", status=503)
+                    operation["flowId"] = flow_id
+                    operation["flowRevision"] = flow_revision
+                    operation["state"] = "applied"
+                    await persist()
+                recovered = await reconcile_create(scenario_id, new_hash)
+                if (
+                    not isinstance(recovered, Mapping)
+                    or recovered.get("flow_id") != operation.get("flowId")
+                ):
+                    raise ScenarioServiceError(
+                        "Managed created flow changed.", status=409
+                    )
+                staged[scenario_id] = (
+                    str(operation["flowId"]),
+                    int(operation["flowRevision"]),
+                    new_hash,
+                )
+            async with self._lock:
+                if self._ensure_loaded() != registry or self._managed_switch_migration_transaction is not None:
+                    raise ScenarioServiceError("Managed migration CAS evidence changed.", status=409)
+                self._managed_switch_create_staging = staged
+                self._managed_switch_replace_staging = staged_replacements
+                if isinstance(journal, dict):
+                    journal["operations"] = operations
+        except BaseException:
+            async def compensate() -> None:
+                for item in reversed(entries):
+                    scenario_id = str(getattr(item, "scenario_id"))
+                    operation = operations.get(scenario_id)
+                    if not isinstance(operation, dict) or operation.get("state") == "pending":
+                        continue
+                    new_hash = str(operation.get("newSourceHash") or "")
+                    if operation.get("kind") == "replace":
+                        flow_id = str(operation.get("flowId") or "")
+                        current = await deployed_source(scenario_id, flow_id)
+                        if current.get("source_hash") == new_hash:
+                            await backend.async_restore_source(
+                                scenario_id,
+                                flow_id,
+                                str(operation["previousSource"]),
+                                expected_current_hash=new_hash,
+                            )
+                        elif current.get("source_hash") != operation.get(
+                            "expectedSourceHash"
+                        ):
+                            raise ScenarioServiceError(
+                                "Managed replacement recovery is ambiguous.",
+                                status=409,
+                            )
+                    else:
+                        recovered = await reconcile_create(scenario_id, new_hash)
+                        if recovered is not None:
+                            recovered_id = recovered.get("flow_id")
+                            intended_id = operation.get("flowId")
+                            if intended_id is not None and recovered_id != intended_id:
+                                raise ScenarioServiceError(
+                                    "Managed create recovery ownership changed.",
+                                    status=409,
+                                )
+                            await delete(
+                                scenario_id,
+                                str(recovered_id),
+                                expected_source_hash=new_hash,
+                            )
+                    operation["state"] = "pending"
+                    operation["flowId"] = (
+                        operation.get("flowId")
+                        if operation.get("kind") == "replace"
+                        else None
+                    )
+                    operation["flowRevision"] = None
+                await persist()
+
+            await asyncio.shield(compensate())
+            raise
+
+    async def async_apply_managed_switch_migration(
+        self,
+        entries: tuple[object, ...],
+        *,
+        journal: Mapping[str, object] | None = None,
+        on_registry: Callable[[Mapping[str, object]], Awaitable[None]] | None = None,
+    ) -> str:
+        """Stage external flows, then apply the short registry CAS commit."""
+
+        if journal is None:
+            from .managed_switch_migration import _initial_journal  # noqa: PLC0415
+
+            journal = _initial_journal(
+                await self.async_capture_managed_switch_migration(entries),
+                entries,
+            )
+        try:
+            await self.async_stage_managed_switch_migration(
+                entries, journal=journal
+            )
+            return await self._async_apply_managed_switch_migration_locked(
+                entries, journal=journal, on_registry=on_registry
+            )
+        except BaseException:
+            await asyncio.shield(
+                self._async_discard_staged_managed_switch_flows(entries)
+            )
+            raise
+
+    async def _async_discard_staged_managed_switch_flows(
+        self, entries: tuple[object, ...] = ()
+    ) -> None:
+        """Delete only flows this attempt created before a registry CAS commit."""
+
+        async with self._lock:
+            if self._managed_switch_migration_transaction is not None:
+                return
+            staged = self._managed_switch_create_staging
+            staged_replacements = self._managed_switch_replace_staging
+            self._managed_switch_create_staging = {}
+            self._managed_switch_replace_staging = {}
+            backend = self._node_red_backend
+        for scenario_id, (flow_id, previous_source, new_hash) in reversed(
+            tuple(staged_replacements.items())
+        ):
+            await backend.async_restore_source(
+                scenario_id, flow_id, previous_source,
+                expected_current_hash=new_hash,
+            )
+        if staged:
+            delete = getattr(backend, "async_delete_managed_flow", None)
+            if not callable(delete):
+                raise ScenarioServiceError(
+                    "Managed source creation recovery is unavailable.", status=503
+                )
+            for scenario_id, (flow_id, _, source_hash) in reversed(tuple(staged.items())):
+                await delete(scenario_id, flow_id, expected_source_hash=source_hash)
+        await self.async_open_managed_switch_execution(entries)
+
+    async def _async_apply_managed_switch_migration_locked(
+        self,
+        entries: tuple[object, ...],
+        *,
+        journal: Mapping[str, object],
+        on_registry: Callable[[Mapping[str, object]], Awaitable[None]] | None,
     ) -> str:
         """CAS-migrate the three release-owned managed scenarios."""
 
@@ -1233,11 +1800,73 @@ class ScenarioService:
                 raise ScenarioServiceError("Managed switch migration manifest is invalid.", status=500)
 
             prepared: list[tuple[object, Scenario, ScenarioNodeRedMetadata, str, bool]] = []
+            created_sources: list[tuple[str, str, str]] = []
+            replacements: dict[str, Scenario] = {}
             for item in entries:
                 scenario_id = str(getattr(item, "scenario_id"))
                 scenario = registry.scenario(scenario_id)
                 if scenario is None:
-                    raise ScenarioNotFoundError(scenario_id)
+                    if getattr(item, "operation", "replace") != "create" or getattr(
+                        item, "expected_revision", object()
+                    ) is not None:
+                        raise ScenarioNotFoundError(scenario_id)
+                    staged = self._managed_switch_create_staging.get(scenario_id)
+                    if staged is None:
+                        raise ScenarioServiceError("Managed source staging is unavailable.", status=503)
+                    flow_id, flow_revision, source_hash = staged
+                    metadata = ScenarioNodeRedMetadata(
+                        flow_id=flow_id,
+                        flow_revision=flow_revision,
+                        source_hash=source_hash,
+                        generated_by=ScenarioNodeRedGeneratedBy.HAUSMAN,
+                        sync_status=ScenarioNodeRedSyncStatus.SYNCED,
+                        input_target_ids=tuple(getattr(item, "input_target_ids")),
+                    )
+                    replacements[scenario_id] = _new_managed_switch_scenario(item, metadata)
+                    created_sources.append((scenario_id, flow_id, metadata.source_hash or ""))
+                    continue
+                if getattr(item, "operation", "replace") == "create":
+                    metadata = scenario.definition.node_red
+                    if (
+                        scenario.revision != 0
+                        or scenario.enabled
+                        or not scenario.protected
+                        or scenario.definition.execution_backend
+                        is not ScenarioExecutionBackend.NODE_RED
+                        or metadata is None
+                        or not metadata.flow_id
+                        or metadata.source_hash != str(getattr(item, "new_source_hash"))
+                        or metadata.input_target_ids
+                        != tuple(getattr(item, "input_target_ids"))
+                    ):
+                        raise ScenarioRevisionConflictError(
+                            scenario_id,
+                            expected_revision=None,
+                            current_revision=scenario.revision,
+                            changed_fields=("scenario",),
+                            current_room_ids=scenario.room_ids,
+                            current_action_ids=tuple(action.id for action in scenario.definition.actions),
+                        )
+                    evidence = await backend.async_verify_managed_topology(
+                        scenario_id, metadata.flow_id
+                    )
+                    if (
+                        evidence.get("topology") != getattr(item, "legacy_topology")
+                        or evidence.get("source_hash") != metadata.source_hash
+                    ):
+                        raise ScenarioServiceError("Protected scenario topology changed.", status=409)
+                    replacements[scenario_id] = scenario
+                    staged_create = self._managed_switch_create_staging.get(
+                        scenario_id
+                    )
+                    if staged_create is None:
+                        raise ScenarioServiceError(
+                            "Managed source staging is unavailable.", status=503
+                        )
+                    created_sources.append(
+                        (scenario_id, staged_create[0], staged_create[2])
+                    )
+                    continue
                 if not scenario.protected:
                     raise ScenarioProtectedError(scenario_id)
                 metadata = scenario.definition.node_red
@@ -1280,7 +1909,7 @@ class ScenarioService:
                 )
                 if migrated_registry and deployed_hash == new_hash:
                     prepared.append((item, scenario, metadata, deployed_hash, True))
-                elif legacy_registry and deployed_hash in {legacy_hash, new_hash}:
+                elif legacy_registry and deployed_hash == new_hash:
                     prepared.append((item, scenario, metadata, deployed_hash, False))
                 else:
                     raise ScenarioRevisionConflictError(
@@ -1292,9 +1921,59 @@ class ScenarioService:
                         current_action_ids=tuple(action.id for action in scenario.definition.actions),
                     )
 
+            operations = journal.get("operations")
+            before_image = journal.get("before")
+            if (
+                not isinstance(operations, Mapping)
+                or not isinstance(before_image, Mapping)
+                or not isinstance(before_image.get("registry"), Mapping)
+            ):
+                raise ScenarioServiceError(
+                    "Managed migration journal is invalid.", status=409
+                )
+            try:
+                previous_registry = ScenarioRegistry.from_storage(
+                    before_image["registry"]
+                )
+            except (ScenarioViolation, TypeError, ValueError) as error:
+                raise ScenarioServiceError(
+                    "Managed migration before-image is invalid.", status=409
+                ) from error
             changed_sources: list[tuple[str, str, str, str]] = []
-            replacements: dict[str, Scenario] = {}
-            last_uses_prepare = False
+            for item in entries:
+                if getattr(item, "operation", "replace") != "replace":
+                    continue
+                scenario_id = str(getattr(item, "scenario_id"))
+                operation = operations.get(scenario_id)
+                if (
+                    isinstance(operation, Mapping)
+                    and operation.get("state") == "applied"
+                    and operation.get("expectedSourceHash")
+                    == operation.get("newSourceHash")
+                ):
+                    continue
+                staged_replace = self._managed_switch_replace_staging.get(
+                    scenario_id
+                )
+                if (
+                    not isinstance(operation, Mapping)
+                    or operation.get("state") != "applied"
+                    or staged_replace is None
+                    or operation.get("flowId") != staged_replace[0]
+                    or operation.get("previousSource") != staged_replace[1]
+                    or operation.get("newSourceHash") != staged_replace[2]
+                ):
+                    raise ScenarioServiceError(
+                        "Managed replacement staging is incomplete.", status=409
+                    )
+                changed_sources.append(
+                    (
+                        scenario_id,
+                        staged_replace[0],
+                        staged_replace[1],
+                        staged_replace[2],
+                    )
+                )
             try:
                 for item, scenario, metadata, deployed_hash, already_done in prepared:
                     if already_done:
@@ -1302,28 +1981,9 @@ class ScenarioService:
                         continue
                     new_hash = str(getattr(item, "new_source_hash"))
                     if deployed_hash != new_hash:
-                        prepare = getattr(backend, "async_prepare_release_source", None)
-                        if callable(prepare):
-                            last_uses_prepare = False
-                            result = await prepare(
-                                scenario.id, scenario.definition, str(metadata.flow_id),
-                                str(getattr(item, "source")), deployed_hash, self._catalog,
-                            )
-                            last_uses_prepare = True
-                        else:
-                            result = await backend.async_update_source(
-                                scenario.id, scenario.definition, str(metadata.flow_id),
-                                str(getattr(item, "source")), deployed_hash, self._catalog,
-                                validate_only=False,
-                            )
-                        previous_source = result.get("previous_source")
-                        if result.get("saved") is not True or not isinstance(previous_source, str):
-                            raise ScenarioServiceError("Managed source update was not confirmed.", status=503)
-                        changed_sources.append(
-                            (scenario.id, str(metadata.flow_id), previous_source, new_hash)
+                        raise ScenarioServiceError(
+                            "Managed source staging is incomplete.", status=409
                         )
-                        if result.get("proposed_source_hash") != new_hash:
-                            raise ScenarioServiceError("Managed source hash mismatch.", status=503)
                     next_metadata = replace(
                         metadata,
                         flow_revision=metadata.flow_revision + 1,
@@ -1338,11 +1998,57 @@ class ScenarioService:
                         revision=scenario.revision + 1,
                         updated_at=int(time.time() * 1000),
                     )
-                if any(not item[4] for item in prepared):
+                if any(not item[4] for item in prepared) or created_sources:
                     next_registry = ScenarioRegistry(
                         scenarios=tuple(replacements.get(item.id, item) for item in registry.scenarios)
+                        + tuple(replacements[scenario_id] for scenario_id, _, _ in created_sources)
                     )
-                    await self.async_save(next_registry)
+                    registry_state = {
+                        "state": "intent",
+                        "beforeHash": hashlib.sha256(
+                            json.dumps(
+                                before_image["registry"],
+                                sort_keys=True,
+                                separators=(",", ":"),
+                                ensure_ascii=False,
+                            ).encode()
+                        ).hexdigest(),
+                        "afterHash": hashlib.sha256(
+                            json.dumps(
+                                next_registry.to_storage(),
+                                sort_keys=True,
+                                separators=(",", ":"),
+                                ensure_ascii=False,
+                            ).encode()
+                        ).hexdigest(),
+                    }
+                    if on_registry is not None:
+                        await on_registry(registry_state)
+                    try:
+                        await self._async_save_managed_migration_registry(
+                            next_registry,
+                            expected=registry,
+                        )
+                    except BaseException as error:
+                        loaded_registry = await self._store.async_load()
+                        if isinstance(loaded_registry, Mapping):
+                            loaded_registry = ScenarioRegistry.from_storage(
+                                loaded_registry
+                            )
+                        if loaded_registry != next_registry:
+                            raise
+                        self._registry = next_registry
+                        if isinstance(error, asyncio.CancelledError):
+                            self._managed_switch_migration_transaction = (
+                                _ManagedSwitchMigrationTransaction(
+                                    previous_registry=previous_registry,
+                                    migrated_registry=next_registry,
+                                    changed_sources=tuple(changed_sources),
+                                    created_sources=tuple(created_sources),
+                                    scenario_ids=frozenset(required_ids),
+                                )
+                            )
+                            raise
                     self._registry = next_registry
                     self._scenario_content_revision_key = None
                     self._scenario_content_revision = None
@@ -1350,25 +2056,38 @@ class ScenarioService:
                     next_registry = registry
                 self._managed_switch_migration_transaction = (
                     _ManagedSwitchMigrationTransaction(
-                        previous_registry=registry,
+                        previous_registry=previous_registry,
                         migrated_registry=next_registry,
                         changed_sources=tuple(changed_sources),
+                        created_sources=tuple(created_sources),
                         scenario_ids=frozenset(required_ids),
                     )
                 )
-            except (Exception, asyncio.CancelledError):
+                registry_state = {
+                    "state": "applied",
+                    "beforeHash": hashlib.sha256(
+                        json.dumps(
+                            before_image["registry"],
+                            sort_keys=True,
+                            separators=(",", ":"),
+                            ensure_ascii=False,
+                        ).encode()
+                    ).hexdigest(),
+                    "afterHash": hashlib.sha256(
+                        json.dumps(
+                            next_registry.to_storage(),
+                            sort_keys=True,
+                            separators=(",", ":"),
+                            ensure_ascii=False,
+                        ).encode()
+                    ).hexdigest(),
+                }
+                if on_registry is not None:
+                    await on_registry(registry_state)
+            except BaseException:
+                if self._managed_switch_migration_transaction is not None:
+                    raise
                 async def _async_compensate_sources() -> None:
-                    nonlocal last_uses_prepare
-                    if last_uses_prepare and changed_sources:
-                        compensate = getattr(
-                            backend,
-                            "async_compensate_last_prepare",
-                            None,
-                        )
-                        if callable(compensate):
-                            await compensate()
-                            changed_sources.pop()
-                        last_uses_prepare = False
                     for (
                         scenario_id,
                         flow_id,
@@ -1381,6 +2100,16 @@ class ScenarioService:
                             previous_source,
                             expected_current_hash=new_hash,
                         )
+                    delete = getattr(backend, "async_delete_managed_flow", None)
+                    if created_sources and not callable(delete):
+                        raise ScenarioServiceError(
+                            "Managed source creation recovery is unavailable.",
+                            status=503,
+                        )
+                    for scenario_id, flow_id, source_hash in reversed(created_sources):
+                        await delete(
+                            scenario_id, flow_id, expected_source_hash=source_hash
+                        )
 
                 try:
                     await asyncio.shield(_async_compensate_sources())
@@ -1388,13 +2117,89 @@ class ScenarioService:
                     raise ScenarioServiceError(
                         "Managed migration failed and CAS rollback was rejected.", status=503
                     ) from rollback_error
+                self._managed_switch_create_staging = {}
+                self._managed_switch_replace_staging = {}
                 raise
             return "completed"
 
-    async def async_finalize_managed_switch_migration(
+    async def async_capture_managed_switch_migration(
         self, entries: tuple[object, ...]
+    ) -> dict[str, object]:
+        """Persistable CAS evidence captured under the scenario coordinator lock."""
+
+        self._require_running()
+        async with self._lock:
+            registry = self._ensure_loaded()
+            backend = self._node_red_backend
+            if backend is None:
+                raise ScenarioServiceError("Node-RED backend is unavailable.", status=503)
+            records: dict[str, dict[str, object]] = {}
+            read_source = getattr(backend, "async_read_source", None)
+            reconcile_create = getattr(
+                backend, "async_reconcile_created_release_source", None
+            )
+            if not callable(read_source) or not callable(reconcile_create):
+                raise ScenarioServiceError(
+                    "Managed source capture is unavailable.", status=503
+                )
+            for item in entries:
+                scenario_id = str(getattr(item, "scenario_id", ""))
+                scenario = registry.scenario(scenario_id)
+                if scenario is None:
+                    if getattr(item, "operation", "replace") != "create":
+                        raise ScenarioNotFoundError(scenario_id)
+                    try:
+                        existing = await reconcile_create(
+                            scenario_id,
+                            str(getattr(item, "new_source_hash")),
+                        )
+                    except NodeRedBackendError as error:
+                        raise ScenarioServiceError(
+                            "Managed create endpoint absence is ambiguous.",
+                            status=409,
+                        ) from error
+                    if existing is not None:
+                        raise ScenarioServiceError(
+                            "Managed create endpoint already exists.",
+                            status=409,
+                        )
+                    records[scenario_id] = {"state": "absent"}
+                    continue
+                metadata = scenario.definition.node_red
+                if metadata is None or not metadata.flow_id:
+                    raise ScenarioServiceError("Protected scenario topology is unavailable.", status=409)
+                evidence = await backend.async_verify_managed_topology(
+                    scenario_id, metadata.flow_id
+                )
+                source = await read_source(scenario_id, metadata.flow_id)
+                if (
+                    not isinstance(source, Mapping)
+                    or source.get("source_hash") != evidence.get("source_hash")
+                    or not isinstance(source.get("source"), str)
+                ):
+                    raise ScenarioServiceError(
+                        "Managed source capture changed.", status=409
+                    )
+                records[scenario_id] = {
+                    "state": "present",
+                    "flowId": metadata.flow_id,
+                    "sourceHash": evidence.get("source_hash"),
+                    "source": source["source"],
+                    "topology": evidence.get("topology"),
+                }
+            return {
+                "registry": registry.to_storage(),
+                "flows": records,
+            }
+
+    async def async_finalize_managed_switch_migration(
+        self,
+        entries: tuple[object, ...],
+        *,
+        journal: Mapping[str, object] | None = None,
+        on_registry: Callable[[Mapping[str, object]], Awaitable[None]] | None = None,
     ) -> None:
-        """Commit retained compensation only after the durable final receipt."""
+        """Persist the final enabled registry while retaining compensation."""
 
         self._require_running()
         async with self._lock:
@@ -1414,15 +2219,113 @@ class ScenarioService:
                     "Protected scenario final CAS evidence changed.", status=409
                 )
             await self._async_verify_managed_switch_migration_locked(entries)
+            if transaction.created_sources:
+                registry = self._ensure_loaded()
+                activated = ScenarioRegistry(
+                    scenarios=tuple(
+                        replace(item, enabled=True, updated_at=int(time.time() * 1000))
+                        if item.id in {source[0] for source in transaction.created_sources}
+                        else item
+                        for item in registry.scenarios
+                    )
+                )
+                before_hash = (
+                    journal.get("registry", {}).get("beforeHash")
+                    if isinstance(journal, Mapping)
+                    and isinstance(journal.get("registry"), Mapping)
+                    else None
+                )
+                if before_hash is None and on_registry is None:
+                    before_hash = hashlib.sha256(
+                        json.dumps(
+                            transaction.previous_registry.to_storage(),
+                            sort_keys=True,
+                            separators=(",", ":"),
+                            ensure_ascii=False,
+                        ).encode()
+                    ).hexdigest()
+                if not isinstance(before_hash, str) or not before_hash:
+                    raise ScenarioServiceError(
+                        "Managed migration registry journal is invalid.",
+                        status=409,
+                    )
+                after_hash = hashlib.sha256(
+                    json.dumps(
+                        activated.to_storage(),
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        ensure_ascii=False,
+                    ).encode()
+                ).hexdigest()
+                registry_state = {
+                    "state": "intent",
+                    "beforeHash": before_hash,
+                    "afterHash": after_hash,
+                }
+                if on_registry is not None:
+                    await on_registry(registry_state)
+                try:
+                    await self._async_save_managed_migration_registry(
+                        activated,
+                        expected=transaction.migrated_registry,
+                    )
+                except BaseException as error:
+                    loaded_registry = await self._store.async_load()
+                    if isinstance(loaded_registry, Mapping):
+                        loaded_registry = ScenarioRegistry.from_storage(
+                            loaded_registry
+                        )
+                    if loaded_registry != activated:
+                        raise
+                    self._registry = activated
+                    self._managed_switch_migration_transaction = replace(
+                        transaction, migrated_registry=activated
+                    )
+                    if isinstance(error, asyncio.CancelledError):
+                        raise
+                self._registry = activated
+                transaction = replace(transaction, migrated_registry=activated)
+                self._managed_switch_migration_transaction = transaction
+                self._scenario_content_revision_key = None
+                self._scenario_content_revision = None
+                if on_registry is not None:
+                    await on_registry(
+                        {
+                            "state": "applied",
+                            "beforeHash": before_hash,
+                            "afterHash": after_hash,
+                        }
+                    )
+
+    async def async_commit_managed_switch_migration(
+        self, entries: tuple[object, ...]
+    ) -> None:
+        """Forget compensation and reopen execution after final verification."""
+
+        async with self._lock:
+            transaction = self._managed_switch_migration_transaction
+            if transaction is None or {
+                str(getattr(item, "scenario_id", "")) for item in entries
+            } != set(transaction.scenario_ids):
+                raise ScenarioServiceError(
+                    "Managed switch migration transaction is unavailable.",
+                    status=409,
+                )
             commit = getattr(
                 self._node_red_backend, "async_commit_last_prepare", None
             )
             if callable(commit):
                 await commit()
             self._managed_switch_migration_transaction = None
+            self._managed_switch_create_staging = {}
+            self._managed_switch_replace_staging = {}
+        await self.async_open_managed_switch_execution(entries)
 
     async def async_rollback_managed_switch_migration(
-        self, entries: tuple[object, ...]
+        self,
+        entries: tuple[object, ...],
+        *,
+        journal: Mapping[str, object] | None = None,
     ) -> bool:
         """Restore an exact prepared migration without overwriting later edits."""
 
@@ -1430,57 +2333,188 @@ class ScenarioService:
         async with self._lock:
             transaction = self._managed_switch_migration_transaction
             backend = self._node_red_backend
-            if transaction is None or backend is None:
+            if backend is None:
                 return False
-            if {
+            required_ids = {
                 str(getattr(item, "scenario_id", "")) for item in entries
-            } != set(transaction.scenario_ids):
-                return False
-            if self._ensure_loaded() != transaction.migrated_registry:
-                return False
-
-            entries_by_id = {
-                str(getattr(item, "scenario_id", "")): item for item in entries
             }
-            try:
-                for scenario_id in transaction.scenario_ids:
-                    scenario = transaction.migrated_registry.scenario(scenario_id)
-                    item = entries_by_id[scenario_id]
-                    metadata = scenario.definition.node_red if scenario else None
+            if transaction is not None and required_ids != set(
+                transaction.scenario_ids
+            ):
+                return False
+            current_registry = self._ensure_loaded()
+            if transaction is not None:
+                previous_registry = transaction.previous_registry
+                migrated_registry = transaction.migrated_registry
+            else:
+                before = journal.get("before") if isinstance(journal, Mapping) else None
+                if not isinstance(before, Mapping) or not isinstance(
+                    before.get("registry"), Mapping
+                ):
+                    return False
+                try:
+                    previous_registry = ScenarioRegistry.from_storage(
+                        before["registry"]
+                    )
+                except (ScenarioViolation, TypeError, ValueError):
+                    return False
+                migrated_registry = current_registry
+            if (
+                current_registry != previous_registry
+                and current_registry != migrated_registry
+            ):
+                return False
+            if transaction is None and current_registry != previous_registry:
+                registry_record = (
+                    journal.get("registry")
+                    if isinstance(journal, Mapping)
+                    else None
+                )
+                current_hash = hashlib.sha256(
+                    json.dumps(
+                        current_registry.to_storage(),
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        ensure_ascii=False,
+                    ).encode()
+                ).hexdigest()
+                if (
+                    not isinstance(registry_record, Mapping)
+                    or registry_record.get("state") not in {"intent", "applied"}
+                    or registry_record.get("afterHash") != current_hash
+                ):
+                    return False
+        operations = journal.get("operations") if isinstance(journal, Mapping) else None
+        if not isinstance(operations, Mapping):
+            if transaction is None:
+                return False
+            operations = {
+                scenario_id: {
+                    "kind": "replace",
+                    "state": "applied",
+                    "flowId": flow_id,
+                    "expectedSourceHash": None,
+                    "newSourceHash": new_hash,
+                    "previousSource": previous_source,
+                }
+                for scenario_id, flow_id, previous_source, new_hash
+                in transaction.changed_sources
+            }
+            operations.update(
+                {
+                    scenario_id: {
+                        "kind": "create",
+                        "state": "applied",
+                        "flowId": flow_id,
+                        "expectedSourceHash": None,
+                        "newSourceHash": source_hash,
+                        "previousSource": None,
+                    }
+                    for scenario_id, flow_id, source_hash
+                    in transaction.created_sources
+                }
+            )
+        read_source = getattr(backend, "async_read_source", None)
+        reconcile_create = getattr(
+            backend, "async_reconcile_created_release_source", None
+        )
+        delete = getattr(backend, "async_delete_managed_flow", None)
+        if not all(callable(item) for item in (read_source, reconcile_create, delete)):
+            return False
+        restores: list[tuple[str, str, str, str]] = []
+        deletes: list[tuple[str, str, str]] = []
+        try:
+            if transaction is not None:
+                for item in entries:
+                    scenario_id = str(getattr(item, "scenario_id"))
+                    expected_hash = str(getattr(item, "new_source_hash"))
+                    scenario = transaction.migrated_registry.scenario(
+                        scenario_id
+                    )
+                    metadata = (
+                        scenario.definition.node_red if scenario is not None else None
+                    )
                     if metadata is None or not metadata.flow_id:
                         return False
                     evidence = await backend.async_verify_managed_topology(
                         scenario_id, metadata.flow_id
                     )
                     if (
-                        evidence.get("source_hash")
-                        != str(getattr(item, "new_source_hash"))
+                        evidence.get("source_hash") != expected_hash
                         or evidence.get("topology")
                         != getattr(item, "legacy_topology")
                     ):
                         return False
-
-                for scenario_id, flow_id, previous_source, new_hash in reversed(
-                    transaction.changed_sources
-                ):
-                    await backend.async_restore_source(
-                        scenario_id,
-                        flow_id,
-                        previous_source,
-                        expected_current_hash=new_hash,
+            for item in entries:
+                scenario_id = str(getattr(item, "scenario_id"))
+                operation = operations.get(scenario_id)
+                if not isinstance(operation, Mapping) or operation.get(
+                    "state"
+                ) == "pending":
+                    continue
+                new_hash = str(operation.get("newSourceHash") or "")
+                if operation.get("kind") == "replace":
+                    flow_id = str(operation.get("flowId") or "")
+                    current = await read_source(scenario_id, flow_id)
+                    current_hash = current.get("source_hash")
+                    if current_hash == new_hash:
+                        previous_source = operation.get("previousSource")
+                        if not isinstance(previous_source, str):
+                            return False
+                        restores.append(
+                            (scenario_id, flow_id, previous_source, new_hash)
+                        )
+                    elif current_hash != operation.get("expectedSourceHash"):
+                        return False
+                else:
+                    recovered = await reconcile_create(scenario_id, new_hash)
+                    if recovered is None:
+                        continue
+                    flow_id = recovered.get("flow_id")
+                    intended_id = operation.get("flowId")
+                    if (
+                        not isinstance(flow_id, str)
+                        or intended_id is not None
+                        and intended_id != flow_id
+                    ):
+                        return False
+                    deletes.append((scenario_id, flow_id, new_hash))
+            for scenario_id, flow_id, previous_source, new_hash in reversed(
+                restores
+            ):
+                await backend.async_restore_source(
+                    scenario_id,
+                    flow_id,
+                    previous_source,
+                    expected_current_hash=new_hash,
+                )
+            for scenario_id, flow_id, source_hash in reversed(deletes):
+                await delete(
+                    scenario_id,
+                    flow_id,
+                    expected_source_hash=source_hash,
+                )
+            async with self._lock:
+                if self._ensure_loaded() != current_registry:
+                    return False
+                if current_registry != previous_registry:
+                    await self._async_save_managed_migration_registry(
+                        previous_registry,
+                        expected=current_registry,
                     )
-                if transaction.previous_registry != transaction.migrated_registry:
-                    await self.async_save(transaction.previous_registry)
-                    self._registry = transaction.previous_registry
+                    self._registry = previous_registry
                     self._scenario_content_revision_key = None
                     self._scenario_content_revision = None
                 commit = getattr(backend, "async_commit_last_prepare", None)
                 if callable(commit):
                     await commit()
-            except (NodeRedBackendError, ScenarioServiceError):
-                return False
-            self._managed_switch_migration_transaction = None
-            return True
+                self._managed_switch_migration_transaction = None
+                self._managed_switch_create_staging = {}
+                self._managed_switch_replace_staging = {}
+        except (NodeRedBackendError, ScenarioServiceError, OSError, ValueError):
+            return False
+        await self.async_open_managed_switch_execution(entries)
+        return True
 
     async def async_verify_managed_switch_migration(
         self, entries: tuple[object, ...]
@@ -1521,6 +2555,43 @@ class ScenarioService:
             if not scenario.protected:
                 raise ScenarioProtectedError(scenario_id)
             metadata = scenario.definition.node_red
+            if getattr(item, "operation", "replace") == "create":
+                if (
+                    getattr(item, "expected_revision", object()) is not None
+                    or scenario.revision != 0
+                    or scenario.definition.execution_backend
+                    is not ScenarioExecutionBackend.NODE_RED
+                    or metadata is None
+                    or not metadata.flow_id
+                    or metadata.source_hash != str(getattr(item, "new_source_hash"))
+                    or metadata.input_target_ids
+                    != tuple(getattr(item, "input_target_ids"))
+                    or metadata.generated_by is not ScenarioNodeRedGeneratedBy.HAUSMAN
+                    or metadata.sync_status is not ScenarioNodeRedSyncStatus.SYNCED
+                ):
+                    raise ScenarioRevisionConflictError(
+                        scenario_id,
+                        expected_revision=None,
+                        current_revision=scenario.revision,
+                        changed_fields=("definition.nodeRed",),
+                        current_room_ids=scenario.room_ids,
+                        current_action_ids=tuple(action.id for action in scenario.definition.actions),
+                    )
+                for target_id in metadata.input_target_ids:
+                    device = self._catalog.device(target_id)
+                    if device is None or getattr(device, "target_id", None) != target_id:
+                        raise ScenarioServiceError("Managed switch migration target is missing.", status=409)
+                evidence = await backend.async_verify_managed_topology(scenario_id, metadata.flow_id)
+                revision = evidence.get("revision")
+                if (
+                    evidence.get("topology") != getattr(item, "legacy_topology")
+                    or evidence.get("source_hash") != metadata.source_hash
+                    or not isinstance(revision, str)
+                    or not revision
+                ):
+                    raise ScenarioServiceError("Protected scenario final CAS evidence changed.", status=409)
+                revisions.add(revision)
+                continue
             expected_revision = int(getattr(item, "legacy_revision")) + 1
             expected_hash = str(getattr(item, "new_source_hash"))
             expected_inputs = tuple(getattr(item, "input_target_ids"))
@@ -3050,11 +4121,14 @@ class ScenarioService:
         """Execute a scenario via the configured executor."""
 
         self._require_running()
+        self._ensure_managed_switch_execution_allowed(scenario_id)
         caller = asyncio.current_task()
         registered = False
         if caller is not None and caller not in self._active_run_calls:
             self._active_run_calls.add(caller)
             registered = True
+        if caller is not None:
+            self._active_run_scenarios.setdefault(caller, set()).add(scenario_id)
         try:
             return await self._async_run_scenario(
                 scenario_id,
@@ -3066,6 +4140,7 @@ class ScenarioService:
         finally:
             if registered and caller is not None:
                 self._active_run_calls.discard(caller)
+                self._active_run_scenarios.pop(caller, None)
 
     async def _async_run_scenario(
         self,
@@ -3078,6 +4153,7 @@ class ScenarioService:
     ) -> dict[str, Any]:
         """Execute one already registered run call."""
 
+        self._ensure_managed_switch_execution_allowed(scenario_id)
         await self.async_refresh_catalog()
         scenario = await self.async_get_scenario(scenario_id)
         if not scenario.enabled:
@@ -3129,6 +4205,7 @@ class ScenarioService:
             queue_lock = self._queue_locks.setdefault(scenario.id, asyncio.Lock())
             queued = False
             async with self._run_lock:
+                self._ensure_managed_switch_execution_allowed(scenario.id)
                 if queue_lock.locked():
                     waiting = self._queue_waiters.get(scenario.id, 0)
                     if waiting >= scenario.definition.queue_limit:
@@ -3161,6 +4238,7 @@ class ScenarioService:
                             self._queue_waiters.pop(scenario.id, None)
 
         async with self._run_lock:
+            self._ensure_managed_switch_execution_allowed(scenario.id)
             previous = self._run_tasks.get(scenario.id)
             if previous is not None and not previous.done():
                 if scenario.definition.execution_mode is ScenarioExecutionMode.SINGLE:
