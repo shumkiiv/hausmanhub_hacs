@@ -19,6 +19,7 @@ from ..domain.device_power_dependencies import (
     DevicePowerDependency,
     effective_device_state,
 )
+from ..domain.scenario_controls import OccupancyEvidence
 from ..domain.scenarios import (
     ScenarioCommandMode,
     ScenarioComparison,
@@ -142,7 +143,10 @@ def _trigger_asserts_presence(
     if trigger_context.get("source") != "device_state":
         return False
     new_value = trigger_context.get("new_value")
-    asserted = new_value is True or (
+    asserted = (
+        OccupancyEvidence.from_states(new_value, None) is OccupancyEvidence.OCCUPIED
+        or new_value is True
+    ) or (
         isinstance(new_value, (str, int))
         and str(new_value).strip().casefold() in _PRESENCE_ON_VALUES
     )

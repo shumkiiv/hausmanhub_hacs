@@ -21,10 +21,15 @@ class OccupancyEvidence(StrEnum):
 
     @classmethod
     def from_states(cls, motion: object = None, presence: object = None) -> "OccupancyEvidence":
-        states = {str(value).lower() for value in (motion, presence)}
+        # ``None`` means that this sensor type is not configured in the zone.
+        # An explicit HA ``unknown``/``unavailable`` state is different and
+        # must remain fail-closed.
+        states = {str(value).lower() for value in (motion, presence) if value is not None}
+        if not states:
+            return cls.UNKNOWN
         if "on" in states:
             return cls.OCCUPIED
-        if states.intersection({"unknown", "unavailable", "none"}):
+        if states.intersection({"unknown", "unavailable"}):
             return cls.UNKNOWN
         if states.intersection({"off", "false", "0"}):
             return cls.ABSENT

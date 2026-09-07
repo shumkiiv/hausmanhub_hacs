@@ -12,6 +12,7 @@ from custom_components.hausman_hub.domain.scenario_controls import (
     absence_confirmed,
     power_readiness,
 )
+from custom_components.hausman_hub.application.scenario_executor import _trigger_asserts_presence
 
 
 def test_occupancy_uses_motion_or_presence_and_unknown_is_not_absence():
@@ -19,6 +20,18 @@ def test_occupancy_uses_motion_or_presence_and_unknown_is_not_absence():
     assert OccupancyEvidence.from_states("off", "on") is OccupancyEvidence.OCCUPIED
     assert OccupancyEvidence.from_states("off", "off") is OccupancyEvidence.ABSENT
     assert OccupancyEvidence.from_states("unknown", "off") is OccupancyEvidence.UNKNOWN
+
+
+def test_occupancy_supports_zones_with_only_one_sensor_type():
+    assert OccupancyEvidence.from_states("off", None) is OccupancyEvidence.ABSENT
+    assert OccupancyEvidence.from_states(None, "off") is OccupancyEvidence.ABSENT
+    assert OccupancyEvidence.from_states("on", None) is OccupancyEvidence.OCCUPIED
+    assert OccupancyEvidence.from_states(None, "on") is OccupancyEvidence.OCCUPIED
+
+
+def test_unknown_or_unavailable_sensor_stays_fail_closed_even_with_other_off():
+    assert OccupancyEvidence.from_states("unavailable", "off") is OccupancyEvidence.UNKNOWN
+    assert OccupancyEvidence.from_states("unknown", None) is OccupancyEvidence.UNKNOWN
 
 
 def test_evening_starts_at_earlier_of_sunset_and_21_00_in_local_time():
@@ -63,6 +76,9 @@ def test_manual_off_inhibits_automation_and_absence_releases_ownership():
 def test_presence_keeps_absence_timer_open_while_motion_event_is_old():
     assert not absence_confirmed("off", "on", absent_for_seconds=600)
     assert absence_confirmed("off", "off", absent_for_seconds=10)
+    assert absence_confirmed("off", None, absent_for_seconds=10)
+    assert absence_confirmed(None, "off", absent_for_seconds=10)
+    assert not absence_confirmed("unavailable", "off", absent_for_seconds=600)
 
 
 def test_power_dependency_requires_ready_power_before_light_commands():
@@ -70,3 +86,10 @@ def test_power_dependency_requires_ready_power_before_light_commands():
     assert power_readiness("unknown", "off") == "power_unknown"
     assert power_readiness("on", "unknown") == "light_not_ready"
     assert power_readiness("on", "off") == "ready"
+
+
+def test_executor_presence_trigger_uses_shared_occupancy_policy():
+    device = type("Device", (), {"name": "Датчик движения", "physical_name": "", "capability_name": "", "device_type_name": "", "entity_id": "binary_sensor.motion"})()
+    catalog = type("Catalog", (), {"device": lambda self, target: device if target == "motion" else None})()
+    assert _trigger_asserts_presence({"source": "device_state", "new_value": "on", "target_id": "motion"}, catalog)
+    assert not _trigger_asserts_presence({"source": "device_state", "new_value": "unavailable", "target_id": "motion"}, catalog)
