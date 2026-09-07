@@ -1,5 +1,19 @@
 # HausmanHub AI Context
 
+- 2026-09-07: после утверждения спецификации `7b27839` цепочка
+  planner -> worker -> tester выполнила одну разрешённую repair-итерацию и
+  остановилась как BLOCKED. Commits `1cd1d5a` и `8dbccc0` добавляют
+  scenario-control primitives, single-sensor fail-closed evidence и вызов
+  evidence из `ScenarioExecutor`; повторный tester: 192 passed, 17 subtests,
+  compileall и diff check PASS. Полная реализация отсутствует: runtime
+  migration загружает только tambur/small_corridor/shower, а пять sources в
+  `tools/managed_scenarios/` plan-only. Не запускались reviewer/security,
+  release/deploy, live migration, калибровка, reinterview и физические
+  тесты. Для возобновления получить fresh exact live manifest через
+  разрешённый read-only маршрут и ответ владельца, считать новые curtain
+  caps 80/90% от реального хода или перенормированной HA-шкалы. План:
+  `docs/superpowers/plans/2026-09-07-hausman-scenario-consolidation.md`.
+
 - 2026-09-07: владелец выбрал вариант 1 для консолидации сценариев и явно
   разрешил fallback planner на Sol high. Раскрытый в диагностическом выводе
   HA admin token перевыпущен: новый токен проверен, старый refresh token
