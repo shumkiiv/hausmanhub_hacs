@@ -4220,7 +4220,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.226", panel.payload["integration_version"])
+        self.assertEqual("1.52.227", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -10521,11 +10521,6 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual(200, response.status)
 
     def test_setup_keeps_switch_runtime_unavailable_when_attach_cleanup_fails(self) -> None:
-        from dataclasses import replace
-
-        from custom_components.hausman_hub.application import (
-            managed_switch_migration as migration_module,
-        )
         from custom_components.hausman_hub.application.managed_switch_migration import (
             ManagedSwitchMigration,
             ManagedSwitchStartupCoordinator,
@@ -10556,18 +10551,9 @@ class LocalSummaryAccessTest(unittest.TestCase):
             "synthetic-switch-cleanup-failure",
         )
         hass.config_entries.entries = [entry]
-        ready_manifest = tuple(
-            replace(item, activation_ready=True)
-            for item in migration_module.FULL_MIGRATION_MANIFEST
-        )
 
         with self.assertLogs("custom_components.hausman_hub", level="ERROR") as logs:
             with (
-                patch.object(
-                    migration_module,
-                    "FULL_MIGRATION_MANIFEST",
-                    ready_manifest,
-                ),
                 patch.object(ManagedSwitchMigration, "async_apply", migration_ready),
                 patch.object(
                     ManagedSwitchBindingMigration,
@@ -10596,6 +10582,10 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertNotIn("private details", rendered_logs)
 
     def test_setup_blocks_incomplete_controller_content_before_runtime(self) -> None:
+        from custom_components.hausman_hub.application import (
+            managed_switch_migration as migration_module,
+        )
+
         hass = FakeHomeAssistant()
         entry = FakeEntry(
             {
@@ -10606,8 +10596,17 @@ class LocalSummaryAccessTest(unittest.TestCase):
             "synthetic-switch-catalog-warmup",
         )
         hass.config_entries.entries = [entry]
+        incomplete_manifest = tuple(
+            replace(item, activation_ready=False)
+            for item in migration_module.FULL_MIGRATION_MANIFEST
+        )
 
-        self.assertTrue(asyncio.run(self.integration.async_setup_entry(hass, entry)))
+        with patch.object(
+            migration_module,
+            "FULL_MIGRATION_MANIFEST",
+            incomplete_manifest,
+        ):
+            self.assertTrue(asyncio.run(self.integration.async_setup_entry(hass, entry)))
 
         self.assertEqual(
             {

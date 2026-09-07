@@ -24,6 +24,7 @@ from custom_components.hausman_hub.application.managed_switch_migration import (
 
 def test_full_manifest_uses_exact_verified_binding_ids() -> None:
     assert len(MIGRATION_MANIFEST) == 8
+    assert all(entry.activation_ready is True for entry in MIGRATION_MANIFEST)
     by_id = {entry.scenario_id: entry for entry in MIGRATION_MANIFEST}
     assert by_id["system-bathroom-exhaust-controller"].input_target_ids == (
         "entity_a591e035e3e5b34f",
@@ -526,14 +527,10 @@ async def test_actual_startup_and_restart_apply_the_exact_registry_disposition()
         activations += 1
         return lambda: None
 
-    ready_manifest = tuple(
-        replace(item, activation_ready=True) for item in MIGRATION_MANIFEST
-    )
     coordinator = ManagedSwitchStartupCoordinator(
         service,
         ManagedSwitchMigration(service, receipt_store),
         activate,
-        manifest=ready_manifest,
     )
 
     await coordinator.async_start()
@@ -602,7 +599,6 @@ async def test_actual_startup_and_restart_apply_the_exact_registry_disposition()
         restarted_service,
         ManagedSwitchMigration(restarted_service, receipt_store),
         restart_activate,
-        manifest=ready_manifest,
     )
     writes_before_restart = len(registry_store.saved)
     await restarted.async_start()
@@ -640,9 +636,7 @@ async def test_full_startup_accepts_permuted_equivalent_baseline_without_reorder
         service,
         ManagedSwitchMigration(service, receipt_store),
         activate,
-        manifest=tuple(
-            replace(item, activation_ready=True) for item in MIGRATION_MANIFEST
-        ),
+        manifest=MIGRATION_MANIFEST,
     )
 
     await coordinator.async_start()

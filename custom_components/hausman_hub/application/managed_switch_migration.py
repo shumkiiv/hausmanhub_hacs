@@ -110,21 +110,21 @@ FULL_MIGRATION_MANIFEST: tuple[ManagedSwitchMigrationEntry, ...] = (
         "757bde711c85ebad4826c2ec0bf2695d0034f7dd820c9ec7c30816f3f37c1551",
         MANAGED_TOPOLOGY, _SHOWER_LEGACY_INPUTS, _SHOWER_INPUTS,
         "53d8876b2b914bd438cdbd020b7dc85f3e9eb3d9a8ea17434ab290d852deea66",
-        "shower_controller.js", expected_revision=4,
+        "shower_controller.js", expected_revision=4, activation_ready=True,
     ),
     ManagedSwitchMigrationEntry(
         "system-small-corridor-light-controller", 3,
         "bc9a2c7883046e568a428e355af312953d70f0f504393b063130f516fe5052b1",
         MANAGED_TOPOLOGY, _SMALL_LEGACY_INPUTS, _SMALL_INPUTS,
         "c3097df8fefa2d09be4e57b059239bcb92fbb0302069500178fc0be1c8fc4800",
-        "small_corridor_controller.js", expected_revision=3,
+        "small_corridor_controller.js", expected_revision=3, activation_ready=True,
     ),
     ManagedSwitchMigrationEntry(
         "system-tambur-adaptive-controller", 8,
         "4daef9ac2de8dc1c95dd2da6887e178751a65d0e47bcf48443635f68eb1ba5dc",
         MANAGED_TOPOLOGY, _TAMBUR_LEGACY_INPUTS, _TAMBUR_INPUTS,
         "c8d5cd80006111146053767f7fd775c25a09ec8b5fab38f3a93a6c9126a417ca",
-        "tambur_controller.js", expected_revision=8,
+        "tambur_controller.js", expected_revision=8, activation_ready=True,
     ),
     ManagedSwitchMigrationEntry(
         "system-toilet-comfort-controller", 0,
@@ -133,6 +133,7 @@ FULL_MIGRATION_MANIFEST: tuple[ManagedSwitchMigrationEntry, ...] = (
         _TOILET_INPUTS, _TOILET_INPUTS,
         "2d91781cf6dd910dadd8e4774eb3d45ae4ae6002b6912dee65bf40ef33af513b",
         "toilet_controller.js", operation="create", expected_revision=None,
+        activation_ready=True,
     ),
     ManagedSwitchMigrationEntry(
         "system-bathroom-exhaust-controller", 0,
@@ -141,6 +142,7 @@ FULL_MIGRATION_MANIFEST: tuple[ManagedSwitchMigrationEntry, ...] = (
         _BATHROOM_INPUTS, _BATHROOM_INPUTS,
         "235302aeaa38e0d82eae01f63015a5180f3d4098f495919a18a587c973902af6",
         "bathroom_controller.js", operation="create", expected_revision=None,
+        activation_ready=True,
     ),
     ManagedSwitchMigrationEntry(
         "system-storage-light-controller", 0,
@@ -149,6 +151,7 @@ FULL_MIGRATION_MANIFEST: tuple[ManagedSwitchMigrationEntry, ...] = (
         _STORAGE_INPUTS, _STORAGE_INPUTS,
         "3190e744c05403f496d5399ee56c4ff1a199461df0e51040afe5a7244d424fd0",
         "storage_controller.js", operation="create", expected_revision=None,
+        activation_ready=True,
     ),
     ManagedSwitchMigrationEntry(
         "system-cabinet-light-controller", 0,
@@ -157,6 +160,7 @@ FULL_MIGRATION_MANIFEST: tuple[ManagedSwitchMigrationEntry, ...] = (
         _CABINET_INPUTS, _CABINET_INPUTS,
         "ead4919d6c3d088fc45a26e0b240a4b0520b0a62ba7277476d143b650133468c",
         "cabinet_controller.js", operation="create", expected_revision=None,
+        activation_ready=True,
     ),
     ManagedSwitchMigrationEntry(
         "system-curtains-privacy-controller", 0,
@@ -165,6 +169,7 @@ FULL_MIGRATION_MANIFEST: tuple[ManagedSwitchMigrationEntry, ...] = (
         _CURTAIN_INPUTS, _CURTAIN_INPUTS,
         "663af424f9fdb51ca3f9d95ed055206858810adf9ba780d5b1fb3ddb9336368e",
         "curtains_controller.js", operation="create", expected_revision=None,
+        activation_ready=True,
     ),
 )
 # The active release manifest is the single authoritative set.  The old
