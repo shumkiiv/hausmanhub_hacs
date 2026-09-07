@@ -4,6 +4,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+import hashlib
+import json
 
 
 class ConsolidationOperation(StrEnum):
@@ -11,6 +13,7 @@ class ConsolidationOperation(StrEnum):
 
     CREATE = "create"
     REPLACE = "replace"
+    UPDATE = "update"
     DISABLE = "disable"
     PRESERVE = "preserve"
 
@@ -28,16 +31,21 @@ PROTECTED_WATER_TARGET_IDS = frozenset(
     {"entity_e3941765c1f247c5", "entity_cadf80670b42abc3"}
 )
 
-# Every existing entry point whose old generation can overlap the consolidated
-# controllers.  The two curtain wrappers keep their IDs but are also closed
-# while their definitions are replaced in the later manifest phase.
-REGISTRY_SCENARIO_IDS_TO_DRAIN = frozenset(
+REGISTRY_MANAGED_REPLACE_IDS = frozenset(
     {
         "system-shower-comfort-controller",
         "system-small-corridor-light-controller",
         "system-tambur-adaptive-controller",
+    }
+)
+REGISTRY_MANUAL_CURTAIN_UPDATE_IDS = frozenset(
+    {
         "scenario_manual_curtains_open",
         "scenario_manual_curtains_close",
+    }
+)
+REGISTRY_DISABLE_IDS = frozenset(
+    {
         "system-bathroom-fan-off-night",
         "system-bathroom-fan-off-day-sustained",
         "system-bathroom-fan-day-light-1",
@@ -68,6 +76,109 @@ REGISTRY_SCENARIO_IDS_TO_DRAIN = frozenset(
         "scenario_curtains_lights_service",
         "scenario_mssvmo6v",
     }
+)
+REGISTRY_PRESERVE_IDS = frozenset(
+    {
+        "scenario-office-curtain-living-lights-close",
+        "scenario-office-curtain-service-lights-close",
+        "scenario_kitchen_ac_off_2200",
+        "scenario_manual_ac_off",
+        "scenario_manual_away",
+        "scenario_manual_good_night",
+        "scenario_manual_lights_off",
+        "scenario_manual_water_close",
+        "scenario_manual_water_open",
+        "scenario_small_corridor_motion_after_sunset",
+        "scenario_small_corridor_motion_low_light",
+        "system-away-turn-off",
+        "system-kitchen-curtains-open-weekday",
+        "system-kitchen-curtains-open-weekend",
+        "system-leak-bathroom-alert",
+        "system-leak-extra-bathroom-alert",
+        "system-leak-kitchen-alert",
+        "system-leak-toilet-alert",
+        "system-office-curtain-auto-close",
+        "system-small-corridor-ambient-dark",
+        "system-small-corridor-ambient-dark-bright",
+        "system-small-corridor-ambient-dusk",
+        "system-small-corridor-ambient-dusk-bright",
+        "system-small-corridor-ambient-night-bright",
+    }
+)
+REGISTRY_CREATE_IDS = frozenset(
+    {
+        "system-toilet-comfort-controller",
+        "system-bathroom-exhaust-controller",
+        "system-storage-light-controller",
+        "system-cabinet-light-controller",
+        "system-curtains-privacy-controller",
+    }
+)
+REGISTRY_DISPOSITION_VERSION = 1
+# Canonical registry identity sorts records by stable scenario ID. Runtime
+# transaction hashes remain order-sensitive and are intentionally separate.
+REGISTRY_BASELINE_HASH = (
+    "a056dc310e7f6fac16aee4b7ca374200453e2ec4f2e7db0ea406cc249d1a1e5c"
+)
+REGISTRY_DISPOSITION = {
+    **{
+        scenario_id: ConsolidationOperation.REPLACE
+        for scenario_id in REGISTRY_MANAGED_REPLACE_IDS
+    },
+    **{
+        scenario_id: ConsolidationOperation.UPDATE
+        for scenario_id in REGISTRY_MANUAL_CURTAIN_UPDATE_IDS
+    },
+    **{
+        scenario_id: ConsolidationOperation.DISABLE
+        for scenario_id in REGISTRY_DISABLE_IDS
+    },
+    **{
+        scenario_id: ConsolidationOperation.PRESERVE
+        for scenario_id in REGISTRY_PRESERVE_IDS
+    },
+}
+REGISTRY_DISPOSITION_COUNTS = {
+    "replace": 3,
+    "update": 2,
+    "disable": 29,
+    "preserve": 24,
+    "create": 5,
+}
+REGISTRY_DISPOSITION_HASH = hashlib.sha256(
+    json.dumps(
+        {
+            "version": REGISTRY_DISPOSITION_VERSION,
+            "registry": {
+                scenario_id: disposition.value
+                for scenario_id, disposition in sorted(
+                    REGISTRY_DISPOSITION.items()
+                )
+            },
+            "create": sorted(REGISTRY_CREATE_IDS),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+).hexdigest()
+
+if (
+    len(REGISTRY_DISPOSITION) != 58
+    or len(REGISTRY_MANAGED_REPLACE_IDS) != 3
+    or len(REGISTRY_MANUAL_CURTAIN_UPDATE_IDS) != 2
+    or len(REGISTRY_DISABLE_IDS) != 29
+    or len(REGISTRY_PRESERVE_IDS) != 24
+    or len(REGISTRY_CREATE_IDS) != 5
+):
+    raise RuntimeError("scenario registry disposition is incomplete")
+
+# Every existing entry point whose old generation can overlap the consolidated
+# controllers. The two curtain wrappers keep their IDs but remain closed while
+# their definitions are replaced in the same registry transaction.
+REGISTRY_SCENARIO_IDS_TO_DRAIN = frozenset(
+    REGISTRY_MANAGED_REPLACE_IDS
+    | REGISTRY_MANUAL_CURTAIN_UPDATE_IDS
+    | REGISTRY_DISABLE_IDS
 )
 
 
@@ -104,10 +215,16 @@ class ConsolidationInventory:
             raise ValueError("inventory must contain exactly three managed controllers")
         if len(self.snapshot_scenario_ids) != self.scenario_count:
             raise ValueError("inventory must contain every verified scenario id")
+        if self.snapshot_scenario_ids != frozenset(REGISTRY_DISPOSITION):
+            raise ValueError("scenario inventory ids do not match the approved disposition")
         if not {item.scenario_id for item in self.managed} <= self.snapshot_scenario_ids:
             raise ValueError("managed controller is missing from the source inventory")
+        if {item.scenario_id for item in self.managed} != REGISTRY_MANAGED_REPLACE_IDS:
+            raise ValueError("managed controller disposition changed without review")
         if len(self.absent_managed_ids) != 5:
             raise ValueError("inventory must contain exactly five absent controllers")
+        if self.absent_managed_ids != REGISTRY_CREATE_IDS:
+            raise ValueError("created controller disposition changed without review")
         if self.native_disable_ids != NATIVE_AUTOMATIONS_TO_DISABLE:
             raise ValueError("native automation disposition changed without review")
         if self.native_preserve_count != 13:
@@ -116,18 +233,19 @@ class ConsolidationInventory:
     def operation_for(self, scenario_id: str) -> ConsolidationOperation:
         if scenario_id in self.absent_managed_ids:
             return ConsolidationOperation.CREATE
-        if scenario_id in {item.scenario_id for item in self.managed}:
-            return ConsolidationOperation.REPLACE
-        raise KeyError(scenario_id)
+        return self.classify_snapshot_scenario(scenario_id)
 
     def classify_snapshot_scenario(
         self, scenario_id: str
     ) -> ConsolidationOperation:
         """Classify every scenario captured in the immutable source registry."""
 
-        if scenario_id in {item.scenario_id for item in self.managed}:
-            return ConsolidationOperation.REPLACE
-        return ConsolidationOperation.PRESERVE
+        if scenario_id not in self.snapshot_scenario_ids:
+            raise KeyError(scenario_id)
+        try:
+            return REGISTRY_DISPOSITION[scenario_id]
+        except KeyError as error:
+            raise KeyError(scenario_id) from error
 
     def classify_snapshot_registry(
         self, scenario_ids: tuple[str, ...]

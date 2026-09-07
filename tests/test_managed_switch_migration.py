@@ -14,6 +14,7 @@ from custom_components.hausman_hub.application.managed_switch_migration import (
     ManagedSwitchMigration,
     ManagedSwitchMigrationConflict,
     _initial_journal,
+    _receipt,
     valid_managed_switch_migration_payload,
 )
 
@@ -259,6 +260,50 @@ def test_completed_receipt_binds_manifest_operations_and_full_registry_hash() ->
     assert not valid_managed_switch_migration_payload(wrong_registry)
 
 
+def test_receipt_binds_approved_registry_distribution_version_and_digest() -> None:
+    store = Store()
+    asyncio.run(ManagedSwitchMigration(Service(), store).async_apply())
+    completed = copy.deepcopy(store.value)
+
+    assert completed["version"] == 4
+    assert completed["dispositionVersion"] == 1
+    assert completed["dispositionCounts"] == {
+        "replace": 3,
+        "update": 2,
+        "disable": 29,
+        "preserve": 24,
+        "create": 5,
+    }
+    assert len(completed["dispositionHash"]) == 64
+    for field, replacement in (
+        ("dispositionVersion", 2),
+        ("dispositionHash", "0" * 64),
+        ("dispositionCounts", {**completed["dispositionCounts"], "disable": 0}),
+    ):
+        changed = copy.deepcopy(completed)
+        changed[field] = replacement
+        assert not valid_managed_switch_migration_payload(changed)
+
+
+def test_old_v3_completed_receipt_is_rejected_without_overwrite_or_delete() -> None:
+    initial = Store()
+    asyncio.run(ManagedSwitchMigration(Service(), initial).async_apply())
+    old_receipt = copy.deepcopy(initial.value)
+    old_receipt["version"] = 3
+    old_receipt.pop("dispositionVersion", None)
+    old_receipt.pop("dispositionHash", None)
+    old_receipt.pop("dispositionCounts", None)
+    store = Store(copy.deepcopy(old_receipt))
+
+    with pytest.raises(ManagedSwitchMigrationConflict, match="receipt"):
+        asyncio.run(
+            ManagedSwitchMigration(Service(completed=True), store).async_apply()
+        )
+
+    assert store.value == old_receipt
+    assert store.saved == []
+
+
 def test_migration_records_create_intent_before_each_external_flow() -> None:
     class SnapshotStore(Store):
         async def async_save(self, value):
@@ -329,8 +374,7 @@ def test_storage_failure_before_prepare_causes_no_mutation() -> None:
 def test_prepared_receipt_reconciles_and_completed_is_idempotent() -> None:
     service = Service()
     prepared = {
-        "migrationId": "managed-switches", "version": 3,
-        "state": "prepared", "manifestHash": MANIFEST_HASH,
+        **_receipt("prepared"),
         "journal": _initial_journal(service._capture(), MIGRATION_MANIFEST),
     }
     store = Store(prepared)
@@ -349,7 +393,7 @@ def test_invalid_or_foreign_receipt_fails_closed() -> None:
         asyncio.run(ManagedSwitchMigration(Service(), store).async_apply())
 
 
-def test_known_completed_v2_receipt_is_verified_and_upgraded_to_v3() -> None:
+def test_known_completed_v2_receipt_is_verified_and_upgraded_to_v4() -> None:
     store = Store(
         {
             "migrationId": "managed-switches",
@@ -364,7 +408,7 @@ def test_known_completed_v2_receipt_is_verified_and_upgraded_to_v3() -> None:
     assert store.saved[0]["state"] == "prepared"
     assert store.saved[-1]["state"] == "completed"
     assert all(item["state"] == "prepared" for item in store.saved[:-1])
-    assert all(item["version"] == 3 for item in store.saved)
+    assert all(item["version"] == 4 for item in store.saved)
     assert service.verifications == 2
 
 

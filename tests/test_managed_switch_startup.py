@@ -148,6 +148,36 @@ def test_incomplete_initial_catalog_activates_once_after_later_snapshot() -> Non
     asyncio.run(exercise())
 
 
+def test_repeated_start_does_not_duplicate_listener_or_activation() -> None:
+    async def exercise() -> None:
+        activations = 0
+        service = _Service(_Catalog(()))
+        migration = _Migration()
+
+        async def activate() -> None:
+            nonlocal activations
+            activations += 1
+
+        coordinator = ManagedSwitchStartupCoordinator(
+            service,
+            migration,
+            activate,
+            manifest=_ready_manifest(),
+        )
+
+        await coordinator.async_start()
+        await coordinator.async_start()
+        assert len(service.observers) == 1
+
+        await service.publish(_Catalog(_required_targets()), final=True)
+        await coordinator.async_start()
+        assert migration.calls == 1
+        assert activations == 1
+        assert service.observers == []
+
+    asyncio.run(exercise())
+
+
 def test_unload_while_waiting_removes_listener_and_prevents_activation() -> None:
     async def exercise() -> None:
         activations = 0

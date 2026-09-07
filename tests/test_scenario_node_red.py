@@ -1254,12 +1254,13 @@ def test_input_snapshot_has_exact_light_and_cover_attribute_allowlists() -> None
     }
 
 
-async def test_all_eight_release_sources_cross_real_async_plan_js_transport() -> None:
-    """Exercise runtime files through the same typed validator used in production."""
+async def test_all_eight_release_sources_cross_service_executor_and_real_async_plan() -> None:
+    """Exercise every final runtime source through the full server call path."""
 
     source_root = Path("custom_components/hausman_hub/managed_scenarios")
     for item in FULL_MIGRATION_MANIFEST:
         source = (source_root / item.source_file).read_text(encoding="utf-8")
+        assert managed_source_hash(source) == item.new_source_hash
         flow_id = f"flow-{item.scenario_id}"
         deployed = build_managed_flow(
             item.scenario_id,
@@ -1295,9 +1296,21 @@ async def test_all_eight_release_sources_cross_real_async_plan_js_transport() ->
             target_id: SimpleNamespace(state="unknown", attributes={})
             for target_id in item.input_target_ids
         }
-        hass = SimpleNamespace(states=SimpleNamespace(get=states.get))
-        catalog = SimpleNamespace(
-            device=lambda target_id: SimpleNamespace(entity_id=target_id)
+        hass = SimpleNamespace(
+            states=SimpleNamespace(get=states.get),
+            services=SimpleNamespace(async_call=AsyncMock()),
+        )
+        catalog = ScenarioCatalog(
+            devices={
+                target_id: ScenarioDeviceEntry(
+                    target_id=target_id,
+                    name=target_id,
+                    entity_id=target_id,
+                    actions=(),
+                )
+                for target_id in item.input_target_ids
+            },
+            scenarios={},
         )
         backend = NodeRedScenarioBackend(hass, request_adapter=adapter)
         backend._ingress_token = "token"  # noqa: SLF001
@@ -1312,17 +1325,42 @@ async def test_all_eight_release_sources_cross_real_async_plan_js_transport() ->
             ),
         )
 
-        actions, result = await backend.async_plan(
+        scenario = Scenario.from_definition(
+            item.scenario_id,
             item.scenario_id,
             definition,
-            f"run-{item.scenario_id}",
+            group="system",
+        )
+
+        class Store:
+            async def async_load(self):
+                return ScenarioRegistry(scenarios=(scenario,))
+
+            async def async_save(self, _registry):
+                raise AssertionError("acceptance dry-run must not save registry")
+
+        service = ScenarioService(hass, Store(), catalog, node_red_backend=backend)
+        await service.async_load()
+        executor = ScenarioExecutor(
+            hass,
             catalog,
+            service.async_run_scenario,
+            node_red_backend=backend,
+        )
+        service.set_executor(executor)
+        result = await service.async_run_scenario(
+            item.scenario_id,
+            correlation_id=f"run-{item.scenario_id}",
             dry_run=True,
         )
 
-        assert actions == ()
         assert result["status"] == "skipped"
-        assert all(trace["id"] and trace["title"] for trace in result["trace"])
+        assert result["scenario_id"] == item.scenario_id
+        assert all(
+            trace["id"] and trace["title"]
+            for trace in result["node_red"]["trace"]
+        )
+        hass.services.async_call.assert_not_awaited()
         assert managed_source_hash(source) == item.new_source_hash
 
 

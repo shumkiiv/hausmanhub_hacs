@@ -12,12 +12,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Mapping
 
 from .native_automation_migration import NativeAutomationNotReady
+from .scenario_consolidation_inventory import (
+    REGISTRY_DISPOSITION_COUNTS,
+    REGISTRY_DISPOSITION_HASH,
+    REGISTRY_DISPOSITION_VERSION,
+)
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 MIGRATION_ID = "managed-switches"
-MIGRATION_VERSION = 3
+MIGRATION_VERSION = 4
 MANAGED_TOPOLOGY = "managed-three-node-v1"
 _KNOWN_COMPLETED_V2_RECEIPT = {
     "migrationId": MIGRATION_ID,
@@ -212,7 +217,15 @@ FULL_MANIFEST_HASH = _manifest_hash_for(FULL_MIGRATION_MANIFEST)
 
 
 def valid_managed_switch_migration_payload(value: object) -> bool:
-    required = {"migrationId", "version", "state", "manifestHash"}
+    required = {
+        "migrationId",
+        "version",
+        "state",
+        "manifestHash",
+        "dispositionVersion",
+        "dispositionHash",
+        "dispositionCounts",
+    }
     return bool(
         isinstance(value, Mapping)
         and set(value) == required | {"journal"}
@@ -220,6 +233,9 @@ def valid_managed_switch_migration_payload(value: object) -> bool:
         and value.get("version") == MIGRATION_VERSION
         and value.get("state") in {"prepared", "completed"}
         and value.get("manifestHash") == MANIFEST_HASH
+        and value.get("dispositionVersion") == REGISTRY_DISPOSITION_VERSION
+        and value.get("dispositionHash") == REGISTRY_DISPOSITION_HASH
+        and value.get("dispositionCounts") == REGISTRY_DISPOSITION_COUNTS
         and (
             _valid_migration_journal(value.get("journal"))
             and (
@@ -466,6 +482,9 @@ def _receipt(state: str) -> dict[str, object]:
         "version": MIGRATION_VERSION,
         "state": state,
         "manifestHash": MANIFEST_HASH,
+        "dispositionVersion": REGISTRY_DISPOSITION_VERSION,
+        "dispositionHash": REGISTRY_DISPOSITION_HASH,
+        "dispositionCounts": dict(REGISTRY_DISPOSITION_COUNTS),
     }
 
 
@@ -786,10 +805,40 @@ class ManagedSwitchMigration:
             "version": MIGRATION_VERSION,
             "state": state,
             "manifestHash": self._manifest_hash,
+            "dispositionVersion": REGISTRY_DISPOSITION_VERSION,
+            "dispositionHash": REGISTRY_DISPOSITION_HASH,
+            "dispositionCounts": dict(REGISTRY_DISPOSITION_COUNTS),
         }
         if journal is not None:
             receipt["journal"] = journal
         return receipt
+
+    @staticmethod
+    async def _async_verify(
+        verify: Callable[..., Awaitable[object]],
+        entries: tuple[ManagedSwitchMigrationEntry, ...],
+        journal: Mapping[str, object],
+        *,
+        require_final: bool,
+    ) -> None:
+        parameters = inspect.signature(verify).parameters
+        keyword_arguments: dict[str, object] = {}
+        if "journal" in parameters:
+            keyword_arguments["journal"] = journal
+        if "require_final" in parameters:
+            keyword_arguments["require_final"] = require_final
+        await verify(entries, **keyword_arguments)
+
+    @staticmethod
+    async def _async_commit(
+        commit: Callable[..., Awaitable[object]],
+        entries: tuple[ManagedSwitchMigrationEntry, ...],
+        journal: Mapping[str, object],
+    ) -> None:
+        keyword_arguments: dict[str, object] = {}
+        if "journal" in inspect.signature(commit).parameters:
+            keyword_arguments["journal"] = journal
+        await commit(entries, **keyword_arguments)
 
     async def async_apply(self) -> str:
         loaded = await self._store.async_load()
@@ -833,7 +882,14 @@ class ManagedSwitchMigration:
                 raise ManagedSwitchMigrationConflict(
                     "scenario migration final CAS verification is unavailable"
                 )
-            await verify(entries)
+            try:
+                await self._async_verify(
+                    verify, entries, journal, require_final=True
+                )
+            except Exception as error:
+                raise ManagedSwitchMigrationConflict(
+                    "scenario migration completed image drifted"
+                ) from error
             current = await capture(entries)
             if _clone_json(current) != journal["after"]:
                 raise ManagedSwitchMigrationConflict(
@@ -849,6 +905,11 @@ class ManagedSwitchMigration:
                     raise ManagedSwitchMigrationConflict(
                         "native automation completion drifted"
                     )
+            commit = getattr(
+                self._service, "async_commit_managed_switch_migration", None
+            )
+            if callable(commit):
+                await self._async_commit(commit, entries, journal)
             return "completed"
 
         if (
@@ -893,13 +954,13 @@ class ManagedSwitchMigration:
                 await self._store.async_save(self._receipt("prepared", journal))
 
             if "journal" in apply_parameters:
-                await apply(
+                apply_state = await apply(
                     entries,
                     journal=journal,
                     on_registry=persist_registry,
                 )
             else:
-                await apply(entries)
+                apply_state = await apply(entries)
             applied = True
             verify = getattr(
                 self._service,
@@ -910,7 +971,12 @@ class ManagedSwitchMigration:
                 raise ManagedSwitchMigrationConflict(
                     "scenario migration final CAS verification is unavailable"
                 )
-            await verify(entries)
+            await self._async_verify(
+                verify,
+                entries,
+                journal,
+                require_final=apply_state == "finalized",
+            )
             if self._native_automation_migration is not None:
                 native_apply = getattr(
                     self._native_automation_migration, "async_apply", None
@@ -946,7 +1012,9 @@ class ManagedSwitchMigration:
                 )
             journal["after"] = _clone_json(after)
             await self._store.async_save(self._receipt("completed", journal))
-            await verify(entries)
+            await self._async_verify(
+                verify, entries, journal, require_final=True
+            )
             if _clone_json(await capture(entries)) != journal["after"]:
                 raise ManagedSwitchMigrationConflict(
                     "scenario migration final image changed"
@@ -965,7 +1033,7 @@ class ManagedSwitchMigration:
                 self._service, "async_commit_managed_switch_migration", None
             )
             if callable(commit):
-                await commit(entries)
+                await self._async_commit(commit, entries, journal)
         except BaseException as error:
             try:
                 await asyncio.shield(

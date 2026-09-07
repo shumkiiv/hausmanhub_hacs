@@ -37,7 +37,16 @@ from .electrical_breakers import (
 )
 from .intercom_release_obligation import IntercomReleaseObligation
 from .operation_journal import scenario_operation_receipt
-from .scenario_consolidation_inventory import REGISTRY_SCENARIO_IDS_TO_DRAIN
+from .scenario_consolidation_inventory import (
+    REGISTRY_BASELINE_HASH,
+    REGISTRY_CREATE_IDS,
+    REGISTRY_DISABLE_IDS,
+    REGISTRY_DISPOSITION,
+    REGISTRY_MANAGED_REPLACE_IDS,
+    REGISTRY_MANUAL_CURTAIN_UPDATE_IDS,
+    REGISTRY_PRESERVE_IDS,
+    REGISTRY_SCENARIO_IDS_TO_DRAIN,
+)
 from .scenario_node_red import (
     NodeRedBackendError,
     NodeRedScenarioBackend,
@@ -99,6 +108,167 @@ _CURTAIN_MANUAL_TARGETS = (
     ("entity_1e0b476b7d082cc0", "Шторы Алисы"),
     ("entity_9164132c7692d6f5", "Шторы кабинет"),
 )
+
+
+def _registry_storage_hash(registry: ScenarioRegistry) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            registry.to_storage(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode()
+    ).hexdigest()
+
+
+def _registry_baseline_hash(registry: ScenarioRegistry) -> str:
+    """Hash registry semantics independently of persisted record order."""
+
+    payload = registry.to_storage()
+    payload["scenarios"] = sorted(
+        payload["scenarios"], key=lambda item: str(item["id"])
+    )
+    return hashlib.sha256(
+        json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode()
+    ).hexdigest()
+
+
+def _scenario_payloads(registry: ScenarioRegistry) -> dict[str, dict[str, object]]:
+    return {
+        scenario.id: _scenario_to_payload(scenario)
+        for scenario in registry.scenarios
+    }
+
+
+def _without_fields(
+    payload: Mapping[str, object], fields: frozenset[str]
+) -> dict[str, object]:
+    return {key: value for key, value in payload.items() if key not in fields}
+
+
+def _verify_approved_registry_baseline(registry: ScenarioRegistry) -> None:
+    if (
+        len(registry.scenarios) != 58
+        or sum(item.enabled for item in registry.scenarios) != 46
+        or {item.id for item in registry.scenarios} != set(REGISTRY_DISPOSITION)
+        or _registry_baseline_hash(registry) != REGISTRY_BASELINE_HASH
+    ):
+        raise ScenarioServiceError(
+            "Scenario registry does not match the approved migration baseline.",
+            status=409,
+        )
+    incoming_disabled_links = {
+        (scenario.id, action.scenario_id)
+        for scenario in registry.scenarios
+        for action in scenario.definition.actions
+        if action.type is ScenarioActionType.RUN_SCENARIO
+        and action.scenario_id in REGISTRY_DISABLE_IDS
+    }
+    if incoming_disabled_links != {
+        (
+            "system-storage-light-off-timer",
+            "system-storage-light-off-confirmed",
+        ),
+        (
+            "scenario_small_corridor_motion_low_light",
+            "scenario_mssvmo6v",
+        ),
+    }:
+        raise ScenarioServiceError(
+            "Scenario registry disabled-call topology changed.", status=409
+        )
+
+
+def _verify_approved_registry_transition(
+    before: ScenarioRegistry,
+    after: ScenarioRegistry,
+    entries: tuple[object, ...],
+) -> bool:
+    """Verify the exact 58 -> 63 disposition and return finalization state."""
+
+    _verify_approved_registry_baseline(before)
+    entry_ids = {str(getattr(item, "scenario_id", "")) for item in entries}
+    if (
+        len(entries) != 8
+        or entry_ids
+        != REGISTRY_MANAGED_REPLACE_IDS | REGISTRY_CREATE_IDS
+        or {item.id for item in after.scenarios}
+        != set(REGISTRY_DISPOSITION) | REGISTRY_CREATE_IDS
+    ):
+        raise ScenarioServiceError(
+            "Managed switch migration manifest is invalid.", status=500
+        )
+    before_payloads = _scenario_payloads(before)
+    after_payloads = _scenario_payloads(after)
+    for scenario_id in REGISTRY_PRESERVE_IDS:
+        if after_payloads[scenario_id] != before_payloads[scenario_id]:
+            raise ScenarioServiceError(
+                "Preserved scenario changed during migration.", status=409
+            )
+    for scenario_id in REGISTRY_DISABLE_IDS:
+        original = before_payloads[scenario_id]
+        disabled = after_payloads[scenario_id]
+        if (
+            original["enabled"] is not True
+            or disabled["enabled"] is not False
+            or disabled["revision"] != int(original["revision"]) + 1
+            or _without_fields(
+                disabled, frozenset({"enabled", "revision", "updatedAt"})
+            )
+            != _without_fields(
+                original, frozenset({"enabled", "revision", "updatedAt"})
+            )
+        ):
+            raise ScenarioServiceError(
+                "Disabled scenario changed outside its approved state fields.",
+                status=409,
+            )
+    _verify_curtain_manual_wrappers(after)
+    for scenario_id in REGISTRY_MANUAL_CURTAIN_UPDATE_IDS:
+        original = before_payloads[scenario_id]
+        updated = after_payloads[scenario_id]
+        if (
+            updated["revision"] != int(original["revision"]) + 1
+            or _without_fields(
+                updated, frozenset({"definition", "revision", "updatedAt"})
+            )
+            != _without_fields(
+                original, frozenset({"definition", "revision", "updatedAt"})
+            )
+        ):
+            raise ScenarioServiceError(
+                "Curtain manual wrapper changed outside its approved fields.",
+                status=409,
+            )
+        original_definition = dict(original["definition"])
+        updated_definition = dict(updated["definition"])
+        original_definition.pop("actions")
+        updated_definition.pop("actions")
+        if updated_definition != original_definition:
+            raise ScenarioServiceError(
+                "Curtain manual wrapper definition drifted.", status=409
+            )
+    creates_enabled = {
+        after.scenario(scenario_id).enabled
+        for scenario_id in REGISTRY_CREATE_IDS
+        if after.scenario(scenario_id) is not None
+    }
+    if creates_enabled not in ({False}, {True}):
+        raise ScenarioServiceError(
+            "Created controller activation is only partially applied.", status=409
+        )
+    finalized = creates_enabled == {True}
+    expected_enabled = 22 if finalized else 17
+    if len(after.scenarios) != 63 or sum(item.enabled for item in after.scenarios) != expected_enabled:
+        raise ScenarioServiceError(
+            "Scenario registry disposition count changed.", status=409
+        )
+    return finalized
 
 
 def _updated_curtain_manual_wrappers(registry: ScenarioRegistry) -> ScenarioRegistry:
@@ -183,6 +353,56 @@ def _verify_curtain_manual_wrappers(registry: ScenarioRegistry) -> None:
             raise ScenarioServiceError(
                 "Curtain manual wrapper migration is incomplete.", status=409
             )
+
+
+def _apply_approved_registry_disposition(
+    before: ScenarioRegistry,
+    replacements: Mapping[str, Scenario],
+    entries: tuple[object, ...],
+) -> ScenarioRegistry:
+    """Build the one approved apply image from the immutable 58-rule baseline."""
+
+    _verify_approved_registry_baseline(before)
+    entry_ids = {str(getattr(item, "scenario_id", "")) for item in entries}
+    if (
+        len(entries) != 8
+        or entry_ids != REGISTRY_MANAGED_REPLACE_IDS | REGISTRY_CREATE_IDS
+        or set(replacements) != entry_ids
+    ):
+        raise ScenarioServiceError(
+            "Managed switch migration manifest is invalid.", status=500
+        )
+    migrated = ScenarioRegistry(
+        scenarios=tuple(
+            replacements.get(scenario.id, scenario)
+            for scenario in before.scenarios
+        )
+        + tuple(
+            replacements[str(getattr(item, "scenario_id"))]
+            for item in entries
+            if str(getattr(item, "scenario_id")) in REGISTRY_CREATE_IDS
+        )
+    )
+    migrated = _updated_curtain_manual_wrappers(migrated)
+    updated_at = int(time.time() * 1000)
+    migrated = ScenarioRegistry(
+        scenarios=tuple(
+            replace(
+                scenario,
+                enabled=False,
+                revision=scenario.revision + 1,
+                updated_at=updated_at,
+            )
+            if scenario.id in REGISTRY_DISABLE_IDS
+            else scenario
+            for scenario in migrated.scenarios
+        )
+    )
+    if _verify_approved_registry_transition(before, migrated, entries):
+        raise ScenarioServiceError(
+            "Managed controllers activated before finalization.", status=409
+        )
+    return migrated
 
 
 def _new_managed_switch_scenario(item: object, metadata: ScenarioNodeRedMetadata) -> Scenario:
@@ -1469,6 +1689,40 @@ class ScenarioService:
             scenario_ids = [str(getattr(item, "scenario_id", "")) for item in entries]
             if not scenario_ids or len(scenario_ids) != len(set(scenario_ids)):
                 raise ScenarioServiceError("Managed switch migration manifest is invalid.", status=500)
+            before_image = journal.get("before") if isinstance(journal, Mapping) else None
+            registry_record = (
+                journal.get("registry") if isinstance(journal, Mapping) else None
+            )
+            if (
+                not isinstance(before_image, Mapping)
+                or not isinstance(before_image.get("registry"), Mapping)
+                or not isinstance(registry_record, Mapping)
+            ):
+                raise ScenarioServiceError(
+                    "Managed migration journal is invalid.", status=409
+                )
+            try:
+                previous_registry = ScenarioRegistry.from_storage(
+                    before_image["registry"]
+                )
+            except (ScenarioViolation, TypeError, ValueError) as error:
+                raise ScenarioServiceError(
+                    "Managed migration before-image is invalid.", status=409
+                ) from error
+            _verify_approved_registry_baseline(previous_registry)
+            current_hash = _registry_storage_hash(registry)
+            registry_owned_after = bool(
+                registry_record.get("state") in {"intent", "applied"}
+                and registry_record.get("afterHash") == current_hash
+            )
+            if registry != previous_registry and not registry_owned_after:
+                raise ScenarioServiceError(
+                    "Managed migration CAS evidence changed.", status=409
+                )
+            if registry_owned_after:
+                _verify_approved_registry_transition(
+                    previous_registry, registry, entries
+                )
             staging_active = bool(
                 self._managed_switch_create_staging
                 or self._managed_switch_replace_staging
@@ -1526,7 +1780,7 @@ class ScenarioService:
                 if getattr(item, "operation", "replace") == "create":
                     if scenario is not None and (
                         scenario.revision != 0
-                        or scenario.enabled
+                        or (scenario.enabled and not registry_owned_after)
                         or not scenario.protected
                         or metadata is None
                         or metadata.source_hash
@@ -1996,6 +2250,40 @@ class ScenarioService:
                 != required_ids
             ):
                 raise ScenarioServiceError("Managed switch migration manifest is invalid.", status=500)
+            operations = journal.get("operations")
+            before_image = journal.get("before")
+            registry_record = journal.get("registry")
+            if (
+                not isinstance(operations, Mapping)
+                or not isinstance(before_image, Mapping)
+                or not isinstance(before_image.get("registry"), Mapping)
+                or not isinstance(registry_record, Mapping)
+            ):
+                raise ScenarioServiceError(
+                    "Managed migration journal is invalid.", status=409
+                )
+            try:
+                previous_registry = ScenarioRegistry.from_storage(
+                    before_image["registry"]
+                )
+            except (ScenarioViolation, TypeError, ValueError) as error:
+                raise ScenarioServiceError(
+                    "Managed migration before-image is invalid.", status=409
+                ) from error
+            _verify_approved_registry_baseline(previous_registry)
+            current_hash = _registry_storage_hash(registry)
+            registry_owned_after = bool(
+                registry_record.get("state") in {"intent", "applied"}
+                and registry_record.get("afterHash") == current_hash
+            )
+            if registry != previous_registry and not registry_owned_after:
+                raise ScenarioServiceError(
+                    "Managed migration CAS evidence changed.", status=409
+                )
+            if registry_owned_after:
+                _verify_approved_registry_transition(
+                    previous_registry, registry, entries
+                )
 
             prepared: list[tuple[object, Scenario, ScenarioNodeRedMetadata, str, bool]] = []
             created_sources: list[tuple[str, str, str]] = []
@@ -2027,7 +2315,7 @@ class ScenarioService:
                     metadata = scenario.definition.node_red
                     if (
                         scenario.revision != 0
-                        or scenario.enabled
+                        or (scenario.enabled and not registry_owned_after)
                         or not scenario.protected
                         or scenario.definition.execution_backend
                         is not ScenarioExecutionBackend.NODE_RED
@@ -2119,24 +2407,6 @@ class ScenarioService:
                         current_action_ids=tuple(action.id for action in scenario.definition.actions),
                     )
 
-            operations = journal.get("operations")
-            before_image = journal.get("before")
-            if (
-                not isinstance(operations, Mapping)
-                or not isinstance(before_image, Mapping)
-                or not isinstance(before_image.get("registry"), Mapping)
-            ):
-                raise ScenarioServiceError(
-                    "Managed migration journal is invalid.", status=409
-                )
-            try:
-                previous_registry = ScenarioRegistry.from_storage(
-                    before_image["registry"]
-                )
-            except (ScenarioViolation, TypeError, ValueError) as error:
-                raise ScenarioServiceError(
-                    "Managed migration before-image is invalid.", status=409
-                ) from error
             changed_sources: list[tuple[str, str, str, str]] = []
             for item in entries:
                 if getattr(item, "operation", "replace") != "replace":
@@ -2196,32 +2466,18 @@ class ScenarioService:
                         revision=scenario.revision + 1,
                         updated_at=int(time.time() * 1000),
                     )
-                if any(not item[4] for item in prepared) or created_sources:
-                    managed_registry = ScenarioRegistry(
-                        scenarios=tuple(replacements.get(item.id, item) for item in registry.scenarios)
-                        + tuple(replacements[scenario_id] for scenario_id, _, _ in created_sources)
-                    )
-                    next_registry = _updated_curtain_manual_wrappers(
-                        managed_registry
+                if registry_owned_after:
+                    next_registry = registry
+                else:
+                    next_registry = _apply_approved_registry_disposition(
+                        previous_registry,
+                        replacements,
+                        entries,
                     )
                     registry_state = {
                         "state": "intent",
-                        "beforeHash": hashlib.sha256(
-                            json.dumps(
-                                before_image["registry"],
-                                sort_keys=True,
-                                separators=(",", ":"),
-                                ensure_ascii=False,
-                            ).encode()
-                        ).hexdigest(),
-                        "afterHash": hashlib.sha256(
-                            json.dumps(
-                                next_registry.to_storage(),
-                                sort_keys=True,
-                                separators=(",", ":"),
-                                ensure_ascii=False,
-                            ).encode()
-                        ).hexdigest(),
+                        "beforeHash": _registry_storage_hash(previous_registry),
+                        "afterHash": _registry_storage_hash(next_registry),
                     }
                     if on_registry is not None:
                         await on_registry(registry_state)
@@ -2253,13 +2509,9 @@ class ScenarioService:
                     self._registry = next_registry
                     self._scenario_content_revision_key = None
                     self._scenario_content_revision = None
-                else:
-                    next_registry = _updated_curtain_manual_wrappers(registry)
-                    if next_registry != registry:
-                        raise ScenarioServiceError(
-                            "Curtain manual wrappers lag managed migration.",
-                            status=409,
-                        )
+                finalized = _verify_approved_registry_transition(
+                    previous_registry, next_registry, entries
+                )
                 self._managed_switch_migration_transaction = (
                     _ManagedSwitchMigrationTransaction(
                         previous_registry=previous_registry,
@@ -2271,22 +2523,8 @@ class ScenarioService:
                 )
                 registry_state = {
                     "state": "applied",
-                    "beforeHash": hashlib.sha256(
-                        json.dumps(
-                            before_image["registry"],
-                            sort_keys=True,
-                            separators=(",", ":"),
-                            ensure_ascii=False,
-                        ).encode()
-                    ).hexdigest(),
-                    "afterHash": hashlib.sha256(
-                        json.dumps(
-                            next_registry.to_storage(),
-                            sort_keys=True,
-                            separators=(",", ":"),
-                            ensure_ascii=False,
-                        ).encode()
-                    ).hexdigest(),
+                    "beforeHash": _registry_storage_hash(previous_registry),
+                    "afterHash": _registry_storage_hash(next_registry),
                 }
                 if on_registry is not None:
                     await on_registry(registry_state)
@@ -2326,7 +2564,7 @@ class ScenarioService:
                 self._managed_switch_create_staging = {}
                 self._managed_switch_replace_staging = {}
                 raise
-            return "completed"
+            return "finalized" if finalized else "completed"
 
     async def async_capture_managed_switch_migration(
         self, entries: tuple[object, ...]
@@ -2424,6 +2662,11 @@ class ScenarioService:
                 raise ScenarioServiceError(
                     "Protected scenario final CAS evidence changed.", status=409
                 )
+            already_finalized = _verify_approved_registry_transition(
+                transaction.previous_registry,
+                transaction.migrated_registry,
+                entries,
+            )
             await self._async_verify_managed_switch_migration_locked(entries)
             if transaction.created_sources:
                 registry = self._ensure_loaded()
@@ -2431,6 +2674,7 @@ class ScenarioService:
                     scenarios=tuple(
                         replace(item, enabled=True, updated_at=int(time.time() * 1000))
                         if item.id in {source[0] for source in transaction.created_sources}
+                        and not item.enabled
                         else item
                         for item in registry.scenarios
                     )
@@ -2455,46 +2699,40 @@ class ScenarioService:
                         "Managed migration registry journal is invalid.",
                         status=409,
                     )
-                after_hash = hashlib.sha256(
-                    json.dumps(
-                        activated.to_storage(),
-                        sort_keys=True,
-                        separators=(",", ":"),
-                        ensure_ascii=False,
-                    ).encode()
-                ).hexdigest()
-                registry_state = {
-                    "state": "intent",
-                    "beforeHash": before_hash,
-                    "afterHash": after_hash,
-                }
-                if on_registry is not None:
-                    await on_registry(registry_state)
-                try:
-                    await self._async_save_managed_migration_registry(
-                        activated,
-                        expected=transaction.migrated_registry,
-                    )
-                except BaseException as error:
-                    loaded_registry = await self._store.async_load()
-                    if isinstance(loaded_registry, Mapping):
-                        loaded_registry = ScenarioRegistry.from_storage(
-                            loaded_registry
+                after_hash = _registry_storage_hash(activated)
+                if activated != registry:
+                    registry_state = {
+                        "state": "intent",
+                        "beforeHash": before_hash,
+                        "afterHash": after_hash,
+                    }
+                    if on_registry is not None:
+                        await on_registry(registry_state)
+                    try:
+                        await self._async_save_managed_migration_registry(
+                            activated,
+                            expected=transaction.migrated_registry,
                         )
-                    if loaded_registry != activated:
-                        raise
-                    self._registry = activated
-                    self._managed_switch_migration_transaction = replace(
-                        transaction, migrated_registry=activated
-                    )
-                    if isinstance(error, asyncio.CancelledError):
-                        raise
+                    except BaseException as error:
+                        loaded_registry = await self._store.async_load()
+                        if isinstance(loaded_registry, Mapping):
+                            loaded_registry = ScenarioRegistry.from_storage(
+                                loaded_registry
+                            )
+                        if loaded_registry != activated:
+                            raise
+                        self._registry = activated
+                        self._managed_switch_migration_transaction = replace(
+                            transaction, migrated_registry=activated
+                        )
+                        if isinstance(error, asyncio.CancelledError):
+                            raise
                 self._registry = activated
                 transaction = replace(transaction, migrated_registry=activated)
                 self._managed_switch_migration_transaction = transaction
                 self._scenario_content_revision_key = None
                 self._scenario_content_revision = None
-                if on_registry is not None:
+                if on_registry is not None and not already_finalized:
                     await on_registry(
                         {
                             "state": "applied",
@@ -2502,20 +2740,40 @@ class ScenarioService:
                             "afterHash": after_hash,
                         }
                     )
+                if not _verify_approved_registry_transition(
+                    transaction.previous_registry,
+                    activated,
+                    entries,
+                ):
+                    raise ScenarioServiceError(
+                        "Managed controller activation is incomplete.", status=409
+                    )
 
     async def async_commit_managed_switch_migration(
-        self, entries: tuple[object, ...]
+        self,
+        entries: tuple[object, ...],
+        *,
+        journal: Mapping[str, object] | None = None,
     ) -> None:
         """Forget compensation and reopen execution after final verification."""
 
         async with self._lock:
             transaction = self._managed_switch_migration_transaction
-            if transaction is None or {
+            required_ids = {
                 str(getattr(item, "scenario_id", "")) for item in entries
-            } != set(transaction.scenario_ids):
+            }
+            if transaction is not None and required_ids != set(
+                transaction.scenario_ids
+            ):
                 raise ScenarioServiceError(
                     "Managed switch migration transaction is unavailable.",
                     status=409,
+                )
+            if transaction is None:
+                await self._async_verify_managed_switch_migration_locked(
+                    entries,
+                    journal=journal,
+                    require_final=True,
                 )
             commit = getattr(
                 self._node_red_backend, "async_commit_last_prepare", None
@@ -2723,16 +2981,28 @@ class ScenarioService:
         return True
 
     async def async_verify_managed_switch_migration(
-        self, entries: tuple[object, ...]
+        self,
+        entries: tuple[object, ...],
+        *,
+        journal: Mapping[str, object] | None = None,
+        require_final: bool | None = None,
     ) -> str:
         """Verify all managed definitions and flows in one final CAS revision."""
 
         self._require_running()
         async with self._lock:
-            return await self._async_verify_managed_switch_migration_locked(entries)
+            return await self._async_verify_managed_switch_migration_locked(
+                entries,
+                journal=journal,
+                require_final=require_final,
+            )
 
     async def _async_verify_managed_switch_migration_locked(
-        self, entries: tuple[object, ...]
+        self,
+        entries: tuple[object, ...],
+        *,
+        journal: Mapping[str, object] | None = None,
+        require_final: bool | None = None,
     ) -> str:
         registry = self._ensure_loaded()
         backend = self._node_red_backend
@@ -2750,6 +3020,33 @@ class ScenarioService:
         ):
             raise ScenarioServiceError(
                 "Managed switch migration manifest is invalid.", status=500
+            )
+        transaction = self._managed_switch_migration_transaction
+        if transaction is not None:
+            previous_registry = transaction.previous_registry
+        else:
+            before = journal.get("before") if isinstance(journal, Mapping) else None
+            if not isinstance(before, Mapping) or not isinstance(
+                before.get("registry"), Mapping
+            ):
+                raise ScenarioServiceError(
+                    "Managed migration verification journal is unavailable.",
+                    status=409,
+                )
+            try:
+                previous_registry = ScenarioRegistry.from_storage(
+                    before["registry"]
+                )
+            except (ScenarioViolation, TypeError, ValueError) as error:
+                raise ScenarioServiceError(
+                    "Managed migration before-image is invalid.", status=409
+                ) from error
+        finalized = _verify_approved_registry_transition(
+            previous_registry, registry, entries
+        )
+        if require_final is not None and finalized is not require_final:
+            raise ScenarioServiceError(
+                "Scenario registry activation state changed.", status=409
             )
 
         revisions: set[str] = set()
