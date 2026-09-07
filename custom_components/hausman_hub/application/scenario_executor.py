@@ -247,6 +247,8 @@ def _normalize_light_action_value(action_id: str, param: str, value: object) -> 
 
     if action_id == "set_brightness_percent":
         percent = _normalize_action_value("position", value)
+        if percent < 0 or percent > 100:
+            raise ValueError("value is outside the allowed range")
         return _normalize_action_value("brightness", round(percent * 255 / 100))
     if action_id == "set_night_light":
         percent = night_light_percent(value)
@@ -3918,20 +3920,49 @@ def _range_error_for_action(
     }.get(action_id)
     if action_id == "set_color_temperature":
         attrs = getattr(state, "attributes", {})
-        if isinstance(attrs, Mapping) and any(key in attrs for key in ("min_color_temp_kelvin", "max_color_temp_kelvin")):
-            minimum = attrs.get("min_color_temp_kelvin")
-            maximum = attrs.get("max_color_temp_kelvin")
-            if not isinstance(minimum, (int, float)) or not isinstance(maximum, (int, float)):
-                return "device range is unavailable"
-            numeric = float(value) if isinstance(value, (int, float)) else math.nan
-            if not math.isfinite(numeric) or numeric < minimum or numeric > maximum:
-                return "value is outside the allowed range"
-        else:
+        if not isinstance(attrs, Mapping):
             return "device range is unavailable"
+        minimum = attrs.get("min_color_temp_kelvin")
+        maximum = attrs.get("max_color_temp_kelvin")
+        if not all(
+            isinstance(item, (int, float)) and not isinstance(item, bool)
+            for item in (minimum, maximum)
+        ):
+            return "device range is unavailable"
+        minimum = float(minimum)
+        maximum = float(maximum)
+        if not all(math.isfinite(item) for item in (minimum, maximum)):
+            return "device range is unavailable"
+        if minimum >= maximum:
+            return "device range is unavailable"
+        numeric = (
+            float(value)
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+            else math.nan
+        )
+        if not math.isfinite(numeric) or numeric < minimum or numeric > maximum:
+            return "value is outside the allowed range"
         return None
-    if action_id in {"set_position", "set_brightness", "set_brightness_percent", "set_night_light"}:
-        minimum, maximum = (1, 30) if action_id == "set_night_light" else (0, 255) if action_id == "set_brightness" else (0, 100) if action_id == "set_brightness_percent" else (0, 100)
-        if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)) or float(value) < minimum or float(value) > maximum or float(value) != round(float(value)):
+    if action_id in {
+        "set_position",
+        "set_brightness",
+        "set_brightness_percent",
+        "set_night_light",
+    }:
+        if action_id == "set_night_light":
+            minimum, maximum = 1, 30
+        elif action_id in {"set_brightness", "set_brightness_percent"}:
+            minimum, maximum = 0, 255
+        else:
+            minimum, maximum = 0, 100
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(float(value))
+            or float(value) < minimum
+            or float(value) > maximum
+            or float(value) != round(float(value))
+        ):
             return "value is outside the allowed range"
         return None
     if required is None:

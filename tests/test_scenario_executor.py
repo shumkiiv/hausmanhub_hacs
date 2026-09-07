@@ -97,7 +97,13 @@ class _FakeHass:
     def __init__(self) -> None:
         self.services = AsyncMock()
         self.state_values = {
-            "light.living_room": SimpleNamespace(state="on", attributes={}),
+            "light.living_room": SimpleNamespace(
+                state="on",
+                attributes={
+                    "min_color_temp_kelvin": 2700,
+                    "max_color_temp_kelvin": 6500,
+                },
+            ),
             "climate.living_room": SimpleNamespace(
                 state="cool", attributes={"temperature": 22, "min_temp": 16,
                 "max_temp": 30, "target_temp_step": 0.5}
@@ -4560,6 +4566,17 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             blocking=True,
         )
 
+    async def test_brightness_percent_rejects_invalid_original_percent(self) -> None:
+        for value in (-1, 101, 50.5, float("nan")):
+            with self.subTest(value=value):
+                receipt = await self.executor.async_execute_device_action(
+                    "device_1", "set_brightness_percent", value
+                )
+
+                self.assertFalse(receipt["accepted"])
+                self.assertEqual("failed", receipt["status"])
+        self.hass.services.async_call.assert_not_awaited()
+
     async def test_color_temperature_action_uses_kelvin_parameter(self) -> None:
         definition = _definition(
             (
@@ -4582,7 +4599,12 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_color_temperature_readback_tolerates_mired_rounding(self) -> None:
         self.hass.states.get = lambda entity_id: SimpleNamespace(
-            state="on", attributes={"color_temp_kelvin": 3003}
+            state="on",
+            attributes={
+                "color_temp_kelvin": 3003,
+                "min_color_temp_kelvin": 2700,
+                "max_color_temp_kelvin": 6500,
+            },
         )
 
         receipt = await self.executor.async_execute_device_action(
@@ -4596,6 +4618,31 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             {"entity_id": "light.living_room", "color_temp_kelvin": 3000},
             blocking=True,
         )
+
+    async def test_color_temperature_requires_actual_ha_bounds(self) -> None:
+        self.hass.states.get = lambda _entity_id: SimpleNamespace(
+            state="on", attributes={}
+        )
+        missing = await self.executor.async_execute_device_action(
+            "device_1", "set_color_temperature", 3000
+        )
+
+        self.hass.states.get = lambda _entity_id: SimpleNamespace(
+            state="on",
+            attributes={
+                "min_color_temp_kelvin": 2700,
+                "max_color_temp_kelvin": 6500,
+            },
+        )
+        outside = await self.executor.async_execute_device_action(
+            "device_1", "set_color_temperature", 7000
+        )
+
+        self.assertFalse(missing["accepted"])
+        self.assertEqual("device range is unavailable", missing["error"])
+        self.assertFalse(outside["accepted"])
+        self.assertEqual("value is outside the allowed range", outside["error"])
+        self.hass.services.async_call.assert_not_awaited()
 
     async def test_adaptive_brightness_uses_solar_curve_and_minimum_percent(
         self,
