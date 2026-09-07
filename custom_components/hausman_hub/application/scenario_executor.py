@@ -2751,7 +2751,11 @@ class ScenarioExecutor:
         ):
             observed_state = str(getattr(current, "state", "unknown"))
             if not automatic and allowed.domain == "light" and action.action_id == "turn_on":
-                begin = self._light_priority.async_begin_direct_action
+                begin = (
+                    self._light_priority._async_begin_direct_action_unlocked
+                    if authority_lock_held
+                    else self._light_priority.async_begin_direct_action
+                )
                 await begin(action.target_id, action.action_id, self._catalog, self._hass)
                 if self._light_safety_obligations is not None:
                     await self._light_safety_obligations.async_cancel(action.target_id)
@@ -3949,9 +3953,11 @@ def _range_error_for_action(
         "set_brightness_percent",
         "set_night_light",
     }:
-        if action_id == "set_night_light":
-            minimum, maximum = 1, 30
-        elif action_id in {"set_brightness", "set_brightness_percent"}:
+        if action_id in {
+            "set_brightness",
+            "set_brightness_percent",
+            "set_night_light",
+        }:
             minimum, maximum = 0, 255
         else:
             minimum, maximum = 0, 100

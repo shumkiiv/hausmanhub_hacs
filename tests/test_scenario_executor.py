@@ -1113,20 +1113,36 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_manual_idempotent_light_claims_ownership_without_dispatch(self) -> None:
         priority = LightAutomationPriority()
-        priority.async_begin_direct_action = AsyncMock()
         obligations = AsyncMock()
         executor = ScenarioExecutor(
             self.hass, self.catalog, self.executor._run_callback,
             light_priority=priority, light_safety_obligations=obligations,
             readback_window_seconds=0.02, readback_interval_seconds=0.01,
         )
-        result = await executor.async_execute_device_action(
-            "device_1", "turn_on", idempotent_actions=True
+        result = await asyncio.wait_for(
+            executor.async_execute_device_action(
+                "device_1", "turn_on", idempotent_actions=True
+            ),
+            timeout=0.2,
         )
+
         self.assertTrue(result["skipped"])
         self.assertEqual("already_in_target_state", result["reason"])
-        priority.async_begin_direct_action.assert_awaited_once()
+        self.assertEqual(
+            "manual",
+            priority._manual_records["light.living_room"]["ownership"],
+        )
         obligations.async_cancel.assert_awaited_once_with("device_1")
+        self.hass.services.async_call.assert_not_awaited()
+
+        token = await asyncio.wait_for(
+            priority.async_begin_direct_action(
+                "device_1", "turn_on", self.catalog, self.hass
+            ),
+            timeout=0.2,
+        )
+        self.assertIsNotNone(token)
+        self.hass.services.async_call.assert_not_awaited()
 
     async def test_manual_authority_storage_failure_blocks_physical_dispatch(
         self,
@@ -4642,6 +4658,35 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("device range is unavailable", missing["error"])
         self.assertFalse(outside["accepted"])
         self.assertEqual("value is outside the allowed range", outside["error"])
+        self.hass.services.async_call.assert_not_awaited()
+
+    async def test_night_light_percent_dispatches_native_brightness(self) -> None:
+        self.hass.states.get = lambda _entity_id: SimpleNamespace(
+            state="on", attributes={"brightness": 51}
+        )
+
+        receipt = await self.executor.async_execute_device_action(
+            "device_1", "set_night_light", 20
+        )
+
+        self.assertTrue(receipt["accepted"])
+        self.assertTrue(receipt["confirmed"])
+        self.hass.services.async_call.assert_awaited_once_with(
+            "light",
+            "turn_on",
+            {"entity_id": "light.living_room", "brightness": 51},
+            blocking=True,
+        )
+
+    async def test_night_light_rejects_invalid_original_percent(self) -> None:
+        for value in (0, 31, 20.5, float("nan")):
+            with self.subTest(value=value):
+                receipt = await self.executor.async_execute_device_action(
+                    "device_1", "set_night_light", value
+                )
+
+                self.assertFalse(receipt["accepted"])
+                self.assertEqual("failed", receipt["status"])
         self.hass.services.async_call.assert_not_awaited()
 
     async def test_adaptive_brightness_uses_solar_curve_and_minimum_percent(
