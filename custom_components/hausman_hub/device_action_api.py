@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import asyncio
+from collections.abc import Awaitable, Callable, Mapping
+from datetime import datetime, timezone
 import inspect
 from http import HTTPStatus
 import logging
@@ -39,6 +41,18 @@ from .application.device_action_receipts import (
     full_action_receipt,
 )
 from .application.scenario_light_priority import _state_is_fresh
+from .application.safe_device_command_lifecycle import (
+    CommandDeadline,
+    SafeDeviceCommandHandle,
+    SafeDeviceCommandLifecycle,
+    SafeDeviceCommandOperation,
+    is_safe_device_descriptor,
+)
+from .application.scenario_executor import (
+    _range_error_for_action,
+    _state_is_restored_or_cached,
+    _state_revision,
+)
 from .application.scenario_service import ScenarioService
 from .climate_api import (
     DOMAIN,
@@ -66,6 +80,308 @@ _DIRECT_IDEMPOTENT_ACTIONS = frozenset(
 _DIRECT_IDEMPOTENT_BLOCKED_TYPES = frozenset(
     {"cover", "lock", "valve", "water", "breaker", "electrical_breaker", "button", "intercom"}
 )
+
+
+class _SafeCommandDeadlineExpired(RuntimeError):
+    """A pre-dispatch read exceeded the bounded safe-command HTTP budget."""
+
+
+_MAX_TRACKED_SAFE_ADMISSION_TASKS = 32
+_TRACKED_SAFE_ADMISSION_TASKS: set[asyncio.Task[Any]] = set()
+SafeTimeoutSettled = Callable[[asyncio.Task[Any]], Awaitable[None]]
+
+
+def _track_safe_admission_task(task: asyncio.Task[Any]) -> None:
+    _TRACKED_SAFE_ADMISSION_TASKS.add(task)
+
+    def consume_result(completed: asyncio.Task[Any]) -> None:
+        _TRACKED_SAFE_ADMISSION_TASKS.discard(completed)
+        if completed.cancelled():
+            return
+        try:
+            completed.exception()
+        except Exception:  # noqa: BLE001
+            return
+
+    task.add_done_callback(consume_result)
+
+
+async def _await_before_safe_deadline(
+    awaitable: Any,
+    deadline: CommandDeadline,
+    *,
+    on_timeout_settled: SafeTimeoutSettled | None = None,
+) -> Any:
+    """Bound admission without waiting for a cancellation-resistant coroutine."""
+
+    if len(_TRACKED_SAFE_ADMISSION_TASKS) >= _MAX_TRACKED_SAFE_ADMISSION_TASKS:
+        if inspect.iscoroutine(awaitable):
+            awaitable.close()
+        raise _SafeCommandDeadlineExpired("safe command admission capacity is full")
+    task = asyncio.create_task(awaitable)
+    _track_safe_admission_task(task)
+    done, _pending = await asyncio.wait({task}, timeout=deadline.remaining())
+    if task in done:
+        return task.result()
+    task.cancel()
+    if on_timeout_settled is not None:
+        async def settle_and_finalize() -> None:
+            try:
+                await task
+            except BaseException:  # cancellation is part of settlement
+                pass
+            try:
+                await on_timeout_settled(task)
+            except Exception:  # noqa: BLE001
+                _LOGGER.warning(
+                    "HausmanHub timed-out safe admission cleanup failed",
+                    exc_info=True,
+                )
+
+        finalizer = asyncio.create_task(
+            settle_and_finalize(),
+            name="hausman-safe-admission-cleanup",
+        )
+        _track_safe_admission_task(finalizer)
+    raise _SafeCommandDeadlineExpired("safe command admission deadline expired")
+
+
+def _safe_action_candidate(
+    *,
+    context: object,
+    action_id: str,
+    dangerous: bool,
+    external_cover: bool,
+    intercom: bool,
+    reassert_key: object,
+    dry_run: bool,
+) -> bool:
+    if (
+        dry_run
+        or dangerous
+        or external_cover
+        or intercom
+        or reassert_key is not None
+        or not isinstance(context, tuple)
+        or len(context) < 4
+    ):
+        return False
+    return is_safe_device_descriptor(
+        domain=context[1], service=context[3], action_id=action_id
+    )
+
+
+def _catalog_safe_descriptor(
+    service: ScenarioService, target_id: str, action_id: str
+) -> bool:
+    """Use the loaded catalog to keep unrelated actions on their existing path."""
+
+    try:
+        device = service.current_catalog().device(target_id)
+        action = device.action(action_id) if device is not None else None
+    except Exception:  # noqa: BLE001
+        return False
+    return bool(
+        action is not None
+        and is_safe_device_descriptor(
+            domain=action.domain,
+            service=action.service,
+            action_id=action_id,
+        )
+    )
+
+
+def _safe_action_admitted(
+    *,
+    service: ScenarioService,
+    hass: HomeAssistant,
+    target_id: str,
+    action_id: str,
+    value: object,
+    context: tuple[str, str, tuple[str, ...], str],
+) -> bool:
+    """Require current identity, fresh availability, value range, and mode options."""
+
+    entity_id, domain, _actions, expected_service = context
+    if not entity_id.startswith(f"{domain}."):
+        return False
+    device = service.current_catalog().device(target_id)
+    allowed = device.action(action_id) if device is not None else None
+    if (
+        device is None
+        or allowed is None
+        or device.entity_id != entity_id
+        or allowed.domain != domain
+        or allowed.service != expected_service
+        or not is_safe_device_descriptor(
+            domain=allowed.domain,
+            service=allowed.service,
+            action_id=action_id,
+        )
+    ):
+        return False
+    state = hass.states.get(entity_id)
+    if (
+        state is None
+        or str(getattr(state, "state", "unknown")) in {"unknown", "unavailable"}
+        or not _state_is_fresh(state)
+        or _state_is_restored_or_cached(state)
+        or _range_error_for_action(device, state, action_id, value) is not None
+    ):
+        return False
+    if action_id in {"set_temperature", "set_humidity"}:
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if action_id in {"turn_on", "turn_off"}:
+        return value is None
+    attributes = getattr(state, "attributes", {})
+    if not isinstance(attributes, Mapping) or not isinstance(value, str) or not value:
+        return False
+    options_key = {
+        "set_hvac_mode": "hvac_modes",
+        "set_fan_mode": "fan_modes",
+        "set_operation_mode": "available_modes",
+    }.get(action_id)
+    options = attributes.get(options_key) if options_key is not None else None
+    return isinstance(options, (list, tuple)) and value in options
+
+
+def _state_observed_at_ms(state: object | None) -> int | None:
+    if state is None:
+        return None
+    observed = (
+        getattr(state, "last_reported", None)
+        or getattr(state, "last_updated", None)
+        or getattr(state, "last_changed", None)
+    )
+    if isinstance(observed, datetime):
+        if observed.tzinfo is None:
+            observed = observed.replace(tzinfo=timezone.utc)
+        return max(0, int(observed.timestamp() * 1000))
+    return time.time_ns() // 1_000_000
+
+
+def _climate_mode_precondition(
+    climate_runtime: object, entity_id: str | None
+) -> Mapping[str, object] | None:
+    if entity_id is None:
+        return None
+    snapshot = getattr(climate_runtime, "device_mode_snapshot_for_entity", None)
+    if not callable(snapshot):
+        return None
+    try:
+        value = snapshot(entity_id)
+    except Exception:  # noqa: BLE001
+        _LOGGER.warning("HausmanHub climate mode snapshot failed", exc_info=True)
+        return None
+    return dict(value) if isinstance(value, Mapping) else None
+
+
+async def _async_write_climate_mode(
+    writer: Any,
+    entity_id: str,
+    mode: str,
+    precondition: Mapping[str, object] | None,
+) -> object:
+    options: dict[str, object] = {}
+    if precondition is not None:
+        if _supports_keyword(writer, "expected_revision"):
+            options["expected_revision"] = precondition.get("revision")
+        if _supports_keyword(writer, "expected_mode"):
+            options["expected_mode"] = precondition.get("mode")
+    return await writer(entity_id, mode, **options)
+
+
+def _pending_safe_result(
+    *,
+    handle: SafeDeviceCommandHandle,
+    hass: HomeAssistant,
+    correlation_id: str,
+) -> dict[str, object]:
+    """Build an accepted result from one real state read after actual dispatch."""
+
+    operation = handle.operation
+    state = hass.states.get(operation.entity_id)
+    return {
+        "correlationId": correlation_id,
+        "requestId": operation.request_id,
+        "targetId": operation.target_id,
+        "actionId": operation.action_id,
+        "accepted": True,
+        "confirmed": False,
+        "status": "accepted",
+        "statusName": "Проверяется",
+        "observedState": (
+            str(getattr(state, "state", "unknown")) if state is not None else None
+        ),
+        "appliedAt": handle.dispatch_at_ms or handle.created_at_ms,
+        "message": "Команда принята, состояние ещё не подтверждено.",
+        "confirmationWindowMs": 30000,
+        "readBack": {
+            "attempted": True,
+            "matched": False,
+            "observedAt": _state_observed_at_ms(state),
+            "observedState": (
+                str(getattr(state, "state", "unknown"))
+                if state is not None
+                else None
+            ),
+            "attempts": 1,
+        },
+        "reason": "state_not_confirmed",
+        "error": None,
+    }
+
+
+def _blocked_unstarted_result(
+    *, request_id: str, target_id: str, action_id: str, correlation_id: str
+) -> dict[str, object]:
+    return {
+        "correlationId": correlation_id,
+        "requestId": request_id,
+        "targetId": target_id,
+        "actionId": action_id,
+        "accepted": False,
+        "confirmed": False,
+        "status": "failed",
+        "statusName": "Не выполнено",
+        "message": "Команда не отправлена: исчерпан общий бюджет пакета.",
+        "confirmationWindowMs": 30000,
+        "readBack": {
+            "attempted": False,
+            "matched": False,
+            "observedAt": None,
+            "observedState": None,
+            "attempts": 0,
+        },
+        "reason": "batch_response_budget_exhausted",
+        "error": "batch_response_budget_exhausted",
+    }
+
+
+def _blocked_safe_admission_result(
+    *, request_id: str, target_id: str, action_id: str, correlation_id: str
+) -> dict[str, object]:
+    return {
+        "correlationId": correlation_id,
+        "requestId": request_id,
+        "targetId": target_id,
+        "actionId": action_id,
+        "accepted": False,
+        "confirmed": False,
+        "status": "failed",
+        "statusName": "Не выполнено",
+        "message": "Команда не отправлена: проверка устройства или значения не пройдена.",
+        "confirmationWindowMs": 30000,
+        "readBack": {
+            "attempted": False,
+            "matched": False,
+            "observedAt": None,
+            "observedState": None,
+            "attempts": 0,
+        },
+        "reason": "safe_device_admission_failed",
+        "error": "safe_device_admission_failed",
+    }
 
 
 def _direct_idempotent_allowed(
@@ -117,10 +433,15 @@ class _DeviceActionLifecycle:
         self._dispatch_crossed = False
         self._intercom_cleanup: tuple[str, str | None, str] | None = None
         self._intercom_cleanup_attempted = False
+        self._completion_lock = asyncio.Lock()
 
     @property
     def dispatch_crossed(self) -> bool:
         return self._dispatch_crossed
+
+    @property
+    def terminal_persisted(self) -> bool:
+        return self._terminal_persisted
 
     def mark_reservation_owned(self) -> None:
         self._reservation_owned = True
@@ -199,20 +520,23 @@ class _DeviceActionLifecycle:
         *,
         item_journal: list[dict[str, object]] | None = None,
     ) -> Any | None:
-        try:
-            await self._idempotency.async_complete(
-                self._key,
-                response,
-                item_journal=item_journal,
-            )
-        except Exception:  # noqa: BLE001
-            _LOGGER.warning(
-                "HausmanHub device action completion persistence failed",
-                exc_info=True,
-            )
-            return await self.async_failure()
-        self._terminal_persisted = True
-        return None
+        async with self._completion_lock:
+            if self._terminal_persisted:
+                return None
+            try:
+                await self._idempotency.async_complete(
+                    self._key,
+                    response,
+                    item_journal=item_journal,
+                )
+            except Exception:  # noqa: BLE001
+                _LOGGER.warning(
+                    "HausmanHub device action completion persistence failed",
+                    exc_info=True,
+                )
+                return await self.async_failure()
+            self._terminal_persisted = True
+            return None
 
 
 async def _async_action_failure(
@@ -271,6 +595,7 @@ class DeviceActionView(HomeAssistantView):
         self._hass = hass
 
     async def post(self, request: Any) -> Any:
+        deadline = CommandDeadline.start()
         if not _is_exact_request(request, DEVICE_ACTIONS_PATH):
             return _not_found(self)
         if not (
@@ -306,6 +631,10 @@ class DeviceActionView(HomeAssistantView):
         target_id = str(payload["targetId"])
         action_id = str(payload["actionId"])
         dry_run = payload.get("dryRun", False)
+        potentially_safe_action = bool(
+            not dry_run
+            and _catalog_safe_descriptor(service, target_id, action_id)
+        )
         try:
             correlation_id = resolve_correlation_id(
                 payload,
@@ -317,9 +646,29 @@ class DeviceActionView(HomeAssistantView):
                 HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
             )
-        context = await service.async_resolve_device_action_context(
-            target_id, action_id
-        )
+        try:
+            context = (
+                await _await_before_safe_deadline(
+                    service.async_resolve_device_action_context(
+                        target_id, action_id
+                    ),
+                    deadline,
+                )
+                if potentially_safe_action
+                else await service.async_resolve_device_action_context(
+                    target_id, action_id
+                )
+            )
+        except _SafeCommandDeadlineExpired:
+            return await _async_action_failure(
+                self,
+                None,
+                request_id=str(
+                    payload.get("requestId")
+                    or f"safe-admission.{uuid.uuid4().hex}"
+                ),
+                response_media_type=response_media_type,
+            )
         entity_id = context[0] if context is not None else None
         target_type = context[1] if context is not None else "sensor"
         allowed_actions = context[2] if context is not None else ()
@@ -338,9 +687,25 @@ class DeviceActionView(HomeAssistantView):
             if (full_response or reassert_key is not None) and target_type == "light"
             else {}
         )
-        intercom_action = await service.async_is_intercom_action(
-            target_id, action_id
-        )
+        try:
+            intercom_action = (
+                await _await_before_safe_deadline(
+                    service.async_is_intercom_action(target_id, action_id),
+                    deadline,
+                )
+                if potentially_safe_action
+                else await service.async_is_intercom_action(target_id, action_id)
+            )
+        except _SafeCommandDeadlineExpired:
+            return await _async_action_failure(
+                self,
+                None,
+                request_id=str(
+                    payload.get("requestId")
+                    or f"safe-admission.{uuid.uuid4().hex}"
+                ),
+                response_media_type=response_media_type,
+            )
         contextual_dangerous_action = (
             intercom_action
             or service.is_contextually_dangerous_action(target_id, action_id)
@@ -350,6 +715,27 @@ class DeviceActionView(HomeAssistantView):
         )
         dangerous_action = (
             action_id in DANGEROUS_ACTION_IDS or contextual_dangerous_action
+        )
+        safe_action_candidate = _safe_action_candidate(
+            context=context,
+            action_id=action_id,
+            dangerous=dangerous_action,
+            external_cover=external_cover_action,
+            intercom=intercom_action,
+            reassert_key=reassert_key,
+            dry_run=bool(dry_run),
+        )
+        safe_action_admitted = bool(
+            safe_action_candidate
+            and context is not None
+            and _safe_action_admitted(
+                service=service,
+                hass=self._hass,
+                target_id=target_id,
+                action_id=action_id,
+                value=payload.get("value"),
+                context=context,
+            )
         )
         direct_idempotent_allowed = _direct_idempotent_allowed(
             action_id=action_id,
@@ -473,8 +859,25 @@ class DeviceActionView(HomeAssistantView):
                 request_id=dispatch_request_id,
                 response_media_type=response_media_type,
             )
+
+            async def abandon_late_reservation(
+                reservation_task: asyncio.Task[Any],
+            ) -> None:
+                if reservation_task.cancelled():
+                    return
+                try:
+                    late_reservation = reservation_task.result()
+                except Exception:  # noqa: BLE001
+                    return
+                if getattr(late_reservation, "outcome", None) != "reserved":
+                    return
+                await idempotency.async_abandon_pre_dispatch(idempotency_key)
+
+            async def abandon_late_transition(_task: asyncio.Task[Any]) -> None:
+                await idempotency.async_abandon_pre_dispatch(idempotency_key)
+
             try:
-                reservation = await idempotency.async_reserve(
+                reservation_awaitable = idempotency.async_reserve(
                     key=idempotency_key,
                     fingerprint=fingerprint,
                     dispatch_id=dispatch_id,
@@ -488,6 +891,22 @@ class DeviceActionView(HomeAssistantView):
                             "requestId": dispatch_request_id,
                         }
                     ],
+                    response_media_type=response_media_type,
+                )
+                reservation = (
+                    await _await_before_safe_deadline(
+                        reservation_awaitable,
+                        deadline,
+                        on_timeout_settled=abandon_late_reservation,
+                    )
+                    if safe_action_candidate
+                    else await reservation_awaitable
+                )
+            except _SafeCommandDeadlineExpired:
+                return await _async_action_failure(
+                    self,
+                    None,
+                    request_id=str(payload.get("requestId")),
                     response_media_type=response_media_type,
                 )
             except Exception as error:  # noqa: BLE001
@@ -532,7 +951,22 @@ class DeviceActionView(HomeAssistantView):
                 )
             lifecycle.mark_reservation_owned()
             try:
-                await idempotency.async_mark_pending(idempotency_key)
+                pending_awaitable = idempotency.async_mark_pending(idempotency_key)
+                if safe_action_candidate:
+                    await _await_before_safe_deadline(
+                        pending_awaitable,
+                        deadline,
+                        on_timeout_settled=abandon_late_transition,
+                    )
+                else:
+                    await pending_awaitable
+            except _SafeCommandDeadlineExpired:
+                return await _async_action_failure(
+                    self,
+                    None,
+                    request_id=str(payload.get("requestId")),
+                    response_media_type=response_media_type,
+                )
             except Exception:  # noqa: BLE001
                 _LOGGER.warning(
                     "HausmanHub device action pending persistence failed",
@@ -569,7 +1003,24 @@ class DeviceActionView(HomeAssistantView):
             idempotency, DangerousActionIdempotency
         ):
             try:
-                await idempotency.async_mark_dispatching(coordination_key)
+                dispatching_awaitable = idempotency.async_mark_dispatching(
+                    coordination_key
+                )
+                if safe_action_admitted:
+                    await _await_before_safe_deadline(
+                        dispatching_awaitable,
+                        deadline,
+                        on_timeout_settled=abandon_late_transition,
+                    )
+                else:
+                    await dispatching_awaitable
+            except _SafeCommandDeadlineExpired:
+                return await _async_action_failure(
+                    self,
+                    None,
+                    request_id=str(payload.get("requestId")),
+                    response_media_type=response_media_type,
+                )
             except Exception:  # noqa: BLE001
                 _LOGGER.warning(
                     "HausmanHub device action dispatch fence persistence failed",
@@ -579,7 +1030,22 @@ class DeviceActionView(HomeAssistantView):
                 return await lifecycle.async_failure()
 
         climate_runtime = self._hass.data.get(DOMAIN, {}).get("climate_runtime")
+        safe_coordinator = self._hass.data.get(DOMAIN, {}).get(
+            "safe_device_command_lifecycle"
+        )
+        if safe_action_admitted and not isinstance(
+            safe_coordinator, SafeDeviceCommandLifecycle
+        ):
+            return await _async_action_failure(
+                self,
+                lifecycle,
+                request_id=str(
+                    payload.get("requestId") or f"safe-command.{uuid.uuid4().hex}"
+                ),
+                response_media_type=response_media_type,
+            )
         dispatch_state = {"crossed": False}
+        safe_handle: SafeDeviceCommandHandle | None = None
 
         def mark_dispatch_crossed() -> None:
             dispatch_state["crossed"] = True
@@ -599,11 +1065,17 @@ class DeviceActionView(HomeAssistantView):
         try:
             climate_entity_id = None
             if not dry_run and action_id == "turn_off" and callable(mode_writer):
-                resolved = await service.async_resolve_device_action(
-                    target_id, action_id
-                )
-                if resolved is not None and resolved[1] == "climate":
-                    climate_entity_id = resolved[0]
+                if context is not None and context[1] == "climate":
+                    climate_entity_id = context[0]
+                else:
+                    resolved = await service.async_resolve_device_action(
+                        target_id, action_id
+                    )
+                    if resolved is not None and resolved[1] == "climate":
+                        climate_entity_id = resolved[0]
+            climate_mode_precondition = _climate_mode_precondition(
+                climate_runtime, climate_entity_id
+            )
             execute_options: dict[str, Any] = {
                 "correlation_id": correlation_id
             }
@@ -633,16 +1105,170 @@ class DeviceActionView(HomeAssistantView):
                 execute_options["contextually_dangerous"] = True
             if intercom_action and not dry_run:
                 execute_options["intercom_release_required"] = True
-            if not dry_run and _supports_keyword(
-                service.async_execute_device_action, "dispatch_marker"
+            if safe_action_candidate and _supports_keyword(
+                service.async_execute_device_action, "require_safe_evidence"
             ):
-                execute_options["dispatch_marker"] = mark_dispatch_crossed
-            result = await service.async_execute_device_action(
-                target_id,
-                action_id,
-                payload.get("value"),
-                **execute_options,
-            )
+                execute_options["require_safe_evidence"] = True
+
+            async def execute_safe_once(
+                coordinator_marker: Any,
+                validate_authority: Any,
+            ) -> Mapping[str, object]:
+                owned_options = dict(execute_options)
+
+                def combined_dispatch_marker() -> None:
+                    mark_dispatch_crossed()
+                    coordinator_marker()
+
+                owned_options["dispatch_marker"] = combined_dispatch_marker
+                owned_options["before_dispatch"] = validate_authority
+                owned_result = dict(
+                    await service.async_execute_device_action(
+                        target_id,
+                        action_id,
+                        payload.get("value"),
+                        **owned_options,
+                    )
+                )
+                if owned_result.get("accepted") is True and climate_entity_id is not None:
+                    try:
+                        climate_mode_change = await _async_write_climate_mode(
+                            mode_writer,
+                            climate_entity_id,
+                            "automatic",
+                            climate_mode_precondition,
+                        )
+                        if isinstance(climate_mode_change, Mapping):
+                            owned_result.update(
+                                {
+                                    "climateMode": climate_mode_change["mode"],
+                                    "climateModeName": "Автоматический режим",
+                                }
+                            )
+                    except Exception:  # noqa: BLE001
+                        _LOGGER.warning(
+                            "HausmanHub climate mode postprocessing failed after safe device action",
+                            exc_info=True,
+                        )
+                return owned_result
+
+            def project_safe_result(
+                owned_result: Mapping[str, object],
+            ) -> dict[str, object]:
+                projected: dict[str, object] = {
+                    "contract": {
+                        "name": "hausman-hub-device-action-receipt",
+                        "version": 1,
+                    },
+                    **dict(owned_result),
+                    "targetType": target_type,
+                }
+                if full_response:
+                    projected = full_action_receipt(
+                        payload=payload,
+                        result=owned_result,
+                        target_type=target_type,
+                        state=(
+                            self._hass.states.get(entity_id)
+                            if isinstance(entity_id, str)
+                            else None
+                        ),
+                        allowed_actions=allowed_actions,
+                        pre_command_evidence=pre_command_evidence,
+                        decision_at=decision_at,
+                    )
+                return projected
+
+            async def publish_late_safe_result(
+                handle: SafeDeviceCommandHandle,
+                owned_result: Mapping[str, object],
+            ) -> None:
+                assert isinstance(safe_coordinator, SafeDeviceCommandLifecycle)
+                projected = project_safe_result(owned_result)
+                if lifecycle is not None and not lifecycle.terminal_persisted:
+                    completion_failure = await lifecycle.async_complete(projected)
+                    if completion_failure is not None:
+                        return
+                if not await safe_coordinator.async_record_late_receipt(
+                    handle, projected
+                ):
+                    return
+                try:
+                    publish_command_receipt(
+                        self._hass, projected, operation="device_action"
+                    )
+                except Exception:  # noqa: BLE001
+                    _LOGGER.warning(
+                        "HausmanHub late safe device receipt publication failed",
+                        exc_info=True,
+                    )
+
+            if safe_action_admitted:
+                assert isinstance(context, tuple)
+                assert isinstance(safe_coordinator, SafeDeviceCommandLifecycle)
+                owned_request_id = dispatch_request_id or f"safe.{uuid.uuid4().hex}"
+                execute_options["request_id"] = owned_request_id
+                operation = SafeDeviceCommandOperation(
+                    request_fingerprint=fingerprint,
+                    request_id=owned_request_id,
+                    target_id=target_id,
+                    entity_id=context[0],
+                    domain=context[1],
+                    service=context[3],
+                    action_id=action_id,
+                    response_media_type=response_media_type,
+                    pre_evidence_revision=_state_revision(
+                        self._hass.states.get(context[0])
+                    ),
+                )
+                try:
+                    safe_handle = await _await_before_safe_deadline(
+                        safe_coordinator.async_start(
+                            operation,
+                            execute_safe_once,
+                            late_callback=publish_late_safe_result,
+                            deadline=deadline,
+                        ),
+                        deadline,
+                    )
+                    result_or_pending = await safe_coordinator.async_response(
+                        safe_handle, deadline
+                    )
+                except asyncio.CancelledError:
+                    if safe_handle is not None:
+                        await safe_coordinator.async_note_http_abandoned(safe_handle)
+                    raise
+                except Exception:
+                    _LOGGER.warning(
+                        "HausmanHub safe device command admission failed",
+                        exc_info=True,
+                    )
+                    return await _async_action_failure(
+                        self,
+                        lifecycle,
+                        request_id=str(payload.get("requestId") or owned_request_id),
+                        response_media_type=response_media_type,
+                    )
+                result = (
+                    dict(result_or_pending)
+                    if result_or_pending is not None
+                    else _pending_safe_result(
+                        handle=safe_handle,
+                        hass=self._hass,
+                        correlation_id=correlation_id,
+                    )
+                )
+            else:
+                if not dry_run and _supports_keyword(
+                    service.async_execute_device_action, "dispatch_marker"
+                ):
+                    execute_options["dispatch_marker"] = mark_dispatch_crossed
+                result = await service.async_execute_device_action(
+                    target_id,
+                    action_id,
+                    payload.get("value"),
+                    **execute_options,
+                )
         except Exception:
             _LOGGER.warning("HausmanHub device action execution failed", exc_info=True)
             if lifecycle is not None:
@@ -676,7 +1302,11 @@ class DeviceActionView(HomeAssistantView):
                 response_media_type=response_media_type,
                 dispatch_crossed=True,
             )
-        if result.get("accepted") is True and climate_entity_id is not None:
+        if (
+            safe_handle is None
+            and result.get("accepted") is True
+            and climate_entity_id is not None
+        ):
             try:
                 climate_mode_change = await mode_writer(
                     climate_entity_id, "automatic"
@@ -767,9 +1397,24 @@ class DeviceActionView(HomeAssistantView):
         if dry_run:
             response["dryRun"] = True
         if lifecycle is not None:
-            completion_failure = await lifecycle.async_complete(response)
+            try:
+                completion_failure = await lifecycle.async_complete(response)
+            except asyncio.CancelledError:
+                if safe_handle is not None and isinstance(
+                    safe_coordinator, SafeDeviceCommandLifecycle
+                ):
+                    await safe_coordinator.async_note_http_abandoned(safe_handle)
+                raise
             if completion_failure is not None:
+                if safe_handle is not None and isinstance(
+                    safe_coordinator, SafeDeviceCommandLifecycle
+                ):
+                    await safe_coordinator.async_note_http_abandoned(safe_handle)
                 return completion_failure
+        if safe_handle is not None and isinstance(
+            safe_coordinator, SafeDeviceCommandLifecycle
+        ):
+            await safe_coordinator.async_note_first_response_persisted(safe_handle)
         try:
             publish_command_receipt(self._hass, response, operation="device_action")
         except Exception:  # noqa: BLE001
@@ -801,6 +1446,7 @@ class DeviceActionBatchView(HomeAssistantView):
         self._hass = hass
 
     async def post(self, request: Any) -> Any:
+        deadline = CommandDeadline.start()
         if not _is_exact_request(request, self.url):
             return _not_found(self)
         if not (
@@ -841,19 +1487,49 @@ class DeviceActionBatchView(HomeAssistantView):
                 HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
             )
-        contexts = []
-        for item in normalized:
-            contexts.append(
-                await service.async_resolve_device_action_context(
+        potentially_safe_batch = bool(
+            normalized
+            and all(
+                item.get("dryRun") is not True
+                and _catalog_safe_descriptor(
+                    service,
+                    str(item["targetId"]),
+                    str(item["actionId"]),
+                )
+                for item in normalized
+            )
+        )
+        try:
+            contexts = []
+            for item in normalized:
+                resolution = service.async_resolve_device_action_context(
                     str(item["targetId"]), str(item["actionId"])
                 )
+                contexts.append(
+                    await _await_before_safe_deadline(resolution, deadline)
+                    if potentially_safe_batch
+                    else await resolution
+                )
+            intercom_flags = []
+            for item in normalized:
+                resolution = service.async_is_intercom_action(
+                    str(item["targetId"]), str(item["actionId"])
+                )
+                intercom_flags.append(
+                    await _await_before_safe_deadline(resolution, deadline)
+                    if potentially_safe_batch
+                    else await resolution
+                )
+        except _SafeCommandDeadlineExpired:
+            return await _async_action_failure(
+                self,
+                None,
+                request_id=str(
+                    payload.get("requestId")
+                    or f"safe-batch-admission.{uuid.uuid4().hex}"
+                ),
+                response_media_type=response_media_type,
             )
-        intercom_flags = [
-            await service.async_is_intercom_action(
-                str(item["targetId"]), str(item["actionId"])
-            )
-            for item in normalized
-        ]
         contextual_dangerous_flags = [
             intercom_flags[index]
             or service.is_contextually_dangerous_action(
@@ -880,6 +1556,38 @@ class DeviceActionBatchView(HomeAssistantView):
             index for index, item in enumerate(normalized)
             if item.get("reassertKey") is not None
         ]
+        safe_batch_candidates = bool(
+            potentially_safe_batch
+            and not dangerous_indexes
+            and not reassert_indexes
+            and all(
+                _safe_action_candidate(
+                    context=contexts[index],
+                    action_id=str(item["actionId"]),
+                    dangerous=False,
+                    external_cover=external_cover_flags[index],
+                    intercom=intercom_flags[index],
+                    reassert_key=item.get("reassertKey"),
+                    dry_run=False,
+                )
+                for index, item in enumerate(normalized)
+            )
+        )
+        safe_batch_admitted = bool(
+            safe_batch_candidates
+            and all(
+                context is not None
+                and _safe_action_admitted(
+                    service=service,
+                    hass=self._hass,
+                    target_id=str(item["targetId"]),
+                    action_id=str(item["actionId"]),
+                    value=item.get("value"),
+                    context=context,
+                )
+                for item, context in zip(normalized, contexts, strict=True)
+            )
+        )
         if dangerous_indexes and not full_request:
             return _legacy_dangerous_forbidden(self)
         if (
@@ -1046,8 +1754,27 @@ class DeviceActionBatchView(HomeAssistantView):
                 request_id=str(payload.get("requestId")),
                 response_media_type=response_media_type,
             )
+
+            async def abandon_late_batch_reservation(
+                reservation_task: asyncio.Task[Any],
+            ) -> None:
+                if reservation_task.cancelled():
+                    return
+                try:
+                    late_reservation = reservation_task.result()
+                except Exception:  # noqa: BLE001
+                    return
+                if getattr(late_reservation, "outcome", None) != "reserved":
+                    return
+                await idempotency.async_abandon_pre_dispatch(idempotency_key)
+
+            async def abandon_late_batch_transition(
+                _task: asyncio.Task[Any],
+            ) -> None:
+                await idempotency.async_abandon_pre_dispatch(idempotency_key)
+
             try:
-                reservation = await idempotency.async_reserve(
+                reservation_awaitable = idempotency.async_reserve(
                     key=idempotency_key,
                     fingerprint=fingerprint,
                     dispatch_id=dispatch_id,
@@ -1066,6 +1793,22 @@ class DeviceActionBatchView(HomeAssistantView):
                         }
                         for index, item in enumerate(normalized)
                     ],
+                    response_media_type=response_media_type,
+                )
+                reservation = (
+                    await _await_before_safe_deadline(
+                        reservation_awaitable,
+                        deadline,
+                        on_timeout_settled=abandon_late_batch_reservation,
+                    )
+                    if safe_batch_candidates
+                    else await reservation_awaitable
+                )
+            except _SafeCommandDeadlineExpired:
+                return await _async_action_failure(
+                    self,
+                    None,
+                    request_id=str(payload.get("requestId")),
                     response_media_type=response_media_type,
                 )
             except Exception as error:  # noqa: BLE001
@@ -1110,7 +1853,22 @@ class DeviceActionBatchView(HomeAssistantView):
                 )
             lifecycle.mark_reservation_owned()
             try:
-                await idempotency.async_mark_pending(idempotency_key)
+                pending_awaitable = idempotency.async_mark_pending(idempotency_key)
+                if safe_batch_candidates:
+                    await _await_before_safe_deadline(
+                        pending_awaitable,
+                        deadline,
+                        on_timeout_settled=abandon_late_batch_transition,
+                    )
+                else:
+                    await pending_awaitable
+            except _SafeCommandDeadlineExpired:
+                return await _async_action_failure(
+                    self,
+                    None,
+                    request_id=str(payload.get("requestId")),
+                    response_media_type=response_media_type,
+                )
             except Exception:  # noqa: BLE001
                 _LOGGER.warning(
                     "HausmanHub device action batch pending persistence failed",
@@ -1154,7 +1912,24 @@ class DeviceActionBatchView(HomeAssistantView):
             idempotency, DangerousActionIdempotency
         ):
             try:
-                await idempotency.async_mark_dispatching(idempotency_key)
+                dispatching_awaitable = idempotency.async_mark_dispatching(
+                    idempotency_key
+                )
+                if safe_batch_admitted:
+                    await _await_before_safe_deadline(
+                        dispatching_awaitable,
+                        deadline,
+                        on_timeout_settled=abandon_late_batch_transition,
+                    )
+                else:
+                    await dispatching_awaitable
+            except _SafeCommandDeadlineExpired:
+                return await _async_action_failure(
+                    self,
+                    None,
+                    request_id=str(payload.get("requestId")),
+                    response_media_type=response_media_type,
+                )
             except Exception:  # noqa: BLE001
                 _LOGGER.warning(
                     "HausmanHub device action batch dispatch fence persistence failed",
@@ -1187,38 +1962,367 @@ class DeviceActionBatchView(HomeAssistantView):
             (str(normalized[index]["targetId"]), str(normalized[index]["actionId"]))
             for index, flag in enumerate(contextual_dangerous_flags) if flag
         )
+        safe_coordinator = self._hass.data.get(DOMAIN, {}).get(
+            "safe_device_command_lifecycle"
+        )
+        safe_batch_handles: list[SafeDeviceCommandHandle] = []
+        if safe_batch_admitted and not isinstance(
+            safe_coordinator, SafeDeviceCommandLifecycle
+        ):
+            return await _async_action_failure(
+                self,
+                lifecycle,
+                request_id=str(
+                    payload.get("requestId")
+                    or f"safe-batch.{uuid.uuid4().hex}"
+                ),
+                response_media_type=response_media_type,
+            )
+
+        def project_safe_batch_item(
+            index: int, result: Mapping[str, object]
+        ) -> dict[str, object]:
+            item = normalized[index]
+            context = contexts[index]
+            if full_response:
+                return full_action_receipt(
+                    payload=item,
+                    result=result,
+                    target_type=context[1] if context is not None else "sensor",
+                    state=(
+                        self._hass.states.get(context[0])
+                        if context is not None
+                        else None
+                    ),
+                    allowed_actions=context[2] if context is not None else (),
+                    pre_command_evidence=pre_evidence[index],
+                    decision_at=decision_at + index,
+                    action_index=index,
+                )
+            return {
+                "contract": {
+                    "name": "hausman-hub-device-action-receipt",
+                    "version": 1,
+                },
+                **dict(result),
+                "targetType": context[1] if context is not None else "sensor",
+                "actionIndex": index,
+            }
+
+        def batch_response_from_wrapped(
+            wrapped_items: list[dict[str, object]],
+        ) -> dict[str, object]:
+            accepted_count = sum(
+                item.get("accepted") is True for item in wrapped_items
+            )
+            confirmed_count = sum(
+                item.get("confirmed") is True for item in wrapped_items
+            )
+            failed_count = sum(
+                item.get("status") == "failed" for item in wrapped_items
+            )
+            return {
+                "contract": {
+                    "name": "hausman-hub-device-action-batch-receipt",
+                    "version": 1,
+                },
+                "correlationId": correlation_id,
+                "status": (
+                    "confirmed"
+                    if confirmed_count == len(wrapped_items)
+                    else "failed"
+                    if failed_count == len(wrapped_items)
+                    else "partial"
+                    if failed_count
+                    else "accepted"
+                ),
+                "total": len(wrapped_items),
+                "acceptedCount": accepted_count,
+                "confirmedCount": confirmed_count,
+                "failedCount": failed_count,
+                "receipts": wrapped_items,
+            }
+
         try:
-            if physical_actions and _supports_keyword(
-                service.async_execute_device_action_batch, "dispatch_marker"
-            ):
-                def mark_unattributed_dispatch() -> None:
-                    unattributed_dispatch_state["crossed"] = True
-                    if lifecycle is not None:
-                        lifecycle.mark_dispatch_crossed()
-
-                batch_options["dispatch_marker"] = mark_unattributed_dispatch
-            per_item_markers_supported = bool(
-                physical_actions
-                and _supports_keyword(
-                    service.async_execute_device_action_batch, "dispatch_markers"
+            if safe_batch_admitted:
+                assert isinstance(safe_coordinator, SafeDeviceCommandLifecycle)
+                per_item_markers_supported = True
+                receipts = []
+                climate_runtime = self._hass.data.get(DOMAIN, {}).get(
+                    "climate_runtime"
                 )
-            )
-            if per_item_markers_supported:
-                def item_marker(index: int) -> None:
-                    if normalized[index].get("dryRun") is True:
-                        return
-                    item_dispatch_crossed[index] = True
-                    if lifecycle is not None:
-                        lifecycle.mark_dispatch_crossed()
-
-                batch_options["dispatch_markers"] = tuple(
-                    (lambda index=index: item_marker(index))
-                    for index in range(len(normalized))
+                mode_writer = getattr(
+                    climate_runtime, "async_set_device_mode_for_entity", None
                 )
-            receipts = await service.async_execute_device_action_batch(
-                normalized,
-                **batch_options,
-            )
+                for index, item in enumerate(normalized):
+                    context = contexts[index]
+                    assert context is not None
+                    request_id = (
+                        dispatch_request_ids[index]
+                        if dispatch_request_ids is not None
+                        else f"safe.{uuid.uuid4().hex}.{index}"
+                    )
+                    mode_precondition = (
+                        _climate_mode_precondition(climate_runtime, context[0])
+                        if item["actionId"] == "turn_off"
+                        and context[1] == "climate"
+                        and callable(mode_writer)
+                        else None
+                    )
+                    if deadline.remaining() <= 0:
+                        receipts.extend(
+                            _blocked_unstarted_result(
+                                request_id=(
+                                    dispatch_request_ids[remaining_index]
+                                    if dispatch_request_ids is not None
+                                    else f"safe.{uuid.uuid4().hex}.{remaining_index}"
+                                ),
+                                target_id=str(normalized[remaining_index]["targetId"]),
+                                action_id=str(normalized[remaining_index]["actionId"]),
+                                correlation_id=correlation_id,
+                            )
+                            for remaining_index in range(index, len(normalized))
+                        )
+                        break
+
+                    async def execute_safe_batch_item(
+                        coordinator_marker: Any,
+                        validate_authority: Any,
+                        *,
+                        item: Mapping[str, object] = item,
+                        context: tuple[str, str, tuple[str, ...], str] = context,
+                        request_id: str = request_id,
+                        index: int = index,
+                        mode_precondition: Mapping[str, object] | None = mode_precondition,
+                    ) -> Mapping[str, object]:
+                        def combined_dispatch_marker() -> None:
+                            item_dispatch_crossed[index] = True
+                            if lifecycle is not None:
+                                lifecycle.mark_dispatch_crossed()
+                            coordinator_marker()
+
+                        item_result = dict(
+                            await service.async_execute_device_action(
+                                str(item["targetId"]),
+                                str(item["actionId"]),
+                                item.get("value"),
+                                correlation_id=correlation_id,
+                                request_id=request_id,
+                                expected_entity_id=context[0],
+                                expected_domain=context[1],
+                                expected_service=context[3],
+                                dispatch_marker=combined_dispatch_marker,
+                                before_dispatch=validate_authority,
+                                require_safe_evidence=True,
+                            )
+                        )
+                        if (
+                            item_result.get("accepted") is True
+                            and item["actionId"] == "turn_off"
+                            and context[1] == "climate"
+                            and callable(mode_writer)
+                        ):
+                            try:
+                                mode_change = await _async_write_climate_mode(
+                                    mode_writer,
+                                    context[0],
+                                    "automatic",
+                                    mode_precondition,
+                                )
+                                if isinstance(mode_change, Mapping):
+                                    item_result.update(
+                                        {
+                                            "climateMode": mode_change["mode"],
+                                            "climateModeName": "Автоматический режим",
+                                        }
+                                    )
+                            except Exception:  # noqa: BLE001
+                                _LOGGER.warning(
+                                    "HausmanHub climate mode postprocessing failed after safe batch item",
+                                    exc_info=True,
+                                )
+                        return item_result
+
+                    async def publish_late_batch_item(
+                        handle: SafeDeviceCommandHandle,
+                        late_result: Mapping[str, object],
+                        *,
+                        index: int = index,
+                    ) -> None:
+                        projected_item = project_safe_batch_item(index, late_result)
+                        if (
+                            lifecycle is not None
+                            and not lifecycle.terminal_persisted
+                            and handle.http_abandoned
+                        ):
+                            raw_items = [dict(receipt) for receipt in receipts[:index]]
+                            raw_items.append(dict(late_result))
+                            raw_items.extend(
+                                _blocked_unstarted_result(
+                                    request_id=(
+                                        dispatch_request_ids[remaining_index]
+                                        if dispatch_request_ids is not None
+                                        else f"safe.abandoned.{remaining_index}"
+                                    ),
+                                    target_id=str(normalized[remaining_index]["targetId"]),
+                                    action_id=str(normalized[remaining_index]["actionId"]),
+                                    correlation_id=correlation_id,
+                                )
+                                for remaining_index in range(index + 1, len(normalized))
+                            )
+                            disconnected_response = batch_response_from_wrapped(
+                                [
+                                    project_safe_batch_item(item_index, raw)
+                                    for item_index, raw in enumerate(raw_items)
+                                ]
+                            )
+                            completion_failure = await lifecycle.async_complete(
+                                disconnected_response,
+                                item_journal=[
+                                    dict(receipt)
+                                    for receipt in disconnected_response["receipts"]
+                                ],
+                            )
+                            if completion_failure is not None:
+                                return
+                        if not await safe_coordinator.async_record_late_receipt(
+                            handle, projected_item
+                        ):
+                            return
+                        try:
+                            publish_command_receipt(
+                                self._hass,
+                                projected_item,
+                                operation="device_action",
+                            )
+                        except Exception:  # noqa: BLE001
+                            _LOGGER.warning(
+                                "HausmanHub late safe batch receipt publication failed",
+                                exc_info=True,
+                            )
+
+                    operation = SafeDeviceCommandOperation(
+                        request_fingerprint=fingerprint,
+                        request_id=request_id,
+                        target_id=str(item["targetId"]),
+                        entity_id=context[0],
+                        domain=context[1],
+                        service=context[3],
+                        action_id=str(item["actionId"]),
+                        response_media_type=response_media_type,
+                        pre_evidence_revision=_state_revision(
+                            self._hass.states.get(context[0])
+                        ),
+                    )
+                    handle: SafeDeviceCommandHandle | None = None
+                    try:
+                        handle = await _await_before_safe_deadline(
+                            safe_coordinator.async_start(
+                                operation,
+                                execute_safe_batch_item,
+                                late_callback=publish_late_batch_item,
+                                deadline=deadline,
+                            ),
+                            deadline,
+                        )
+                        safe_batch_handles.append(handle)
+                        item_result = await safe_coordinator.async_response(
+                            handle, deadline
+                        )
+                    except asyncio.CancelledError:
+                        if handle is not None:
+                            await safe_coordinator.async_note_http_abandoned(handle)
+                        raise
+                    except Exception:  # noqa: BLE001
+                        _LOGGER.warning(
+                            "HausmanHub safe batch item admission failed",
+                            exc_info=True,
+                        )
+                        receipts.extend(
+                            _blocked_unstarted_result(
+                                request_id=(
+                                    dispatch_request_ids[remaining_index]
+                                    if dispatch_request_ids is not None
+                                    else f"safe.{uuid.uuid4().hex}.{remaining_index}"
+                                ),
+                                target_id=str(normalized[remaining_index]["targetId"]),
+                                action_id=str(normalized[remaining_index]["actionId"]),
+                                correlation_id=correlation_id,
+                            )
+                            for remaining_index in range(index, len(normalized))
+                        )
+                        break
+                    if item_result is None:
+                        receipts.append(
+                            _pending_safe_result(
+                                handle=handle,
+                                hass=self._hass,
+                                correlation_id=correlation_id,
+                            )
+                        )
+                        receipts.extend(
+                            _blocked_unstarted_result(
+                                request_id=(
+                                    dispatch_request_ids[remaining_index]
+                                    if dispatch_request_ids is not None
+                                    else f"safe.{uuid.uuid4().hex}.{remaining_index}"
+                                ),
+                                target_id=str(normalized[remaining_index]["targetId"]),
+                                action_id=str(normalized[remaining_index]["actionId"]),
+                                correlation_id=correlation_id,
+                            )
+                            for remaining_index in range(index + 1, len(normalized))
+                        )
+                        break
+                    receipts.append(dict(item_result))
+            elif safe_batch_candidates:
+                per_item_markers_supported = True
+                receipts = [
+                    _blocked_safe_admission_result(
+                        request_id=(
+                            dispatch_request_ids[index]
+                            if dispatch_request_ids is not None
+                            else f"safe.rejected.{uuid.uuid4().hex}.{index}"
+                        ),
+                        target_id=str(item["targetId"]),
+                        action_id=str(item["actionId"]),
+                        correlation_id=correlation_id,
+                    )
+                    for index, item in enumerate(normalized)
+                ]
+            else:
+                if physical_actions and _supports_keyword(
+                    service.async_execute_device_action_batch, "dispatch_marker"
+                ):
+                    def mark_unattributed_dispatch() -> None:
+                        unattributed_dispatch_state["crossed"] = True
+                        if lifecycle is not None:
+                            lifecycle.mark_dispatch_crossed()
+
+                    batch_options["dispatch_marker"] = mark_unattributed_dispatch
+                per_item_markers_supported = bool(
+                    physical_actions
+                    and _supports_keyword(
+                        service.async_execute_device_action_batch,
+                        "dispatch_markers",
+                    )
+                )
+                if per_item_markers_supported:
+                    def item_marker(index: int) -> None:
+                        if normalized[index].get("dryRun") is True:
+                            return
+                        item_dispatch_crossed[index] = True
+                        if lifecycle is not None:
+                            lifecycle.mark_dispatch_crossed()
+
+                    batch_options["dispatch_markers"] = tuple(
+                        (lambda index=index: item_marker(index))
+                        for index in range(len(normalized))
+                    )
+                receipts = await service.async_execute_device_action_batch(
+                    normalized,
+                    **batch_options,
+                )
         except Exception:  # noqa: BLE001
             _LOGGER.warning("HausmanHub device action batch execution failed", exc_info=True)
             if lifecycle is not None:
@@ -1365,12 +2469,24 @@ class DeviceActionBatchView(HomeAssistantView):
                 "receipts": wrapped,
             }
         if lifecycle is not None:
-            completion_failure = await lifecycle.async_complete(
-                response,
-                item_journal=[dict(item) for item in wrapped],
-            )
+            try:
+                completion_failure = await lifecycle.async_complete(
+                    response,
+                    item_journal=[dict(item) for item in wrapped],
+                )
+            except asyncio.CancelledError:
+                if isinstance(safe_coordinator, SafeDeviceCommandLifecycle):
+                    for handle in safe_batch_handles:
+                        await safe_coordinator.async_note_http_abandoned(handle)
+                raise
             if completion_failure is not None:
+                if isinstance(safe_coordinator, SafeDeviceCommandLifecycle):
+                    for handle in safe_batch_handles:
+                        await safe_coordinator.async_note_http_abandoned(handle)
                 return completion_failure
+        if isinstance(safe_coordinator, SafeDeviceCommandLifecycle):
+            for handle in safe_batch_handles:
+                await safe_coordinator.async_note_first_response_persisted(handle)
         for receipt in wrapped:
             try:
                 publish_command_receipt(

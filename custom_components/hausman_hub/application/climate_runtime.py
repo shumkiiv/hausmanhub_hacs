@@ -1673,6 +1673,9 @@ class ClimateRuntime:
         self,
         entity_id: object,
         mode: object,
+        *,
+        expected_revision: object | None = None,
+        expected_mode: object | None = None,
     ) -> dict[str, object] | None:
         """Persist an AC ownership choice resolved from its control entity."""
 
@@ -1713,6 +1716,20 @@ class ClimateRuntime:
                 if device.room_id in manual_room_ids or was_explicitly_manual
                 else "automatic"
             )
+            if (
+                expected_revision is not None
+                and expected_revision != self._manual_memory.updated_at
+            ) or (expected_mode is not None and expected_mode != previous_mode):
+                return {
+                    "device_id": device.device_id,
+                    "room_id": device.room_id,
+                    "entity_id": entity_id,
+                    "previous_mode": previous_mode,
+                    "mode": previous_mode,
+                    "changed": False,
+                    "skipped": True,
+                    "reason": "manual_mode_changed",
+                }
             should_be_manual = mode == "manual"
             if device.room_id in manual_room_ids and should_be_manual:
                 updated = self._manual_memory
@@ -1744,6 +1761,48 @@ class ClimateRuntime:
                 "mode": effective_mode,
                 "changed": changed,
             }
+
+    def device_mode_snapshot_for_entity(
+        self, entity_id: object
+    ) -> dict[str, object] | None:
+        """Return the revision and effective mode used for a later CAS write."""
+
+        if not isinstance(entity_id, str):
+            return None
+        contour = self._contours.contour(CLIMATE_CONTOUR_ID)
+        if contour is None:
+            return None
+        assigned_device_ids = {
+            device_id for room in contour.rooms for device_id in room.device_ids
+        }
+        device = next(
+            (
+                candidate
+                for candidate in self._registry.devices
+                if candidate.device_id in assigned_device_ids
+                and candidate.kind is ClimateDeviceKind.AIR_CONDITIONER
+                and (
+                    endpoint := candidate.endpoint(ClimateEndpointRole.CONTROL)
+                ) is not None
+                and endpoint.entity_id == entity_id
+            ),
+            None,
+        )
+        if device is None:
+            return None
+        manual_room_ids = set(
+            effective_manual_room_ids(self._manual_memory, self._registry)
+        )
+        mode = (
+            "manual"
+            if device.room_id in manual_room_ids
+            or device.device_id in set(self._manual_memory.manual_device_ids)
+            else "automatic"
+        )
+        return {
+            "revision": self._manual_memory.updated_at,
+            "mode": mode,
+        }
 
     async def async_home_climate_targets(
         self, payload: object, *, reliability_request: object | None = None,

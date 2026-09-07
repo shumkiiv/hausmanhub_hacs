@@ -731,6 +731,7 @@ class ScenarioExecutor:
         expected_service: str | None = None,
         contextually_dangerous: bool = False,
         idempotent_actions: bool = False,
+        require_safe_evidence: bool = False,
     ) -> dict[str, Any]:
         """Execute one allowlisted device action and confirm its HA read-back."""
 
@@ -792,6 +793,7 @@ class ScenarioExecutor:
                 expected_evidence_sequence=expected_evidence_sequence,
                 force_contextually_dangerous=contextually_dangerous,
                 idempotent_actions=idempotent_actions,
+                require_safe_evidence=require_safe_evidence,
                 command_request_id=request_id,
                 protection_trigger_context=None,
                 power_dependencies=(
@@ -888,6 +890,21 @@ class ScenarioExecutor:
                 ),
                 require_new_evidence=force_new_readback,
             )
+        if (
+            device is not None
+            and self._entity_registry_platform(device.entity_id) == "smartir"
+            and device.action(action_id) is not None
+            and device.action(action_id).domain == "climate"
+        ):
+            # SmartIR writes the requested value into HA before sending IR and
+            # swallows send errors. Its fresh matching state is software echo,
+            # not physical device confirmation.
+            read_back = dict(read_back)
+            read_back["matched"] = False
+            read_back.pop("observedValue", None)
+            read_back.pop("evidenceRevision", None)
+            read_back.pop("evidenceSequence", None)
+            read_back["isNewEvidence"] = False
         skipped = receipt.get("skipped") is True
         curtain_no_op = (
             skipped
@@ -1045,7 +1062,7 @@ class ScenarioExecutor:
         attempts = 0
         observed_at: int | None = None
         observed_state: str | None = None
-        observed_value: int | None = None
+        observed_value: object | None = None
         evidence_revision: str | None = None
         evidence_sequence: int | None = None
         is_new_evidence = False
@@ -1158,6 +1175,10 @@ class ScenarioExecutor:
                     state, action_id, value
                 ) and is_new_evidence and position_changed:
                     matched = True
+                    if not position_readback:
+                        observed_value = _device_action_observed_value(
+                            state, action_id
+                        )
                     break
             remaining = deadline - loop.time()
             if remaining <= 0:
@@ -2554,6 +2575,7 @@ class ScenarioExecutor:
         lighting_scenario_text: str = "",
         power_dependencies: Mapping[str, DevicePowerDependency] | None = None,
         dispatch_marker: Callable[[], None] | None = None,
+        require_safe_evidence: bool = False,
     ) -> dict[str, Any]:
         external_dispatch_marker = dispatch_marker
         physical_dispatch_state = {"crossed": False}
@@ -2887,6 +2909,12 @@ class ScenarioExecutor:
         # an exhausted budget cannot switch an upstream source on as a side
         # effect of a rejected target command.
         current = self._hass.states.get(device.entity_id)
+        if require_safe_evidence:
+            safe_evidence_error = _safe_dispatch_evidence_error(
+                device, current, action.action_id, confirmation_value
+            )
+            if safe_evidence_error is not None:
+                return {**base, "status": "failed", "error": safe_evidence_error}
         pre_command_revision = _state_revision(current)
         physical_dispatch_at: datetime | None = None
         curtain_plan: CurtainDispatchPlan | None = None
@@ -3174,7 +3202,7 @@ class ScenarioExecutor:
             power_precondition
             and power_precondition.get("sourceTurnedOn") is True
         )
-        require_new_readback = force_new_readback or (
+        require_new_readback = force_new_readback or require_safe_evidence or (
             not dry_run
             and (allowed.domain == "light" or is_contextually_dangerous)
             and pre_command_revision is not None
@@ -3271,6 +3299,19 @@ class ScenarioExecutor:
                         **base,
                         "status": "failed",
                         "error": "dispatch_descriptor_changed",
+                    })
+            if require_safe_evidence:
+                safe_evidence_error = _safe_dispatch_evidence_error(
+                    current_device,
+                    self._hass.states.get(device.entity_id),
+                    action.action_id,
+                    confirmation_value,
+                )
+                if safe_evidence_error is not None:
+                    return failed_after_power_dispatch({
+                        **base,
+                        "status": "failed",
+                        "error": safe_evidence_error,
                     })
             if curtain_plan is not None:
                 current_policy = self._curtain_command_policy
@@ -3492,6 +3533,16 @@ class ScenarioExecutor:
                 ),
                 position_not_before=physical_dispatch_at,
             )
+            if (
+                allowed.domain == "climate"
+                and self._entity_registry_platform(device.entity_id) == "smartir"
+            ):
+                read_back = dict(read_back)
+                read_back["matched"] = False
+                read_back.pop("observedValue", None)
+                read_back.pop("evidenceRevision", None)
+                read_back.pop("evidenceSequence", None)
+                read_back["isNewEvidence"] = False
             if curtain_plan is not None and not curtain_result_can_be_confirmed:
                 read_back = self._unverified_curtain_read_back(read_back)
             receipt["confirmed"] = read_back["matched"] is True
@@ -4475,7 +4526,16 @@ def _device_action_confirmed(
         return state_value in {"open", "opening"}
     if action_id == "close_valve":
         return state_value in {"closed", "closing"}
-    expected_attribute = {
+    if action_id == "set_temperature":
+        actual = attributes.get(
+            "target_temperature", attributes.get("temperature")
+        )
+    elif action_id == "set_humidity":
+        actual = attributes.get("target_humidity", attributes.get("humidity"))
+    elif action_id == "set_hvac_mode":
+        actual = attributes.get("hvac_mode", state_value)
+    else:
+        expected_attribute = {
         "set_brightness": "brightness",
         "set_adaptive_brightness": "brightness",
         "set_night_light": "brightness",
@@ -4483,15 +4543,12 @@ def _device_action_confirmed(
         "set_color_temperature": "color_temp_kelvin",
         "set_rgb_color": "rgb_color",
         "set_position": "current_position",
-        "set_temperature": "temperature",
-        "set_hvac_mode": "hvac_mode",
         "set_fan_mode": "fan_mode",
-        "set_humidity": "humidity",
         "set_operation_mode": "operation_mode",
-    }.get(action_id)
-    if expected_attribute is None:
-        return False
-    actual = attributes.get(expected_attribute)
+        }.get(action_id)
+        if expected_attribute is None:
+            return False
+        actual = attributes.get(expected_attribute)
     if action_id == "set_rgb_color":
         return isinstance(actual, (list, tuple)) and list(actual) == list(value or [])
     if isinstance(actual, (int, float)) and isinstance(value, (int, float)):
@@ -4500,6 +4557,34 @@ def _device_action_confirmed(
         tolerance = 75.0 if action_id == "set_color_temperature" else 0.1
         return abs(float(actual) - float(value)) <= tolerance
     return str(actual) == str(value)
+
+
+def _device_action_observed_value(state: object, action_id: str) -> object | None:
+    """Read the real target value from the same state sample used to confirm."""
+
+    state_value = str(getattr(state, "state", "unknown"))
+    attributes = getattr(state, "attributes", {})
+    if not isinstance(attributes, Mapping):
+        return None
+    if action_id == "set_temperature":
+        return attributes.get("target_temperature", attributes.get("temperature"))
+    if action_id == "set_humidity":
+        return attributes.get("target_humidity", attributes.get("humidity"))
+    if action_id == "set_hvac_mode":
+        return attributes.get("hvac_mode", state_value)
+    attribute = {
+        "set_brightness": "brightness",
+        "set_adaptive_brightness": "brightness",
+        "set_night_light": "brightness",
+        "set_brightness_percent": "brightness",
+        "set_color_temperature": "color_temp_kelvin",
+        "set_rgb_color": "rgb_color",
+        "set_position": "current_position",
+        "set_fan_mode": "fan_mode",
+        "set_operation_mode": "operation_mode",
+        "set_value": "value",
+    }.get(action_id)
+    return attributes.get(attribute) if attribute is not None else None
 
 
 def _number_range_error(device: object, value: object) -> str | None:
@@ -4612,4 +4697,44 @@ def _range_error_for_action(
         return "value does not match the allowed step"
     if action_id == "set_humidity" and abs(numeric - round(numeric)) > 1e-6:
         return "value does not match the allowed step"
+    return None
+
+
+def _safe_dispatch_evidence_error(
+    device: object,
+    state: object | None,
+    action_id: str,
+    value: object,
+) -> str | None:
+    """Revalidate public safe climate evidence at the final service boundary."""
+
+    if (
+        state is None
+        or str(getattr(state, "state", "unknown")) in {"unknown", "unavailable"}
+        or not _state_is_fresh(state)
+        or _state_is_restored_or_cached(state)
+    ):
+        return "safe_device_evidence_unavailable"
+    range_error = _range_error_for_action(device, state, action_id, value)
+    if range_error is not None:
+        return range_error
+    if action_id not in {
+        "set_hvac_mode",
+        "set_fan_mode",
+        "set_operation_mode",
+    }:
+        return None
+    if not isinstance(value, str) or not value:
+        return "value is invalid"
+    attributes = getattr(state, "attributes", {})
+    if not isinstance(attributes, Mapping):
+        return "safe_device_evidence_unavailable"
+    option_key = {
+        "set_hvac_mode": "hvac_modes",
+        "set_fan_mode": "fan_modes",
+        "set_operation_mode": "available_modes",
+    }[action_id]
+    options = attributes.get(option_key)
+    if not isinstance(options, (list, tuple)) or value not in options:
+        return "value is outside the allowed options"
     return None

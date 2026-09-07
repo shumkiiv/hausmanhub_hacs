@@ -4824,6 +4824,8 @@ class ScenarioService:
         dispatch_marker: Callable[[], None] | None = None,
         idempotent_actions: bool = False,
         contextually_dangerous: bool = False,
+        before_dispatch: Callable[[], Awaitable[None]] | None = None,
+        require_safe_evidence: bool = False,
     ) -> dict[str, Any]:
         """Execute one catalog action through the shared strict executor."""
 
@@ -4919,13 +4921,15 @@ class ScenarioService:
                     )
                     raise
 
-            options["before_dispatch"] = (
-                arm_intercom_release
-            )
+            options["before_dispatch"] = arm_intercom_release
+        elif before_dispatch is not None:
+            options["before_dispatch"] = before_dispatch
         if dispatch_marker is not None:
             options["dispatch_marker"] = dispatch_marker
         if idempotent_actions:
             options["idempotent_actions"] = True
+        if require_safe_evidence:
+            options["require_safe_evidence"] = True
         # The release obligation is intentionally left armed after the
         # executor crosses its dispatch callback.  An exception from the HA
         # service leaves the physical result unknown, so cancelling here could

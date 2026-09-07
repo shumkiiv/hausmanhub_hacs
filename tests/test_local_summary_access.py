@@ -912,6 +912,203 @@ class LocalSummaryAccessTest(unittest.TestCase):
         state.entity_id = entity_id
         return state
 
+    def _install_slow_safe_climate_action_stack(
+        self,
+        *,
+        service_entered: asyncio.Event,
+        release_service: asyncio.Event,
+    ) -> SimpleNamespace:
+        """Wire real service/executor objects around one deliberately slow HA call."""
+
+        from custom_components.hausman_hub.application.scenario_executor import (
+            ScenarioExecutor,
+        )
+        from custom_components.hausman_hub.application.scenario_service import (
+            ScenarioService,
+        )
+        from custom_components.hausman_hub.application.scenarios import (
+            ScenarioCatalog,
+            ScenarioDeviceAction,
+            ScenarioDeviceEntry,
+        )
+
+        climate_entity_id = "climate.synthetic_slow_smartir"
+        trv_entity_id = "climate.synthetic_slow_trv"
+        humidifier_entity_id = "humidifier.synthetic_slow"
+        catalog = ScenarioCatalog(
+            devices={
+                "slow_smartir": ScenarioDeviceEntry(
+                    target_id="slow_smartir",
+                    name="Медленный кондиционер",
+                    entity_id=climate_entity_id,
+                    actions=(
+                        ScenarioDeviceAction(
+                            action_id="set_temperature",
+                            title="Температура",
+                            domain="climate",
+                            service="set_temperature",
+                            allowed_fields=frozenset({"value"}),
+                        ),
+                        ScenarioDeviceAction(
+                            action_id="turn_off",
+                            title="Выключить",
+                            domain="climate",
+                            service="turn_off",
+                            allowed_fields=frozenset(),
+                        ),
+                    ),
+                    device_type="climate",
+                ),
+                "slow_trv": ScenarioDeviceEntry(
+                    target_id="slow_trv",
+                    name="Медленный термостат",
+                    entity_id=trv_entity_id,
+                    actions=(
+                        ScenarioDeviceAction(
+                            action_id="set_temperature",
+                            title="Температура",
+                            domain="climate",
+                            service="set_temperature",
+                            allowed_fields=frozenset({"value"}),
+                        ),
+                    ),
+                    device_type="climate",
+                ),
+                "slow_humidifier": ScenarioDeviceEntry(
+                    target_id="slow_humidifier",
+                    name="Медленный увлажнитель",
+                    entity_id=humidifier_entity_id,
+                    actions=(
+                        ScenarioDeviceAction(
+                            action_id="set_humidity",
+                            title="Влажность",
+                            domain="humidifier",
+                            service="set_humidity",
+                            allowed_fields=frozenset({"value"}),
+                        ),
+                    ),
+                    device_type="humidifier",
+                ),
+            },
+            scenarios={},
+        )
+
+        class Store:
+            async def async_load(self) -> None:
+                return None
+
+            async def async_save(self, _value: object) -> None:
+                return None
+
+        async def load_catalog() -> object:
+            return catalog
+
+        state = SimpleNamespace(service_calls=[])
+        service = ScenarioService(
+            self.hass,
+            Store(),
+            catalog,
+            catalog_loader=load_catalog,
+        )
+        executor = ScenarioExecutor(
+            self.hass,
+            catalog,
+            service.async_run_scenario,
+            readback_interval_seconds=0.01,
+        )
+        service.set_executor(executor)
+        self.hass.data["hausman_hub"]["scenario_service"] = service
+        self.hass.states.values[climate_entity_id] = SimpleNamespace(
+            state="cool",
+            attributes={
+                "temperature": 21,
+                "target_temperature": 21,
+                "min_temp": 16,
+                "max_temp": 30,
+                "target_temp_step": 1,
+            },
+            last_updated=datetime.now(timezone.utc),
+        )
+        self.hass.states.values[humidifier_entity_id] = SimpleNamespace(
+            state="on",
+            attributes={
+                "humidity": 40,
+                "target_humidity": 40,
+                "min_humidity": 30,
+                "max_humidity": 80,
+                "target_humidity_step": 1,
+            },
+            last_updated=datetime.now(timezone.utc),
+        )
+        self.hass.states.values[trv_entity_id] = SimpleNamespace(
+            state="heat",
+            attributes={
+                "temperature": 20,
+                "target_temperature": 20,
+                "min_temp": 5,
+                "max_temp": 30,
+                "target_temp_step": 0.5,
+            },
+            last_updated=datetime.now(timezone.utc),
+        )
+        self.hass.entity_registry.entities[climate_entity_id] = SimpleNamespace(
+            entity_id=climate_entity_id,
+            platform="smartir",
+            disabled_by=None,
+        )
+
+        class Services:
+            async def async_call(
+                inner_self,
+                domain: str,
+                action: str,
+                service_data: dict[str, object],
+                *,
+                blocking: bool,
+                **options: object,
+            ) -> None:
+                state.service_calls.append(
+                    (domain, action, dict(service_data), blocking, dict(options))
+                )
+                entity_id = service_data.get("entity_id")
+                if (
+                    domain == "climate"
+                    and action == "set_temperature"
+                    and isinstance(entity_id, str)
+                ):
+                    current = self.hass.states.values[entity_id]
+                    self.hass.states.values[entity_id] = SimpleNamespace(
+                        state=current.state,
+                        attributes={
+                            **current.attributes,
+                            "temperature": service_data["temperature"],
+                            "target_temperature": service_data["temperature"],
+                        },
+                        last_updated=datetime.now(timezone.utc),
+                    )
+                if (
+                    domain == "humidifier"
+                    and action == "set_humidity"
+                    and isinstance(entity_id, str)
+                ):
+                    current = self.hass.states.values[entity_id]
+                    self.hass.states.values[entity_id] = SimpleNamespace(
+                        state=current.state,
+                        attributes={
+                            **current.attributes,
+                            "humidity": service_data["humidity"],
+                            "target_humidity": service_data["humidity"],
+                        },
+                        last_updated=datetime.now(timezone.utc),
+                    )
+                service_entered.set()
+                await release_service.wait()
+
+        self.hass.services = Services()
+        state.service = service
+        state.executor = executor
+        return state
+
     @staticmethod
     def _manual_settings_request(request_id: str, interval: int = 30) -> dict[str, object]:
         return {
@@ -7971,6 +8168,870 @@ class LocalSummaryAccessTest(unittest.TestCase):
             self.hass.data["hausman_hub"]["device_action_idempotency"]._records,
         )
 
+    def test_safe_climate_http_returns_before_slow_real_service_finishes(self) -> None:
+        path = "/api/hausman_hub/v1/device-actions"
+        view = next(item for item in self.hass.http.views if item.url == path)
+
+        async def exercise() -> tuple[FakeResponse, float, SimpleNamespace]:
+            service_entered = asyncio.Event()
+            release_service = asyncio.Event()
+            stack = self._install_slow_safe_climate_action_stack(
+                service_entered=service_entered,
+                release_service=release_service,
+            )
+            request = FakeJsonRequest(
+                "192.168.1.20",
+                reader_user("system-users"),
+                path,
+                {
+                    "contract": {
+                        "name": "hausman-hub-device-action-request",
+                        "version": 1,
+                    },
+                    "correlationId": "safe.climate.slow.1",
+                    "requestId": "safe.climate.slow.request.1",
+                    "targetId": "slow_smartir",
+                    "actionId": "set_temperature",
+                    "value": 23,
+                },
+                content_type="application/vnd.hausmanhub.device-action-request.full+json",
+                accept="application/vnd.hausmanhub.device-action-receipt.full+json",
+            )
+            started = time.monotonic()
+            try:
+                response = await asyncio.wait_for(view.post(request), timeout=2.5)
+                elapsed = time.monotonic() - started
+                self.assertTrue(service_entered.is_set(), response.payload)
+            finally:
+                release_service.set()
+            coordinator = self.hass.data["hausman_hub"].get(
+                "safe_device_command_lifecycle"
+            )
+            if coordinator is not None:
+                await coordinator.async_close()
+            return response, elapsed, stack
+
+        response, elapsed, stack = asyncio.run(exercise())
+
+        self.assertEqual(200, response.status)
+        self.assertLess(elapsed, 2.5)
+        self.assertTrue(response.payload["accepted"])
+        self.assertFalse(response.payload["confirmed"])
+        self.assertEqual("accepted", response.payload["status"])
+        self.assertEqual("executed", response.payload["decision"])
+        self.assertTrue(response.payload["commandSent"])
+        self.assertTrue(response.payload["readBack"]["attempted"])
+        self.assertFalse(response.payload["readBack"]["matched"])
+        self.assertNotIn("observedValue", response.payload["readBack"])
+        self.assertEqual(1, len(stack.service_calls))
+
+    def test_safe_deadline_does_not_capture_an_ordinary_switch_action(self) -> None:
+        """Only exact climate descriptors may opt into the shortened HTTP path."""
+
+        api = importlib.import_module(
+            "custom_components.hausman_hub.device_action_api"
+        )
+        path = "/api/hausman_hub/v1/device-actions"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        entity_id = "switch.synthetic_ordinary_deadline"
+        self.hass.states.values[entity_id] = SimpleNamespace(
+            state="off",
+            attributes={},
+            last_updated=datetime.now(timezone.utc),
+        )
+        action = SimpleNamespace(domain="switch", service="turn_on")
+        device = SimpleNamespace(
+            entity_id=entity_id,
+            action=lambda action_id: action if action_id == "turn_on" else None,
+        )
+        service.current_catalog = lambda: SimpleNamespace(
+            device=lambda target_id: device if target_id == "ordinary_switch" else None
+        )
+        calls = 0
+
+        async def resolve_context(_target_id: str, _action_id: str):
+            await asyncio.sleep(0.03)
+            return entity_id, "switch", ("turn_on",), "turn_on"
+
+        async def no_intercom(_target_id: str, _action_id: str) -> bool:
+            return False
+
+        async def execute(
+            target_id: str,
+            action_id: str,
+            _value: object,
+            *,
+            correlation_id: str,
+            **options: object,
+        ) -> dict[str, object]:
+            nonlocal calls
+            calls += 1
+            return {
+                "correlationId": correlation_id,
+                "requestId": str(options.get("request_id") or "ordinary.request.1"),
+                "targetId": target_id,
+                "actionId": action_id,
+                "accepted": True,
+                "confirmed": False,
+                "status": "accepted",
+            }
+
+        service.async_resolve_device_action_context = resolve_context
+        service.async_is_intercom_action = no_intercom
+        service.is_contextually_dangerous_action = lambda *_args: False
+        service.is_external_cover_action = lambda *_args: False
+        service.async_execute_device_action = execute
+
+        def short_deadline():
+            started = time.monotonic()
+            return api.CommandDeadline(started, started + 0.01)
+
+        with patch.object(api.CommandDeadline, "start", side_effect=short_deadline):
+            response = asyncio.run(
+                view.post(
+                    FakeJsonRequest(
+                        "192.168.1.20",
+                        reader_user("system-users"),
+                        path,
+                        {"targetId": "ordinary_switch", "actionId": "turn_on"},
+                    )
+                )
+            )
+
+        self.assertEqual(200, response.status)
+        self.assertEqual(1, calls)
+
+    def test_safe_climate_batch_blocks_unstarted_item_before_slow_call_finishes(self) -> None:
+        path = "/api/hausman_hub/v1/device-actions/batch"
+        view = next(item for item in self.hass.http.views if item.url == path)
+
+        async def exercise() -> tuple[FakeResponse, FakeResponse, float, SimpleNamespace]:
+            service_entered = asyncio.Event()
+            release_service = asyncio.Event()
+            stack = self._install_slow_safe_climate_action_stack(
+                service_entered=service_entered,
+                release_service=release_service,
+            )
+            payload = {
+                    "contract": {
+                        "name": "hausman-hub-device-action-batch-request",
+                        "version": 1,
+                    },
+                    "correlationId": "safe.climate.batch.slow.1",
+                    "requestId": "safe.climate.batch.slow.request.1",
+                    "actions": [
+                        {
+                            "targetId": "slow_smartir",
+                            "actionId": "set_temperature",
+                            "value": 23,
+                        },
+                        {
+                            "targetId": "slow_humidifier",
+                            "actionId": "set_humidity",
+                            "value": 45,
+                        },
+                    ],
+                }
+
+            def request() -> FakeJsonRequest:
+                return FakeJsonRequest(
+                    "192.168.1.20",
+                    reader_user("system-users"),
+                    path,
+                    copy.deepcopy(payload),
+                    content_type="application/vnd.hausmanhub.device-action-batch-request.full+json",
+                    accept="application/vnd.hausmanhub.device-action-batch-receipt.full+json",
+                )
+            started = time.monotonic()
+            try:
+                response = await asyncio.wait_for(view.post(request()), timeout=2.5)
+                elapsed = time.monotonic() - started
+                self.assertTrue(service_entered.is_set(), response.payload)
+                replay = await asyncio.wait_for(view.post(request()), timeout=0.5)
+            finally:
+                release_service.set()
+            coordinator = self.hass.data["hausman_hub"].get(
+                "safe_device_command_lifecycle"
+            )
+            if coordinator is not None:
+                await coordinator.async_close()
+            return response, replay, elapsed, stack
+
+        response, replay, elapsed, stack = asyncio.run(exercise())
+
+        self.assertEqual(200, response.status)
+        self.assertLess(elapsed, 2.5)
+        self.assertEqual(response.payload, replay.payload)
+        self.assertEqual("partial", response.payload["status"])
+        first, second = response.payload["receipts"]
+        self.assertTrue(first["accepted"])
+        self.assertFalse(first["confirmed"])
+        self.assertTrue(first["commandSent"])
+        self.assertEqual("executed", first["decision"])
+        self.assertFalse(second["accepted"])
+        self.assertFalse(second["confirmed"])
+        self.assertFalse(second["commandSent"])
+        self.assertEqual("blocked", second["decision"])
+        self.assertTrue(second["decisionTerminal"])
+        self.assertEqual(1, len(stack.service_calls))
+
+    def test_safe_trv_and_humidifier_slow_calls_use_one_bounded_path(self) -> None:
+        path = "/api/hausman_hub/v1/device-actions"
+        view = next(item for item in self.hass.http.views if item.url == path)
+
+        async def exercise() -> list[tuple[str, FakeResponse, float, int]]:
+            outcomes: list[tuple[str, FakeResponse, float, int]] = []
+            for target_id, action_id, value in (
+                ("slow_trv", "set_temperature", 21.5),
+                ("slow_humidifier", "set_humidity", 45),
+            ):
+                service_entered = asyncio.Event()
+                release_service = asyncio.Event()
+                stack = self._install_slow_safe_climate_action_stack(
+                    service_entered=service_entered,
+                    release_service=release_service,
+                )
+                request_id = f"safe.slow.{target_id}.1"
+                request = FakeJsonRequest(
+                    "192.168.1.20",
+                    reader_user("system-users"),
+                    path,
+                    {
+                        "contract": {
+                            "name": "hausman-hub-device-action-request",
+                            "version": 1,
+                        },
+                        "correlationId": f"{request_id}.correlation",
+                        "requestId": request_id,
+                        "targetId": target_id,
+                        "actionId": action_id,
+                        "value": value,
+                    },
+                    content_type="application/vnd.hausmanhub.device-action-request.full+json",
+                    accept="application/vnd.hausmanhub.device-action-receipt.full+json",
+                )
+                started = time.monotonic()
+                try:
+                    response = await asyncio.wait_for(view.post(request), timeout=2.5)
+                    elapsed = time.monotonic() - started
+                    self.assertTrue(service_entered.is_set())
+                finally:
+                    release_service.set()
+                outcomes.append(
+                    (target_id, response, elapsed, len(stack.service_calls))
+                )
+            coordinator = self.hass.data["hausman_hub"].get(
+                "safe_device_command_lifecycle"
+            )
+            if coordinator is not None:
+                await coordinator.async_close()
+            return outcomes
+
+        outcomes = asyncio.run(exercise())
+
+        for target_id, response, elapsed, calls in outcomes:
+            self.assertEqual(200, response.status, target_id)
+            self.assertLess(elapsed, 2.5, target_id)
+            self.assertTrue(response.payload["accepted"], target_id)
+            self.assertFalse(response.payload["confirmed"], target_id)
+            self.assertTrue(response.payload["commandSent"], target_id)
+            self.assertTrue(response.payload["readBack"]["attempted"], target_id)
+            self.assertEqual(1, calls, target_id)
+
+    def test_safe_turn_off_returns_before_mode_writer_and_cas_preserves_manual_choice(self) -> None:
+        path = "/api/hausman_hub/v1/device-actions"
+        view = next(item for item in self.hass.http.views if item.url == path)
+
+        async def exercise() -> tuple[FakeResponse, float, list[dict[str, object]], str]:
+            service_entered = asyncio.Event()
+            release_service = asyncio.Event()
+            release_service.set()
+            stack = self._install_slow_safe_climate_action_stack(
+                service_entered=service_entered,
+                release_service=release_service,
+            )
+            writer_entered = asyncio.Event()
+            release_writer = asyncio.Event()
+            writer_done = asyncio.Event()
+            mode_state: dict[str, object] = {"revision": 1, "mode": "manual"}
+            writes: list[dict[str, object]] = []
+
+            def snapshot(_entity_id: str) -> dict[str, object]:
+                return dict(mode_state)
+
+            async def write_mode(
+                _entity_id: str,
+                mode: str,
+                *,
+                expected_revision: object | None = None,
+                expected_mode: object | None = None,
+            ) -> dict[str, object]:
+                writer_entered.set()
+                await release_writer.wait()
+                writes.append(
+                    {
+                        "mode": mode,
+                        "expected_revision": expected_revision,
+                        "expected_mode": expected_mode,
+                    }
+                )
+                if (
+                    expected_revision != mode_state["revision"]
+                    or expected_mode != mode_state["mode"]
+                ):
+                    writer_done.set()
+                    return {
+                        "mode": mode_state["mode"],
+                        "changed": False,
+                        "skipped": True,
+                        "reason": "manual_mode_changed",
+                    }
+                mode_state["mode"] = mode
+                writer_done.set()
+                return {"mode": mode, "changed": True}
+
+            self.hass.data["hausman_hub"]["climate_runtime"] = SimpleNamespace(
+                device_mode_snapshot_for_entity=snapshot,
+                async_set_device_mode_for_entity=write_mode,
+            )
+            request = FakeJsonRequest(
+                "192.168.1.20",
+                reader_user("system-users"),
+                path,
+                {
+                    "contract": {
+                        "name": "hausman-hub-device-action-request",
+                        "version": 1,
+                    },
+                    "correlationId": "safe.turn-off.mode-writer.1",
+                    "requestId": "safe.turn-off.mode-writer.request.1",
+                    "targetId": "slow_smartir",
+                    "actionId": "turn_off",
+                },
+                content_type="application/vnd.hausmanhub.device-action-request.full+json",
+                accept="application/vnd.hausmanhub.device-action-receipt.full+json",
+            )
+            started = time.monotonic()
+            response = await asyncio.wait_for(view.post(request), timeout=2.5)
+            elapsed = time.monotonic() - started
+            self.assertTrue(service_entered.is_set())
+            self.assertTrue(writer_entered.is_set())
+            mode_state["revision"] = 2
+            release_writer.set()
+            await asyncio.wait_for(writer_done.wait(), timeout=1)
+            await asyncio.sleep(0)
+            coordinator = self.hass.data["hausman_hub"].get(
+                "safe_device_command_lifecycle"
+            )
+            if coordinator is not None:
+                await coordinator.async_close()
+            self.assertEqual(1, len(stack.service_calls))
+            return response, elapsed, writes, str(mode_state["mode"])
+
+        response, elapsed, writes, final_mode = asyncio.run(exercise())
+
+        self.assertEqual(200, response.status)
+        self.assertLess(elapsed, 2.5)
+        self.assertTrue(response.payload["accepted"])
+        self.assertFalse(response.payload["confirmed"])
+        self.assertTrue(response.payload["commandSent"])
+        self.assertEqual(
+            [{"mode": "automatic", "expected_revision": 1, "expected_mode": "manual"}],
+            writes,
+        )
+        self.assertEqual("manual", final_mode)
+
+    def test_safe_slow_replay_and_supported_legacy_negotiations_do_not_redispatch(self) -> None:
+        path = "/api/hausman_hub/v1/device-actions"
+        view = next(item for item in self.hass.http.views if item.url == path)
+
+        async def exercise() -> tuple[FakeResponse, FakeResponse, FakeResponse, FakeResponse, list[int]]:
+            call_counts: list[int] = []
+
+            first_entered = asyncio.Event()
+            first_release = asyncio.Event()
+            first_stack = self._install_slow_safe_climate_action_stack(
+                service_entered=first_entered,
+                release_service=first_release,
+            )
+            full_payload = {
+                "contract": {
+                    "name": "hausman-hub-device-action-request",
+                    "version": 1,
+                },
+                "correlationId": "safe.replay.1",
+                "requestId": "safe.replay.request.1",
+                "targetId": "slow_smartir",
+                "actionId": "set_temperature",
+                "value": 23,
+            }
+            full_request = lambda accept: FakeJsonRequest(
+                "192.168.1.20",
+                reader_user("system-users"),
+                path,
+                copy.deepcopy(full_payload),
+                content_type="application/vnd.hausmanhub.device-action-request.full+json",
+                accept=accept,
+            )
+            first = await asyncio.wait_for(
+                view.post(
+                    full_request(
+                        "application/vnd.hausmanhub.device-action-receipt.full+json"
+                    )
+                ),
+                timeout=2.5,
+            )
+            replay = await asyncio.wait_for(
+                view.post(
+                    full_request(
+                        "application/vnd.hausmanhub.device-action-receipt.full+json"
+                    )
+                ),
+                timeout=0.5,
+            )
+            call_counts.append(len(first_stack.service_calls))
+            first_release.set()
+
+            legacy_response_entered = asyncio.Event()
+            legacy_response_release = asyncio.Event()
+            legacy_response_stack = self._install_slow_safe_climate_action_stack(
+                service_entered=legacy_response_entered,
+                release_service=legacy_response_release,
+            )
+            full_legacy_payload = {
+                **full_payload,
+                "correlationId": "safe.full-legacy.1",
+                "requestId": "safe.full-legacy.request.1",
+                "targetId": "slow_trv",
+                "value": 21.5,
+            }
+            full_legacy = await asyncio.wait_for(
+                view.post(
+                    FakeJsonRequest(
+                        "192.168.1.20",
+                        reader_user("system-users"),
+                        path,
+                        full_legacy_payload,
+                        content_type="application/vnd.hausmanhub.device-action-request.full+json",
+                        accept="application/json",
+                    )
+                ),
+                timeout=2.5,
+            )
+            call_counts.append(len(legacy_response_stack.service_calls))
+            legacy_response_release.set()
+
+            legacy_entered = asyncio.Event()
+            legacy_release = asyncio.Event()
+            legacy_stack = self._install_slow_safe_climate_action_stack(
+                service_entered=legacy_entered,
+                release_service=legacy_release,
+            )
+            legacy = await asyncio.wait_for(
+                view.post(
+                    FakeJsonRequest(
+                        "192.168.1.20",
+                        reader_user("system-users"),
+                        path,
+                        {
+                            "targetId": "slow_humidifier",
+                            "actionId": "set_humidity",
+                            "value": 45,
+                        },
+                    )
+                ),
+                timeout=2.5,
+            )
+            call_counts.append(len(legacy_stack.service_calls))
+            legacy_release.set()
+            await asyncio.sleep(0)
+            coordinator = self.hass.data["hausman_hub"].get(
+                "safe_device_command_lifecycle"
+            )
+            if coordinator is not None:
+                await coordinator.async_close()
+            return first, replay, full_legacy, legacy, call_counts
+
+        first, replay, full_legacy, legacy, call_counts = asyncio.run(exercise())
+
+        self.assertEqual(200, first.status)
+        self.assertEqual(first.payload, replay.payload)
+        self.assertEqual(
+            "application/vnd.hausmanhub.device-action-receipt.full+json",
+            replay.headers["Content-Type"],
+        )
+        self.assertEqual(200, full_legacy.status)
+        self.assertEqual("application/json", full_legacy.headers["Content-Type"])
+        self.assertEqual(200, legacy.status)
+        self.assertEqual("application/json", legacy.headers["Content-Type"])
+        self.assertEqual([1, 1, 1], call_counts)
+
+    def test_safe_late_readback_distinguishes_smartir_echo_trv_and_failure(self) -> None:
+        path = "/api/hausman_hub/v1/device-actions"
+        view = next(item for item in self.hass.http.views if item.url == path)
+
+        async def exercise() -> dict[str, dict[str, object]]:
+            late: dict[str, dict[str, object]] = {}
+            for target_id, value, fail_after_call in (
+                ("slow_smartir", 23, False),
+                ("slow_trv", 21.5, False),
+                ("slow_humidifier", 45, True),
+            ):
+                service_entered = asyncio.Event()
+                release_service = asyncio.Event()
+                stack = self._install_slow_safe_climate_action_stack(
+                    service_entered=service_entered,
+                    release_service=release_service,
+                )
+                action_id = (
+                    "set_humidity"
+                    if target_id == "slow_humidifier"
+                    else "set_temperature"
+                )
+                if fail_after_call:
+                    original_call = self.hass.services.async_call
+
+                    async def failing_call(*args, **kwargs):
+                        await original_call(*args, **kwargs)
+                        raise RuntimeError("synthetic post-dispatch failure")
+
+                    self.hass.services.async_call = failing_call
+                request_id = f"safe.late.{target_id}.1"
+                response = await asyncio.wait_for(
+                    view.post(
+                        FakeJsonRequest(
+                            "192.168.1.20",
+                            reader_user("system-users"),
+                            path,
+                            {
+                                "contract": {
+                                    "name": "hausman-hub-device-action-request",
+                                    "version": 1,
+                                },
+                                "correlationId": f"{request_id}.correlation",
+                                "requestId": request_id,
+                                "targetId": target_id,
+                                "actionId": action_id,
+                                "value": value,
+                            },
+                            content_type="application/vnd.hausmanhub.device-action-request.full+json",
+                            accept="application/vnd.hausmanhub.device-action-receipt.full+json",
+                        )
+                    ),
+                    timeout=2.5,
+                )
+                self.assertTrue(response.payload["accepted"])
+                self.assertFalse(response.payload["confirmed"])
+                release_service.set()
+                coordinator = self.hass.data["hausman_hub"][
+                    "safe_device_command_lifecycle"
+                ]
+                record = None
+                for _attempt in range(200):
+                    record = next(
+                        (
+                            item
+                            for item in coordinator._payload["operations"]
+                            if item["targetId"] == target_id
+                        ),
+                        None,
+                    )
+                    if record is not None and record["lateReceipt"] is not None:
+                        break
+                    await asyncio.sleep(0.01)
+                self.assertIsNotNone(record)
+                self.assertIsNotNone(record["lateReceipt"])
+                self.assertEqual(1, len(stack.service_calls))
+                late[target_id] = copy.deepcopy(record["lateReceipt"])
+            await self.hass.data["hausman_hub"][
+                "safe_device_command_lifecycle"
+            ].async_close()
+            return late
+
+        late = asyncio.run(exercise())
+
+        smartir = late["slow_smartir"]
+        self.assertFalse(smartir["confirmed"])
+        self.assertNotIn("observedValue", smartir["readBack"])
+        trv = late["slow_trv"]
+        self.assertTrue(trv["confirmed"])
+        self.assertEqual(21.5, trv["readBack"]["observedValue"])
+        failure = late["slow_humidifier"]
+        self.assertTrue(failure["accepted"])
+        self.assertFalse(failure["confirmed"])
+        self.assertEqual("dispatch_result_unknown", failure["reason"])
+
+    def test_safe_trv_preexisting_match_without_new_evidence_is_not_confirmed(self) -> None:
+        path = "/api/hausman_hub/v1/device-actions"
+        view = next(item for item in self.hass.http.views if item.url == path)
+
+        async def exercise() -> tuple[FakeResponse, int]:
+            service_entered = asyncio.Event()
+            release_service = asyncio.Event()
+            stack = self._install_slow_safe_climate_action_stack(
+                service_entered=service_entered,
+                release_service=release_service,
+            )
+            stack.executor._readback_window_seconds = 0.05
+
+            async def no_new_state(
+                domain: str,
+                action: str,
+                service_data: dict[str, object],
+                *,
+                blocking: bool,
+                **options: object,
+            ) -> None:
+                stack.service_calls.append(
+                    (domain, action, dict(service_data), blocking, dict(options))
+                )
+                service_entered.set()
+
+            self.hass.services.async_call = no_new_state
+            response = await view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    reader_user("system-users"),
+                    path,
+                    {
+                        "contract": {
+                            "name": "hausman-hub-device-action-request",
+                            "version": 1,
+                        },
+                        "correlationId": "safe.trv.prematch.1",
+                        "requestId": "safe.trv.prematch.request.1",
+                        "targetId": "slow_trv",
+                        "actionId": "set_temperature",
+                        "value": 20,
+                    },
+                    content_type="application/vnd.hausmanhub.device-action-request.full+json",
+                    accept="application/vnd.hausmanhub.device-action-receipt.full+json",
+                )
+            )
+            await self.hass.data["hausman_hub"][
+                "safe_device_command_lifecycle"
+            ].async_close()
+            return response, len(stack.service_calls)
+
+        response, calls = asyncio.run(exercise())
+
+        self.assertEqual(200, response.status)
+        self.assertTrue(response.payload["accepted"])
+        self.assertFalse(response.payload["confirmed"])
+        self.assertFalse(response.payload["commandSent"])
+        self.assertEqual("skipped", response.payload["decision"])
+        self.assertNotIn("readBack", response.payload)
+        self.assertEqual(0, calls)
+
+    def test_safe_climate_slow_idempotency_phases_are_bounded_and_never_dispatch(self) -> None:
+        path = "/api/hausman_hub/v1/device-actions"
+        view = next(item for item in self.hass.http.views if item.url == path)
+
+        async def exercise() -> list[tuple[str, int, float, int]]:
+            results: list[tuple[str, int, float, int]] = []
+            idempotency = self.hass.data["hausman_hub"][
+                "device_action_idempotency"
+            ]
+            coordinator = self.hass.data["hausman_hub"].get(
+                "safe_device_command_lifecycle"
+            )
+            for phase, method_name in (
+                ("reserve", "async_reserve"),
+                ("pending", "async_mark_pending"),
+                ("dispatching", "async_mark_dispatching"),
+            ):
+                service_entered = asyncio.Event()
+                release_service = asyncio.Event()
+                stack = self._install_slow_safe_climate_action_stack(
+                    service_entered=service_entered,
+                    release_service=release_service,
+                )
+                release_storage = asyncio.Event()
+                original = getattr(idempotency, method_name)
+
+                async def delayed(*args, _original=original, **kwargs):
+                    try:
+                        await release_storage.wait()
+                    except asyncio.CancelledError:
+                        await release_storage.wait()
+                    return await _original(*args, **kwargs)
+
+                setattr(idempotency, method_name, delayed)
+                request_id = f"safe.storage.{phase}.1"
+                request = FakeJsonRequest(
+                    "192.168.1.20",
+                    reader_user("system-users"),
+                    path,
+                    {
+                        "contract": {
+                            "name": "hausman-hub-device-action-request",
+                            "version": 1,
+                        },
+                        "correlationId": f"{request_id}.correlation",
+                        "requestId": request_id,
+                        "targetId": "slow_smartir",
+                        "actionId": "set_temperature",
+                        "value": 23,
+                    },
+                    content_type="application/vnd.hausmanhub.device-action-request.full+json",
+                    accept="application/vnd.hausmanhub.device-action-receipt.full+json",
+                )
+                started = time.monotonic()
+                response = await asyncio.wait_for(view.post(request), timeout=2.5)
+                elapsed = time.monotonic() - started
+                setattr(idempotency, method_name, original)
+                release_storage.set()
+                for _attempt in range(100):
+                    if f"request:{request_id}" not in idempotency._records:
+                        break
+                    await asyncio.sleep(0.01)
+                results.append(
+                    (phase, response.status, elapsed, len(stack.service_calls))
+                )
+                release_service.set()
+            if coordinator is not None:
+                await coordinator.async_close()
+            return results
+
+        results = asyncio.run(exercise())
+
+        self.assertEqual(
+            ["reserve", "pending", "dispatching"],
+            [item[0] for item in results],
+        )
+        for _phase, status, elapsed, service_calls in results:
+            self.assertEqual(503, status)
+            self.assertLess(elapsed, 2.5)
+            self.assertEqual(0, service_calls)
+
+    def test_safe_climate_invalid_or_unavailable_values_never_dispatch(self) -> None:
+        path = "/api/hausman_hub/v1/device-actions"
+        view = next(item for item in self.hass.http.views if item.url == path)
+
+        async def exercise() -> list[tuple[str, FakeResponse, int]]:
+            outcomes: list[tuple[str, FakeResponse, int]] = []
+            cases = (
+                ("bool", True, False),
+                ("nan", float("nan"), False),
+                ("inf", float("inf"), False),
+                ("range", 31, False),
+                ("step", 22.5, False),
+                ("unavailable", 23, True),
+            )
+            for name, value, unavailable in cases:
+                service_entered = asyncio.Event()
+                release_service = asyncio.Event()
+                stack = self._install_slow_safe_climate_action_stack(
+                    service_entered=service_entered,
+                    release_service=release_service,
+                )
+                if unavailable:
+                    state = self.hass.states.values[
+                        "climate.synthetic_slow_smartir"
+                    ]
+                    self.hass.states.values[
+                        "climate.synthetic_slow_smartir"
+                    ] = SimpleNamespace(
+                        state="unavailable",
+                        attributes=state.attributes,
+                        last_updated=datetime.now(timezone.utc),
+                    )
+                request_id = f"safe.invalid.{name}.1"
+                response = await view.post(
+                    FakeJsonRequest(
+                        "192.168.1.20",
+                        reader_user("system-users"),
+                        path,
+                        {
+                            "contract": {
+                                "name": "hausman-hub-device-action-request",
+                                "version": 1,
+                            },
+                            "correlationId": f"{request_id}.correlation",
+                            "requestId": request_id,
+                            "targetId": "slow_smartir",
+                            "actionId": "set_temperature",
+                            "value": value,
+                        },
+                        content_type="application/vnd.hausmanhub.device-action-request.full+json",
+                        accept="application/vnd.hausmanhub.device-action-receipt.full+json",
+                    )
+                )
+                outcomes.append((name, response, len(stack.service_calls)))
+                release_service.set()
+            coordinator = self.hass.data["hausman_hub"].get(
+                "safe_device_command_lifecycle"
+            )
+            if coordinator is not None:
+                await coordinator.async_close()
+            return outcomes
+
+        outcomes = asyncio.run(exercise())
+
+        for name, response, service_calls in outcomes:
+            self.assertIn(response.status, {200, 400, 409}, name)
+            if response.status == 200:
+                self.assertFalse(response.payload["accepted"], name)
+                self.assertFalse(response.payload["commandSent"], name)
+            self.assertEqual(0, service_calls, name)
+
+    def test_safe_batch_invalid_item_blocks_every_item_before_dispatch(self) -> None:
+        path = "/api/hausman_hub/v1/device-actions/batch"
+        view = next(item for item in self.hass.http.views if item.url == path)
+
+        async def exercise() -> tuple[FakeResponse, int]:
+            service_entered = asyncio.Event()
+            release_service = asyncio.Event()
+            stack = self._install_slow_safe_climate_action_stack(
+                service_entered=service_entered,
+                release_service=release_service,
+            )
+            response = await view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    reader_user("system-users"),
+                    path,
+                    {
+                        "contract": {
+                            "name": "hausman-hub-device-action-batch-request",
+                            "version": 1,
+                        },
+                        "correlationId": "safe.batch.invalid.1",
+                        "requestId": "safe.batch.invalid.request.1",
+                        "actions": [
+                            {
+                                "targetId": "slow_smartir",
+                                "actionId": "set_temperature",
+                                "value": 23,
+                            },
+                            {
+                                "targetId": "slow_humidifier",
+                                "actionId": "set_humidity",
+                                "value": 45.5,
+                            },
+                        ],
+                    },
+                    content_type="application/vnd.hausmanhub.device-action-batch-request.full+json",
+                    accept="application/vnd.hausmanhub.device-action-batch-receipt.full+json",
+                )
+            )
+            await self.hass.data["hausman_hub"][
+                "safe_device_command_lifecycle"
+            ].async_close()
+            return response, len(stack.service_calls)
+
+        response, calls = asyncio.run(exercise())
+
+        self.assertEqual(200, response.status)
+        self.assertEqual("failed", response.payload["status"])
+        self.assertEqual(0, response.payload["acceptedCount"])
+        self.assertEqual(2, response.payload["failedCount"])
+        self.assertTrue(
+            all(not item["commandSent"] for item in response.payload["receipts"])
+        )
+        self.assertEqual(0, calls)
+
     def test_external_gate_requires_full_confirmation_and_fresh_state(self) -> None:
         path = "/api/hausman_hub/v1/device-actions"
         view = next(item for item in self.hass.http.views if item.url == path)
@@ -9411,7 +10472,12 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertIn("sensor.synthetic_private_temperature", self.hass.states.values)
         self.assertEqual(1, len(self.entry.update_listeners))
 
-        self.entry.process_unload_callbacks()
+        with patch.object(
+            self.integration.asyncio,
+            "run",
+            side_effect=AssertionError("unload callback must not create a private loop"),
+        ):
+            self.entry.process_unload_callbacks()
 
         self.assertEqual([], self.entry.update_listeners)
 

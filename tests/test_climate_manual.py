@@ -429,6 +429,43 @@ class MemoryManualStore:
 
 
 class ClimateManualRuntimeTest(unittest.IsolatedAsyncioTestCase):
+    async def test_entity_mode_cas_does_not_overwrite_newer_manual_choice(self) -> None:
+        registry = native_registry(ClimateControlScope.MANAGED)
+        store = MemoryManualStore()
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=SafeConfiguration(
+                mode="shadow",
+                climate_bridge_mode=ClimateControlMode.MANAGED,
+                climate_canary_room_id=None,
+            ),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryStore(native_contours()),
+            manual_store=store,
+            strict_ha_call_executor=RecordingTrialExecutor(),
+            ha_state_view=MutableStateView(healthy_states()),
+            now_ms=lambda: NOW,
+        )
+        await runtime.async_start()
+        snapshot = runtime.device_mode_snapshot_for_entity("climate.living_ac")
+        self.assertIsNotNone(snapshot)
+
+        await runtime.async_set_device_mode_for_entity(
+            "climate.living_ac", "manual"
+        )
+        stale = await runtime.async_set_device_mode_for_entity(
+            "climate.living_ac",
+            "automatic",
+            expected_revision=snapshot["revision"],  # type: ignore[index]
+            expected_mode=snapshot["mode"],  # type: ignore[index]
+        )
+        ownership = await runtime.async_dashboard_climate_ownership()
+
+        self.assertEqual("manual_mode_changed", stale["reason"])
+        self.assertTrue(stale["skipped"])
+        self.assertFalse(stale["changed"])
+        self.assertEqual("manual", ownership["entities"]["climate.living_ac"])
+
     async def test_entity_mode_updates_dashboard_ownership_without_command(self) -> None:
         registry = native_registry(ClimateControlScope.MANAGED)
         store = MemoryManualStore()

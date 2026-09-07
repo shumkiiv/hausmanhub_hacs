@@ -217,6 +217,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     await device_action_idempotency.async_load()
     domain_data["device_action_idempotency"] = device_action_idempotency
+    from .application.safe_device_command_lifecycle import (
+        SafeDeviceCommandLifecycle,
+    )
+    from .safe_device_command_storage import HomeAssistantSafeDeviceCommandStore
+
+    safe_device_command_lifecycle = SafeDeviceCommandLifecycle(
+        HomeAssistantSafeDeviceCommandStore(hass, entry.entry_id)
+    )
+    await safe_device_command_lifecycle.async_load()
+    domain_data["safe_device_command_lifecycle"] = safe_device_command_lifecycle
+
+    def close_safe_device_commands() -> None:
+        """Schedule fallback cleanup for setup aborts on Home Assistant's loop."""
+
+        if safe_device_command_lifecycle.closed:
+            return
+        hass.async_create_task(
+            safe_device_command_lifecycle.async_close()
+        )
+
+    entry.async_on_unload(close_safe_device_commands)
     from homeassistant.helpers.event import async_track_time_interval
 
     entry.async_on_unload(
@@ -977,11 +998,18 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .tablet_power_api import clear_tablet_power_api
     from .manual_light_off_protection_api import clear_manual_light_off_protection_api
 
+    safe_device_command_lifecycle = hass.data.get("hausman_hub", {}).get(
+        "safe_device_command_lifecycle"
+    )
     unloaded = await hass.config_entries.async_unload_platforms(
         entry,
         (Platform.SENSOR, Platform.SWITCH),
     )
     if unloaded:
+        if safe_device_command_lifecycle is not None:
+            close = getattr(safe_device_command_lifecycle, "async_close", None)
+            if callable(close):
+                await close()
         _clear_hausmanhub_state_values(hass, entry)
         clear_local_summary_access(hass, entry)
         clear_event_stream(hass, entry.entry_id)
