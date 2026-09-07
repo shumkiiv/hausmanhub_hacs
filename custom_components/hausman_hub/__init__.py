@@ -428,6 +428,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await scenario_service.async_load()
     from .application.managed_switch_migration import (
         HomeAssistantManagedSwitchMigrationStore,
+        FULL_MIGRATION_MANIFEST,
         MIGRATION_MANIFEST,
         ManagedSwitchActivation,
         ManagedSwitchMigration,
@@ -439,8 +440,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         scenario_service,
         HomeAssistantManagedSwitchMigrationStore(hass, entry.entry_id),
         source_loader=lambda: async_load_managed_switch_migration_entries(
-            hass.async_add_executor_job
+            hass.async_add_executor_job, FULL_MIGRATION_MANIFEST
         ),
+        manifest=FULL_MIGRATION_MANIFEST,
     )
     from .application.managed_switch_binding_migration import (
         HomeAssistantManagedSwitchBindingMigrationStore,
@@ -535,7 +537,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             and manual_light_off_protection.ready_for_release_owned_switches
             and all(
                 scenario_service.current_catalog().device(target_id) is not None
-                for migration in MIGRATION_MANIFEST
+                for migration in FULL_MIGRATION_MANIFEST
                 for target_id in migration.input_target_ids
             )
         ),
@@ -646,6 +648,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _async_activate_managed_switch_runtime,
         binding_migration=managed_switch_binding_migration,
         status_publisher=_publish_managed_switch_status,
+        manifest=FULL_MIGRATION_MANIFEST,
     )
     entry.async_on_unload(managed_switch_startup.cancel)
     await managed_switch_startup.async_start()

@@ -4,7 +4,7 @@ const r = msg.payload && typeof msg.payload === 'object' ? msg.payload : {};
 const i = r.inputs && typeof r.inputs === 'object' ? r.inputs : {};
 const s = id => i[id] && i[id].state != null ? String(i[id].state) : null;
 const bindings = r.bindings && typeof r.bindings === 'object' ? r.bindings : {};
-const light = typeof bindings.light === 'string' ? bindings.light : null;
+const light = bindings.light === 'entity_0123456789abcdef' ? bindings.light : null;
 const sensors = Object.keys(i).filter(id => /cabinet|office|kabinet|motion|presence|occupancy/i.test(id));
 const occupied = sensors.some(id => ['on', 'true', 'occupied', 'detected'].includes(s(id)));
 const manual = r.context && r.context.trigger && r.context.trigger.source === 'manual';

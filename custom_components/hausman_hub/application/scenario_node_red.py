@@ -63,9 +63,9 @@ _TRUSTED_SYSTEM_SOURCE_HASHES = {
 _TRUSTED_ADDITIONAL_SYSTEM_SOURCE_HASHES = {
     "system-toilet-comfort-controller": frozenset({"2bbb3d66ce65b3938602992dbc93902004d43eaa3d9e561b48a043dd8502ef85"}),
     "system-bathroom-exhaust-controller": frozenset({"67a6ea3ee8c62198e07dce7e75bf379eb95a0a459f74890d5a494212c9ff85ff"}),
-    "system-storage-light-controller": frozenset({"9168494c56a6434bcf49d0170c4b4a2759967c2cf771b2450ed6989a770e1de8"}),
-    "system-cabinet-light-controller": frozenset({"80db20857c8809d68201f0f137886b52a3f17a827fc6af414d7be5e1ef80d7eb"}),
-    "system-curtains-privacy-controller": frozenset({"32a60a508f87cf02c09b85adabd1de77fa30449a44028ee11c4da31e3b7f9211"}),
+    "system-storage-light-controller": frozenset({"256c29b62141d152e222c0c13bdb812cabd891041769921bd8cf9b6dcb6b9556"}),
+    "system-cabinet-light-controller": frozenset({"8c5223a0b858ee1d408eb6b25128ac9ac32bd3aa3b14735419e9bde3e3dbdeef"}),
+    "system-curtains-privacy-controller": frozenset({"9e3053290bd0c409ecb0c89f8445793ed56319237396673417b97a14ed96339e"}),
 }
 
 def _trusted_hashes(scenario_id: str) -> frozenset[str]:
@@ -91,7 +91,11 @@ _SYSTEM_PLAN_ENVELOPES = {
         "delays": {120: 1, 1800: 1}, "runScenarios": {},
     },
     "system-cabinet-light-controller": {
-        "actions": {}, "delays": {}, "runScenarios": {},
+        "actions": {
+            ("entity_0123456789abcdef", "turn_on"): 1,
+            ("entity_0123456789abcdef", "set_brightness_percent"): 1,
+            ("entity_0123456789abcdef", "set_color_temperature"): 1,
+        }, "delays": {}, "runScenarios": {},
     },
     "system-curtains-privacy-controller": {
         "actions": {
@@ -139,6 +143,11 @@ _SYSTEM_PLAN_ENVELOPES = {
         "delays": {1: 1, 5: 4, 300: 1},
         "runScenarios": {},
     },
+}
+_SYSTEM_BINDING_ALLOWLIST = {
+    "system-cabinet-light-controller": {"light": "entity_0123456789abcdef"},
+    "system-curtains-privacy-controller": {},
+    "system-storage-light-controller": {},
 }
 _SYSTEM_INPUT_ATTRIBUTE_ALLOWLIST = {
     "system-shower-comfort-controller": {},
@@ -1820,6 +1829,9 @@ class NodeRedScenarioBackend:
             "scenarioId": scenario_id,
             "dryRun": dry_run,
             "inputs": self._input_snapshot(scenario_id, definition, catalog),
+            # Bindings are server-owned.  Node-RED never receives arbitrary
+            # entity IDs from a caller or editor.
+            "bindings": dict(_SYSTEM_BINDING_ALLOWLIST.get(scenario_id, {})),
             "context": {
                 "timestampMs": int(time.time() * 1000),
                 "trigger": safe_trigger,

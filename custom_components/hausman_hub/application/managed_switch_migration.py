@@ -60,19 +60,13 @@ _TAMBUR_INPUTS = (
     "entity_170c7a4e2505b803",
 )
 
-_TOILET_INPUTS = (
-    "binary_sensor.datchik_dvizheniia_tualet_zaniatost",
-    "binary_sensor.0xa4c13889c39443d5_occupancy",
-    "switch.0xacbac0fffebde2d3_1", "switch.0xacbac0fffebde2d3_2",
-    "switch.0x54ef44100019f608",
-)
-_BATHROOM_INPUTS = (
-    "switch.0xacbac0fffebe38d0_1", "switch.0xacbac0fffebe38d0_2",
-    "switch.0x54ef44100019fca5",
-)
-_STORAGE_INPUTS = ("switch.0x603d61fffe767806_1",)
-_CABINET_INPUTS = ()
-_CURTAIN_INPUTS = ("cover.shtory_gostinaia", "cover.0xa4c1385a4bcce3d6")
+# Only stable catalog IDs may cross the scenario boundary.  Unknown live
+# bindings remain absent and make that controller safely skip until bound.
+_TOILET_INPUTS = ("entity_6667b3400bce7970", "entity_5d95de599d2b5cec")
+_BATHROOM_INPUTS = ("entity_a591e035e3e5b34f", "entity_d82766182d69dd51")
+_STORAGE_INPUTS = ("entity_0ec37ef18b4b39a6",)
+_CABINET_INPUTS = ("entity_0123456789abcdef",)
+_CURTAIN_INPUTS = ()
 
 FULL_MIGRATION_MANIFEST: tuple[ManagedSwitchMigrationEntry, ...] = (
     ManagedSwitchMigrationEntry(
@@ -111,27 +105,29 @@ FULL_MIGRATION_MANIFEST: tuple[ManagedSwitchMigrationEntry, ...] = (
     ManagedSwitchMigrationEntry(
         "system-storage-light-controller", 1, "2" * 64, MANAGED_TOPOLOGY,
         _STORAGE_INPUTS, _STORAGE_INPUTS,
-        "9168494c56a6434bcf49d0170c4b4a2759967c2cf771b2450ed6989a770e1de8",
+        "256c29b62141d152e222c0c13bdb812cabd891041769921bd8cf9b6dcb6b9556",
         "storage_controller.js",
     ),
     ManagedSwitchMigrationEntry(
         "system-cabinet-light-controller", 1, "3" * 64, MANAGED_TOPOLOGY,
         _CABINET_INPUTS, _CABINET_INPUTS,
-        "80db20857c8809d68201f0f137886b52a3f17a827fc6af414d7be5e1ef80d7eb",
+        "8c5223a0b858ee1d408eb6b25128ac9ac32bd3aa3b14735419e9bde3e3dbdeef",
         "cabinet_controller.js",
     ),
     ManagedSwitchMigrationEntry(
         "system-curtains-privacy-controller", 1, "4" * 64, MANAGED_TOPOLOGY,
         _CURTAIN_INPUTS, _CURTAIN_INPUTS,
-        "32a60a508f87cf02c09b85adabd1de77fa30449a44028ee11c4da31e3b7f9211",
+        "9e3053290bd0c409ecb0c89f8445793ed56319237396673417b97a14ed96339e",
         "curtains_controller.js",
     ),
 )
-_CORE_MIGRATION_MANIFEST = FULL_MIGRATION_MANIFEST[:3]
-MIGRATION_MANIFEST = _CORE_MIGRATION_MANIFEST
+# The active release manifest is the single authoritative set.  The old
+# three-controller set is compatibility history only and must never drive
+# startup, receipts, or execution.
+MIGRATION_MANIFEST = FULL_MIGRATION_MANIFEST
 LEGACY_MANAGED_SWITCHES = {
     item.scenario_id: (item.legacy_revision, item.legacy_source_hash)
-    for item in MIGRATION_MANIFEST
+    for item in FULL_MIGRATION_MANIFEST
 }
 
 

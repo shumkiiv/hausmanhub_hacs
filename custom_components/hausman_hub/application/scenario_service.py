@@ -1223,9 +1223,7 @@ class ScenarioService:
             if backend is None:
                 raise ScenarioServiceError("Node-RED backend is unavailable.", status=503)
             required_ids = {
-                "system-shower-comfort-controller",
-                "system-small-corridor-light-controller",
-                "system-tambur-adaptive-controller",
+                str(getattr(item, "scenario_id", "")) for item in entries
             }
             if (
                 len(entries) != len(required_ids)
@@ -1503,9 +1501,7 @@ class ScenarioService:
                 "Node-RED backend is unavailable.", status=503
             )
         required_ids = {
-            "system-shower-comfort-controller",
-            "system-small-corridor-light-controller",
-            "system-tambur-adaptive-controller",
+            str(getattr(item, "scenario_id", "")) for item in entries
         }
         if (
             len(entries) != len(required_ids)
