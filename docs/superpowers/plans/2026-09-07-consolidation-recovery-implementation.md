@@ -106,6 +106,13 @@ backend options flow в `config_flow.py`, `application/scenario_node_red.py`.
 
 ## 3. Координатор, кладовка, ручной приоритет и питание
 
+Checkpoint `a4dd87a`: настройки и серверный снимок части 2, durable
+координатор кладовки и её сквозной execution path проверены исполнителем.
+Полный pytest: 2610 passed, 4 skipped, 1238 subtests; package PASS до
+и после commit. Ручная защита общего контура, питание и последующие
+комнаты ещё требуют реализации. Все восемь activation_ready=False.
+Успех транспортных тестов восьми JS не означает готовность восьми правил.
+
 Файлы: `application/scenario_control_coordinator.py`, существующие
 `scenario_light_priority`, `manual_light_off_protection`,
 `light_safety_obligations`, `scenario_executor`, `__init__.py`, storage JS.
