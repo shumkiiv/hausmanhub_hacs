@@ -171,7 +171,7 @@ EXPECTED_MANIFEST_VALUES = {
     "issue_tracker": "https://github.com/shumkiiv/hausmanhub_hacs/issues",
     "integration_type": "hub",
     "single_config_entry": True,
-    "after_dependencies": ["recorder", "weather"],
+    "after_dependencies": ["automation", "recorder", "weather"],
     "requirements": [],
 }
 EXPECTED_MANIFEST_KEYS = frozenset((*EXPECTED_MANIFEST_VALUES, "version"))

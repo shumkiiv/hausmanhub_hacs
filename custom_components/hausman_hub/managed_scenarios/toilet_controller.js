@@ -15,5 +15,5 @@ const actions = motion ? targets.filter(([id]) => s(id) !== 'on').map(([targetId
   actionId: 'turn_on', actionTitle: 'Включить',
 })) : [];
 msg.statusCode = 200;
-msg.payload = {contract: {name: 'hausman-node-red-scenario-execution', version: 1}, correlationId: String(r.correlationId || ''), scenarioId: 'system-toilet-comfort-controller', status: actions.length ? 'completed' : 'skipped', selectedBranch: motion ? 'occupied' : 'absent', actions, trace: [{id: 'occupancy_or', status: motion ? 'passed' : 'failed', expected: 'motion OR occupancy'}]};
+msg.payload = {contract: {name: 'hausman-node-red-scenario-execution', version: 1}, correlationId: String(r.correlationId || ''), scenarioId: 'system-toilet-comfort-controller', status: actions.length ? 'completed' : 'skipped', selectedBranch: motion ? 'occupied' : 'absent', actions, trace: [{id: 'occupancy_or', title: 'Присутствие в туалете', status: motion ? 'passed' : 'failed', actual: motion, expected: 'motion OR occupancy', reason: null}]};
 return msg;

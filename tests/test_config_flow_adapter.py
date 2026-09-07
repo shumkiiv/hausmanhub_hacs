@@ -9,6 +9,7 @@ home. A real Core 2026.6 runtime check remains a separate Python 3.14 task.
 from __future__ import annotations
 
 import importlib
+import json
 from datetime import datetime
 from pathlib import Path
 import sys
@@ -440,6 +441,7 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("advanced_settings", result["step_id"])
         self.assertEqual(
             [
+                "scenario_controls",
                 "climate_registry",
                 "climate_connection",
                 "climate_migration",
@@ -686,6 +688,59 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
 
         self.assert_section_menu(await options_flow.async_step_init())
         self.assert_advanced_menu(await options_flow.async_step_advanced_settings())
+
+    async def test_scenario_control_policy_is_editable_only_as_exact_cas_document(self) -> None:
+        from custom_components.hausman_hub.application.scenario_control_policy import (
+            ScenarioControlPolicyService,
+        )
+        from custom_components.hausman_hub.domain.scenario_controls import (
+            scenario_control_document_to_payload,
+        )
+
+        class Store:
+            payload = None
+
+            async def async_load(self):
+                return self.payload
+
+            async def async_save(self, payload):
+                self.payload = payload
+
+        service = ScenarioControlPolicyService(Store())
+        await service.async_load()
+        flow = self.config_flow.HausmanHubOptionsFlow()
+        flow.config_entry = FakeConfigEntry({"mode": "read-only"}, {})
+        flow.hass = SimpleNamespace(
+            data={self.config_flow.DOMAIN: {"scenario_control_policy_service": service}}
+        )
+
+        form = await flow.async_step_scenario_controls()
+        field = next(iter(form["schema"].fields))
+        document = json.loads(field.default)
+        document["policy"]["storageAbsenceSeconds"] = 180
+        saved = await flow.async_step_scenario_controls(
+            {"scenario_control_policy_json": json.dumps(document)}
+        )
+        stale = await flow.async_step_scenario_controls(
+            {"scenario_control_policy_json": json.dumps(document)}
+        )
+        malformed = dict(scenario_control_document_to_payload(service.current))
+        malformed["unexpected"] = True
+        invalid = await flow.async_step_scenario_controls(
+            {"scenario_control_policy_json": json.dumps(malformed)}
+        )
+
+        self.assertEqual("create_entry", saved["type"])
+        self.assertEqual(1, service.current.policy_revision)
+        self.assertEqual(180, service.current.policy.storage_absence_seconds)
+        self.assertEqual(
+            {"scenario_control_policy_json": "invalid_scenario_controls"},
+            stale["errors"],
+        )
+        self.assertEqual(
+            {"scenario_control_policy_json": "invalid_scenario_controls"},
+            invalid["errors"],
+        )
 
     async def test_options_form_hides_a_broken_saved_configuration(self) -> None:
         """A damaged saved configuration cannot make shadow look selected."""

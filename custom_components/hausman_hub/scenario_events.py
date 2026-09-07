@@ -304,6 +304,7 @@ async def async_start_scenario_events(
     service: ScenarioService,
     command_contexts: ScenarioCommandContextRegistry | None = None,
     activation_latch: object | None = None,
+    excluded_scenario_ids: frozenset[str] = frozenset(),
 ) -> None:
     """Subscribe enabled device-state scenario triggers to HA state events."""
 
@@ -321,6 +322,8 @@ async def async_start_scenario_events(
         new_state = data.get("new_state")
         for item in service.state_trigger_items():
             scenario_id, trigger_id, target_entity_id = item[:3]
+            if scenario_id in excluded_scenario_ids:
+                continue
             if entity_id != target_entity_id:
                 continue
             try:
@@ -346,6 +349,8 @@ async def async_start_scenario_events(
         if not isinstance(event_type, str) or event_type == _EVENT_STATE_CHANGED:
             return
         for scenario_id, trigger_id, expected_type, expected_data in service.event_trigger_items():
+            if scenario_id in excluded_scenario_ids:
+                continue
             if event_type != expected_type or not event_trigger_matches(data, expected_data):
                 continue
             try:

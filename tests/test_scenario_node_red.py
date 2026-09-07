@@ -12,6 +12,7 @@ import sys
 import traceback
 import unittest
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -29,11 +30,27 @@ from custom_components.hausman_hub.application.scenario_node_red import (
     validate_managed_source,
 )
 from custom_components.hausman_hub.application.scenario_executor import ScenarioExecutor
+from custom_components.hausman_hub.application.scenario_control_coordinator import (
+    STORAGE_LIGHT_TARGET_ID,
+    STORAGE_MOTION_TARGET_ID,
+    ScenarioControlCoordinator,
+)
+from custom_components.hausman_hub.application.scenario_control_policy import (
+    ScenarioControlPolicyService,
+)
+from custom_components.hausman_hub.application.scenario_light_priority import (
+    LightAutomationPriority,
+)
+from custom_components.hausman_hub.application.scenario_service import ScenarioService
+from custom_components.hausman_hub.application.managed_switch_migration import (
+    FULL_MIGRATION_MANIFEST,
+)
 from custom_components.hausman_hub.application.scenarios import (
     ScenarioDeviceAction,
     ScenarioDeviceEntry,
 )
 from custom_components.hausman_hub.domain.scenarios import (
+    Scenario,
     ScenarioAction,
     ScenarioActionType,
     ScenarioDefinition,
@@ -42,6 +59,7 @@ from custom_components.hausman_hub.domain.scenarios import (
     ScenarioNodeRedGeneratedBy,
     ScenarioNodeRedMetadata,
     ScenarioNodeRedSyncStatus,
+    ScenarioRegistry,
     ScenarioTrigger,
     ScenarioTriggerType,
 )
@@ -1065,6 +1083,11 @@ async def _case_plan_accepts_nested_scenario_but_rejects_existing_actions() -> N
         "target_id": "relay",
         "new_value": "on",
     }
+    assert posts[0]["context"]["controls"] == {
+        "policyRevision": 0,
+        "policy": {},
+        "state": {"ready": False, "transition": "unavailable"},
+    }
 
     try:
         await backend.async_plan(
@@ -1075,6 +1098,670 @@ async def _case_plan_accepts_nested_scenario_but_rejects_existing_actions() -> N
     else:
         raise AssertionError("Node-RED existing_action must fail closed")
     assert sum(method == "GET" for method, _path in calls) == 8
+
+
+async def test_plan_injects_server_controls_and_drops_client_spoof() -> None:
+    source = compile_managed_function("test_flow", _definition())
+    deployed = build_managed_flow("test_flow", "Тест", source, flow_id="flow-one")
+    requests: list[dict[str, object]] = []
+    response = {
+        "contract": {"name": "hausman-node-red-scenario-execution", "version": 1},
+        "correlationId": "run-controls",
+        "scenarioId": "test_flow",
+        "status": "completed",
+        "summary": "Готово.",
+        "selectedBranch": "default",
+        "durationMs": 0,
+        "trace": [],
+        "actions": [
+            {
+                "id": "notify",
+                "type": "notification",
+                "message": "Готово",
+            }
+        ],
+    }
+
+    async def adapter(method, path, headers, payload):
+        del headers
+        if method == "GET" and path.endswith("/flows"):
+            return 200, _global_revision(deployed, "rev-one")
+        if method == "GET" and path.endswith("/flow/flow-one"):
+            return 200, deployed
+        if method == "POST":
+            requests.append(payload)
+            return 200, response
+        raise AssertionError((method, path))
+
+    async def controls(scenario_id, run_id, trigger):
+        assert (scenario_id, run_id) == ("test_flow", "run-controls")
+        assert "controls" not in trigger
+        return {
+            "policyRevision": 7,
+            "policy": {"storageAbsenceSeconds": 120},
+            "state": {"transition": "occupied_on", "generation": 4},
+        }
+
+    backend = NodeRedScenarioBackend(
+        SimpleNamespace(states=SimpleNamespace(get=lambda _: None)),
+        request_adapter=adapter,
+        control_context_provider=controls,
+    )
+    backend._ingress_token = "token"  # noqa: SLF001
+    backend._ingress_session = "session"  # noqa: SLF001
+    definition = replace(
+        _definition(),
+        node_red=ScenarioNodeRedMetadata(
+            flow_id="flow-one",
+            source_hash=managed_source_hash(source),
+            sync_status=ScenarioNodeRedSyncStatus.SYNCED,
+        ),
+    )
+
+    await backend.async_plan(
+        "test_flow",
+        definition,
+        "run-controls",
+        SimpleNamespace(device=lambda _: None),
+        dry_run=False,
+        trigger_context={
+            "source": "device_state",
+            "trigger_id": "occupied",
+            "controls": {"policyRevision": 999, "state": {"transition": "attack"}},
+        },
+    )
+
+    assert requests[0]["context"]["trigger"] == {
+        "source": "device_state",
+        "trigger_id": "occupied",
+    }
+    assert requests[0]["context"]["controls"] == {
+        "policyRevision": 7,
+        "policy": {"storageAbsenceSeconds": 120},
+        "state": {"transition": "occupied_on", "generation": 4},
+    }
+
+
+def test_input_snapshot_has_exact_light_and_cover_attribute_allowlists() -> None:
+    state = SimpleNamespace(
+        state="on",
+        attributes={
+            "brightness": 128,
+            "color_temp_kelvin": 3000,
+            "color_temp": 333,
+            "current_position": 47,
+            "friendly_name": "must not cross",
+            "token": "secret",
+        },
+    )
+    hass = SimpleNamespace(states=SimpleNamespace(get=lambda _: state))
+    backend = NodeRedScenarioBackend(hass)
+    target_ids = (
+        "entity_8746cfd7f6f7103d",
+        "entity_2da2065add6e2168",
+        "entity_1e0b476b7d082cc0",
+        "entity_9164132c7692d6f5",
+    )
+    catalog = SimpleNamespace(
+        device=lambda target_id: SimpleNamespace(entity_id=f"cover.{target_id}")
+    )
+    definition = replace(
+        _definition(),
+        node_red=ScenarioNodeRedMetadata(input_target_ids=target_ids),
+    )
+
+    curtains = backend._input_snapshot(  # noqa: SLF001
+        "system-curtains-privacy-controller", definition, catalog
+    )
+    assert all(
+        item["attributes"] == {"current_position": 47}
+        for item in curtains.values()
+    )
+
+    light_definition = replace(
+        _definition(),
+        node_red=ScenarioNodeRedMetadata(
+            input_target_ids=("entity_0ec37ef18b4b39a6",)
+        ),
+    )
+    light = backend._input_snapshot(  # noqa: SLF001
+        "system-storage-light-controller", light_definition, catalog
+    )
+    assert light["entity_0ec37ef18b4b39a6"]["attributes"] == {
+        "brightness": 128,
+        "color_temp_kelvin": 3000,
+        "color_temp": 333,
+    }
+
+
+async def test_all_eight_release_sources_cross_real_async_plan_js_transport() -> None:
+    """Exercise runtime files through the same typed validator used in production."""
+
+    source_root = Path("custom_components/hausman_hub/managed_scenarios")
+    for item in FULL_MIGRATION_MANIFEST:
+        source = (source_root / item.source_file).read_text(encoding="utf-8")
+        flow_id = f"flow-{item.scenario_id}"
+        deployed = build_managed_flow(
+            item.scenario_id,
+            item.scenario_id,
+            source,
+            flow_id=flow_id,
+        )
+
+        async def adapter(method, path, headers, payload):
+            del headers
+            if method == "GET" and path.endswith("/flows"):
+                return 200, _global_revision(deployed, "rev-one")
+            if method == "GET" and path.endswith(f"/flow/{flow_id}"):
+                return 200, deployed
+            if method == "POST" and path.endswith(item.scenario_id):
+                harness = (
+                    "const request=JSON.parse(process.argv[1]);"
+                    "const source=process.argv[2];"
+                    "const run=new Function('msg',source);"
+                    "const result=run({payload:request});"
+                    "process.stdout.write(JSON.stringify(result.payload));"
+                )
+                completed = subprocess.run(
+                    ["node", "-e", harness, json.dumps(payload), source],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                return 200, json.loads(completed.stdout)
+            raise AssertionError((method, path))
+
+        states = {
+            target_id: SimpleNamespace(state="unknown", attributes={})
+            for target_id in item.input_target_ids
+        }
+        hass = SimpleNamespace(states=SimpleNamespace(get=states.get))
+        catalog = SimpleNamespace(
+            device=lambda target_id: SimpleNamespace(entity_id=target_id)
+        )
+        backend = NodeRedScenarioBackend(hass, request_adapter=adapter)
+        backend._ingress_token = "token"  # noqa: SLF001
+        backend._ingress_session = "session"  # noqa: SLF001
+        definition = replace(
+            _definition(),
+            node_red=ScenarioNodeRedMetadata(
+                flow_id=flow_id,
+                source_hash=item.new_source_hash,
+                input_target_ids=item.input_target_ids,
+                sync_status=ScenarioNodeRedSyncStatus.SYNCED,
+            ),
+        )
+
+        actions, result = await backend.async_plan(
+            item.scenario_id,
+            definition,
+            f"run-{item.scenario_id}",
+            catalog,
+            dry_run=True,
+        )
+
+        assert actions == ()
+        assert result["status"] == "skipped"
+        assert all(trace["id"] and trace["title"] for trace in result["trace"])
+        assert managed_source_hash(source) == item.new_source_hash
+
+
+async def test_storage_js_transport_selects_only_server_generation_actions() -> None:
+    item = next(
+        item
+        for item in FULL_MIGRATION_MANIFEST
+        if item.scenario_id == "system-storage-light-controller"
+    )
+    source = Path(
+        "custom_components/hausman_hub/managed_scenarios/storage_controller.js"
+    ).read_text(encoding="utf-8")
+    flow_id = "flow-storage"
+    deployed = build_managed_flow(item.scenario_id, "Кладовка", source, flow_id=flow_id)
+    state_values = {
+        item.input_target_ids[0]: SimpleNamespace(state="on", attributes={}),
+        item.input_target_ids[1]: SimpleNamespace(state="off", attributes={}),
+    }
+
+    async def controls(_scenario_id, run_id, _trigger):
+        return {
+            "policyRevision": 3,
+            "policy": {
+                "storageAbsenceSeconds": 120,
+                "storageExhaustTargetId": None,
+                "storageExhaustTimes": ["11:00", "20:00"],
+                "storageExhaustRunSeconds": 1800,
+            },
+            "state": {
+                "ready": True,
+                "transition": "storage_light_on",
+                "generation": 8,
+                "correlationId": run_id,
+                "evidence": {
+                    "motion": "on",
+                    "presence": None,
+                    "light": "off",
+                    "ownershipRevision": None,
+                },
+            },
+        }
+
+    async def adapter(method, path, headers, payload):
+        del headers
+        if method == "GET" and path.endswith("/flows"):
+            return 200, _global_revision(deployed, "rev-one")
+        if method == "GET" and path.endswith(f"/flow/{flow_id}"):
+            return 200, deployed
+        if method == "POST":
+            completed = subprocess.run(
+                [
+                    "node",
+                    "-e",
+                    "const p=JSON.parse(process.argv[1]);const s=process.argv[2];"
+                    "const r=(new Function('msg',s))({payload:p});"
+                    "process.stdout.write(JSON.stringify(r.payload));",
+                    json.dumps(payload),
+                    source,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return 200, json.loads(completed.stdout)
+        raise AssertionError((method, path))
+
+    catalog = SimpleNamespace(
+        device=lambda target_id: SimpleNamespace(entity_id=target_id)
+    )
+    backend = NodeRedScenarioBackend(
+        SimpleNamespace(states=SimpleNamespace(get=state_values.get)),
+        request_adapter=adapter,
+        control_context_provider=controls,
+    )
+    backend._ingress_token = "token"  # noqa: SLF001
+    backend._ingress_session = "session"  # noqa: SLF001
+    definition = replace(
+        _definition(),
+        node_red=ScenarioNodeRedMetadata(
+            flow_id=flow_id,
+            source_hash=item.new_source_hash,
+            input_target_ids=item.input_target_ids,
+            sync_status=ScenarioNodeRedSyncStatus.SYNCED,
+        ),
+    )
+
+    actions, result = await backend.async_plan(
+        item.scenario_id,
+        definition,
+        "run-storage-on",
+        catalog,
+        dry_run=False,
+        trigger_context={
+            "source": "device_state",
+            "trigger_id": "spoofed_off_is_ignored",
+            "controls": {"state": {"transition": "storage_light_off_due"}},
+        },
+    )
+
+    assert [(action.id, action.action_id) for action in actions] == [
+        ("storage_light_on", "turn_on")
+    ]
+    assert result["selectedBranch"] == "storage_light_on"
+
+
+async def test_storage_coordinator_crosses_real_async_plan_and_executor_path() -> None:
+    item = next(
+        entry for entry in FULL_MIGRATION_MANIFEST
+        if entry.scenario_id == "system-storage-light-controller"
+    )
+    source = Path(
+        "custom_components/hausman_hub/managed_scenarios/storage_controller.js"
+    ).read_text(encoding="utf-8")
+    deployed = build_managed_flow(
+        item.scenario_id, "Кладовка", source, flow_id="flow-storage-e2e"
+    )
+    state_values = {
+        "binary_sensor.storage_motion": SimpleNamespace(state="on", attributes={}),
+        "light.storage": SimpleNamespace(state="off", attributes={}),
+    }
+
+    class Services:
+        calls: list[tuple[str, str, dict[str, object]]] = []
+
+        async def async_call(self, domain, service, data, **_kwargs):
+            self.calls.append((domain, service, data))
+            if domain == "light" and service == "turn_on":
+                state_values["light.storage"] = SimpleNamespace(
+                    state="on", attributes={}
+                )
+
+    hass = SimpleNamespace(
+        states=SimpleNamespace(get=state_values.get),
+        services=Services(),
+    )
+    devices = {
+        STORAGE_MOTION_TARGET_ID: ScenarioDeviceEntry(
+            target_id=STORAGE_MOTION_TARGET_ID,
+            name="Движение кладовки",
+            entity_id="binary_sensor.storage_motion",
+            actions=(),
+        ),
+        STORAGE_LIGHT_TARGET_ID: ScenarioDeviceEntry(
+            target_id=STORAGE_LIGHT_TARGET_ID,
+            name="Свет кладовки",
+            entity_id="light.storage",
+            actions=(
+                ScenarioDeviceAction(
+                    action_id="turn_on",
+                    title="Включить",
+                    domain="light",
+                    service="turn_on",
+                    allowed_fields=frozenset(),
+                ),
+                ScenarioDeviceAction(
+                    action_id="turn_off",
+                    title="Выключить",
+                    domain="light",
+                    service="turn_off",
+                    allowed_fields=frozenset(),
+                ),
+            ),
+        ),
+    }
+    catalog = SimpleNamespace(device=devices.get)
+
+    async def adapter(method, path, headers, payload):
+        del headers
+        if method == "GET" and path.endswith("/flows"):
+            return 200, _global_revision(deployed, "rev-storage-e2e")
+        if method == "GET" and path.endswith("/flow/flow-storage-e2e"):
+            return 200, deployed
+        if method == "POST":
+            completed = subprocess.run(
+                [
+                    "node",
+                    "-e",
+                    "const p=JSON.parse(process.argv[1]);const s=process.argv[2];"
+                    "const r=(new Function('msg',s))({payload:p});"
+                    "process.stdout.write(JSON.stringify(r.payload));",
+                    json.dumps(payload),
+                    source,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return 200, json.loads(completed.stdout)
+        raise AssertionError((method, path))
+
+    backend = NodeRedScenarioBackend(hass, request_adapter=adapter)
+    backend._ingress_token = "token"  # noqa: SLF001
+    backend._ingress_session = "session"  # noqa: SLF001
+    definition = replace(
+        _definition(),
+        node_red=ScenarioNodeRedMetadata(
+            flow_id="flow-storage-e2e",
+            source_hash=item.new_source_hash,
+            input_target_ids=item.input_target_ids,
+            sync_status=ScenarioNodeRedSyncStatus.SYNCED,
+        ),
+    )
+
+    class MemoryStore:
+        payload = None
+
+        async def async_load(self):
+            return self.payload
+
+        async def async_save(self, payload):
+            self.payload = payload
+
+    class RuntimeService:
+        executor = None
+        results: list[dict[str, object]] = []
+
+        async def async_run_scenario(self, scenario_id, **kwargs):
+            result = await self.executor.async_execute(
+                definition,
+                kwargs["correlation_id"],
+                scenario_id=scenario_id,
+                trigger_context=kwargs["trigger_context"],
+            )
+            self.results.append(result)
+            return result
+
+    class Priority:
+        def is_owned(self, _entity_id, _hass):
+            return False
+
+        def ownership_revision(self, _entity_id, _hass):
+            return None
+
+    policy = ScenarioControlPolicyService(MemoryStore())
+    await policy.async_load()
+    service = RuntimeService()
+    coordinator = ScenarioControlCoordinator(
+        hass,
+        service,
+        policy,
+        MemoryStore(),
+        Priority(),
+        catalog_resolver=catalog.device,
+        schedule_tasks=False,
+    )
+    await coordinator.async_load()
+    backend.set_control_context_provider(coordinator.async_control_context)
+    service.executor = ScenarioExecutor(
+        hass,
+        catalog,
+        service.async_run_scenario,
+        node_red_backend=backend,
+    )
+
+    await coordinator.async_handle_storage_change()
+
+    assert [(domain, action) for domain, action, _ in hass.services.calls] == [
+        ("light", "turn_on")
+    ]
+    assert service.results[0]["status"] == "completed"
+    assert service.results[0]["node_red"]["selectedBranch"] == "storage_light_on"
+    assert service.results[0]["confirmed"] is True
+    assert state_values["light.storage"].state == "on"
+
+
+async def test_storage_real_service_switch_ownership_and_120_second_off_path() -> None:
+    """Cross the production service, priority, JS transport and executor boundaries."""
+
+    item = next(
+        entry for entry in FULL_MIGRATION_MANIFEST
+        if entry.scenario_id == "system-storage-light-controller"
+    )
+    source = Path(
+        "custom_components/hausman_hub/managed_scenarios/storage_controller.js"
+    ).read_text(encoding="utf-8")
+    deployed = build_managed_flow(
+        item.scenario_id, "Кладовка", source, flow_id="flow-storage-integration"
+    )
+    revision = [datetime(2026, 9, 7, tzinfo=timezone.utc)]
+
+    def state(value: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            state=value,
+            attributes={},
+            last_changed=revision[0],
+            last_updated=revision[0],
+        )
+
+    state_values = {
+        "binary_sensor.storage_motion": state("on"),
+        "switch.storage_light": state("off"),
+    }
+
+    class Services:
+        calls: list[tuple[str, str, dict[str, object]]] = []
+
+        async def async_call(self, domain, service, data, **_kwargs):
+            self.calls.append((domain, service, data))
+            if domain == "switch" and service in {"turn_on", "turn_off"}:
+                revision[0] += timedelta(milliseconds=1)
+                state_values["switch.storage_light"] = state(
+                    "on" if service == "turn_on" else "off"
+                )
+
+    hass = SimpleNamespace(
+        states=SimpleNamespace(get=state_values.get),
+        services=Services(),
+    )
+    devices = {
+        STORAGE_MOTION_TARGET_ID: ScenarioDeviceEntry(
+            target_id=STORAGE_MOTION_TARGET_ID,
+            name="Движение кладовки",
+            entity_id="binary_sensor.storage_motion",
+            actions=(),
+        ),
+        STORAGE_LIGHT_TARGET_ID: ScenarioDeviceEntry(
+            target_id=STORAGE_LIGHT_TARGET_ID,
+            name="Свет кладовки",
+            entity_id="switch.storage_light",
+            actions=tuple(
+                ScenarioDeviceAction(
+                    action_id=action_id,
+                    title=title,
+                    domain="switch",
+                    service=action_id,
+                    allowed_fields=frozenset(),
+                )
+                for action_id, title in (
+                    ("turn_on", "Включить"),
+                    ("turn_off", "Выключить"),
+                )
+            ),
+        ),
+    }
+    from custom_components.hausman_hub.application.scenarios import ScenarioCatalog
+
+    catalog = ScenarioCatalog(devices=devices, scenarios={})
+    definition = replace(
+        _definition(),
+        node_red=ScenarioNodeRedMetadata(
+            flow_id="flow-storage-integration",
+            source_hash=item.new_source_hash,
+            input_target_ids=item.input_target_ids,
+            sync_status=ScenarioNodeRedSyncStatus.SYNCED,
+        ),
+    )
+
+    class ScenarioStore:
+        def __init__(self):
+            self.registry = ScenarioRegistry(
+                scenarios=(
+                    Scenario.from_definition(
+                        item.scenario_id,
+                        "Свет кладовки",
+                        definition,
+                        group="system",
+                    ),
+                )
+            )
+
+        async def async_load(self):
+            return self.registry
+
+        async def async_save(self, registry):
+            self.registry = registry
+
+    class MappingStore:
+        payload = None
+        recovered_previous = False
+
+        async def async_load(self):
+            return self.payload
+
+        async def async_save(self, payload):
+            self.payload = payload
+
+    async def adapter(method, path, headers, payload):
+        del headers
+        if method == "GET" and path.endswith("/flows"):
+            return 200, _global_revision(deployed, "rev-storage-integration")
+        if method == "GET" and path.endswith("/flow/flow-storage-integration"):
+            return 200, deployed
+        if method == "POST":
+            completed = subprocess.run(
+                [
+                    "node",
+                    "-e",
+                    "const p=JSON.parse(process.argv[1]);const s=process.argv[2];"
+                    "const r=(new Function('msg',s))({payload:p});"
+                    "process.stdout.write(JSON.stringify(r.payload));",
+                    json.dumps(payload),
+                    source,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return 200, json.loads(completed.stdout)
+        raise AssertionError((method, path))
+
+    backend = NodeRedScenarioBackend(hass, request_adapter=adapter)
+    backend._ingress_token = "token"  # noqa: SLF001
+    backend._ingress_session = "session"  # noqa: SLF001
+    service = ScenarioService(hass, ScenarioStore(), catalog, node_red_backend=backend)
+    await service.async_load()
+    priority = LightAutomationPriority(MappingStore())
+    await priority.async_load()
+    policy = ScenarioControlPolicyService(MappingStore())
+    await policy.async_load()
+    clock = [0]
+    coordinator = ScenarioControlCoordinator(
+        hass,
+        service,
+        policy,
+        MappingStore(),
+        priority,
+        catalog_resolver=catalog.device,
+        now_ms=lambda: clock[0],
+        schedule_tasks=False,
+    )
+    await coordinator.async_load()
+    backend.set_control_context_provider(coordinator.async_control_context)
+    executor = ScenarioExecutor(
+        hass,
+        catalog,
+        service.async_run_scenario,
+        node_red_backend=backend,
+        light_priority=priority,
+    )
+    service.set_executor(executor)
+
+    await coordinator.async_handle_storage_change()
+    assert state_values["switch.storage_light"].state == "on"
+    assert priority.is_owned("switch.storage_light", hass)
+
+    revision[0] += timedelta(milliseconds=1)
+    state_values["binary_sensor.storage_motion"] = state("off")
+    await coordinator.async_handle_storage_change()
+    assert coordinator.storage_state["deadlineMs"] == 120_000
+    clock[0] = 119_999
+    await coordinator.async_reconcile_storage_due()
+    assert [call[1] for call in hass.services.calls] == ["turn_on"]
+    clock[0] = 120_000
+    await coordinator.async_reconcile_storage_due()
+    assert [call[1] for call in hass.services.calls] == ["turn_on", "turn_off"]
+    assert state_values["switch.storage_light"].state == "off"
+    assert not priority.is_owned("switch.storage_light", hass)
+
+    revision[0] += timedelta(milliseconds=1)
+    state_values["binary_sensor.storage_motion"] = state("on")
+    await coordinator.async_handle_storage_change()
+    assert priority.is_owned("switch.storage_light", hass)
+    revision[0] += timedelta(milliseconds=1)
+    state_values["switch.storage_light"] = state("on")
+    revision[0] += timedelta(milliseconds=1)
+    state_values["binary_sensor.storage_motion"] = state("off")
+    await coordinator.async_handle_storage_change()
+    assert coordinator.storage_state["transition"] == "manual_light_hold"
+    assert coordinator.storage_state["deadlineMs"] is None
 
 
 def test_tambur_power_up_plan_matches_release_envelope() -> None:

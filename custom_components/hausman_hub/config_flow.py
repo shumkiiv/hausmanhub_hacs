@@ -172,6 +172,7 @@ TEMPORARY_TEMPERATURE_CONFIRM_FIELD = "confirm_temporary_temperature"
 TEMPORARY_TEMPERATURE_CLEAR_CONFIRM_FIELD = "confirm_temporary_temperature_clear"
 TEMPORARY_TEMPERATURE_RESULT_CLOSE_FIELD = "close_temporary_temperature_result"
 CLIMATE_REGISTRY_JSON_FIELD = "climate_registry_json"
+SCENARIO_CONTROL_POLICY_JSON_FIELD = "scenario_control_policy_json"
 CLIMATE_REGISTRY_CONFIRM_FIELD = "confirm_registry_save"
 CLIMATE_REGISTRY_ACTION_FIELD = "climate_registry_action"
 CLIMATE_ROOM_ID_FIELD = "climate_room_id"
@@ -919,6 +920,19 @@ def _climate_registry_json_schema(default: str) -> vol.Schema:
     )
 
 
+def _scenario_control_policy_json_schema(default: str) -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(
+                SCENARIO_CONTROL_POLICY_JSON_FIELD,
+                default=default,
+            ): TextSelector(
+                TextSelectorConfig(multiline=True, type=TextSelectorType.TEXT)
+            )
+        }
+    )
+
+
 def _climate_migration_address_schema() -> vol.Schema:
     return vol.Schema(
         {
@@ -1501,12 +1515,66 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_menu(
             step_id="advanced_settings",
             menu_options=[
+                "scenario_controls",
                 "climate_registry",
                 "climate_connection",
                 "climate_migration",
                 "native_climate",
                 "test_switch",
             ],
+        )
+
+    async def async_step_scenario_controls(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Edit the complete server-owned controller policy using CAS."""
+
+        service = self._scenario_control_policy_service()
+        errors: dict[str, str] = {}
+        if service is None:
+            default = "{}"
+            errors["base"] = "scenario_controls_unavailable"
+        else:
+            from .domain.scenario_controls import scenario_control_document_to_payload
+
+            default = json.dumps(
+                scenario_control_document_to_payload(service.current),
+                ensure_ascii=False,
+                indent=2,
+            )
+        if user_input is not None and service is not None:
+            raw = user_input.get(SCENARIO_CONTROL_POLICY_JSON_FIELD)
+            if (
+                not isinstance(raw, str)
+                or not raw
+                or len(raw.encode("utf-8")) > MAX_CLIMATE_REGISTRY_FORM_BYTES
+            ):
+                errors[SCENARIO_CONTROL_POLICY_JSON_FIELD] = (
+                    "invalid_scenario_controls"
+                )
+            else:
+                try:
+                    from .domain.scenario_controls import (
+                        scenario_control_document_from_payload,
+                    )
+
+                    candidate = scenario_control_document_from_payload(json.loads(raw))
+                    await service.async_replace(
+                        candidate.policy_revision, candidate.policy
+                    )
+                except Exception:
+                    errors[SCENARIO_CONTROL_POLICY_JSON_FIELD] = (
+                        "invalid_scenario_controls"
+                    )
+                else:
+                    return self.async_create_entry(
+                        title="", data=dict(self.config_entry.options)
+                    )
+        return self.async_show_form(
+            step_id="scenario_controls",
+            data_schema=_scenario_control_policy_json_schema(default),
+            errors=errors,
         )
 
     async def async_step_contours(
@@ -4461,6 +4529,16 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
 
         runtime = domain_data.get("climate_runtime")
         return runtime if isinstance(runtime, ClimateRuntime) else None
+
+    def _scenario_control_policy_service(self) -> Any | None:
+        hass = getattr(self, "hass", None)
+        domain_data = getattr(hass, "data", {}).get(DOMAIN)
+        if not isinstance(domain_data, Mapping):
+            return None
+        from .application.scenario_control_policy import ScenarioControlPolicyService
+
+        service = domain_data.get("scenario_control_policy_service")
+        return service if isinstance(service, ScenarioControlPolicyService) else None
 
     def _preview_placeholders(self) -> dict[str, str]:
         preview = self._registry_preview or {}

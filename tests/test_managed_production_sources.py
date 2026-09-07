@@ -9,7 +9,10 @@ ROOT = Path(__file__).parents[1]
 SCENARIOS = {
     "toilet_controller.js": ({"entity_ce73f88bda2e6812": "on"}, {}),
     "bathroom_controller.js": ({"entity_a591e035e3e5b34f": "on"}, {}),
-    "storage_controller.js": ({"entity_00dcf0ebdc0bc6cb": "on"}, {}),
+    "storage_controller.js": ({
+        "entity_00dcf0ebdc0bc6cb": "on",
+        "entity_0ec37ef18b4b39a6": "off",
+    }, {}),
     "cabinet_controller.js": ({"entity_5f3b4436fb7b6f2b": "on"}, {"light": "entity_aeaf7c250c68e8c2"}),
     "curtains_controller.js": ({
         "entity_8746cfd7f6f7103d": {"state": "open", "attributes": {"current_position": 40}},
@@ -41,7 +44,28 @@ def test_all_new_production_sources_return_typed_positive_plans() -> None:
             key: value if isinstance(value, dict) else {"state": value, "attributes": {}}
             for key, value in raw_inputs.items()
         }
-        request = {"correlationId": "production-source-test", "inputs": inputs, "bindings": bindings, "context": {"trigger": {"source": "manual", "trigger_id": "sunset"}}}
+        context = {"trigger": {"source": "manual", "trigger_id": "sunset"}}
+        if filename == "storage_controller.js":
+            context["controls"] = {
+                "policyRevision": 0,
+                "policy": {
+                    "storageExhaustTargetId": None,
+                    "storageExhaustTimes": ["11:00", "20:00"],
+                    "storageExhaustRunSeconds": 1800,
+                },
+                "state": {
+                    "ready": True,
+                    "transition": "storage_light_on",
+                    "generation": 1,
+                    "evidence": {
+                        "motion": "on",
+                        "presence": None,
+                        "light": "off",
+                        "ownershipRevision": None,
+                    },
+                },
+            }
+        request = {"correlationId": "production-source-test", "inputs": inputs, "bindings": bindings, "context": context}
         payload = _run_source(filename, request)
         assert payload["statusCode"] if "statusCode" in payload else True
         assert payload["scenarioId"].startswith("system-")

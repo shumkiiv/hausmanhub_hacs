@@ -426,6 +426,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         scenario_service.is_electrical_breaker_entity
     )
     await scenario_service.async_load()
+    from .application.scenario_control_policy import ScenarioControlPolicyService
+    from .scenario_control_storage import HomeAssistantScenarioControlPolicyStore
+
+    def _safe_storage_exhaust_binding(target_id: str, device: object) -> bool:
+        entity_id = getattr(device, "entity_id", None)
+        water_actuators = water_safety.configuration.get("actuators", [])
+        protected_water_entities = {
+            actuator.get("entityId")
+            for actuator in water_actuators
+            if isinstance(actuator, dict)
+        }
+        return bool(
+            isinstance(entity_id, str)
+            and entity_id not in protected_water_entities
+            and not scenario_service.is_electrical_breaker_entity_for_target(target_id)
+            and not scenario_service.is_contextually_dangerous_action(target_id, "turn_on")
+            and not scenario_service.is_contextually_dangerous_action(target_id, "turn_off")
+        )
+
+    scenario_control_policy = ScenarioControlPolicyService(
+        HomeAssistantScenarioControlPolicyStore(hass, entry.entry_id),
+        capability_resolver=lambda target_id: (
+            scenario_service.current_catalog().device(target_id)
+        ),
+        binding_safety_validator=_safe_storage_exhaust_binding,
+    )
+    await scenario_control_policy.async_load()
+    domain_data["scenario_control_policy_service"] = scenario_control_policy
     from .application.managed_switch_migration import (
         HomeAssistantManagedSwitchMigrationStore,
         FULL_MIGRATION_MANIFEST,
@@ -524,6 +552,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
     )
     scenario_service.set_executor(scenario_executor)
+    from .application.scenario_control_coordinator import ScenarioControlCoordinator
+    from .scenario_control_state_storage import HomeAssistantScenarioControlStateStore
+
+    scenario_control_coordinator = ScenarioControlCoordinator(
+        hass,
+        scenario_service,
+        scenario_control_policy,
+        HomeAssistantScenarioControlStateStore(hass, entry.entry_id),
+        light_priority,
+        catalog_resolver=lambda target_id: (
+            scenario_service.current_catalog().device(target_id)
+        ),
+    )
+    await scenario_control_coordinator.async_load()
+    scenario_node_red_backend.set_control_context_provider(
+        scenario_control_coordinator.async_control_context
+    )
+    domain_data["scenario_control_coordinator"] = scenario_control_coordinator
+    entry.async_on_unload(scenario_control_coordinator.cancel)
     entry.async_on_unload(
         intercom_release_obligation.start(
             scenario_service.async_reconcile_intercom_release
@@ -582,8 +629,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         try:
             staged_entry = _ActivationEntry()
+            await scenario_control_coordinator.async_start(
+                staged_entry, activation_latch
+            )
             await async_start_scenario_schedule(
-                hass, staged_entry, scenario_service, activation_latch
+                hass,
+                staged_entry,
+                scenario_service,
+                activation_latch,
+                scenario_control_coordinator.owned_scenario_ids,
             )
             await async_start_scenario_events(
                 hass,
@@ -591,6 +645,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 scenario_service,
                 scenario_command_contexts,
                 activation_latch,
+                scenario_control_coordinator.owned_scenario_ids,
             )
             await smart_switch_adapter.async_start()
         except asyncio.CancelledError:
@@ -622,6 +677,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # No await follows it, so no callback can observe a half-owned
             # runtime with an open latch.
             activation_latch.open()
+            scenario_control_coordinator.activate()
             domain_data["smart_switch_runtime"] = {
                 "state": "ready",
                 "adapter": smart_switch_adapter,

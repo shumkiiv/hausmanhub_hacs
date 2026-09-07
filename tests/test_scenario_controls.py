@@ -32,6 +32,7 @@ def test_occupancy_supports_zones_with_only_one_sensor_type():
 def test_unknown_or_unavailable_sensor_stays_fail_closed_even_with_other_off():
     assert OccupancyEvidence.from_states("unavailable", "off") is OccupancyEvidence.UNKNOWN
     assert OccupancyEvidence.from_states("unknown", None) is OccupancyEvidence.UNKNOWN
+    assert OccupancyEvidence.from_states("unexpected", "off") is OccupancyEvidence.UNKNOWN
 
 
 def test_evening_starts_at_earlier_of_sunset_and_21_00_in_local_time():

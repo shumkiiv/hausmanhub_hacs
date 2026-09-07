@@ -32,6 +32,7 @@ async def async_start_scenario_schedule(
     entry: ConfigEntry,
     service: ScenarioService,
     activation_latch: object | None = None,
+    excluded_scenario_ids: frozenset[str] = frozenset(),
 ) -> None:
     """Arm every enabled time/sun trigger and keep the arming in sync."""
 
@@ -39,7 +40,13 @@ async def async_start_scenario_schedule(
     armed_signature: tuple = ()
 
     def _signature() -> tuple:
-        return tuple(sorted(service.scheduled_trigger_items()))
+        return tuple(
+            sorted(
+                item
+                for item in service.scheduled_trigger_items()
+                if item[0] not in excluded_scenario_ids
+            )
+        )
 
     async def _async_run_due(
         scenario_id: str, trigger_id: str, _now: datetime
@@ -76,6 +83,8 @@ async def async_start_scenario_schedule(
             unsub()
         unsubs.clear()
         for scenario_id, trigger_id, trigger_type, value in service.scheduled_trigger_items():
+            if scenario_id in excluded_scenario_ids:
+                continue
             if trigger_type == "time":
                 from homeassistant.helpers.event import (  # noqa: PLC0415
                     async_track_time_change,

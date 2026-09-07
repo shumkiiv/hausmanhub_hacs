@@ -10,6 +10,8 @@ from datetime import datetime, time
 from enum import StrEnum
 from dataclasses import dataclass
 from datetime import timedelta
+import re
+from typing import Mapping
 
 
 class OccupancyEvidence(StrEnum):
@@ -29,9 +31,7 @@ class OccupancyEvidence(StrEnum):
             return cls.UNKNOWN
         if "on" in states:
             return cls.OCCUPIED
-        if states.intersection({"unknown", "unavailable"}):
-            return cls.UNKNOWN
-        if states.intersection({"off", "false", "0"}):
+        if states and states.issubset({"off", "false", "0"}):
             return cls.ABSENT
         return cls.UNKNOWN
 
@@ -177,3 +177,236 @@ def power_readiness(power_state: object, light_state: object) -> str:
     if light in {"unknown", "unavailable", "none"}:
         return "light_not_ready"
     return "ready"
+
+
+SCENARIO_CONTROL_DOCUMENT_VERSION = 1
+_TARGET_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_CLOCK_TIME = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+
+
+@dataclass(frozen=True, slots=True)
+class ScenarioControlPolicy:
+    """Server-owned editable bounds shared by managed controllers."""
+
+    absence_confirmation_seconds: int = 10
+    presence_rise_seconds: int = 10
+    storage_absence_seconds: int = 120
+    shower_absence_seconds: int = 300
+    toilet_absence_seconds: int = 480
+    manual_release_seconds: int = 300
+    manual_off_block_seconds: int = 300
+    storage_exhaust_target_id: str | None = None
+    storage_exhaust_times: tuple[str, ...] = ("11:00", "20:00")
+    storage_exhaust_run_seconds: int = 1800
+    small_corridor_lux_threshold: int = 450
+    lux_hysteresis: int = 25
+    lux_hold_seconds: int = 30
+    day_brightness_floor_percent: int = 20
+    evening_brightness_floor_percent: int = 5
+    night_brightness_cap_percent: int = 5
+    relative_fade_percent: int = 10
+    relative_fade_period_seconds: int = 300
+    brightness_ramp_seconds: int = 30
+    neutral_color_temperature_kelvin: int = 3000
+    evening_color_temperature_kelvin: int = 2200
+    evening_latest: str = "21:00"
+    tambur_main_off: str = "23:00"
+    small_corridor_main_off: str = "23:30"
+    kitchen_cover_cap_percent: int = 80
+    cabinet_cover_cap_percent: int = 90
+
+
+@dataclass(frozen=True, slots=True)
+class ScenarioControlDocument:
+    """One CAS revision and its complete validated policy."""
+
+    policy_revision: int = 0
+    policy: ScenarioControlPolicy = ScenarioControlPolicy()
+
+
+_POLICY_FIELDS = {
+    "absenceConfirmationSeconds": "absence_confirmation_seconds",
+    "presenceRiseSeconds": "presence_rise_seconds",
+    "storageAbsenceSeconds": "storage_absence_seconds",
+    "showerAbsenceSeconds": "shower_absence_seconds",
+    "toiletAbsenceSeconds": "toilet_absence_seconds",
+    "manualReleaseSeconds": "manual_release_seconds",
+    "manualOffBlockSeconds": "manual_off_block_seconds",
+    "storageExhaustTargetId": "storage_exhaust_target_id",
+    "storageExhaustTimes": "storage_exhaust_times",
+    "storageExhaustRunSeconds": "storage_exhaust_run_seconds",
+    "smallCorridorLuxThreshold": "small_corridor_lux_threshold",
+    "luxHysteresis": "lux_hysteresis",
+    "luxHoldSeconds": "lux_hold_seconds",
+    "dayBrightnessFloorPercent": "day_brightness_floor_percent",
+    "eveningBrightnessFloorPercent": "evening_brightness_floor_percent",
+    "nightBrightnessCapPercent": "night_brightness_cap_percent",
+    "relativeFadePercent": "relative_fade_percent",
+    "relativeFadePeriodSeconds": "relative_fade_period_seconds",
+    "brightnessRampSeconds": "brightness_ramp_seconds",
+    "neutralColorTemperatureKelvin": "neutral_color_temperature_kelvin",
+    "eveningColorTemperatureKelvin": "evening_color_temperature_kelvin",
+    "eveningLatest": "evening_latest",
+    "tamburMainOff": "tambur_main_off",
+    "smallCorridorMainOff": "small_corridor_main_off",
+    "kitchenCoverCapPercent": "kitchen_cover_cap_percent",
+    "cabinetCoverCapPercent": "cabinet_cover_cap_percent",
+}
+
+
+def validate_scenario_control_policy(policy: ScenarioControlPolicy) -> None:
+    """Reject unsafe policy values and inconsistent controller bounds."""
+
+    if not isinstance(policy, ScenarioControlPolicy):
+        raise ValueError("a scenario control policy is required")
+    integer_fields = {
+        name: getattr(policy, field)
+        for name, field in _POLICY_FIELDS.items()
+        if field not in {
+            "storage_exhaust_target_id",
+            "storage_exhaust_times",
+            "evening_latest",
+            "tambur_main_off",
+            "small_corridor_main_off",
+        }
+    }
+    if any(type(value) is not int for value in integer_fields.values()):
+        raise ValueError("scenario control numeric values must be integers")
+    if not 10 <= policy.absence_confirmation_seconds <= 60:
+        raise ValueError("absence confirmation must be between 10 and 60 seconds")
+    if not 0 <= policy.presence_rise_seconds <= 60:
+        raise ValueError("presence rise must be between 0 and 60 seconds")
+    if not policy.absence_confirmation_seconds <= policy.storage_absence_seconds <= 3600:
+        raise ValueError("storage absence must include the confirmation interval")
+    if not policy.absence_confirmation_seconds <= policy.shower_absence_seconds <= 3600:
+        raise ValueError("shower absence must include the confirmation interval")
+    if not policy.absence_confirmation_seconds <= policy.toilet_absence_seconds <= 3600:
+        raise ValueError("toilet absence must include the confirmation interval")
+    if not 0 <= policy.manual_release_seconds <= 3600:
+        raise ValueError("manual release is outside its supported range")
+    if not 0 <= policy.manual_off_block_seconds <= 3600:
+        raise ValueError("manual off block is outside its supported range")
+    target_id = policy.storage_exhaust_target_id
+    if target_id is not None and (
+        not isinstance(target_id, str) or _TARGET_ID.fullmatch(target_id) is None
+    ):
+        raise ValueError("storage exhaust target id is invalid")
+    if (
+        not isinstance(policy.storage_exhaust_times, tuple)
+        or not 1 <= len(policy.storage_exhaust_times) <= 8
+        or len(set(policy.storage_exhaust_times)) != len(policy.storage_exhaust_times)
+        or any(_CLOCK_TIME.fullmatch(value) is None for value in policy.storage_exhaust_times)
+    ):
+        raise ValueError("storage exhaust times are invalid")
+    if not 1 <= policy.storage_exhaust_run_seconds <= 7200:
+        raise ValueError("storage exhaust run time is outside its supported range")
+    if not 1 <= policy.small_corridor_lux_threshold <= 100_000:
+        raise ValueError("small corridor lux threshold is outside its supported range")
+    if not 0 <= policy.lux_hysteresis < policy.small_corridor_lux_threshold:
+        raise ValueError("lux hysteresis must be below the activation threshold")
+    if not 0 <= policy.lux_hold_seconds <= 600:
+        raise ValueError("lux hold is outside its supported range")
+    if not (
+        0 <= policy.night_brightness_cap_percent
+        <= policy.evening_brightness_floor_percent
+        <= policy.day_brightness_floor_percent
+        <= 100
+    ):
+        raise ValueError("brightness floors and caps must be ordered")
+    if not 1 <= policy.relative_fade_percent <= 99:
+        raise ValueError("relative fade must be between 1 and 99 percent")
+    if not 1 <= policy.relative_fade_period_seconds <= 3600:
+        raise ValueError("relative fade period is outside its supported range")
+    if not 1 <= policy.brightness_ramp_seconds <= 600:
+        raise ValueError("brightness ramp is outside its supported range")
+    if not 1500 <= policy.evening_color_temperature_kelvin <= 6500:
+        raise ValueError("evening color temperature is outside its supported range")
+    if not 1500 <= policy.neutral_color_temperature_kelvin <= 6500:
+        raise ValueError("neutral color temperature is outside its supported range")
+    if policy.evening_color_temperature_kelvin > policy.neutral_color_temperature_kelvin:
+        raise ValueError("evening temperature must not exceed neutral temperature")
+    for value in (
+        policy.evening_latest,
+        policy.tambur_main_off,
+        policy.small_corridor_main_off,
+    ):
+        if not isinstance(value, str) or _CLOCK_TIME.fullmatch(value) is None:
+            raise ValueError("scenario control schedule time is invalid")
+    if not 1 <= policy.kitchen_cover_cap_percent <= 100:
+        raise ValueError("kitchen cover cap is outside its supported range")
+    if not 1 <= policy.cabinet_cover_cap_percent <= 100:
+        raise ValueError("cabinet cover cap is outside its supported range")
+
+
+def scenario_control_policy_to_payload(
+    policy: ScenarioControlPolicy,
+) -> dict[str, object]:
+    """Serialize one complete policy after validation."""
+
+    validate_scenario_control_policy(policy)
+    payload: dict[str, object] = {}
+    for external, field in _POLICY_FIELDS.items():
+        value = getattr(policy, field)
+        payload[external] = list(value) if isinstance(value, tuple) else value
+    return payload
+
+
+def scenario_control_policy_from_payload(value: object) -> ScenarioControlPolicy:
+    """Parse only the exact versioned policy surface."""
+
+    if not isinstance(value, Mapping) or set(value) != set(_POLICY_FIELDS):
+        raise ValueError("scenario control policy fields are invalid")
+    kwargs = {field: value[external] for external, field in _POLICY_FIELDS.items()}
+    exhaust_times = kwargs["storage_exhaust_times"]
+    if not isinstance(exhaust_times, list) or not all(
+        isinstance(item, str) for item in exhaust_times
+    ):
+        raise ValueError("storage exhaust times are invalid")
+    kwargs["storage_exhaust_times"] = tuple(exhaust_times)
+    policy = ScenarioControlPolicy(**kwargs)
+    validate_scenario_control_policy(policy)
+    return policy
+
+
+def scenario_control_document_to_payload(
+    document: ScenarioControlDocument,
+) -> dict[str, object]:
+    """Serialize the exact durable CAS document."""
+
+    if not isinstance(document, ScenarioControlDocument):
+        raise ValueError("a scenario control document is required")
+    if type(document.policy_revision) is not int or not 0 <= document.policy_revision <= 2**31 - 1:
+        raise ValueError("policy revision is invalid")
+    return {
+        "version": SCENARIO_CONTROL_DOCUMENT_VERSION,
+        "policyRevision": document.policy_revision,
+        "policy": scenario_control_policy_to_payload(document.policy),
+    }
+
+
+def scenario_control_document_from_payload(value: object) -> ScenarioControlDocument:
+    """Parse a complete persisted document without permissive defaults."""
+
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != {"version", "policyRevision", "policy"}
+        or value.get("version") != SCENARIO_CONTROL_DOCUMENT_VERSION
+        or type(value.get("policyRevision")) is not int
+    ):
+        raise ValueError("scenario control document is invalid")
+    document = ScenarioControlDocument(
+        policy_revision=int(value["policyRevision"]),
+        policy=scenario_control_policy_from_payload(value["policy"]),
+    )
+    scenario_control_document_to_payload(document)
+    return document
+
+
+def valid_scenario_control_document_payload(value: object) -> bool:
+    """Return whether the safety store payload is exact and complete."""
+
+    try:
+        scenario_control_document_from_payload(value)
+    except (TypeError, ValueError):
+        return False
+    return True

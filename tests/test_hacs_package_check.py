@@ -109,6 +109,30 @@ class HacsPackageCheckTest(unittest.TestCase):
             findings,
         )
 
+    def test_manifest_requires_the_exact_runtime_dependency_order(self) -> None:
+        manifest = json.loads(file_content(self.files, package.MANIFEST_PATH))
+        for invalid in (
+            ["recorder", "weather"],
+            ["automation", "recorder", "weather", "script"],
+            ["weather", "recorder", "automation"],
+        ):
+            changed = dict(manifest)
+            changed["after_dependencies"] = invalid
+            files = replace_file(
+                self.files,
+                package.MANIFEST_PATH,
+                json.dumps(changed).encode("utf-8"),
+            )
+
+            with self.subTest(after_dependencies=invalid):
+                self.assertIn(
+                    (
+                        f"{package.MANIFEST_PATH}: after_dependencies must be "
+                        "['automation', 'recorder', 'weather']"
+                    ),
+                    package.find_hacs_package_violations(files, self.file_modes),
+                )
+
     def test_clean_ci_environment_must_install_the_test_cryptography_pin(self) -> None:
         workflow = file_content(self.files, WORKFLOW_PATH)
         changed_workflow = replace_file(

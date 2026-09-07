@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import inspect
 import json
 import math
 import os
@@ -61,10 +62,10 @@ _TRUSTED_SYSTEM_SOURCE_HASHES = {
     ),
 }
 _TRUSTED_ADDITIONAL_SYSTEM_SOURCE_HASHES = {
-    "system-toilet-comfort-controller": frozenset({"d46cae51f74459a617aff70b8d056f0bca961968f9d173b1d17b5769b2351579"}),
-    "system-bathroom-exhaust-controller": frozenset({"588864e71c899dd6d57c42f3040393be5793b57ebec243bf609ec407dc92f8ad"}),
-    "system-storage-light-controller": frozenset({"b46671a5f83c5fba9e7dd5fcfbd15f0132d5b5ca68c2291f1817fa3e1f03d4db"}),
-    "system-cabinet-light-controller": frozenset({"d6f7d43bf964a1bc565b905427239d730f57650effd51dfca1b4e2eb7702bc78"}),
+    "system-toilet-comfort-controller": frozenset({"218fa449363cb8d69cf366a670bf207846a7def9846da6fa130fa4157efb279d"}),
+    "system-bathroom-exhaust-controller": frozenset({"2b413c28d18f61f6730a3b31831bb73f98d690cb4d937ed75856f165475ebd74"}),
+    "system-storage-light-controller": frozenset({"3190e744c05403f496d5399ee56c4ff1a199461df0e51040afe5a7244d424fd0"}),
+    "system-cabinet-light-controller": frozenset({"07e08025f24e98dfb67cef2f424a63a161b45b01d67dbe90456aad6055bf34ff"}),
     "system-curtains-privacy-controller": frozenset({"d60c10c32f0f689a7f0fe1a31466d4825454cdec00a67590a10bcfdc44cf54cc"}),
 }
 
@@ -89,8 +90,11 @@ _SYSTEM_PLAN_ENVELOPES = {
         }, "delays": {1800: 1}, "runScenarios": {},
     },
     "system-storage-light-controller": {
-        "actions": {("entity_0ec37ef18b4b39a6", "turn_on"): 1},
-        "delays": {120: 1, 1800: 1}, "runScenarios": {},
+        "actions": {
+            ("entity_0ec37ef18b4b39a6", "turn_on"): 1,
+            ("entity_0ec37ef18b4b39a6", "turn_off"): 1,
+        },
+        "delays": {}, "runScenarios": {},
     },
     "system-cabinet-light-controller": {
         "actions": {
@@ -166,6 +170,25 @@ _SYSTEM_INPUT_ATTRIBUTE_ALLOWLIST = {
             {"brightness", "color_temp_kelvin", "color_temp"}
         ),
     },
+    "system-storage-light-controller": {
+        "entity_0ec37ef18b4b39a6": frozenset(
+            {"brightness", "color_temp_kelvin", "color_temp"}
+        ),
+    },
+    "system-cabinet-light-controller": {
+        "entity_aeaf7c250c68e8c2": frozenset(
+            {"brightness", "color_temp_kelvin", "color_temp"}
+        ),
+    },
+    "system-curtains-privacy-controller": {
+        target_id: frozenset({"current_position"})
+        for target_id in (
+            "entity_8746cfd7f6f7103d",
+            "entity_2da2065add6e2168",
+            "entity_1e0b476b7d082cc0",
+            "entity_9164132c7692d6f5",
+        )
+    },
 }
 _TRACE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _TRACE_REASON = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
@@ -213,6 +236,10 @@ _FORBIDDEN_SOURCE_PATTERNS = (
 RequestAdapter = Callable[
     [str, str, Mapping[str, str], Mapping[str, object] | None],
     Awaitable[tuple[int, object]],
+]
+ControlContextProvider = Callable[
+    [str, str, Mapping[str, object]],
+    Mapping[str, object] | Awaitable[Mapping[str, object]],
 ]
 
 
@@ -349,6 +376,55 @@ def _validated_trigger_context(
             or isinstance(item, float) and math.isfinite(item)
         )
     }
+
+
+def _validated_control_context(value: object) -> dict[str, object]:
+    """Bound one provider-owned policy/state document before JS transport."""
+
+    if not isinstance(value, Mapping) or set(value) != {
+        "policyRevision", "policy", "state"
+    }:
+        raise NodeRedBackendError("server control context is invalid")
+    revision = value.get("policyRevision")
+    if type(revision) is not int or not 0 <= revision <= 2**31 - 1:
+        raise NodeRedBackendError("server control policy revision is invalid")
+
+    def safe(item: object, *, depth: int = 0) -> object:
+        if depth > 4:
+            raise NodeRedBackendError("server control context is too deep")
+        if item is None or isinstance(item, (str, bool)):
+            if isinstance(item, str) and len(item) > 256:
+                raise NodeRedBackendError("server control string is too long")
+            return item
+        if isinstance(item, int) and not isinstance(item, bool):
+            return item
+        if isinstance(item, float) and math.isfinite(item):
+            return item
+        if isinstance(item, Mapping):
+            if len(item) > 64 or any(
+                not isinstance(key, str) or not key or len(key) > 64
+                for key in item
+            ):
+                raise NodeRedBackendError("server control mapping is invalid")
+            return {str(key): safe(child, depth=depth + 1) for key, child in item.items()}
+        if isinstance(item, (list, tuple)):
+            if len(item) > 64:
+                raise NodeRedBackendError("server control list is too long")
+            return [safe(child, depth=depth + 1) for child in item]
+        raise NodeRedBackendError("server control value is invalid")
+
+    policy = safe(value.get("policy"))
+    state = safe(value.get("state"))
+    if not isinstance(policy, dict) or not isinstance(state, dict):
+        raise NodeRedBackendError("server control policy and state are invalid")
+    result = {
+        "policyRevision": revision,
+        "policy": policy,
+        "state": state,
+    }
+    if len(json.dumps(result, separators=(",", ":"), ensure_ascii=False).encode()) > 32_768:
+        raise NodeRedBackendError("server control context is too large")
+    return result
 
 
 def validate_managed_source(
@@ -644,11 +720,13 @@ class NodeRedScenarioBackend:
         hass: HomeAssistant,
         *,
         request_adapter: RequestAdapter | None = None,
+        control_context_provider: ControlContextProvider | None = None,
         supervisor_token: str | None = None,
         addon_slug: str = NODE_RED_ADDON_SLUG,
     ) -> None:
         self._hass = hass
         self._request_adapter = request_adapter
+        self._control_context_provider = control_context_provider
         self._supervisor_token = supervisor_token or os.environ.get("SUPERVISOR_TOKEN", "")
         self._addon_slug = addon_slug
         self._ingress_token: str | None = None
@@ -657,6 +735,31 @@ class NodeRedScenarioBackend:
         self._last_checked_at: int | None = None
         self._last_error = "Node-RED ещё не проверен."
         self._last_prepare_operation: dict[str, object] | None = None
+
+    def set_control_context_provider(
+        self, provider: ControlContextProvider | None
+    ) -> None:
+        """Wire the sole server-owned source of controller policy and state."""
+
+        self._control_context_provider = provider
+
+    async def _async_control_context(
+        self,
+        scenario_id: str,
+        run_id: str,
+        trigger: Mapping[str, object],
+    ) -> dict[str, object]:
+        provider = self._control_context_provider
+        if provider is None:
+            return {
+                "policyRevision": 0,
+                "policy": {},
+                "state": {"ready": False, "transition": "unavailable"},
+            }
+        value = provider(scenario_id, run_id, trigger)
+        if inspect.isawaitable(value):
+            value = await value
+        return _validated_control_context(value)
 
     async def _raw_request(
         self,
@@ -1918,6 +2021,14 @@ class NodeRedScenarioBackend:
             current_hash,
         )
         safe_trigger = _validated_trigger_context(trigger_context, run_id)
+        controls = await self._async_control_context(
+            scenario_id, run_id, safe_trigger
+        )
+        bindings = dict(_SYSTEM_BINDING_ALLOWLIST.get(scenario_id, {}))
+        if scenario_id == "system-storage-light-controller":
+            exhaust_target = controls["policy"].get("storageExhaustTargetId")
+            if isinstance(exhaust_target, str) and exhaust_target:
+                bindings["storageExhaust"] = exhaust_target
         payload = {
             "correlationId": run_id,
             "scenarioId": scenario_id,
@@ -1925,10 +2036,11 @@ class NodeRedScenarioBackend:
             "inputs": self._input_snapshot(scenario_id, definition, catalog),
             # Bindings are server-owned.  Node-RED never receives arbitrary
             # entity IDs from a caller or editor.
-            "bindings": dict(_SYSTEM_BINDING_ALLOWLIST.get(scenario_id, {})),
+            "bindings": bindings,
             "context": {
                 "timestampMs": int(time.time() * 1000),
                 "trigger": safe_trigger,
+                "controls": controls,
             },
         }
         status, body = await self._raw_request(
@@ -1980,7 +2092,9 @@ class NodeRedScenarioBackend:
             }:
                 raise NodeRedBackendError("Node-RED returned a forbidden action type")
             actions.append(action)
-        self._validate_plan_envelope(scenario_id, definition, actions)
+        self._validate_plan_envelope(
+            scenario_id, definition, actions, server_bindings=bindings
+        )
         self._validate_typed_plan(scenario_id, actions, safe_trigger)
         trace = body.get("trace")
         if not isinstance(trace, list) or len(trace) > 64:
@@ -2048,18 +2162,32 @@ class NodeRedScenarioBackend:
 
     @staticmethod
     def _validate_plan_envelope(
-        scenario_id: str, definition: ScenarioDefinition, actions: list[ScenarioAction]
+        scenario_id: str,
+        definition: ScenarioDefinition,
+        actions: list[ScenarioAction],
+        *,
+        server_bindings: Mapping[str, str] | None = None,
     ) -> None:
         if scenario_id not in _SYSTEM_PLAN_ENVELOPES:
             _validate_definition_subsequence(definition, actions)
             return
-        _validate_system_branch(scenario_id, actions)
+        _validate_system_branch(
+            scenario_id, actions, server_bindings=server_bindings
+        )
         envelope = _SYSTEM_PLAN_ENVELOPES[scenario_id]
         counts: dict[tuple[str, object], int] = {}
         for action in actions:
             if action.type is ScenarioActionType.DEVICE_ACTION:
                 key = (str(action.target_id), str(action.action_id))
                 limit = envelope["actions"].get(key)
+                if (
+                    limit is None
+                    and scenario_id == "system-storage-light-controller"
+                    and isinstance(server_bindings, Mapping)
+                    and action.target_id == server_bindings.get("storageExhaust")
+                    and action.action_id in {"turn_on", "turn_off"}
+                ):
+                    limit = 1
                 counts[("action", key)] = counts.get(("action", key), 0) + 1
                 if limit is None or counts[("action", key)] > limit:
                     raise NodeRedBackendError("Node-RED action exceeds the release-trusted envelope")
@@ -2164,7 +2292,12 @@ def _validate_definition_subsequence(
         raise NodeRedBackendError("Node-RED plan is not the exact server-authored definition")
 
 
-def _validate_system_branch(scenario_id: str, actions: list[ScenarioAction]) -> None:
+def _validate_system_branch(
+    scenario_id: str,
+    actions: list[ScenarioAction],
+    *,
+    server_bindings: Mapping[str, str] | None = None,
+) -> None:
     """Validate the ordered, release-authored branches of both controllers."""
 
     def device(action: ScenarioAction, ident: str, target: str, action_id: str, value: object = None) -> bool:
@@ -2180,6 +2313,42 @@ def _validate_system_branch(scenario_id: str, actions: list[ScenarioAction]) -> 
             and action.delay_seconds == seconds and action.target_id is None
             and action.action_id is None and action.value is None and action.message is None
         )
+
+    if scenario_id == "system-storage-light-controller":
+        if not actions:
+            return
+        if len(actions) != 1:
+            raise NodeRedBackendError("Node-RED storage branch exceeds release source")
+        action = actions[0]
+        valid = (
+            device(
+                action,
+                "storage_light_on",
+                "entity_0ec37ef18b4b39a6",
+                "turn_on",
+            )
+            or device(
+                action,
+                "storage_light_off",
+                "entity_0ec37ef18b4b39a6",
+                "turn_off",
+            )
+        )
+        exhaust = (
+            server_bindings.get("storageExhaust")
+            if isinstance(server_bindings, Mapping)
+            else None
+        )
+        if isinstance(exhaust, str):
+            valid = valid or device(
+                action,
+                f"storage_exhaust_{'on' if action.action_id == 'turn_on' else 'off'}",
+                exhaust,
+                str(action.action_id),
+            )
+        if not valid:
+            raise NodeRedBackendError("Node-RED storage branch exceeds release source")
+        return
 
     if scenario_id == "system-tambur-adaptive-controller":
         chandelier = "entity_71859313239a14e4"

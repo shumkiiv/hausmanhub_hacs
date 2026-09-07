@@ -2405,6 +2405,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             self.assertIn("unsafe_canary_control_target", content["options"]["error"])
             self.assertEqual(
                 {
+                    "scenario_controls",
                     "climate_registry",
                     "climate_connection",
                     "climate_migration",
@@ -2412,6 +2413,16 @@ class ReadOnlySkeletonTest(unittest.TestCase):
                     "test_switch",
                 },
                 set(steps["advanced_settings"]["menu_options"]),
+            )
+            self.assertEqual(
+                {"scenario_control_policy_json"},
+                set(steps["scenario_controls"]["data"]),
+            )
+            self.assertIn(
+                "scenario_controls_unavailable", content["options"]["error"]
+            )
+            self.assertIn(
+                "invalid_scenario_controls", content["options"]["error"]
             )
             self.assertEqual(
                 {
