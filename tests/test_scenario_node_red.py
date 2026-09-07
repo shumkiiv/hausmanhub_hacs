@@ -1510,7 +1510,8 @@ async def test_curtains_cross_real_service_async_plan_and_executor_without_deadl
     )
     assert manual["status"] == "completed", manual
     assert len(hass.services.calls) == 4, manual
-    assert manual["confirmed"] is True
+    assert manual["confirmed"] is False
+    assert all(receipt["confirmed"] is False for receipt in manual["receipts"])
     assert {data["position"] for _, _, data in hass.services.calls} == {
         80, 90, 100
     }
@@ -1525,7 +1526,8 @@ async def test_curtains_cross_real_service_async_plan_and_executor_without_deadl
     )
     assert sunrise["status"] == "completed"
     assert len(hass.services.calls) == 8
-    assert sunrise["confirmed"] is True
+    assert sunrise["confirmed"] is False
+    assert all(receipt["confirmed"] is False for receipt in sunrise["receipts"])
     before_duplicate = list(hass.services.calls)
     duplicate = await protection.async_run_trusted_sunrise(
         2_000, service.async_run_scenario

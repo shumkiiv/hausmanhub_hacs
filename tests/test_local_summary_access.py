@@ -5636,7 +5636,11 @@ class LocalSummaryAccessTest(unittest.TestCase):
 
         self.assertEqual(200, first.status)
         self.assertEqual(100, first.payload["actionValue"])
-        self.assertEqual(80, first.payload["readBack"]["observedValue"])
+        self.assertFalse(first.payload["confirmed"])
+        self.assertEqual(
+            "curtain_position_provenance_unverified", first.payload["reason"]
+        )
+        self.assertNotIn("observedValue", first.payload["readBack"])
         self.assertLessEqual(
             first.payload["commandSentAt"],
             first.payload["readBack"]["observedAt"],

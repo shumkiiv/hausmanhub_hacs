@@ -456,7 +456,8 @@ async def test_executor_limited_open_dispatches_position_instead_of_raw_open() -
     )
 
     assert receipt["actionId"] == "open_cover"
-    assert receipt["confirmed"] is True
+    assert receipt["confirmed"] is False
+    assert receipt["reason"] == "curtain_position_provenance_unverified"
     assert "observedValue" not in receipt["readBack"]
     hass.services.async_call.assert_awaited_once_with(
         "cover",
@@ -467,9 +468,9 @@ async def test_executor_limited_open_dispatches_position_instead_of_raw_open() -
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("actual", "confirmed"), [(80, True), (79, False)])
+@pytest.mark.parametrize("actual", [80, 79])
 async def test_executor_reports_actual_position_not_requested(
-    actual: int, confirmed: bool
+    actual: int,
 ) -> None:
     executor, hass, _state_value, _devices = _executor_for_target(
         observed_position=actual,
@@ -482,14 +483,12 @@ async def test_executor_reports_actual_position_not_requested(
         KITCHEN_CURTAIN_TARGET, "set_position", 100
     )
 
-    assert receipt["confirmed"] is confirmed
-    assert receipt["readBack"]["observedValue"] == actual
-    assert receipt["readBack"]["evidenceRevision"]
-    assert receipt["readBack"]["evidenceSequence"] == receipt["readBack"][
-        "observedAt"
-    ]
+    assert receipt["confirmed"] is False
+    assert "observedValue" not in receipt["readBack"]
+    assert "evidenceRevision" not in receipt["readBack"]
+    assert "evidenceSequence" not in receipt["readBack"]
     assert receipt["appliedAt"] <= receipt["readBack"]["observedAt"]
-    assert receipt["reason"] == "curtain_position_limited"
+    assert receipt["reason"] == "curtain_position_provenance_unverified"
     hass.services.async_call.assert_awaited_once()
 
 
@@ -507,8 +506,8 @@ async def test_same_position_with_only_new_timestamp_does_not_confirm_movement()
     )
 
     assert receipt["confirmed"] is False
-    assert receipt["readBack"]["observedValue"] == 0
-    assert receipt["readBack"]["isNewEvidence"] is True
+    assert "observedValue" not in receipt["readBack"]
+    assert receipt["readBack"]["isNewEvidence"] is False
     hass.services.async_call.assert_awaited_once()
 
 
@@ -529,8 +528,8 @@ async def test_new_position_attribute_confirms_with_unchanged_old_last_changed()
 
     assert state.state == "open"
     assert state.last_changed == old_last_changed
-    assert receipt["confirmed"] is True
-    assert receipt["readBack"]["observedValue"] == 80
+    assert receipt["confirmed"] is False
+    assert "observedValue" not in receipt["readBack"]
     hass.services.async_call.assert_awaited_once()
 
 
@@ -621,7 +620,8 @@ async def test_default_policy_still_allows_safe_kitchen_close_and_stop() -> None
         KITCHEN_CURTAIN_TARGET, "set_position", 0
     )
 
-    assert closed["confirmed"] is True
+    assert closed["confirmed"] is False
+    assert closed["reason"] == "curtain_position_provenance_unverified"
     closing_hass.services.async_call.assert_awaited_once_with(
         "cover",
         "set_cover_position",
@@ -636,6 +636,8 @@ async def test_default_policy_still_allows_safe_kitchen_close_and_stop() -> None
         KITCHEN_CURTAIN_TARGET, "stop_cover"
     )
     assert stopped["accepted"] is True
+    assert stopped["confirmed"] is False
+    assert stopped["reason"] == "curtain_position_provenance_unverified"
     stopping_hass.services.async_call.assert_awaited_once_with(
         "cover", "stop_cover", {"entity_id": "cover.test"}, blocking=True
     )
@@ -652,9 +654,9 @@ async def test_kitchen_numeric_zero_with_unknown_position_uses_position_readback
         KITCHEN_CURTAIN_TARGET, "set_position", 0
     )
 
-    assert receipt["confirmed"] is True
-    assert receipt["readBack"]["observedValue"] == 0
-    assert receipt["readBack"]["isNewEvidence"] is True
+    assert receipt["confirmed"] is False
+    assert "observedValue" not in receipt["readBack"]
+    assert receipt["readBack"]["isNewEvidence"] is False
     hass.services.async_call.assert_awaited_once_with(
         "cover",
         "set_cover_position",
@@ -736,7 +738,8 @@ async def test_office_close_above_guard_remains_allowed_without_scale_grant() ->
         OFFICE_CURTAIN_TARGET, "close_cover"
     )
 
-    assert receipt["confirmed"] is True
+    assert receipt["confirmed"] is False
+    assert receipt["reason"] == "curtain_position_provenance_unverified"
     hass.services.async_call.assert_awaited_once_with(
         "cover", "close_cover", {"entity_id": "cover.test"}, blocking=True
     )
@@ -754,7 +757,8 @@ async def test_non_office_close_is_not_blocked_by_missing_position() -> None:
         LIVING_CURTAIN_TARGET, "close_cover"
     )
 
-    assert receipt["confirmed"] is True
+    assert receipt["confirmed"] is False
+    assert receipt["reason"] == "curtain_position_provenance_unverified"
     hass.services.async_call.assert_awaited_once_with(
         "cover", "close_cover", {"entity_id": "cover.test"}, blocking=True
     )
@@ -775,8 +779,8 @@ async def test_office_safe_opening_from_zero_is_not_treated_as_target_twenty() -
         OFFICE_CURTAIN_TARGET, "set_position", 100
     )
 
-    assert receipt["confirmed"] is True
-    assert receipt["readBack"]["observedValue"] == 90
+    assert receipt["confirmed"] is False
+    assert "observedValue" not in receipt["readBack"]
     hass.services.async_call.assert_awaited_once_with(
         "cover",
         "set_cover_position",
@@ -1155,7 +1159,8 @@ async def test_full_core_open_keeps_raw_service() -> None:
         LIVING_CURTAIN_TARGET, "open_cover"
     )
 
-    assert receipt["confirmed"] is True
+    assert receipt["confirmed"] is False
+    assert receipt["reason"] == "curtain_position_provenance_unverified"
     hass.services.async_call.assert_awaited_once_with(
         "cover", "open_cover", {"entity_id": "cover.test"}, blocking=True
     )
@@ -1220,9 +1225,12 @@ async def test_regular_scenario_uses_limited_dispatch_and_position_readback() ->
         definition, "curtain-run-1", scenario_id="curtain-regular"
     )
 
-    assert result["receipts"][0]["confirmed"] is True
+    assert result["receipts"][0]["confirmed"] is False
     assert result["receipts"][0]["service"] == "set_cover_position"
-    assert result["receipts"][0]["read_back"]["observedValue"] == 80
+    assert "observedValue" not in result["receipts"][0]["read_back"]
+    assert result["receipts"][0]["reason"] == (
+        "curtain_position_provenance_unverified"
+    )
     hass.services.async_call.assert_awaited_once()
 
 
@@ -1285,8 +1293,8 @@ async def test_full_core_no_op_sends_nothing_and_is_not_new_confirmation() -> No
         idempotent_actions=True,
     )
 
-    assert receipt["skipped"] is True
+    assert "skipped" not in receipt
     assert receipt["confirmed"] is False
-    assert receipt["reason"] == "already_in_target_state"
-    assert receipt["readBack"]["attempted"] is False
-    hass.services.async_call.assert_not_awaited()
+    assert receipt["reason"] == "curtain_position_provenance_unverified"
+    assert receipt["readBack"]["attempted"] is True
+    hass.services.async_call.assert_awaited_once()

@@ -78,6 +78,7 @@ async def coordinator(store=None, *, clock=None, sunrise=10_000):
 
 
 async def confirmed_auto_close(value, table, *, target=LIVING_CURTAIN_TARGET):
+    source_hash = "confirmed-auto-close-source"
     decision = await value.async_before_action(
         target_id=target,
         entity_id=table[target].entity_id,
@@ -88,8 +89,22 @@ async def confirmed_auto_close(value, table, *, target=LIVING_CURTAIN_TARGET):
         automatic=True,
         dry_run=False,
         receipt_id="auto-close-1",
+        source_hash=source_hash,
     )
     assert decision.allowed
+    dispatch = await value.async_validate_before_dispatch(
+        target_id=target,
+        entity_id=table[target].entity_id,
+        action_id="set_position",
+        requested=0,
+        applied=0,
+        current_position=50,
+        automatic=True,
+        token=decision.token,
+        receipt_id="auto-close-1",
+        source_hash=source_hash,
+    )
+    assert dispatch.allowed
     await value.async_note_result(
         target_id=target,
         entity_id=table[target].entity_id,
@@ -100,18 +115,17 @@ async def confirmed_auto_close(value, table, *, target=LIVING_CURTAIN_TARGET):
         automatic=True,
         dry_run=False,
         receipt_id="auto-close-1",
-        protection_generation=decision.token,
+        protection_generation=dispatch.token,
         confirmed=True,
         evidence_revision="state-close-1",
+        physical_result_proven=True,
     )
 
 
 @pytest.mark.asyncio
 async def test_stale_automatic_close_generation_is_rejected_and_late_receipt_is_ignored() -> None:
     value, table, _clock = await coordinator()
-    await confirmed_auto_close(value, table)
     record_before = value.payload["targets"][LIVING_CURTAIN_TARGET]
-    old_receipt = record_before["confirmedAutomaticClose"]
     automatic = await value.async_before_action(
         target_id=LIVING_CURTAIN_TARGET,
         entity_id=table[LIVING_CURTAIN_TARGET].entity_id,
@@ -143,6 +157,7 @@ async def test_stale_automatic_close_generation_is_rejected_and_late_receipt_is_
         current_position=50,
         automatic=True,
         token=automatic.token,
+        receipt_id="late-auto-close",
     )
     assert manual.allowed
     assert not rejected.allowed
@@ -163,8 +178,9 @@ async def test_stale_automatic_close_generation_is_rejected_and_late_receipt_is_
         evidence_revision="late-close-state",
     )
     record_after = value.payload["targets"][LIVING_CURTAIN_TARGET]
-    assert record_after["confirmedAutomaticClose"] == old_receipt
-    assert record_after["manualOpenEvidence"]["receiptId"] == "racing-manual-open"
+    assert record_after["generation"] == record_before["generation"] + 1
+    assert record_after["automaticCloseIntent"] is None
+    assert record_after["confirmedAutomaticClose"] is None
 
 
 @pytest.mark.asyncio
@@ -221,12 +237,12 @@ async def test_unknown_release_boundary_is_durable_and_never_guessed_after_resta
     assert not blocked.allowed
     assert result["status"] == "completed"
     assert calls == 1
-    assert observed["targets"][LIVING_CURTAIN_TARGET]["morningOpenAllowed"] is False
-    assert observed["targets"][KITCHEN_CURTAIN_TARGET]["morningOpenAllowed"] is False
+    assert observed["targets"][LIVING_CURTAIN_TARGET]["morningOpenAllowed"] is True
+    assert observed["targets"][KITCHEN_CURTAIN_TARGET]["morningOpenAllowed"] is True
     assert observed["targets"][CURTAIN_TARGET_IDS[2]]["morningOpenAllowed"] is True
     assert observed["targets"][CURTAIN_TARGET_IDS[3]]["morningOpenAllowed"] is True
-    assert restarted.payload["targets"][LIVING_CURTAIN_TARGET]["latchedAtMs"] is not None
-    assert restarted.payload["targets"][KITCHEN_CURTAIN_TARGET]["latchedAtMs"] is not None
+    assert restarted.payload["targets"][LIVING_CURTAIN_TARGET]["latchedAtMs"] is None
+    assert restarted.payload["targets"][KITCHEN_CURTAIN_TARGET]["latchedAtMs"] is None
 
 
 @pytest.mark.asyncio
@@ -441,6 +457,39 @@ def test_payload_validator_rejects_identity_and_partial_target_sets() -> None:
     assert not valid_curtain_protection_payload({"version": 1, "targets": table})
 
 
+@pytest.mark.asyncio
+async def test_v1_confirmed_readback_migrates_to_unconfirmed_intent() -> None:
+    table = {
+        target: {
+            "targetId": target,
+            "entityId": f"cover.{index}",
+            "generation": 3,
+            "confirmedAutomaticClose": (
+                {
+                    "receiptId": "legacy-close",
+                    "evidenceRevision": "ha-readback",
+                    "confirmedAtMs": 900,
+                }
+                if target == LIVING_CURTAIN_TARGET
+                else None
+            ),
+            "manualOpenEvidence": None,
+            "latchedAtMs": None,
+            "releaseSunriseAtMs": None,
+            "lastProcessedSunriseMs": None,
+        }
+        for index, target in enumerate(CURTAIN_TARGET_IDS)
+    }
+    store = MemoryStore({"version": 1, "targets": table})
+    value, _devices, _clock = await coordinator(store)
+
+    record = value.payload["targets"][LIVING_CURTAIN_TARGET]
+    assert store.payload["version"] == 2
+    assert record["confirmedAutomaticClose"] is None
+    assert record["automaticCloseIntent"]["operationId"] == "legacy-close"
+    assert record["automaticCloseIntent"]["phase"] == "unconfirmed"
+
+
 def test_calibration_grant_is_exact_expiring_revocable_and_single_use() -> None:
     clock = [1_000]
     authority = CurtainCalibrationAuthority(now_ms=lambda: clock[0])
@@ -492,7 +541,7 @@ def test_calibration_grant_is_exact_expiring_revocable_and_single_use() -> None:
 
 
 @pytest.mark.asyncio
-async def test_executor_latches_explicit_manual_no_op_after_confirmed_automatic_close() -> None:
+async def test_executor_latches_explicit_manual_echo_after_unconfirmed_automatic_close() -> None:
     before = datetime.now(timezone.utc) - timedelta(seconds=1)
     state = SimpleNamespace(
         state="open", attributes={"current_position": 50}, last_updated=before
@@ -573,7 +622,7 @@ async def test_executor_latches_explicit_manual_no_op_after_confirmed_automatic_
         scenario_id="curtain-test",
         trigger_context={"source": "schedule", "trigger_id": "sunset"},
     )
-    assert closed["confirmed"] is True
+    assert closed["confirmed"] is False
 
     state.state = "open"
     state.attributes = {"current_position": 100}
@@ -585,7 +634,8 @@ async def test_executor_latches_explicit_manual_no_op_after_confirmed_automatic_
         request_id="manual-no-op",
         idempotent_actions=True,
     )
-    assert manual["skipped"] is True
+    assert manual["confirmed"] is False
+    assert manual["reason"] == "curtain_position_provenance_unverified"
     assert protection.payload["targets"][LIVING_CURTAIN_TARGET]["latchedAtMs"] == 1_000
 
     state.attributes = {"current_position": 50}
@@ -596,7 +646,7 @@ async def test_executor_latches_explicit_manual_no_op_after_confirmed_automatic_
         trigger_context={"source": "schedule", "trigger_id": "sunset"},
     )
     assert blocked["receipts"][0]["reason"] == "curtain_manual_open_latched"
-    assert service.await_count == 1
+    assert service.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -650,9 +700,6 @@ async def test_executor_revalidates_latch_generation_after_dispatch_barrier() ->
         now_ms=lambda: 1_000,
     )
     await protection.async_load()
-    await confirmed_auto_close(
-        protection, devices_by_target, target=KITCHEN_CURTAIN_TARGET
-    )
     executor = ScenarioExecutor(
         hass,
         catalog,

@@ -354,6 +354,7 @@ def full_action_receipt(
         if (
             target_type == "cover"
             and action_id == "set_position"
+            and confirmed
             and "observedValue" in read_back
         ):
             normalized_read_back["observedValue"] = read_back["observedValue"]

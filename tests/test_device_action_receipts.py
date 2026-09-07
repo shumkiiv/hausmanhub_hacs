@@ -159,7 +159,10 @@ def test_limited_cover_receipt_keeps_requested_and_reports_actual(
     )
 
     assert receipt["actionValue"] == 100
-    assert receipt["readBack"]["observedValue"] == actual
+    if confirmed:
+        assert receipt["readBack"]["observedValue"] == actual
+    else:
+        assert "observedValue" not in receipt["readBack"]
     assert receipt["confirmed"] is confirmed
     _validator("v1/device-action-receipt.schema.json", "full").validate(receipt)
 
@@ -202,6 +205,50 @@ def test_limited_open_receipt_has_no_numeric_fields() -> None:
     assert "actionValue" not in receipt
     assert "observedValue" not in receipt["readBack"]
     assert receipt["reason"] == "curtain_position_limited"
+    _validator("v1/device-action-receipt.schema.json", "full").validate(receipt)
+
+
+def test_unverified_curtain_full_receipt_keeps_command_but_hides_echo_value() -> None:
+    receipt = full_action_receipt(
+        payload={
+            "targetId": "entity_9164132c7692d6f5",
+            "actionId": "set_position",
+            "value": 100,
+        },
+        result={
+            "correlationId": "curtain.optimistic.1",
+            "requestId": "curtain.optimistic.request.1",
+            "accepted": True,
+            "confirmed": False,
+            "status": "accepted",
+            "message": "Команда передана. Физическое положение не подтверждено.",
+            "reason": "curtain_position_provenance_unverified",
+            "appliedAt": 1_788_000_000_000,
+            "confirmationWindowMs": 1000,
+            "readBack": {
+                "attempted": True,
+                "matched": False,
+                "observedAt": 1_788_000_000_100,
+                "observedState": "open",
+                "observedValue": 90,
+                "attempts": 1,
+                "isNewEvidence": True,
+            },
+        },
+        target_type="cover",
+        state=SimpleNamespace(state="open", attributes={"current_position": 90}),
+        allowed_actions=("open_cover", "set_position"),
+        pre_command_evidence={},
+        decision_at=1_788_000_000_000,
+    )
+
+    assert receipt["decision"] == "executed"
+    assert receipt["commandSent"] is True
+    assert receipt["accepted"] is True
+    assert receipt["confirmed"] is False
+    assert receipt["reason"] == "curtain_position_provenance_unverified"
+    assert receipt["actionValue"] == 100
+    assert "observedValue" not in receipt["readBack"]
     _validator("v1/device-action-receipt.schema.json", "full").validate(receipt)
 
 

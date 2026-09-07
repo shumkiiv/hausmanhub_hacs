@@ -22,6 +22,15 @@ KITCHEN_CURTAIN_TARGET = "entity_2da2065add6e2168"
 ALICE_CURTAIN_TARGET = "entity_1e0b476b7d082cc0"
 OFFICE_CURTAIN_TARGET = "entity_9164132c7692d6f5"
 
+_CURTAIN_ENTITY_IDS = MappingProxyType(
+    {
+        LIVING_CURTAIN_TARGET: "cover.shtory_gostinaia",
+        KITCHEN_CURTAIN_TARGET: "cover.0xa4c1385a4bcce3d6",
+        ALICE_CURTAIN_TARGET: "cover.0xa4c138b23cb850b4",
+        OFFICE_CURTAIN_TARGET: "cover.0xa4c1381b3fb1c985",
+    }
+)
+
 _CURTAIN_TARGETS = frozenset(
     {
         LIVING_CURTAIN_TARGET,
@@ -41,6 +50,8 @@ _ACTION_SERVICES = {
 }
 _UNAVAILABLE_STATES = frozenset({"unknown", "unavailable"})
 _STOP_POLICY_REVISION = "curtain-safe-stop.v1"
+CURTAIN_POSITION_PROVENANCE_UNVERIFIED = "unverified_optimistic"
+CURTAIN_POSITION_PROVENANCE_VERIFIED = "verified_device_report"
 
 
 class CurtainPolicyError(ValueError):
@@ -63,6 +74,59 @@ class CurtainTargetPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class CurtainPositionEvidence:
+    """Exact provenance snapshot bound into a dispatch plan."""
+
+    provenance: str
+    identity_digest: str
+
+
+class CurtainPositionEvidencePolicy:
+    """Server-owned provenance for exact curtain target/entity identities."""
+
+    def __init__(
+        self,
+        *,
+        verified_device_reports: frozenset[tuple[str, str]] = frozenset(),
+    ) -> None:
+        exact_identities = frozenset(_CURTAIN_ENTITY_IDS.items())
+        if not verified_device_reports.issubset(exact_identities):
+            raise ValueError("verified curtain evidence identity is invalid")
+        self._verified_device_reports = verified_device_reports
+
+    @classmethod
+    def with_verified_device_reports(
+        cls, identities: set[tuple[str, str]] | frozenset[tuple[str, str]]
+    ) -> CurtainPositionEvidencePolicy:
+        """Create an explicit synthetic adapter for provenance tests."""
+
+        return cls(verified_device_reports=frozenset(identities))
+
+    def snapshot(self, target_id: str, entity_id: str) -> CurtainPositionEvidence:
+        """Bind provenance to the exact current target/entity pair."""
+
+        identity_digest = hashlib.sha256(
+            json.dumps(
+                [target_id, entity_id],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        verified = (
+            _CURTAIN_ENTITY_IDS.get(target_id) == entity_id
+            and (target_id, entity_id) in self._verified_device_reports
+        )
+        return CurtainPositionEvidence(
+            provenance=(
+                CURTAIN_POSITION_PROVENANCE_VERIFIED
+                if verified
+                else CURTAIN_POSITION_PROVENANCE_UNVERIFIED
+            ),
+            identity_digest=identity_digest,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class CurtainDispatchPlan:
     """Immutable separation between public intent and physical dispatch."""
 
@@ -81,6 +145,8 @@ class CurtainDispatchPlan:
     limited: bool
     pre_command_evidence_revision: str | None
     pre_command_position: int | None
+    position_provenance: str
+    position_identity_digest: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,6 +224,7 @@ class CurtainCommandPolicy:
         *,
         confirmed_scale_targets: frozenset[str] = frozenset(),
         scale_authorization_provider: Callable[[str], object] | None = None,
+        position_evidence_policy: CurtainPositionEvidencePolicy | None = None,
     ) -> None:
         unknown = set(confirmed_scale_targets).difference(_SCALE_DEPENDENT_TARGETS)
         if unknown:
@@ -169,6 +236,14 @@ class CurtainCommandPolicy:
         )
         self._confirmed_scale_targets = confirmed_scale_targets
         self._scale_authorization_provider = scale_authorization_provider
+        if (
+            position_evidence_policy is not None
+            and not isinstance(position_evidence_policy, CurtainPositionEvidencePolicy)
+        ):
+            raise TypeError("curtain position evidence policy is invalid")
+        self._position_evidence_policy = (
+            position_evidence_policy or CurtainPositionEvidencePolicy()
+        )
 
     @classmethod
     def with_confirmed_scales(
@@ -176,6 +251,7 @@ class CurtainCommandPolicy:
         confirmed_targets: set[str] | frozenset[str],
         *,
         control_document_provider: Callable[[], ScenarioControlDocument] | None = None,
+        position_evidence_policy: CurtainPositionEvidencePolicy | None = None,
     ) -> CurtainCommandPolicy:
         """Create a server-side policy for a physically confirmed test/setup."""
 
@@ -185,6 +261,7 @@ class CurtainCommandPolicy:
         return cls(
             control_document_provider,
             confirmed_scale_targets=frozenset(confirmed_targets),
+            position_evidence_policy=position_evidence_policy,
         )
 
     @property
@@ -237,6 +314,9 @@ class CurtainCommandPolicy:
         if action_id == "stop_cover":
             if requested is not None:
                 raise CurtainPolicyError("curtain_action_does_not_accept_value")
+            position_evidence = self._position_evidence_policy.snapshot(
+                target_id, entity_id
+            )
             return CurtainDispatchPlan(
                 target_id=target_id,
                 entity_id=entity_id,
@@ -253,6 +333,8 @@ class CurtainCommandPolicy:
                 limited=False,
                 pre_command_evidence_revision=_state_revision(current_state),
                 pre_command_position=trusted_curtain_position(current_state),
+                position_provenance=position_evidence.provenance,
+                position_identity_digest=position_evidence.identity_digest,
             )
 
         targets, policy_revision = self._snapshot()
@@ -318,6 +400,9 @@ class CurtainCommandPolicy:
             confirmation_value = applied
             limited = applied != normalized
 
+        position_evidence = self._position_evidence_policy.snapshot(
+            target_id, entity_id
+        )
         return CurtainDispatchPlan(
             target_id=target_id,
             entity_id=entity_id,
@@ -334,6 +419,8 @@ class CurtainCommandPolicy:
             limited=limited,
             pre_command_evidence_revision=_state_revision(current_state),
             pre_command_position=position,
+            position_provenance=position_evidence.provenance,
+            position_identity_digest=position_evidence.identity_digest,
         )
 
     def plan_calibration(
@@ -371,6 +458,9 @@ class CurtainCommandPolicy:
             or getattr(action, "service", None) != service
         ):
             raise CurtainPolicyError("curtain_dispatch_descriptor_invalid")
+        position_evidence = self._position_evidence_policy.snapshot(
+            str(target_id), entity_id
+        )
         return CurtainDispatchPlan(
             target_id=str(target_id),
             entity_id=entity_id,
@@ -387,6 +477,8 @@ class CurtainCommandPolicy:
             limited=False,
             pre_command_evidence_revision=_state_revision(current_state),
             pre_command_position=trusted_curtain_position(current_state),
+            position_provenance=position_evidence.provenance,
+            position_identity_digest=position_evidence.identity_digest,
         )
 
     def _snapshot(

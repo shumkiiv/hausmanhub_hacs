@@ -634,7 +634,10 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             "set_position",
             100,
         )
-        self.assertTrue(receipt["confirmed"])
+        self.assertFalse(receipt["confirmed"])
+        self.assertEqual(
+            "curtain_position_provenance_unverified", receipt["reason"]
+        )
         runtime_hass.services.async_call.assert_awaited_once_with(
             "cover",
             "set_cover_position",

@@ -547,7 +547,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .application.scenario_command_context import (
         ScenarioCommandContextRegistry,
     )
-    from .application.curtain_command_policy import CurtainCommandPolicy
+    from .application.curtain_command_policy import (
+        CurtainCommandPolicy,
+        CurtainPositionEvidencePolicy,
+    )
     from .application.curtain_protection import CurtainProtectionCoordinator
     from .curtain_protection_storage import HomeAssistantCurtainProtectionStore
 
@@ -598,6 +601,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             scale_authorization_provider=(
                 curtain_scale_confirmation.authorization_snapshot
             ),
+            position_evidence_policy=CurtainPositionEvidencePolicy(),
         ),
         curtain_protection=curtain_protection,
     )

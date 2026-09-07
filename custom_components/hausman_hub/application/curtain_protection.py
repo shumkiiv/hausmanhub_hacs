@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
+import json
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
@@ -24,6 +26,8 @@ CURTAIN_TARGET_IDS = (
     ALICE_CURTAIN_TARGET,
     OFFICE_CURTAIN_TARGET,
 )
+_PROTECTION_VERSION = 2
+_INTENT_PHASES = frozenset({"reserved", "dispatch_intent", "unconfirmed"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,7 +44,10 @@ def _empty_record(target_id: str, entity_id: str) -> dict[str, object]:
         "targetId": target_id,
         "entityId": entity_id,
         "generation": 0,
+        "cycleId": "curtain-cycle.initial",
+        "automaticCloseIntent": None,
         "confirmedAutomaticClose": None,
+        "morningOpenIntent": None,
         "manualOpenEvidence": None,
         "latchedAtMs": None,
         "releaseSunriseAtMs": None,
@@ -53,15 +60,20 @@ def valid_curtain_protection_payload(value: object) -> bool:
 
     if not isinstance(value, Mapping) or set(value) != {"version", "targets"}:
         return False
-    if value.get("version") != 1 or not isinstance(value.get("targets"), Mapping):
+    if not isinstance(value.get("targets"), Mapping):
+        return False
+    if value.get("version") == 1:
+        return _valid_v1_targets(value["targets"])
+    if value.get("version") != _PROTECTION_VERSION:
         return False
     targets = value["targets"]
     if set(targets) != set(CURTAIN_TARGET_IDS):
         return False
     expected = {
-        "targetId", "entityId", "generation", "confirmedAutomaticClose",
-        "manualOpenEvidence", "latchedAtMs", "releaseSunriseAtMs",
-        "lastProcessedSunriseMs",
+        "targetId", "entityId", "generation", "cycleId",
+        "automaticCloseIntent", "confirmedAutomaticClose",
+        "morningOpenIntent", "manualOpenEvidence", "latchedAtMs",
+        "releaseSunriseAtMs", "lastProcessedSunriseMs",
     }
     for target_id, record in targets.items():
         if (
@@ -72,6 +84,7 @@ def valid_curtain_protection_payload(value: object) -> bool:
             or not record.get("entityId")
             or type(record.get("generation")) is not int
             or not 0 <= int(record["generation"]) <= 2**31 - 1
+            or not _valid_text(record.get("cycleId"))
         ):
             return False
         for key in ("latchedAtMs", "releaseSunriseAtMs", "lastProcessedSunriseMs"):
@@ -79,8 +92,21 @@ def valid_curtain_protection_payload(value: object) -> bool:
             if item is not None and (type(item) is not int or not 0 <= item <= 2**63 - 1):
                 return False
         close = record.get("confirmedAutomaticClose")
-        if close is not None and not _valid_evidence(close, {"receiptId", "evidenceRevision", "confirmedAtMs"}):
+        if close is not None and not (
+            _valid_evidence(
+                close,
+                {
+                    "receiptId", "evidenceRevision", "confirmedAtMs",
+                    "positionProvenance",
+                },
+            )
+            and close.get("positionProvenance") == "verified_device_report"
+        ):
             return False
+        for key in ("automaticCloseIntent", "morningOpenIntent"):
+            intent = record.get(key)
+            if intent is not None and not _valid_intent(intent):
+                return False
         manual = record.get("manualOpenEvidence")
         if manual is not None and (
             not _valid_evidence(manual, {"receiptId", "evidenceRevision", "recordedAtMs", "outcome"})
@@ -93,6 +119,74 @@ def valid_curtain_protection_payload(value: object) -> bool:
     return True
 
 
+def _valid_v1_targets(targets: object) -> bool:
+    """Accept the exact legacy image only long enough to migrate it safely."""
+
+    if not isinstance(targets, Mapping) or set(targets) != set(CURTAIN_TARGET_IDS):
+        return False
+    expected = {
+        "targetId", "entityId", "generation", "confirmedAutomaticClose",
+        "manualOpenEvidence", "latchedAtMs", "releaseSunriseAtMs",
+        "lastProcessedSunriseMs",
+    }
+    for target_id, record in targets.items():
+        if (
+            not isinstance(record, Mapping)
+            or set(record) != expected
+            or record.get("targetId") != target_id
+            or not _valid_text(record.get("entityId"))
+            or type(record.get("generation")) is not int
+            or not 0 <= int(record["generation"]) <= 2**31 - 1
+        ):
+            return False
+        for key in ("latchedAtMs", "releaseSunriseAtMs", "lastProcessedSunriseMs"):
+            item = record.get(key)
+            if item is not None and (
+                type(item) is not int or not 0 <= item <= 2**63 - 1
+            ):
+                return False
+        close = record.get("confirmedAutomaticClose")
+        if close is not None and not _valid_evidence(
+            close, {"receiptId", "evidenceRevision", "confirmedAtMs"}
+        ):
+            return False
+        manual = record.get("manualOpenEvidence")
+        if manual is not None and (
+            not _valid_evidence(
+                manual,
+                {"receiptId", "evidenceRevision", "recordedAtMs", "outcome"},
+            )
+            or manual.get("outcome")
+            not in {"pending", "confirmed", "unknown", "external"}
+        ):
+            return False
+        if (record.get("latchedAtMs") is not None) != (manual is not None):
+            return False
+    return True
+
+
+def _valid_intent(value: object) -> bool:
+    return bool(
+        isinstance(value, Mapping)
+        and set(value)
+        == {
+            "operationId", "identityDigest", "sourceHash", "phase",
+            "recordedAtMs",
+        }
+        and all(
+            _valid_text(value.get(key))
+            for key in ("operationId", "identityDigest", "sourceHash")
+        )
+        and value.get("phase") in _INTENT_PHASES
+        and type(value.get("recordedAtMs")) is int
+        and 0 <= value["recordedAtMs"] <= 2**63 - 1
+    )
+
+
+def _valid_text(value: object) -> bool:
+    return isinstance(value, str) and bool(value) and len(value) <= 256
+
+
 def _valid_evidence(value: object, keys: set[str]) -> bool:
     if not isinstance(value, Mapping) or set(value) != keys:
         return False
@@ -103,6 +197,62 @@ def _valid_evidence(value: object, keys: set[str]) -> bool:
         elif not isinstance(item, str) or not item or len(item) > 256:
             return False
     return True
+
+
+def _identity_digest(target_id: str, entity_id: str) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            [target_id, entity_id],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _source_hash(value: str | None) -> str:
+    if _valid_text(value):
+        return str(value)
+    return hashlib.sha256(b"curtain-source.unspecified").hexdigest()
+
+
+def _intent_token(generation: int, intent: Mapping[str, object]) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            [
+                generation,
+                intent.get("operationId"),
+                intent.get("identityDigest"),
+                intent.get("sourceHash"),
+                intent.get("phase"),
+            ],
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _preflight_token(
+    generation: int,
+    cycle_id: object,
+    target_id: str,
+    entity_id: str,
+    receipt_id: str,
+    source_hash: str | None,
+) -> str:
+    """Bind an in-memory preflight to the durable state it observed."""
+
+    return hashlib.sha256(
+        json.dumps(
+            [
+                generation,
+                cycle_id,
+                target_id,
+                entity_id,
+                receipt_id,
+                _source_hash(source_hash),
+            ],
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 class CurtainProtectionCoordinator:
@@ -170,7 +320,7 @@ class CurtainProtectionCoordinator:
 
     @property
     def payload(self) -> dict[str, object]:
-        return {"version": 1, "targets": copy.deepcopy(self._targets)}
+        return {"version": _PROTECTION_VERSION, "targets": copy.deepcopy(self._targets)}
 
     async def async_load(self) -> None:
         """Load protection without making safe manual commands unavailable."""
@@ -192,11 +342,66 @@ class CurtainProtectionCoordinator:
             self._initialize_empty()
             self._mark_unhealthy("curtain_protection_store_invalid")
             return
-        self._targets = copy.deepcopy(dict(payload["targets"]))
+        migrated = self._migrate_payload(payload)
+        self._targets = copy.deepcopy(dict(migrated["targets"]))
         if getattr(self._store, "recovered_previous", False):
             self._mark_unhealthy("curtain_protection_store_recovered_previous")
         if not self._identities_match():
             self._mark_unhealthy("curtain_protection_identity_changed")
+        if payload.get("version") == 1 and self._healthy:
+            try:
+                await self._save()
+            except Exception:  # noqa: BLE001
+                self._mark_unhealthy("curtain_protection_store_write_failed")
+
+    def _migrate_payload(self, payload: Mapping[str, object]) -> dict[str, object]:
+        """Downgrade legacy HA readback ownership to an unconfirmed intent."""
+
+        if payload.get("version") == _PROTECTION_VERSION:
+            return copy.deepcopy(dict(payload))
+        targets: dict[str, dict[str, object]] = {}
+        for target_id, source in payload["targets"].items():
+            record = copy.deepcopy(dict(source))
+            entity_id = str(record["entityId"])
+            close = record.get("confirmedAutomaticClose")
+            recorded_at = (
+                int(close["confirmedAtMs"])
+                if isinstance(close, Mapping)
+                and type(close.get("confirmedAtMs")) is int
+                else 0
+            )
+            operation_id = (
+                str(close["receiptId"])
+                if isinstance(close, Mapping)
+                and _valid_text(close.get("receiptId"))
+                else "legacy-unattributed-close"
+            )
+            record.update(
+                {
+                    "cycleId": (
+                        f"curtain-cycle.sunrise.{record['lastProcessedSunriseMs']}"
+                        if type(record.get("lastProcessedSunriseMs")) is int
+                        else "curtain-cycle.legacy"
+                    ),
+                    "automaticCloseIntent": (
+                        {
+                            "operationId": operation_id,
+                            "identityDigest": _identity_digest(target_id, entity_id),
+                            "sourceHash": hashlib.sha256(
+                                b"legacy-unverified-readback"
+                            ).hexdigest(),
+                            "phase": "unconfirmed",
+                            "recordedAtMs": recorded_at,
+                        }
+                        if close is not None
+                        else None
+                    ),
+                    "confirmedAutomaticClose": None,
+                    "morningOpenIntent": None,
+                }
+            )
+            targets[str(target_id)] = record
+        return {"version": _PROTECTION_VERSION, "targets": targets}
 
     def _initialize_empty(self) -> None:
         self._targets = {}
@@ -235,7 +440,11 @@ class CurtainProtectionCoordinator:
         return action_id == "close_cover" or (
             action_id == "set_position"
             and type(requested) is int
-            and (current_position is None or requested < current_position)
+            and (
+                requested == 0
+                or current_position is None
+                or requested < current_position
+            )
         )
 
     async def async_before_action(
@@ -250,6 +459,7 @@ class CurtainProtectionCoordinator:
         automatic: bool,
         dry_run: bool,
         receipt_id: str,
+        source_hash: str | None = None,
     ) -> CurtainProtectionDecision:
         """Latch manual intent or reject conflicting automatic close."""
 
@@ -271,12 +481,41 @@ class CurtainProtectionCoordinator:
                     return CurtainProtectionDecision(False, self._reason or "curtain_protection_unhealthy")
                 if record.get("latchedAtMs") is not None:
                     return CurtainProtectionDecision(False, "curtain_manual_open_latched")
-                return CurtainProtectionDecision(True, token=str(record["generation"]))
+                if (
+                    record.get("automaticCloseIntent") is not None
+                    or record.get("confirmedAutomaticClose") is not None
+                ):
+                    return CurtainProtectionDecision(
+                        False, "curtain_close_already_attempted"
+                    )
+                if dry_run:
+                    return CurtainProtectionDecision(True)
+                return CurtainProtectionDecision(
+                    True,
+                    token=_preflight_token(
+                        int(record["generation"]),
+                        record.get("cycleId"),
+                        target_id,
+                        entity_id,
+                        receipt_id,
+                        source_hash,
+                    ),
+                )
             if automatic or not opening or dry_run:
                 return CurtainProtectionDecision(True)
-            if record.get("confirmedAutomaticClose") is None:
+            if (
+                record.get("confirmedAutomaticClose") is None
+                and record.get("automaticCloseIntent") is None
+            ):
+                updated = copy.deepcopy(record)
+                updated["generation"] = int(record["generation"]) + 1
+                self._targets[target_id] = updated
+                try:
+                    await self._save()
+                except Exception:  # noqa: BLE001
+                    self._mark_unhealthy("curtain_protection_store_write_failed")
                 return CurtainProtectionDecision(
-                    True, token=str(record["generation"])
+                    True, token=str(updated["generation"])
                 )
             now = self._now_ms()
             release = self._next_sunrise_ms()
@@ -313,6 +552,8 @@ class CurtainProtectionCoordinator:
         current_position: int | None,
         automatic: bool,
         token: str | None,
+        receipt_id: str,
+        source_hash: str | None = None,
     ) -> CurtainProtectionDecision:
         """Revalidate the protection generation at the physical boundary."""
 
@@ -332,11 +573,27 @@ class CurtainProtectionCoordinator:
                         False, "curtain_protection_identity_changed"
                     )
                 return CurtainProtectionDecision(True)
-            if token != str(record.get("generation")):
-                return CurtainProtectionDecision(
-                    False, "curtain_protection_generation_changed"
-                )
             if automatic and closing:
+                if record.get("automaticCloseIntent") is not None:
+                    return CurtainProtectionDecision(
+                        False, "curtain_close_already_attempted"
+                    )
+                if record.get("confirmedAutomaticClose") is not None:
+                    return CurtainProtectionDecision(
+                        False, "curtain_close_already_attempted"
+                    )
+                expected_token = _preflight_token(
+                    int(record["generation"]),
+                    record.get("cycleId"),
+                    target_id,
+                    entity_id,
+                    receipt_id,
+                    source_hash,
+                )
+                if token != expected_token:
+                    return CurtainProtectionDecision(
+                        False, "curtain_protection_generation_changed"
+                    )
                 if not self._healthy:
                     return CurtainProtectionDecision(
                         False,
@@ -346,6 +603,52 @@ class CurtainProtectionCoordinator:
                     return CurtainProtectionDecision(
                         False, "curtain_manual_open_latched"
                     )
+                intent = {
+                    "operationId": receipt_id,
+                    "identityDigest": _identity_digest(target_id, entity_id),
+                    "sourceHash": _source_hash(source_hash),
+                    "phase": "reserved",
+                    "recordedAtMs": self._now_ms(),
+                }
+                reserved = copy.deepcopy(record)
+                reserved["automaticCloseIntent"] = intent
+                previous = self._targets[target_id]
+                self._targets[target_id] = reserved
+                try:
+                    await self._save()
+                except Exception:  # noqa: BLE001
+                    self._targets[target_id] = previous
+                    self._mark_unhealthy("curtain_protection_store_write_failed")
+                    return CurtainProtectionDecision(False, self._reason)
+                dispatch_intent = dict(intent)
+                dispatch_intent["phase"] = "dispatch_intent"
+                updated = copy.deepcopy(reserved)
+                updated["automaticCloseIntent"] = dispatch_intent
+                self._targets[target_id] = updated
+                try:
+                    await self._save()
+                except Exception:  # noqa: BLE001
+                    # The service call has not crossed its boundary. Try to
+                    # release the durable reservation; if storage remains
+                    # unavailable, the saved reservation deliberately blocks
+                    # a retry after restart.
+                    self._targets[target_id] = previous
+                    try:
+                        await self._save()
+                    except Exception:  # noqa: BLE001
+                        self._targets[target_id] = reserved
+                    self._mark_unhealthy("curtain_protection_store_write_failed")
+                    return CurtainProtectionDecision(False, self._reason)
+                return CurtainProtectionDecision(
+                    True,
+                    token=_intent_token(
+                        int(updated["generation"]), dispatch_intent
+                    ),
+                )
+            if token != str(record.get("generation")):
+                return CurtainProtectionDecision(
+                    False, "curtain_protection_generation_changed"
+                )
             return CurtainProtectionDecision(True, token=token)
 
     async def async_note_result(
@@ -363,6 +666,7 @@ class CurtainProtectionCoordinator:
         protection_generation: str | None,
         confirmed: bool,
         evidence_revision: str | None,
+        physical_result_proven: bool = False,
     ) -> None:
         """Persist only attributable confirmed close or manual-open outcome."""
 
@@ -379,20 +683,41 @@ class CurtainProtectionCoordinator:
                 return
             updated = copy.deepcopy(record)
             changed = False
-            if automatic and closing and confirmed:
+            if automatic and closing:
+                intent = record.get("automaticCloseIntent")
                 if (
-                    protection_generation != str(record.get("generation"))
+                    not isinstance(intent, Mapping)
+                    or intent.get("phase") != "dispatch_intent"
+                    or protection_generation
+                    != _intent_token(int(record["generation"]), intent)
                     or record.get("latchedAtMs") is not None
                     or not self._healthy
                 ):
                     return
-                updated["generation"] = int(record["generation"]) + 1
-                updated["confirmedAutomaticClose"] = {
-                    "receiptId": receipt_id,
-                    "evidenceRevision": evidence_revision or "confirmed-readback",
-                    "confirmedAtMs": self._now_ms(),
-                }
+                if confirmed and physical_result_proven:
+                    updated["generation"] = int(record["generation"]) + 1
+                    updated["automaticCloseIntent"] = None
+                    updated["confirmedAutomaticClose"] = {
+                        "receiptId": receipt_id,
+                        "evidenceRevision": (
+                            evidence_revision or "verified-device-report"
+                        ),
+                        "confirmedAtMs": self._now_ms(),
+                        "positionProvenance": "verified_device_report",
+                    }
+                else:
+                    unconfirmed = dict(intent)
+                    unconfirmed["phase"] = "unconfirmed"
+                    updated["automaticCloseIntent"] = unconfirmed
+                    updated["confirmedAutomaticClose"] = None
                 changed = True
+            elif automatic and opening:
+                morning = record.get("morningOpenIntent")
+                if isinstance(morning, Mapping):
+                    unconfirmed = dict(morning)
+                    unconfirmed["phase"] = "unconfirmed"
+                    updated["morningOpenIntent"] = unconfirmed
+                    changed = True
             elif not automatic and opening and isinstance(updated.get("manualOpenEvidence"), Mapping):
                 evidence = dict(updated["manualOpenEvidence"])
                 if (
@@ -429,7 +754,10 @@ class CurtainProtectionCoordinator:
             if (
                 record is None
                 or record.get("entityId") != entity_id
-                or record.get("confirmedAutomaticClose") is None
+                or (
+                    record.get("confirmedAutomaticClose") is None
+                    and record.get("automaticCloseIntent") is None
+                )
                 or record.get("latchedAtMs") is not None
             ):
                 return
@@ -473,25 +801,25 @@ class CurtainProtectionCoordinator:
                 last = record.get("lastProcessedSunriseMs")
                 if type(last) is int and occurred_at_ms <= last:
                     continue
-                release = record.get("releaseSunriseAtMs")
-                latched = record.get("latchedAtMs") is not None
-                if type(release) is int and release <= occurred_at_ms:
-                    record["generation"] = int(record["generation"]) + 1
-                    record["confirmedAutomaticClose"] = None
-                    record["manualOpenEvidence"] = None
-                    record["latchedAtMs"] = None
-                    record["releaseSunriseAtMs"] = None
-                    changed = True
-                    open_allowed.add(target_id)
-                elif release is None and not latched:
-                    # A new trusted morning invalidates yesterday's automatic
-                    # close ownership before the opening command is planned.
-                    # The resulting own state event therefore cannot be
-                    # mistaken for external manual intervention.
-                    if record.get("confirmedAutomaticClose") is not None:
-                        record["confirmedAutomaticClose"] = None
-                        changed = True
-                    open_allowed.add(target_id)
+                entity_id = str(record["entityId"])
+                cycle_id = f"curtain-cycle.sunrise.{occurred_at_ms}"
+                record["generation"] = int(record["generation"]) + 1
+                record["cycleId"] = cycle_id
+                record["automaticCloseIntent"] = None
+                record["confirmedAutomaticClose"] = None
+                record["manualOpenEvidence"] = None
+                record["latchedAtMs"] = None
+                record["releaseSunriseAtMs"] = None
+                record["morningOpenIntent"] = {
+                    "operationId": f"{run_id}:{target_id}",
+                    "identityDigest": _identity_digest(target_id, entity_id),
+                    "sourceHash": hashlib.sha256(
+                        f"{CURTAIN_SCENARIO_ID}:{cycle_id}".encode("utf-8")
+                    ).hexdigest(),
+                    "phase": "dispatch_intent",
+                    "recordedAtMs": occurred_at_ms,
+                }
+                open_allowed.add(target_id)
                 record["lastProcessedSunriseMs"] = occurred_at_ms
                 changed = True
             if not changed:
@@ -544,7 +872,10 @@ class CurtainProtectionCoordinator:
                         "generation": record["generation"],
                         "latched": record.get("latchedAtMs") is not None,
                         "automaticCloseAllowed": bool(
-                            self._healthy and record.get("latchedAtMs") is None
+                            self._healthy
+                            and record.get("latchedAtMs") is None
+                            and record.get("automaticCloseIntent") is None
+                            and record.get("confirmedAutomaticClose") is None
                         ),
                         "morningOpenAllowed": bool(
                             trusted and target_id in open_allowed
