@@ -60,7 +60,21 @@ _TAMBUR_INPUTS = (
     "entity_170c7a4e2505b803",
 )
 
-MIGRATION_MANIFEST: tuple[ManagedSwitchMigrationEntry, ...] = (
+_TOILET_INPUTS = (
+    "binary_sensor.datchik_dvizheniia_tualet_zaniatost",
+    "binary_sensor.0xa4c13889c39443d5_occupancy",
+    "switch.0xacbac0fffebde2d3_1", "switch.0xacbac0fffebde2d3_2",
+    "switch.0x54ef44100019f608",
+)
+_BATHROOM_INPUTS = (
+    "switch.0xacbac0fffebe38d0_1", "switch.0xacbac0fffebe38d0_2",
+    "switch.0x54ef44100019fca5",
+)
+_STORAGE_INPUTS = ("switch.0x603d61fffe767806_1",)
+_CABINET_INPUTS = ()
+_CURTAIN_INPUTS = ("cover.shtory_gostinaia", "cover.0xa4c1385a4bcce3d6")
+
+FULL_MIGRATION_MANIFEST: tuple[ManagedSwitchMigrationEntry, ...] = (
     ManagedSwitchMigrationEntry(
         "system-shower-comfort-controller", 3,
         "4ecf6735e3350c89116c9e1ec56f649fc9c6ba420ca884dcd43347bbc8bb3257",
@@ -82,7 +96,39 @@ MIGRATION_MANIFEST: tuple[ManagedSwitchMigrationEntry, ...] = (
         "4daef9ac2de8dc1c95dd2da6887e178751a65d0e47bcf48443635f68eb1ba5dc",
         "tambur_controller.js",
     ),
+    ManagedSwitchMigrationEntry(
+        "system-toilet-comfort-controller", 1, "0" * 64, MANAGED_TOPOLOGY,
+        _TOILET_INPUTS, _TOILET_INPUTS,
+        "d53fba40dc7ec73590ad7c0e5db18708b18f50f9933db7d205635b3b2366d2d7",
+        "toilet_controller.js",
+    ),
+    ManagedSwitchMigrationEntry(
+        "system-bathroom-exhaust-controller", 1, "1" * 64, MANAGED_TOPOLOGY,
+        _BATHROOM_INPUTS, _BATHROOM_INPUTS,
+        "951a9ecfdae7bf7a7b3f7acab0b685702d0769b73430ee225ed0338d5b896d51",
+        "bathroom_controller.js",
+    ),
+    ManagedSwitchMigrationEntry(
+        "system-storage-light-controller", 1, "2" * 64, MANAGED_TOPOLOGY,
+        _STORAGE_INPUTS, _STORAGE_INPUTS,
+        "687a66462ce5445e8473f2519dc086b88d9252b51520662444d6196f3c3a0896",
+        "storage_controller.js",
+    ),
+    ManagedSwitchMigrationEntry(
+        "system-cabinet-light-controller", 1, "3" * 64, MANAGED_TOPOLOGY,
+        _CABINET_INPUTS, _CABINET_INPUTS,
+        "80db20857c8809d68201f0f137886b52a3f17a827fc6af414d7be5e1ef80d7eb",
+        "cabinet_controller.js",
+    ),
+    ManagedSwitchMigrationEntry(
+        "system-curtains-privacy-controller", 1, "4" * 64, MANAGED_TOPOLOGY,
+        _CURTAIN_INPUTS, _CURTAIN_INPUTS,
+        "32a60a508f87cf02c09b85adabd1de77fa30449a44028ee11c4da31e3b7f9211",
+        "curtains_controller.js",
+    ),
 )
+_CORE_MIGRATION_MANIFEST = FULL_MIGRATION_MANIFEST[:3]
+MIGRATION_MANIFEST = _CORE_MIGRATION_MANIFEST
 LEGACY_MANAGED_SWITCHES = {
     item.scenario_id: (item.legacy_revision, item.legacy_source_hash)
     for item in MIGRATION_MANIFEST

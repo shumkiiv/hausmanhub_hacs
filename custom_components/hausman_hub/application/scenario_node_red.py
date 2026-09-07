@@ -60,6 +60,16 @@ _TRUSTED_SYSTEM_SOURCE_HASHES = {
         {"bc9a2c7883046e568a428e355af312953d70f0f504393b063130f516fe5052b1"}
     ),
 }
+_TRUSTED_ADDITIONAL_SYSTEM_SOURCE_HASHES = {
+    "system-toilet-comfort-controller": frozenset({"d53fba40dc7ec73590ad7c0e5db18708b18f50f9933db7d205635b3b2366d2d7"}),
+    "system-bathroom-exhaust-controller": frozenset({"951a9ecfdae7bf7a7b3f7acab0b685702d0769b73430ee225ed0338d5b896d51"}),
+    "system-storage-light-controller": frozenset({"687a66462ce5445e8473f2519dc086b88d9252b51520662444d6196f3c3a0896"}),
+    "system-cabinet-light-controller": frozenset({"80db20857c8809d68201f0f137886b52a3f17a827fc6af414d7be5e1ef80d7eb"}),
+    "system-curtains-privacy-controller": frozenset({"32a60a508f87cf02c09b85adabd1de77fa30449a44028ee11c4da31e3b7f9211"}),
+}
+
+def _trusted_hashes(scenario_id: str) -> frozenset[str]:
+    return _TRUSTED_SYSTEM_SOURCE_HASHES.get(scenario_id, frozenset()) | _TRUSTED_ADDITIONAL_SYSTEM_SOURCE_HASHES.get(scenario_id, frozenset())
 # Release-trusted managed sources may select a branch, but cannot enlarge the
 # physical envelope. Each listed device action is allowed at most once; their
 # delays are exact source constants, not values supplied by Node-RED.
@@ -1220,7 +1230,7 @@ class NodeRedScenarioBackend:
         canonical_hash = managed_source_hash(
             compile_managed_function(scenario_id, definition)
         )
-        trusted_hashes = _TRUSTED_SYSTEM_SOURCE_HASHES.get(scenario_id, frozenset())
+        trusted_hashes = _trusted_hashes(scenario_id)
         if proposed_hash != canonical_hash and proposed_hash not in trusted_hashes:
             raise NodeRedSourceInvalid(
                 "Исходник не входит в подписанный набор этого выпуска.",
@@ -1768,7 +1778,7 @@ class NodeRedScenarioBackend:
         current_hash = str(current["source_hash"])
         if current_hash != metadata.source_hash:
             raise NodeRedBackendError("Node-RED source changed before execution")
-        trusted_hashes = _TRUSTED_SYSTEM_SOURCE_HASHES.get(scenario_id, frozenset())
+        trusted_hashes = _trusted_hashes(scenario_id)
         if trusted_hashes and current_hash not in trusted_hashes:
             raise NodeRedBackendError(
                 "Node-RED system source is not release-trusted"
