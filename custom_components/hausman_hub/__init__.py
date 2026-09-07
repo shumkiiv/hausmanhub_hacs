@@ -530,6 +530,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .application.scenario_command_context import (
         ScenarioCommandContextRegistry,
     )
+    from .application.curtain_command_policy import CurtainCommandPolicy
 
     scenario_command_contexts = ScenarioCommandContextRegistry()
     scenario_executor = ScenarioExecutor(
@@ -548,6 +549,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         electrical_breaker_resolver=scenario_service.is_electrical_breaker_entity,
         command_contexts=scenario_command_contexts,
         manual_light_off_protection=manual_light_off_protection,
+        curtain_command_policy=CurtainCommandPolicy(
+            lambda: scenario_control_policy.current
+        ),
     )
     entry.async_on_unload(
         light_safety_obligations.start(

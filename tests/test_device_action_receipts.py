@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 from jsonschema import Draft202012Validator, RefResolver
 import json
+import pytest
 
 from custom_components.hausman_hub.application.device_action_receipts import (
     evidence_snapshot,
@@ -113,6 +114,95 @@ def test_unconfirmed_command_remains_accepted_in_full_receipt() -> None:
     assert receipt["confirmed"] is False
     assert receipt["status"] == "accepted"
     assert receipt["message"] == "Команда принята, состояние ещё не подтверждено"
+
+
+@pytest.mark.parametrize(
+    ("actual", "confirmed"),
+    [(80, True), (79, False)],
+)
+def test_limited_cover_receipt_keeps_requested_and_reports_actual(
+    actual: int, confirmed: bool
+) -> None:
+    receipt = full_action_receipt(
+        payload={
+            "targetId": "entity_2da2065add6e2168",
+            "actionId": "set_position",
+            "value": 100,
+        },
+        result={
+            "correlationId": "curtain.1",
+            "requestId": "curtain.request.1",
+            "accepted": True,
+            "confirmed": confirmed,
+            "status": "confirmed" if confirmed else "accepted",
+            "message": "Позиция проверена.",
+            "reason": "curtain_position_limited",
+            "appliedAt": 1788000000000,
+            "confirmationWindowMs": 1000,
+            "readBack": {
+                "attempted": True,
+                "matched": confirmed,
+                "observedAt": 1788000000100,
+                "observedState": "open",
+                "observedValue": actual,
+                "attempts": 1,
+                "isNewEvidence": True,
+                "evidenceRevision": f"cover.kitchen.{actual}",
+                "evidenceSequence": 1788000000100,
+            },
+        },
+        target_type="cover",
+        state=SimpleNamespace(state="open", attributes={"current_position": actual}),
+        allowed_actions=("open_cover", "set_position"),
+        pre_command_evidence={},
+        decision_at=1788000000000,
+    )
+
+    assert receipt["actionValue"] == 100
+    assert receipt["readBack"]["observedValue"] == actual
+    assert receipt["confirmed"] is confirmed
+    _validator("v1/device-action-receipt.schema.json", "full").validate(receipt)
+
+
+def test_limited_open_receipt_has_no_numeric_fields() -> None:
+    receipt = full_action_receipt(
+        payload={
+            "targetId": "entity_2da2065add6e2168",
+            "actionId": "open_cover",
+        },
+        result={
+            "correlationId": "curtain.open.1",
+            "requestId": "curtain.open.request.1",
+            "accepted": True,
+            "confirmed": True,
+            "status": "confirmed",
+            "message": "Открытие ограничено безопасной позицией.",
+            "reason": "curtain_position_limited",
+            "appliedAt": 1788000000000,
+            "confirmationWindowMs": 1000,
+            "readBack": {
+                "attempted": True,
+                "matched": True,
+                "observedAt": 1788000000100,
+                "observedState": "open",
+                "observedValue": 80,
+                "attempts": 1,
+                "isNewEvidence": True,
+                "evidenceRevision": "cover.kitchen.80",
+                "evidenceSequence": 1788000000100,
+            },
+        },
+        target_type="cover",
+        state=SimpleNamespace(state="open", attributes={"current_position": 80}),
+        allowed_actions=("open_cover", "set_position"),
+        pre_command_evidence={},
+        decision_at=1788000000000,
+    )
+
+    assert "actionValue" not in receipt
+    assert "observedValue" not in receipt["readBack"]
+    assert receipt["reason"] == "curtain_position_limited"
+    _validator("v1/device-action-receipt.schema.json", "full").validate(receipt)
 
 
 def test_stale_on_evidence_exposes_one_light_reassert_budget() -> None:

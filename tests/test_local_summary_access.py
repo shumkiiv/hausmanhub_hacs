@@ -13,6 +13,7 @@ import tempfile
 import time
 import unittest
 import weakref
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -5359,6 +5360,308 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual(
             "application/vnd.hausmanhub.device-action-receipt.full+json",
             response.headers["Content-Type"],
+        )
+
+    def test_full_curtain_replay_keeps_original_observation_after_policy_change(
+        self,
+    ) -> None:
+        """A completed replay never recalculates the applied curtain position."""
+
+        path = "/api/hausman_hub/v1/device-actions"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        tablet = reader_user("system-users")
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        entity_id = "cover.synthetic_kitchen"
+        self.hass.states.values[entity_id] = SimpleNamespace(
+            state="closed",
+            attributes={"current_position": 0},
+            last_updated=datetime.now(timezone.utc),
+        )
+        cap = {"value": 80}
+        executions = 0
+
+        async def resolve_context(target_id: str, action_id: str):
+            self.assertEqual(
+                ("entity_2da2065add6e2168", "set_position"),
+                (target_id, action_id),
+            )
+            return (
+                entity_id,
+                "cover",
+                ("open_cover", "close_cover", "set_position"),
+                "set_cover_position",
+            )
+
+        async def execute_action(
+            target_id: str,
+            action_id: str,
+            value: object,
+            *,
+            correlation_id: str | None = None,
+            **options: object,
+        ) -> dict[str, object]:
+            nonlocal executions
+            executions += 1
+            options["dispatch_marker"]()
+            observed = min(int(value), cap["value"])
+            observed_at = int(time.time() * 1000)
+            self.hass.states.values[entity_id] = SimpleNamespace(
+                state="open",
+                attributes={"current_position": observed},
+                last_updated=datetime.now(timezone.utc),
+            )
+            return {
+                "correlationId": correlation_id,
+                "requestId": options["request_id"],
+                "targetId": target_id,
+                "actionId": action_id,
+                "accepted": True,
+                "confirmed": True,
+                "status": "confirmed",
+                "statusName": "Выполнено",
+                "appliedAt": observed_at,
+                "message": "Позиция шторы подтверждена.",
+                "confirmationWindowMs": 8000,
+                "readBack": {
+                    "attempted": True,
+                    "matched": True,
+                    "observedAt": observed_at,
+                    "observedState": "open",
+                    "observedValue": observed,
+                    "attempts": 1,
+                    "isNewEvidence": True,
+                    "evidenceRevision": f"cover.synthetic.{observed}",
+                    "evidenceSequence": observed_at,
+                },
+                "reason": "curtain_position_limited",
+            }
+
+        service.async_resolve_device_action_context = resolve_context
+        service.async_execute_device_action = execute_action
+        payload = {
+            "contract": {
+                "name": "hausman-hub-device-action-request",
+                "version": 1,
+            },
+            "correlationId": "curtain.full.1",
+            "requestId": "curtain.full.request.1",
+            "idempotencyKey": "curtain.full.key.1",
+            "targetId": "entity_2da2065add6e2168",
+            "actionId": "set_position",
+            "value": 100,
+        }
+
+        def send(body: dict[str, object]) -> FakeResponse:
+            return asyncio.run(
+                view.post(
+                    FakeJsonRequest(
+                        "192.168.1.20",
+                        tablet,
+                        path,
+                        copy.deepcopy(body),
+                        content_type=(
+                            "application/vnd.hausmanhub.device-action-request."
+                            "full+json"
+                        ),
+                        accept=(
+                            "application/vnd.hausmanhub.device-action-receipt."
+                            "full+json"
+                        ),
+                    )
+                )
+            )
+
+        first = send(payload)
+        cap["value"] = 70
+        replay = send(payload)
+        conflict = send({**payload, "value": 90})
+
+        self.assertEqual(200, first.status)
+        self.assertEqual(200, replay.status)
+        self.assertEqual(409, conflict.status)
+        self.assertEqual(100, first.payload["actionValue"])
+        self.assertEqual(80, first.payload["readBack"]["observedValue"])
+        self.assertLessEqual(
+            first.payload["commandSentAt"],
+            first.payload["readBack"]["observedAt"],
+        )
+        self.assertTrue(
+            str(first.payload["readBack"]["commandRequestId"]).startswith(
+                "dispatch."
+            )
+        )
+        self.assertEqual(first.payload, replay.payload)
+        self.assertEqual(
+            "idempotency_key_conflict",
+            conflict.payload["details"]["detailCode"],
+        )
+        self.assertEqual(1, executions)
+
+    def test_full_curtain_request_uses_real_executor_readback_and_replays_once(
+        self,
+    ) -> None:
+        """HTTP retains the actual HA position returned by the shared executor."""
+
+        from custom_components.hausman_hub.application.curtain_command_policy import (
+            KITCHEN_CURTAIN_TARGET,
+            CurtainCommandPolicy,
+        )
+        from custom_components.hausman_hub.application.scenarios import (
+            ScenarioCatalog,
+            ScenarioDeviceAction,
+            ScenarioDeviceEntry,
+        )
+
+        path = "/api/hausman_hub/v1/device-actions"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        control_service = self.hass.data["hausman_hub"][
+            "scenario_control_policy_service"
+        ]
+        executor = service._executor
+        entity_id = "cover.synthetic_kitchen_actual"
+        actions = (
+            ScenarioDeviceAction(
+                action_id="open_cover",
+                title="Открыть",
+                domain="cover",
+                service="open_cover",
+                allowed_fields=frozenset(),
+            ),
+            ScenarioDeviceAction(
+                action_id="close_cover",
+                title="Закрыть",
+                domain="cover",
+                service="close_cover",
+                allowed_fields=frozenset(),
+            ),
+            ScenarioDeviceAction(
+                action_id="set_position",
+                title="Положение",
+                domain="cover",
+                service="set_cover_position",
+                allowed_fields=frozenset({"value"}),
+            ),
+        )
+        catalog = ScenarioCatalog(
+            devices={
+                KITCHEN_CURTAIN_TARGET: ScenarioDeviceEntry(
+                    target_id=KITCHEN_CURTAIN_TARGET,
+                    name="Шторы кухня",
+                    entity_id=entity_id,
+                    actions=actions,
+                    device_type="cover",
+                )
+            },
+            scenarios={},
+        )
+        service._catalog = catalog
+        service._catalog_loader = None
+        executor.replace_catalog(catalog)
+        executor._curtain_command_policy = CurtainCommandPolicy.with_confirmed_scales(
+            {KITCHEN_CURTAIN_TARGET},
+            control_document_provider=lambda: control_service.current,
+        )
+        before_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        self.hass.states.values[entity_id] = SimpleNamespace(
+            state="closed",
+            attributes={"current_position": 0},
+            last_updated=before_at,
+        )
+        service_calls: list[tuple[str, str, dict[str, object], bool]] = []
+
+        class Services:
+            async def async_call(
+                inner_self,
+                domain: str,
+                action: str,
+                service_data: dict[str, object],
+                *,
+                blocking: bool,
+                **_options: object,
+            ) -> None:
+                service_calls.append(
+                    (domain, action, dict(service_data), blocking)
+                )
+                self.hass.states.values[entity_id] = SimpleNamespace(
+                    state="open",
+                    attributes={"current_position": service_data["position"]},
+                    last_updated=datetime.now(timezone.utc),
+                )
+
+        self.hass.services = Services()
+        payload = {
+            "contract": {
+                "name": "hausman-hub-device-action-request",
+                "version": 1,
+            },
+            "correlationId": "curtain.actual.1",
+            "requestId": "curtain.actual.request.1",
+            "idempotencyKey": "curtain.actual.key.1",
+            "targetId": KITCHEN_CURTAIN_TARGET,
+            "actionId": "set_position",
+            "value": 100,
+        }
+
+        def send(body: dict[str, object]) -> FakeResponse:
+            return asyncio.run(
+                view.post(
+                    FakeJsonRequest(
+                        "192.168.1.20",
+                        reader_user("system-users"),
+                        path,
+                        copy.deepcopy(body),
+                        content_type=(
+                            "application/vnd.hausmanhub.device-action-request."
+                            "full+json"
+                        ),
+                        accept=(
+                            "application/vnd.hausmanhub.device-action-receipt."
+                            "full+json"
+                        ),
+                    )
+                )
+            )
+
+        first = send(payload)
+        current = control_service.current
+        asyncio.run(
+            control_service.async_replace(
+                current.policy_revision,
+                replace(current.policy, kitchen_cover_cap_percent=70),
+            )
+        )
+        replay = send(payload)
+        conflict = send({**payload, "value": 90})
+
+        self.assertEqual(200, first.status)
+        self.assertEqual(100, first.payload["actionValue"])
+        self.assertEqual(80, first.payload["readBack"]["observedValue"])
+        self.assertLessEqual(
+            first.payload["commandSentAt"],
+            first.payload["readBack"]["observedAt"],
+        )
+        self.assertTrue(
+            str(first.payload["readBack"]["commandRequestId"]).startswith(
+                "dispatch."
+            )
+        )
+        self.assertEqual(first.payload, replay.payload)
+        self.assertEqual(409, conflict.status)
+        self.assertEqual(
+            "idempotency_key_conflict",
+            conflict.payload["details"]["detailCode"],
+        )
+        self.assertEqual(
+            [
+                (
+                    "cover",
+                    "set_cover_position",
+                    {"entity_id": entity_id, "position": 80},
+                    True,
+                )
+            ],
+            service_calls,
         )
 
     def test_device_action_response_sets_negotiated_type_after_ha_json_creation(self) -> None:

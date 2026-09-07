@@ -351,7 +351,13 @@ def full_action_receipt(
                     "evidenceSequence": final_evidence["evidenceSequence"],
                 }
             )
-        if "value" in payload and confirmed:
+        if (
+            target_type == "cover"
+            and action_id == "set_position"
+            and "observedValue" in read_back
+        ):
+            normalized_read_back["observedValue"] = read_back["observedValue"]
+        elif "value" in payload and confirmed:
             normalized_read_back["observedValue"] = payload["value"]
         receipt["readBack"] = normalized_read_back
     return receipt

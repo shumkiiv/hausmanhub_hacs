@@ -28,6 +28,12 @@ from ..domain.scenarios import (
     ScenarioExecutionBackend,
 )
 from .device_action_protocol import DANGEROUS_ACTION_IDS
+from .curtain_command_policy import (
+    CurtainCommandPolicy,
+    CurtainDispatchPlan,
+    CurtainPolicyError,
+    trusted_curtain_position,
+)
 from .scenario_light_priority import (
     MANUAL_LIGHT_PRIORITY_REASON,
     LightAutomationPriority,
@@ -646,6 +652,7 @@ class ScenarioExecutor:
         electrical_breaker_resolver: Callable[[str], bool] | None = None,
         command_contexts: ScenarioCommandContextRegistry | None = None,
         manual_light_off_protection: ManualLightOffProtectionCoordinator | None = None,
+        curtain_command_policy: CurtainCommandPolicy | None = None,
     ):
         if not 0.01 <= readback_window_seconds <= 30.0:
             raise ValueError("readback window must be between 0.01 and 30 seconds")
@@ -668,6 +675,7 @@ class ScenarioExecutor:
         self._electrical_breaker_resolver = electrical_breaker_resolver
         self._command_contexts = command_contexts
         self._manual_light_off_protection = manual_light_off_protection
+        self._curtain_command_policy = curtain_command_policy or CurtainCommandPolicy()
         self._scenario_generation_validator: (
             Callable[[str, str], Awaitable[bool]] | None
         ) = None
@@ -717,7 +725,10 @@ class ScenarioExecutor:
 
         request_id = request_id or self.new_run_id()
         correlation_id = correlation_id or request_id
-        execution_action_id = f"action_{request_id[:16]}"
+        execution_action_id = (
+            "action_"
+            + hashlib.sha256(request_id.encode("utf-8")).hexdigest()[:16]
+        )
         action = ScenarioAction(
             id=execution_action_id,
             type=ScenarioActionType.DEVICE_ACTION,
@@ -867,10 +878,17 @@ class ScenarioExecutor:
                 require_new_evidence=force_new_readback,
             )
         skipped = receipt.get("skipped") is True
-        confirmed = read_back["matched"] is True
+        curtain_no_op = (
+            skipped
+            and self._curtain_command_policy.manages_target(target_id)
+        )
+        confirmed = read_back["matched"] is True and not curtain_no_op
         observed_state = read_back["observedState"]
         receipt["confirmed"] = confirmed
         receipt["read_back"] = read_back
+        public_read_back = dict(read_back)
+        if action_id == "open_cover":
+            public_read_back.pop("observedValue", None)
         if automatic_reassert:
             async with self._light_priority.authority_lock():
                 await self._light_priority.async_note_reassert(
@@ -891,9 +909,17 @@ class ScenarioExecutor:
             "targetId": target_id,
             "actionId": action_id,
             "observedState": observed_state,
-            "appliedAt": int(time.time() * 1000),
+            "appliedAt": (
+                receipt["curtain_command_sent_at_ms"]
+                if type(receipt.get("curtain_command_sent_at_ms")) is int
+                else int(time.time() * 1000)
+            ),
             "message": (
-                f"{device_name}: новое состояние подтверждено."
+                f"{device_name}: открытие ограничено безопасной позицией."
+                if receipt.get("curtain_limited") is True and confirmed
+                else f"{device_name}: команда ограничения отправлена, позиция ещё не подтверждена."
+                if receipt.get("curtain_limited") is True
+                else f"{device_name}: новое состояние подтверждено."
                 if confirmed
                 else f"{device_name}: команда принята, состояние ещё не подтверждено."
             ),
@@ -901,9 +927,9 @@ class ScenarioExecutor:
                 receipt.get("confirmation_window_ms")
                 or self._confirmation_window_ms
             ),
-            "readBack": read_back,
+            "readBack": public_read_back,
             "reason": receipt.get("reason")
-            if skipped
+            if skipped or receipt.get("curtain_limited") is True
             else None
             if confirmed
             else "state_not_confirmed",
@@ -974,6 +1000,9 @@ class ScenarioExecutor:
         require_new_evidence: bool = False,
         window_seconds: float | None = None,
         prepared_power_sources: frozenset[str] = frozenset(),
+        before_position: int | None = None,
+        position_readback: bool = False,
+        position_not_before: datetime | None = None,
     ) -> dict[str, object]:
         """Poll one bounded HA state window and return explicit evidence."""
 
@@ -992,12 +1021,29 @@ class ScenarioExecutor:
         attempts = 0
         observed_at: int | None = None
         observed_state: str | None = None
+        observed_value: int | None = None
+        evidence_revision: str | None = None
+        evidence_sequence: int | None = None
+        is_new_evidence = False
         matched = False
+        position_readback = position_readback and action_id == "set_position"
         while True:
             attempts += 1
             state = self._hass.states.get(entity_id)
             if state is not None:
-                observed_at = int(time.time() * 1000)
+                if position_readback:
+                    observed = (
+                        getattr(state, "last_reported", None)
+                        or getattr(state, "last_updated", None)
+                        or getattr(state, "last_changed", None)
+                    )
+                    observed_at = (
+                        max(0, int(observed.timestamp() * 1000))
+                        if isinstance(observed, datetime)
+                        else int(time.time() * 1000)
+                    )
+                else:
+                    observed_at = int(time.time() * 1000)
                 dependencies = (
                     self._power_dependency_resolver()
                     if self._power_dependency_resolver is not None
@@ -1009,7 +1055,11 @@ class ScenarioExecutor:
                 }
 
                 def read_effective_state(requested_entity_id: str) -> str | None:
-                    current = self._hass.states.get(requested_entity_id)
+                    current = (
+                        state
+                        if requested_entity_id == entity_id
+                        else self._hass.states.get(requested_entity_id)
+                    )
                     if current is None:
                         return None
                     if requested_entity_id in power_source_ids:
@@ -1026,34 +1076,87 @@ class ScenarioExecutor:
                     read_effective_state,
                 )
                 observed_state = effective_state
+                current_revision = _state_revision(state)
                 is_new_evidence = (
                     not require_new_evidence
                     or (
                         after_revision is not None
-                        and
-                        (current_revision := _state_revision(state)) is not None
+                        and current_revision is not None
                         and current_revision != after_revision
                     )
                 )
+                position_changed = True
+                if position_readback:
+                    actual_position = trusted_curtain_position(state)
+                    observed_datetime = (
+                        getattr(state, "last_reported", None)
+                        or getattr(state, "last_updated", None)
+                        or getattr(state, "last_changed", None)
+                    )
+                    if (
+                        isinstance(observed_datetime, datetime)
+                        and observed_datetime.tzinfo is None
+                    ):
+                        observed_datetime = observed_datetime.replace(
+                            tzinfo=timezone.utc
+                        )
+                    observed_after_dispatch = bool(
+                        position_not_before is None
+                        or (
+                            isinstance(observed_datetime, datetime)
+                            and observed_datetime >= position_not_before
+                        )
+                    )
+                    # Keep every returned evidence field from this exact poll.
+                    # A later unknown sample must not inherit an older value.
+                    observed_value = None
+                    evidence_revision = None
+                    evidence_sequence = None
+                    if (
+                        actual_position is not None
+                        and is_new_evidence
+                        and observed_after_dispatch
+                    ):
+                        observed_value = actual_position
+                        evidence_revision = current_revision
+                        evidence_sequence = observed_at
+                    is_new_evidence = is_new_evidence and observed_after_dispatch
+                    position_changed = (
+                        before_position is None
+                        or (
+                            actual_position is not None
+                            and actual_position != before_position
+                        )
+                    )
                 if (
                     dependency_status is None or not dependency_status.blocks_commands
                 ) and _device_action_confirmed(
                     state, action_id, value
-                ) and is_new_evidence:
+                ) and is_new_evidence and position_changed:
                     matched = True
                     break
             remaining = deadline - loop.time()
             if remaining <= 0:
                 break
             await asyncio.sleep(min(self._readback_interval_seconds, remaining))
-        return {
+        result: dict[str, object] = {
             "attempted": True,
             "matched": matched,
             "observedAt": observed_at,
             "observedState": observed_state,
             "attempts": attempts,
-            "isNewEvidence": matched and after_revision is not None,
+            "isNewEvidence": (
+                is_new_evidence if position_readback else matched
+            )
+            and after_revision is not None,
         }
+        if observed_value is not None:
+            result["observedValue"] = observed_value
+        if evidence_revision is not None:
+            result["evidenceRevision"] = evidence_revision
+        if evidence_sequence is not None:
+            result["evidenceSequence"] = evidence_sequence
+        return result
 
     async def async_execute(
         self,
@@ -2759,6 +2862,66 @@ class ScenarioExecutor:
         # effect of a rejected target command.
         current = self._hass.states.get(device.entity_id)
         pre_command_revision = _state_revision(current)
+        physical_dispatch_at: datetime | None = None
+        curtain_plan: CurtainDispatchPlan | None = None
+        try:
+            curtain_plan = self._curtain_command_policy.plan(
+                device=device,
+                action_id=action.action_id,
+                requested=confirmation_value,
+                current_state=current,
+            )
+        except CurtainPolicyError as error:
+            if error.skipped:
+                return {
+                    **base,
+                    "status": "completed",
+                    "target_id": action.target_id,
+                    "domain": allowed.domain,
+                    "service": allowed.service,
+                    "entity_id": device.entity_id,
+                    "confirmed": False,
+                    "skipped": True,
+                    "reason": error.code,
+                    "read_back": {
+                        "attempted": False,
+                        "matched": False,
+                        "observedAt": None,
+                        "observedState": str(
+                            getattr(current, "state", "unknown")
+                        ),
+                        "attempts": 0,
+                        "isNewEvidence": False,
+                    },
+                }
+            return {**base, "status": "failed", "error": error.code}
+        if curtain_plan is not None:
+            dispatch_service = curtain_plan.service
+            service_data = dict(curtain_plan.service_data)
+            confirmation_action_id = curtain_plan.confirmation_action_id
+            confirmation_value = curtain_plan.confirmation_value
+            if (
+                (
+                    action.action_id
+                    in {"open_cover", "set_position", "close_cover"}
+                    and pre_command_revision is None
+                )
+                or (
+                    (
+                        action.action_id == "open_cover"
+                        or (
+                            action.action_id == "set_position"
+                            and confirmation_value != 0
+                        )
+                    )
+                    and curtain_plan.pre_command_position is None
+                )
+            ):
+                return {
+                    **base,
+                    "status": "failed",
+                    "error": "curtain_evidence_unavailable",
+                }
         range_error = _range_error_for_action(device, current, action.action_id, confirmation_value)
         if range_error is not None:
             return {**base, "status": "failed", "error": range_error}
@@ -2935,6 +3098,12 @@ class ScenarioExecutor:
             and (allowed.domain == "light" or is_contextually_dangerous)
             and pre_command_revision is not None
         )
+        if curtain_plan is not None and action.action_id in {
+            "open_cover",
+            "set_position",
+            "close_cover",
+        }:
+            require_new_readback = True
         if (
             stale_automatic_turn_on
         ):
@@ -3022,6 +3191,23 @@ class ScenarioExecutor:
                         "status": "failed",
                         "error": "dispatch_descriptor_changed",
                     })
+            if curtain_plan is not None:
+                current_policy = self._curtain_command_policy
+                try:
+                    current_plan = current_policy.plan(
+                        device=current_device,
+                        action_id=action.action_id,
+                        requested=curtain_plan.requested,
+                        current_state=self._hass.states.get(device.entity_id),
+                    )
+                except CurtainPolicyError:
+                    current_plan = None
+                if current_plan != curtain_plan:
+                    return failed_after_power_dispatch({
+                        **base,
+                        "status": "failed",
+                        "error": "curtain_dispatch_plan_changed",
+                    })
             if stale_automatic_turn_on:
                 assert reassert_identity is not None
                 if not await self._light_priority.async_validate_reassert(
@@ -3076,6 +3262,7 @@ class ScenarioExecutor:
                         device.entity_id,
                         "on" if dispatch_service == "turn_on" else "off",
                     )
+                physical_dispatch_at = datetime.now(timezone.utc)
                 mark_physical_dispatch()
                 base["_physical_attempted"] = True
                 await self._call_service(
@@ -3109,6 +3296,16 @@ class ScenarioExecutor:
                 else {}
             ),
         }
+        if curtain_plan is not None:
+            receipt["curtain_policy_revision"] = curtain_plan.policy_revision
+            receipt["curtain_policy_generation"] = curtain_plan.generation
+            receipt["curtain_requested"] = curtain_plan.requested
+            receipt["curtain_applied"] = curtain_plan.applied
+            receipt["curtain_limited"] = curtain_plan.limited
+            if isinstance(physical_dispatch_at, datetime):
+                receipt["curtain_command_sent_at_ms"] = max(
+                    0, int(physical_dispatch_at.timestamp() * 1000)
+                )
         if dry_run:
             receipt["service_data"] = service_data
             receipt["planned"] = True
@@ -3117,6 +3314,15 @@ class ScenarioExecutor:
         elif defer_readback:
             receipt["_readback_action_id"] = confirmation_action_id
             receipt["_readback_value"] = confirmation_value
+            if (
+                curtain_plan is not None
+                and confirmation_action_id == "set_position"
+            ):
+                receipt["_readback_before_position"] = (
+                    curtain_plan.pre_command_position
+                )
+                receipt["_readback_curtain_position"] = True
+                receipt["_readback_position_not_before"] = physical_dispatch_at
             if require_new_readback:
                 receipt["_readback_after_revision"] = pre_command_revision
                 receipt["_readback_require_new"] = True
@@ -3135,12 +3341,27 @@ class ScenarioExecutor:
                 require_new_evidence=require_new_readback,
                 window_seconds=confirmation_window_ms / 1000,
                 prepared_power_sources=prepared_sources,
+                before_position=(
+                    curtain_plan.pre_command_position
+                    if curtain_plan is not None
+                    and confirmation_action_id == "set_position"
+                    else None
+                ),
+                position_readback=(
+                    curtain_plan is not None
+                    and confirmation_action_id == "set_position"
+                ),
+                position_not_before=physical_dispatch_at,
             )
             receipt["confirmed"] = read_back["matched"] is True
             receipt["read_back"] = read_back
             receipt["effective_state"] = read_back.get("observedState")
             receipt["reason"] = (
-                None if read_back["matched"] is True else "state_not_confirmed"
+                "curtain_position_limited"
+                if curtain_plan is not None and curtain_plan.limited
+                else None
+                if read_back["matched"] is True
+                else "state_not_confirmed"
             )
             receipt["confirmation_window_ms"] = confirmation_window_ms
         if adaptive_minimum is not None:
@@ -3628,6 +3849,13 @@ class ScenarioExecutor:
             value = receipt.pop("_readback_value", None)
             after_revision = receipt.pop("_readback_after_revision", None)
             require_new = receipt.pop("_readback_require_new", False) is True
+            before_position = receipt.pop("_readback_before_position", None)
+            position_readback = (
+                receipt.pop("_readback_curtain_position", False) is True
+            )
+            position_not_before = receipt.pop(
+                "_readback_position_not_before", None
+            )
             prepared = receipt.pop("_readback_prepared_power_sources", ())
             if not isinstance(action_id, str):
                 continue
@@ -3647,6 +3875,17 @@ class ScenarioExecutor:
                         ),
                         prepared_power_sources=frozenset(
                             item for item in prepared if isinstance(item, str)
+                        ),
+                        before_position=(
+                            before_position
+                            if type(before_position) is int
+                            else None
+                        ),
+                        position_readback=position_readback,
+                        position_not_before=(
+                            position_not_before
+                            if isinstance(position_not_before, datetime)
+                            else None
                         ),
                     ),
                 )
@@ -3673,7 +3912,13 @@ class ScenarioExecutor:
             receipt["confirmed"] = confirmed
             receipt["read_back"] = read_back
             receipt["effective_state"] = read_back.get("observedState")
-            receipt["reason"] = None if confirmed else "state_not_confirmed"
+            receipt["reason"] = (
+                "curtain_position_limited"
+                if receipt.get("curtain_limited") is True
+                else None
+                if confirmed
+                else "state_not_confirmed"
+            )
 
     def _batch_confirmation_window_seconds(
         self, receipt: Mapping[str, Any], action_id: str
