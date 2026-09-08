@@ -652,6 +652,10 @@ def climate_tablet_snapshot(
         *(["set_home_targets"] if home_targets_allowed else []),
         *(["synchronize_home"] if home_base_allowed else []),
     ]
+    home_temperature_range = (
+        projected_rooms[0]["temperature_range"] if projected_rooms else
+        {"minimum": 18, "maximum": 28, "step": 0.5}
+    )
     home_allowed = bool(home_actions)
     if home_allowed:
         home_reasons = []
@@ -689,6 +693,10 @@ def climate_tablet_snapshot(
         "home_control": {
             "enabled": home_allowed,
             "allowed_actions": home_actions,
+            "action_inputs": (
+                {"set_home_targets": {"target_temperature": home_temperature_range}}
+                if home_targets_allowed else {}
+            ),
             "blocked_reasons": home_reasons,
         },
         "rooms": projected_rooms,

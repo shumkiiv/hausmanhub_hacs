@@ -200,6 +200,20 @@
           "uniqueItems": true,
           "maxItems": 9
         },
+        "action_inputs": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "set_home_targets": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["target_temperature"],
+              "properties": {
+                "target_temperature": {"$ref": "#/$defs/temperature_range"}
+              }
+            }
+          }
+        },
         "blocked_reasons": {
           "type": "array",
           "items": {"$ref": "#/$defs/block_reason"},
@@ -220,6 +234,20 @@
             "properties": {
               "allowed_actions": {"maxItems": 0},
               "blocked_reasons": {"minItems": 1}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "allowed_actions": {"contains": {"const": "set_home_targets"}}
+            },
+            "required": ["allowed_actions"]
+          },
+          "then": {
+            "required": ["action_inputs"],
+            "properties": {
+              "action_inputs": {"required": ["set_home_targets"]}
             }
           }
         }
