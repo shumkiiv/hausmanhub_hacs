@@ -8,6 +8,8 @@ const HARNESS = "/tests/visual/hausman-hub-panel-harness.html";
 const HARNESS_ORIGIN = "http://127.0.0.1:8765";
 const FIXED_NOW = "2026-08-23T02:15:00.000Z";
 const PANEL_READY_TIMEOUT_MS = 45_000;
+const HARNESS_PHASE_TIMEOUT_MS = 60_000;
+const HARNESS_CLOSE_TIMEOUT_MS = 5_000;
 const allStates = [
   ["overview", ""], ["lighting", ""], ["climate", ""], ["rooms", ""], ["media", ""],
   ["security", ""], ["devices", ""], ["energy", ""], ["scenarios", ""], ["settings", ""],
@@ -158,6 +160,43 @@ function assignControlLanes(controls, requestedLaneCount) {
   controls.forEach((control, index) => lanes[index % laneCount].push({ index, control }));
   return lanes;
 }
+
+function harnessPhaseMessage({ state, key = null, occurrence = null, lane = null, phase }) {
+  return `state=${state} key=${key ?? "-"} occurrence=${occurrence ?? "-"} lane=${lane ?? "-"} phase=${phase}`;
+}
+
+function harnessPhaseError(identity) {
+  const error = new Error(`Harness phase deadline exceeded: ${harnessPhaseMessage(identity)}`);
+  error.harnessPhase = identity;
+  return error;
+}
+
+async function withHarnessDeadline(identity, operation, timeoutMs = HARNESS_PHASE_TIMEOUT_MS) {
+  let timer;
+  const work = Promise.resolve().then(operation);
+  // The race may settle before a browser operation. Retain a rejection handler
+  // on that operation so a late failure is observed instead of becoming an
+  // unhandled rejection after the lane has already stopped.
+  work.catch(() => {});
+  try {
+    return await Promise.race([
+      work,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(harnessPhaseError(identity)), timeoutMs); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function closeHarnessResource(resource, identity) {
+  if (resource) await withHarnessDeadline({ ...identity, phase: "close" }, () => resource.close(), HARNESS_CLOSE_TIMEOUT_MS);
+}
+
+test("harness deadline rejects a never-resolving action with its complete identity", async () => {
+  const identity = { state: "rooms", key: "room:open", occurrence: 2, lane: 3, phase: "exercise" };
+  await expect(withHarnessDeadline(identity, () => new Promise(() => {}), 10))
+    .rejects.toThrow("state=rooms key=room:open occurrence=2 lane=3 phase=exercise");
+});
 
 test("intent classifier: ui-only effect", async () => {
   expect(classify({ intent: "ui-only", effect: { attribute: "data-section", equals: "rooms" } }, { calls: [], attributes: { "data-section": "rooms" } }).pass).toBe(true);
@@ -435,11 +474,14 @@ function writeReport(report) {
   fs.renameSync(temp, file);
 }
 
-async function createStateContext(browser, routeTelemetry) {
-  const context = await browser.newContext();
-  await context.addInitScript(resetLocalStateAndFreezeClock, FIXED_NOW);
-  await context.addInitScript(auditInit);
-  await context.route("**/*", async route => {
+async function createStateContext(browser, routeTelemetry, identity = { state: "test", key: null, occurrence: null, lane: null }) {
+  let context;
+  try {
+    return await withHarnessDeadline({ ...identity, phase: "create" }, async () => {
+      context = await browser.newContext();
+      await context.addInitScript(resetLocalStateAndFreezeClock, FIXED_NOW);
+      await context.addInitScript(auditInit);
+      await context.route("**/*", async route => {
     const url = new URL(route.request().url());
     if (url.origin === HARNESS_ORIGIN) {
       routeTelemetry.continued.push(`${url.origin}${url.pathname}`);
@@ -450,20 +492,34 @@ async function createStateContext(browser, routeTelemetry) {
     routeTelemetry.blockedAttempts += 1;
     if (routeTelemetry.blocked.length < 32) routeTelemetry.blocked.push(`${url.protocol}//${url.host}${url.pathname}`);
     await route.abort("blockedbyclient");
-  });
-  return context;
+      });
+      return context;
+    });
+  } catch (error) {
+    try { await closeHarnessResource(context, identity); } catch { /* Preserve the failed create phase. */ }
+    throw error;
+  }
 }
 
-async function freshStatePage(context, state) {
-  const page = await context.newPage();
-  await open(page, state);
-  return page;
+async function freshStatePage(context, state, identity = { state: state[0], key: null, occurrence: null, lane: null }) {
+  let page;
+  try {
+    return await withHarnessDeadline({ ...identity, phase: "open" }, async () => {
+      page = await context.newPage();
+      await open(page, state);
+      return page;
+    });
+  } catch (error) {
+    try { await closeHarnessResource(page, identity); } catch { /* Preserve the failed open phase. */ }
+    throw error;
+  }
 }
 
-async function waitForStableControlInventory(page, expected) {
-  let consecutiveReadySamples = 0;
-  const requiredReadySamples = expected.occurrenceTotal > 1 ? 2 : 1;
-  await expect.poll(async () => {
+async function waitForStableControlInventory(page, expected, identity = { state: "test", key: expected.key, occurrence: expected.occurrence, lane: null }) {
+  return withHarnessDeadline({ ...identity, phase: "inventory" }, async () => {
+    let consecutiveReadySamples = 0;
+    const requiredReadySamples = expected.occurrenceTotal > 1 ? 2 : 1;
+    await expect.poll(async () => {
     const snapshot = await page.locator("hausman-hub-panel").evaluate((host, key) => {
       const visible = node => { const style = getComputedStyle(node); return !node.disabled && !node.hidden && style.display !== "none" && style.visibility !== "hidden" && node.getClientRects().length > 0; };
       const count = [...host.shadowRoot.querySelectorAll("button,input,select,textarea,a,[role=button]")]
@@ -479,12 +535,17 @@ async function waitForStableControlInventory(page, expected) {
   }, {
     timeout: PANEL_READY_TIMEOUT_MS,
     message: `stable visible inventory for ${expected.key}`,
-  }).toBe(expected.occurrenceTotal);
+    }).toBe(expected.occurrenceTotal);
+  });
 }
 
-async function exerciseControl(page, state, expected) {
+async function exerciseControl(page, state, expected, identity) {
+  return withHarnessDeadline({ ...identity, phase: "exercise" }, () => exerciseControlUnbounded(page, state, expected, identity));
+}
+
+async function exerciseControlUnbounded(page, state, expected, identity) {
   await open(page, state);
-  await waitForStableControlInventory(page, expected);
+  await waitForStableControlInventory(page, expected, identity);
   const outcome = await page.locator("hausman-hub-panel").evaluate(async (host, control) => {
     const root = host.shadowRoot;
     const visible = node => { const style = getComputedStyle(node); return !node.disabled && !node.hidden && style.display !== "none" && style.visibility !== "hidden" && node.getClientRects().length > 0; };
@@ -524,7 +585,7 @@ async function exerciseControl(page, state, expected) {
     const selected = Boolean(current && (current.matches(".is-active,.is-selected") || ["true", "page"].includes(current.getAttribute("aria-selected")) || current.getAttribute("aria-pressed") === "true" || current.getAttribute("aria-checked") === "true"));
     return { clicked: true, calls: (window.__hausmanHubHarnessCalls || []).slice(before), actionLatencyMs: performance.now() - actionStartedAt, domChanged: root.innerHTML !== beforeDom, valueChanged: beforeValue !== undefined && target.value !== beforeValue, checkedChanged: beforeChecked !== undefined && target.checked !== beforeChecked, selected, editorOpen: Boolean(root.querySelector(".scenario-editor-overlay")), scrollIntoViewCalls, attributes };
   }, expected);
-  const current = await page.evaluate(() => ({ audit: window.__hausmanHubInteractionAudit, errors: window.__hausmanHubHarnessErrors || [] }));
+  const current = await withHarnessDeadline({ ...identity, phase: "audit" }, () => page.evaluate(() => ({ audit: window.__hausmanHubInteractionAudit, errors: window.__hausmanHubHarnessErrors || [] })));
   return { outcome, current };
 }
 
@@ -536,13 +597,16 @@ test("every visible enabled HACS control is located and safely exercised in the 
   const safeActionLatencies = [];
   const report = { provenance: releaseProvenance(), observed_source_ids: [], signatures: [], attempted_signatures: [], clicked_signatures: [], blocked_signatures: [], unrecorded_signatures: [], unclassified: [], unrecorded_commands: [], unexpected_calls: [], failed_effects: [], missing: [], errors: [], sections: {}, blocked_external_attempts: 0, external_network: false, mutation_escape: false, harness_calls: 0, safe_action_latency_ms: latencySummary(safeActionLatencies) };
   for (const state of states) {
-    const context = await createStateContext(browser, routeTelemetry);
+    const stateIdentity = { state: state[0], key: null, occurrence: null, lane: null };
+    let context;
+    let stateFailure;
     try {
-      const page = await freshStatePage(context, state);
+      context = await createStateContext(browser, routeTelemetry, stateIdentity);
+      const page = await freshStatePage(context, state, stateIdentity);
       let controls;
       try {
         if (state[0] === "rooms") await expect(page.locator("hausman-hub-panel").locator(".rooms-canon-search")).toHaveAttribute("aria-label", "Найти комнату");
-        const inventory = await page.locator("hausman-hub-panel").evaluate((host, currentState) => {
+        const inventory = await withHarnessDeadline({ ...stateIdentity, phase: "inventory" }, () => page.locator("hausman-hub-panel").evaluate((host, currentState) => {
       const root = host.shadowRoot;
       const visible = node => { const style = getComputedStyle(node); return !node.disabled && !node.hidden && style.display !== "none" && style.visibility !== "hidden" && node.getClientRects().length > 0; };
       const technicalPath = node => {
@@ -567,15 +631,15 @@ test("every visible enabled HACS control is located and safely exercised in the 
         auditSource: node.dataset?.hmhAuditSource || "",
         technicalPath: technicalPath(node),
       }));
-        }, state[0]);
+        }, state[0]));
         controls = withOccurrences(inventory.filter((item) => item.key));
         for (const item of inventory.filter((candidate) => !candidate.key || !candidate.intent || !intentFor(state[0], candidate.key) || intentFor(state[0], candidate.key)?.intent !== candidate.intent)) {
           report.unclassified.push({ state: state[0], key: item.key || null, intent: item.intent || null, tag: item.tag, className: item.className, testid: item.testid, id: item.id, name: item.name, ariaControls: item.ariaControls, auditSource: item.auditSource, technicalPath: item.technicalPath });
         }
-        const initialAudit = await page.evaluate(() => ({ audit: window.__hausmanHubInteractionAudit, errors: window.__hausmanHubHarnessErrors || [] }));
+        const initialAudit = await withHarnessDeadline({ ...stateIdentity, phase: "audit" }, () => page.evaluate(() => ({ audit: window.__hausmanHubInteractionAudit, errors: window.__hausmanHubHarnessErrors || [] })));
         report.observed_source_ids.push(...initialAudit.audit.sources.map(row => row.source_id), ...initialAudit.audit.listeners.map(row => row.source_id)); report.errors.push(...initialAudit.errors);
       } finally {
-        await page.close();
+        await closeHarnessResource(page, stateIdentity);
       }
       report.sections[state[0]] = { visible_enabled: controls.length, attempted: 0, clicked: 0, blocked: 0 };
       if (INVENTORY_ONLY) continue;
@@ -583,16 +647,22 @@ test("every visible enabled HACS control is located and safely exercised in the 
       // allowing Chromium to use more than one CPU core. Each lane owns one
       // context and Page, so navigation in one lane cannot reset another lane.
       const laneRuns = assignControlLanes(controls, 4).map(async (lane, laneIndex) => {
-        const laneContext = laneIndex === 0 ? context : await createStateContext(browser, routeTelemetry);
+        const laneIdentity = { state: state[0], key: null, occurrence: null, lane: laneIndex };
+        const laneContext = laneIndex === 0 ? context : await createStateContext(browser, routeTelemetry, laneIdentity);
         let action;
+        let laneCleanupError;
         try {
-          action = await laneContext.newPage();
+          action = await withHarnessDeadline({ ...laneIdentity, phase: "create" }, () => laneContext.newPage());
           const results = [];
-          for (const item of lane) results.push({ ...item, ...await exerciseControl(action, state, item.control) });
+          for (const item of lane) {
+            const actionIdentity = { state: state[0], key: item.control.key, occurrence: item.control.occurrence, lane: laneIndex };
+            results.push({ ...item, ...await exerciseControl(action, state, item.control, actionIdentity) });
+          }
           return results;
         } finally {
-          await action?.close();
-          if (laneIndex !== 0) await laneContext.close();
+          try { await closeHarnessResource(action, laneIdentity); } catch (error) { laneCleanupError = error; }
+          try { if (laneIndex !== 0) await closeHarnessResource(laneContext, laneIdentity); } catch (error) { laneCleanupError ||= error; }
+          if (laneCleanupError) throw laneCleanupError;
         }
       });
       const settledLanes = await Promise.allSettled(laneRuns);
@@ -618,8 +688,21 @@ test("every visible enabled HACS control is located and safely exercised in the 
       report.safe_action_latency_ms = latencySummary(safeActionLatencies);
       report.blocked_external_attempts = routeTelemetry.blockedAttempts;
       writeReport(report);
+    } catch (error) {
+      stateFailure = error;
+      report.errors.push(error.message || String(error));
+      report.safe_action_latency_ms = latencySummary(safeActionLatencies);
+      report.blocked_external_attempts = routeTelemetry.blockedAttempts;
+      writeReport(report);
+      throw error;
     } finally {
-      await context.close();
+      try {
+        await closeHarnessResource(context, stateIdentity);
+      } catch (error) {
+        report.errors.push(error.message || String(error));
+        writeReport(report);
+        if (!stateFailure) throw error;
+      }
     }
   }
   report.observed_source_ids = [...new Set(report.observed_source_ids)].sort(); report.signatures = [...new Set(report.signatures)]; report.attempted_signatures = [...new Set(report.attempted_signatures)]; report.clicked_signatures = [...new Set(report.clicked_signatures)]; report.blocked_signatures = [...new Set(report.blocked_signatures)]; report.unrecorded_signatures = [...new Set(report.unrecorded_signatures)]; report.errors = [...new Set(report.errors)];
