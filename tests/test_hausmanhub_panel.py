@@ -1085,6 +1085,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         button_styles = BUTTONS_CSS.read_text(encoding="utf-8")
         lighting_styles = LIGHTING_CSS.read_text(encoding="utf-8")
 
+        self.assertNotIn("?v=1.52.227", styles)
         self.assertLessEqual(len(styles.encode("utf-8")), MAX_PANEL_CSS_BYTES)
         self.assertLessEqual(len(weather_source_styles.encode("utf-8")), 8 * 1024)
         self.assertLessEqual(len(scenario_styles.encode("utf-8")), 20 * 1024)
