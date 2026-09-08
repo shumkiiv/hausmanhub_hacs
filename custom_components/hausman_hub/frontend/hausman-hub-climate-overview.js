@@ -206,6 +206,7 @@ export function renderHomeTargetCard(panel, dashboard, deps, options = {}) {
   }
   card.appendChild(head);
   const formatTarget = (value) => `${value.toFixed(1).replace(".0", "").replace(".", ",")}°`;
+  const stepAmount = formatTarget(bounds.step).slice(0, -1);
   const dial = deps.el("div", "overview-canon-target-dial");
   const stepButton = (label, delta, aria) => {
     const button = deps.el("button", "overview-canon-target-step");
@@ -223,11 +224,11 @@ export function renderHomeTargetCard(panel, dashboard, deps, options = {}) {
     });
     return button;
   };
-  dial.appendChild(stepButton("−0,5", -0.5, "Понизить общую цель на 0,5 °C"));
+  dial.appendChild(stepButton(`−${stepAmount}`, -bounds.step, `Понизить общую цель на ${stepAmount} °C`));
   const value = deps.el("strong", "overview-canon-target-value", target === null
     ? "Нет данных" : formatTarget(target));
   dial.appendChild(value);
-  dial.appendChild(stepButton("+0,5", 0.5, "Повысить общую цель на 0,5 °C"));
+  dial.appendChild(stepButton(`+${stepAmount}`, bounds.step, `Повысить общую цель на ${stepAmount} °C`));
   card.appendChild(dial);
   if (target !== null) {
     const sliderWrap = deps.el("div", "overview-canon-target-slider");
@@ -256,12 +257,13 @@ export function renderHomeTargetCard(panel, dashboard, deps, options = {}) {
   [["Прохладно", 24], ["Комфорт", 25], ["Тепло", 26]].forEach(([name, preset]) => {
     const chip = deps.el("button", `overview-canon-target-preset${target === preset ? " is-active" : ""}`);
     chip.type = "button";
-    chip.disabled = panel._busy || !canSetTargets || target === null;
+    const presetAllowed = validHomeTarget(preset, bounds);
+    chip.disabled = panel._busy || !canSetTargets || target === null || !presetAllowed;
     chip.appendChild(deps.el("strong", null, name));
     chip.appendChild(deps.el("small", null, `${preset}°`));
     deps.setAttr(chip, "aria-label", `Установить общую цель ${preset} °C`);
     chip.addEventListener("click", () => {
-      if (chip.disabled || target === preset) return;
+      if (chip.disabled || !presetAllowed || target === preset) return;
       setClimateHomeTarget(panel, preset);
     });
     presets.appendChild(chip);
