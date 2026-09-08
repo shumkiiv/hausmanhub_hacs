@@ -3363,7 +3363,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
     def test_climate_overview_synchronizes_once_through_capability_gated_action(self) -> None:
         payloads = dict(GET_PATHS)
         payloads["hausman_hub/v1/dashboard"] = {
-            "summary": {"targetTemp": 25},
+            "summary": {"targetTemp": 18},
             "rooms": [{"id": "living", "name": "Гостиная", "temp": 24.5, "humidity": 45}],
             "devices": [],
             "alarms": [],
@@ -3375,7 +3375,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                 "allowed_actions": ["set_home_targets", "synchronize_home"],
                 "action_inputs": {
                     "set_home_targets": {
-                        "target_temperature": {"minimum": 18, "maximum": 28, "step": 0.5},
+                        "target_temperature": {"minimum": 18, "maximum": 28, "step": 2},
                     },
                 },
                 "blocked_reasons": [],
@@ -3402,7 +3402,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           && call.payload.action === "set_home_targets");
         if (!homeTarget || homeTarget.payload.room_id !== null
           || homeTarget.payload.expected_state_revision !== 78
-          || homeTarget.payload.parameters.target_temperature !== 25.5) {
+          || homeTarget.payload.parameters.target_temperature !== 20) {
           throw new Error("home target quick action payload mismatch: " + JSON.stringify(homeTarget));
         }
         panel._shell.tabs.climate.fire("click");

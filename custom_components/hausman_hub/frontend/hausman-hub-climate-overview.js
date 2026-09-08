@@ -210,7 +210,8 @@ export function renderHomeTargetCard(panel, dashboard, deps, options = {}) {
   const stepButton = (label, delta, aria) => {
     const button = deps.el("button", "overview-canon-target-step");
     button.type = "button";
-    const next = target === null ? null : Math.round((target + delta) / bounds.step) * bounds.step;
+    const next = target === null ? null
+      : Math.round((target - bounds.minimum) / bounds.step + Math.sign(delta)) * bounds.step + bounds.minimum;
     button.disabled = panel._busy || !canSetTargets || target === null || !validHomeTarget(next, bounds);
     deps.setAttr(button, "aria-label", aria);
     button.appendChild(climateIcon(delta < 0 ? "minus" : "plus", deps));
