@@ -28,6 +28,36 @@ const states = selectedStates(allStates, process.env.HACS_INTENT_STATES || "");
 const output = process.env.PLAYWRIGHT_OUTPUT_DIR || process.env.QA_ARTIFACT_ROOT;
 const INVENTORY_ONLY = process.env.HACS_INTENT_INVENTORY_ONLY === "1";
 const ROOT = path.resolve(process.cwd());
+// Exact paths observed in the last successful exhaustive harness run. The
+// route policy deliberately does not discover files dynamically: new assets
+// must be observed and reviewed before the release gate may load them.
+const ALLOWED_LOCAL_REQUEST_PATHS = new Set([
+  "/api/hausman_hub/panel/assets/hero_living_room_night.png", "/api/hausman_hub/panel/assets/hero_premium_kitchen_night_v2.png",
+  "/api/hausman_hub/panel/assets/hero_room_bedroom_night.webp", "/api/hausman_hub/panel/assets/hero_room_office_night.webp",
+  "/api/hausman_hub/panel/hausman-hub-panel.css", "/tests/visual/hausman-hub-panel-harness.html",
+  ...[
+    "area-binding", "buttons", "catalog", "climate-overview", "climate-side", "command-feedback", "control-channel", "correlation",
+    "device-actions", "device-bindings", "device-card", "device-controls", "device-discovery", "device-features", "device-inventory",
+    "device-maintenance", "device-property-names", "devices-overview", "diagnostics", "energy-chart", "energy-meter", "energy",
+    "error-taxonomy", "feedback", "first-run-draft", "harness-intents", "hero-room-navigation", "home-sections", "intercom",
+    "inventory-duplicates", "kiosk", "library-hero", "light-protection", "lighting-side", "lighting", "media-device", "media-overview",
+    "media-side", "modal", "navigation", "notice", "overview-events-modal", "overview-hero-state", "overview-side", "overview-utility-cards",
+    "overview", "pagination", "panel", "power-links", "rollout", "room-climate-sources", "room-device-groups", "room-icons", "room-setup",
+    "rooms-side", "rooms", "scenario-ai", "scenario-badges", "scenario-bulk", "scenario-catalog", "scenario-device-picker",
+    "scenario-editor-scroll", "scenario-extensions", "scenario-fields", "scenario-icons", "scenario-node-red", "scenario-rooms", "scenario-state",
+    "scenarios", "security-overview", "settings-profile", "settings-rooms", "settings", "switch", "technical-log", "tokens", "ui-state",
+    "weather-sources", "wizard-validation",
+  ].flatMap((name) => [
+    `/custom_components/hausman_hub/frontend/hausman-hub-${name}.js`,
+    `/custom_components/hausman_hub/frontend/hausman-hub-${name}.css`,
+  ]),
+].filter((pathname) => pathname.startsWith("/api/") || fs.existsSync(path.join(ROOT, pathname))));
+const EXPECTED_BLOCKED_EXTERNAL_IMAGES = new Set([
+  "https://www.zigbee2mqtt.io/images/devices/AC211.png",
+  "https://www.zigbee2mqtt.io/images/devices/TO-Q-SY1-JZT.png",
+  "https://www.zigbee2mqtt.io/images/devices/TRVZB.png",
+  "https://www.zigbee2mqtt.io/images/devices/TS0505B_1.png",
+]);
 const INTERACTION_MANIFEST = JSON.parse(fs.readFileSync(path.join(ROOT, "qa/full-functional/hacs-interactions.json"), "utf8"));
 const INTENTS = new Map((INTERACTION_MANIFEST.interaction_intents || []).map((item) => [`${item.state}:${item.key}`, item]));
 const INTENTS_BY_KEY = new Map((INTERACTION_MANIFEST.interaction_intents || []).map((item) => [item.key, item]));
@@ -474,6 +504,29 @@ function writeReport(report) {
   fs.renameSync(temp, file);
 }
 
+function requestRecord(request) {
+  const url = new URL(request.url());
+  return { method: request.method(), resource_type: request.resourceType(), url: `${url.origin}${url.pathname}` };
+}
+
+function createRouteTelemetry() {
+  return {
+    continued_requests: [], mutation_escape_requests: [], unexpected_local_requests: [],
+    blocked_external_requests: [], unexpected_external_requests: [],
+  };
+}
+
+function attachRouteTelemetry(report, routeTelemetry) {
+  for (const name of Object.keys(routeTelemetry)) report[name] = routeTelemetry[name];
+  report.mutation_escape = report.mutation_escape_requests.length > 0;
+  report.external_network = report.unexpected_external_requests.length > 0;
+  report.blocked_external_attempts = report.blocked_external_requests.length + report.unexpected_external_requests.length;
+}
+
+function expectedBlockedExternal(record) {
+  return record.method === "GET" && record.resource_type === "image" && EXPECTED_BLOCKED_EXTERNAL_IMAGES.has(record.url);
+}
+
 async function createStateContext(browser, routeTelemetry, identity = { state: "test", key: null, occurrence: null, lane: null }) {
   let context;
   try {
@@ -482,16 +535,19 @@ async function createStateContext(browser, routeTelemetry, identity = { state: "
       await context.addInitScript(resetLocalStateAndFreezeClock, FIXED_NOW);
       await context.addInitScript(auditInit);
       await context.route("**/*", async route => {
-    const url = new URL(route.request().url());
-    if (url.origin === HARNESS_ORIGIN) {
-      routeTelemetry.continued.push(`${url.origin}${url.pathname}`);
-      return route.continue();
-    }
-    // Never put query parameters into QA artifacts, and retain only a small
-    // sample. The aggregate count below is the authoritative telemetry.
-    routeTelemetry.blockedAttempts += 1;
-    if (routeTelemetry.blocked.length < 32) routeTelemetry.blocked.push(`${url.protocol}//${url.host}${url.pathname}`);
-    await route.abort("blockedbyclient");
+        const record = requestRecord(route.request());
+        if (new URL(record.url).origin === HARNESS_ORIGIN) {
+          if (record.method !== "GET") routeTelemetry.mutation_escape_requests.push(record);
+          else if (ALLOWED_LOCAL_REQUEST_PATHS.has(new URL(record.url).pathname)) {
+            routeTelemetry.continued_requests.push(record);
+            return route.continue();
+          } else routeTelemetry.unexpected_local_requests.push(record);
+        } else if (expectedBlockedExternal(record)) {
+          routeTelemetry.blocked_external_requests.push(record);
+        } else {
+          routeTelemetry.unexpected_external_requests.push(record);
+        }
+        await route.abort("blockedbyclient");
       });
       return context;
     });
@@ -589,11 +645,44 @@ async function exerciseControlUnbounded(page, state, expected, identity) {
   return { outcome, current };
 }
 
+test("route policy classifies local mutation and unexpected external requests while permitting the fixture image", async ({ browser }) => {
+  const routeTelemetry = createRouteTelemetry();
+  const context = await createStateContext(browser, routeTelemetry);
+  try {
+    const page = await context.newPage();
+    await open(page, allStates[0]);
+    expect(routeTelemetry.unexpected_local_requests).toEqual([]);
+    for (const values of Object.values(routeTelemetry)) values.length = 0;
+
+    await page.evaluate(async () => {
+      await fetch("/api/hausman_hub/v1/security-probe", { method: "POST" }).catch(() => {});
+      await fetch("https://example.invalid/security-probe").catch(() => {});
+      await new Promise((resolve) => {
+        const image = new Image();
+        image.addEventListener("error", resolve, { once: true });
+        image.src = "https://www.zigbee2mqtt.io/images/devices/TS0505B_1.png";
+      });
+    });
+
+    expect(routeTelemetry.mutation_escape_requests).toEqual([
+      { method: "POST", resource_type: "fetch", url: "http://127.0.0.1:8765/api/hausman_hub/v1/security-probe" },
+    ]);
+    expect(routeTelemetry.unexpected_external_requests).toEqual([
+      { method: "GET", resource_type: "fetch", url: "https://example.invalid/security-probe" },
+    ]);
+    expect(routeTelemetry.blocked_external_requests).toEqual([
+      { method: "GET", resource_type: "image", url: "https://www.zigbee2mqtt.io/images/devices/TS0505B_1.png" },
+    ]);
+  } finally {
+    await context.close();
+  }
+});
+
 test("every visible enabled HACS control is located and safely exercised in the isolated harness", async ({ browser }) => {
   test.setTimeout(30 * 60_000);
   if (!output) throw new Error("PLAYWRIGHT_OUTPUT_DIR or QA_ARTIFACT_ROOT is required");
   fs.mkdirSync(output, { recursive: true, mode: 0o700 });
-  const routeTelemetry = { blocked: [], blockedAttempts: 0, continued: [], continuedExternal: [] };
+  const routeTelemetry = createRouteTelemetry();
   const safeActionLatencies = [];
   const report = { provenance: releaseProvenance(), observed_source_ids: [], signatures: [], attempted_signatures: [], clicked_signatures: [], blocked_signatures: [], unrecorded_signatures: [], unclassified: [], unrecorded_commands: [], unexpected_calls: [], failed_effects: [], missing: [], errors: [], sections: {}, blocked_external_attempts: 0, external_network: false, mutation_escape: false, harness_calls: 0, safe_action_latency_ms: latencySummary(safeActionLatencies) };
   for (const state of states) {
@@ -686,13 +775,13 @@ test("every visible enabled HACS control is located and safely exercised in the 
       }
       report.observed_source_ids = [...new Set(report.observed_source_ids)].sort(); report.signatures = [...new Set(report.signatures)]; report.attempted_signatures = [...new Set(report.attempted_signatures)]; report.clicked_signatures = [...new Set(report.clicked_signatures)]; report.blocked_signatures = [...new Set(report.blocked_signatures)]; report.unrecorded_signatures = [...new Set(report.unrecorded_signatures)]; report.errors = [...new Set(report.errors)];
       report.safe_action_latency_ms = latencySummary(safeActionLatencies);
-      report.blocked_external_attempts = routeTelemetry.blockedAttempts;
+      attachRouteTelemetry(report, routeTelemetry);
       writeReport(report);
     } catch (error) {
       stateFailure = error;
       report.errors.push(error.message || String(error));
       report.safe_action_latency_ms = latencySummary(safeActionLatencies);
-      report.blocked_external_attempts = routeTelemetry.blockedAttempts;
+      attachRouteTelemetry(report, routeTelemetry);
       writeReport(report);
       throw error;
     } finally {
@@ -700,6 +789,7 @@ test("every visible enabled HACS control is located and safely exercised in the 
         await closeHarnessResource(context, stateIdentity);
       } catch (error) {
         report.errors.push(error.message || String(error));
+        attachRouteTelemetry(report, routeTelemetry);
         writeReport(report);
         if (!stateFailure) throw error;
       }
@@ -708,8 +798,8 @@ test("every visible enabled HACS control is located and safely exercised in the 
   report.observed_source_ids = [...new Set(report.observed_source_ids)].sort(); report.signatures = [...new Set(report.signatures)]; report.attempted_signatures = [...new Set(report.attempted_signatures)]; report.clicked_signatures = [...new Set(report.clicked_signatures)]; report.blocked_signatures = [...new Set(report.blocked_signatures)]; report.unrecorded_signatures = [...new Set(report.unrecorded_signatures)]; report.errors = [...new Set(report.errors)];
   report.safe_action_latency_ms = latencySummary(safeActionLatencies);
   report.unclassified = summarizeUnclassified(report.unclassified);
-  report.external_network = routeTelemetry.continuedExternal.length > 0; report.blocked_external_attempts = routeTelemetry.blockedAttempts; report.continued_requests = [...new Set(routeTelemetry.continued)].sort(); report.blocked_requests = [...new Set(routeTelemetry.blocked)].sort();
-  expect(report.continued_requests.every((request) => request.startsWith(`${HARNESS_ORIGIN}/`))).toBe(true);
+  attachRouteTelemetry(report, routeTelemetry);
+  expect(report.continued_requests.every((request) => request.method === "GET" && request.url.startsWith(`${HARNESS_ORIGIN}/`))).toBe(true);
   writeReport(report);
   if (INVENTORY_ONLY) return;
   expect(report.missing).toEqual([]); expect(report.errors).toEqual([]); expect(report.unclassified).toEqual([]); expect(report.unrecorded_commands).toEqual([]); expect(report.unexpected_calls).toEqual([]); expect(report.failed_effects).toEqual([]); expect(report.external_network).toBe(false); expect(report.signatures.length).toBeGreaterThan(0);

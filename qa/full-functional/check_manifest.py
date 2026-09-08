@@ -6,8 +6,71 @@ import json
 import math
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from release_pin import MANIFEST, is_release_provenance
+
+
+HARNESS_ORIGIN = "http://127.0.0.1:8765"
+EXPECTED_BLOCKED_EXTERNAL_IMAGES = {
+    "https://www.zigbee2mqtt.io/images/devices/AC211.png",
+    "https://www.zigbee2mqtt.io/images/devices/TO-Q-SY1-JZT.png",
+    "https://www.zigbee2mqtt.io/images/devices/TRVZB.png",
+    "https://www.zigbee2mqtt.io/images/devices/TS0505B_1.png",
+}
+KNOWN_FRONTEND_ASSET_NAMES = (
+    "area-binding", "buttons", "catalog", "climate-overview", "climate-side", "command-feedback", "control-channel", "correlation",
+    "device-actions", "device-bindings", "device-card", "device-controls", "device-discovery", "device-features", "device-inventory",
+    "device-maintenance", "device-property-names", "devices-overview", "diagnostics", "energy-chart", "energy-meter", "energy",
+    "error-taxonomy", "feedback", "first-run-draft", "harness-intents", "hero-room-navigation", "home-sections", "intercom",
+    "inventory-duplicates", "kiosk", "library-hero", "light-protection", "lighting-side", "lighting", "media-device", "media-overview",
+    "media-side", "modal", "navigation", "notice", "overview-events-modal", "overview-hero-state", "overview-side", "overview-utility-cards",
+    "overview", "pagination", "panel", "power-links", "rollout", "room-climate-sources", "room-device-groups", "room-icons", "room-setup",
+    "rooms-side", "rooms", "scenario-ai", "scenario-badges", "scenario-bulk", "scenario-catalog", "scenario-device-picker",
+    "scenario-editor-scroll", "scenario-extensions", "scenario-fields", "scenario-icons", "scenario-node-red", "scenario-rooms", "scenario-state",
+    "scenarios", "security-overview", "settings-profile", "settings-rooms", "settings", "switch", "technical-log", "tokens", "ui-state",
+    "weather-sources", "wizard-validation",
+)
+
+
+def allowed_local_paths() -> set[str]:
+    paths = {
+        "/api/hausman_hub/panel/assets/hero_living_room_night.png",
+        "/api/hausman_hub/panel/assets/hero_premium_kitchen_night_v2.png",
+        "/api/hausman_hub/panel/assets/hero_room_bedroom_night.webp",
+        "/api/hausman_hub/panel/assets/hero_room_office_night.webp",
+        "/api/hausman_hub/panel/hausman-hub-panel.css",
+        "/tests/visual/hausman-hub-panel-harness.html",
+    }
+    for name in KNOWN_FRONTEND_ASSET_NAMES:
+        for suffix in (".js", ".css"):
+            pathname = f"/custom_components/hausman_hub/frontend/hausman-hub-{name}{suffix}"
+            if (Path(__file__).parents[2] / pathname.lstrip("/")).is_file():
+                paths.add(pathname)
+    return paths
+
+
+def valid_request_record(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and set(value) == {"method", "resource_type", "url"}
+        and all(isinstance(value.get(field), str) and value[field] for field in ("method", "resource_type", "url"))
+        and not urlsplit(value["url"]).query
+        and not urlsplit(value["url"]).fragment
+    )
+
+
+def is_allowed_continued_request(value: object) -> bool:
+    if not valid_request_record(value) or value["method"] != "GET":
+        return False
+    parsed = urlsplit(value["url"])
+    return f"{parsed.scheme}://{parsed.netloc}" == HARNESS_ORIGIN and parsed.path in allowed_local_paths()
+
+
+def is_expected_blocked_image(value: object) -> bool:
+    return valid_request_record(value) and value == {
+        "method": "GET", "resource_type": "image", "url": value["url"],
+    } and value["url"] in EXPECTED_BLOCKED_EXTERNAL_IMAGES
 
 
 data = json.loads(MANIFEST.read_text(encoding="utf-8"))
@@ -62,10 +125,32 @@ else:
         or (len(latency_values) == 3 and latency_values != sorted(latency_values))
     ):
         errors.append("safe action latency telemetry is incomplete")
+    route_fields = (
+        "continued_requests",
+        "mutation_escape_requests",
+        "unexpected_local_requests",
+        "blocked_external_requests",
+        "unexpected_external_requests",
+    )
+    route_telemetry = {name: report.get(name) for name in route_fields}
+    if any(not isinstance(values, list) or not all(valid_request_record(value) for value in values) for values in route_telemetry.values()):
+        errors.append("route telemetry is incomplete")
+    else:
+        if not all(is_allowed_continued_request(value) for value in route_telemetry["continued_requests"]):
+            errors.append("route telemetry includes an unapproved continued request")
+        if not all(is_expected_blocked_image(value) for value in route_telemetry["blocked_external_requests"]):
+            errors.append("route telemetry includes an unexpected blocked external request")
+        if route_telemetry["mutation_escape_requests"] or route_telemetry["unexpected_local_requests"] or route_telemetry["unexpected_external_requests"]:
+            errors.append("route telemetry records an unsafe request")
+        if (
+            not isinstance(report.get("external_network"), bool)
+            or not isinstance(report.get("mutation_escape"), bool)
+            or report["external_network"] != bool(route_telemetry["unexpected_external_requests"])
+            or report["mutation_escape"] != bool(route_telemetry["mutation_escape_requests"])
+        ):
+            errors.append("route telemetry booleans disagree with request records")
     if (
         report.get("missing")
-        or report.get("external_network")
-        or report.get("mutation_escape")
         or report.get("errors")
         or report.get("unrecorded_signatures")
         or report.get("unclassified")

@@ -64,6 +64,11 @@ def minimal_runtime_report() -> dict:
         "errors": [],
         "external_network": False,
         "mutation_escape": False,
+        "continued_requests": [],
+        "mutation_escape_requests": [],
+        "unexpected_local_requests": [],
+        "blocked_external_requests": [],
+        "unexpected_external_requests": [],
         "safe_action_latency_ms": {"count": 0, "p50_ms": 0, "p95_ms": 0, "max_ms": 0},
     }
 
@@ -155,6 +160,29 @@ def test_manifest_checker_rejects_incomplete_safe_action_latency_telemetry() -> 
     result = run_manifest_checker(report)
     assert result.returncode == 1
     assert "safe action latency telemetry is incomplete" in result.stdout
+
+
+def test_manifest_checker_rejects_missing_route_telemetry() -> None:
+    report = minimal_runtime_report()
+    del report["mutation_escape_requests"]
+    result = run_manifest_checker(report)
+    assert result.returncode == 1
+    assert "route telemetry is incomplete" in result.stdout
+
+
+def test_manifest_checker_rejects_false_booleans_that_disagree_with_route_telemetry() -> None:
+    report = minimal_runtime_report()
+    report["mutation_escape_requests"] = [{"method": "POST", "resource_type": "fetch", "url": "http://127.0.0.1:8765/api/hausman_hub/v1/security-probe"}]
+    result = run_manifest_checker(report)
+    assert result.returncode == 1
+    assert "route telemetry records an unsafe request" in result.stdout
+
+
+def test_manifest_checker_accepts_expected_blocked_zigbee_image() -> None:
+    report = minimal_runtime_report()
+    report["blocked_external_requests"] = [{"method": "GET", "resource_type": "image", "url": "https://www.zigbee2mqtt.io/images/devices/TS0505B_1.png"}]
+    result = run_manifest_checker(report)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_digest_changes_for_an_audited_release_input() -> None:
