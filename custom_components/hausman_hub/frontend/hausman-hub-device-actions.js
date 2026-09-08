@@ -1,7 +1,7 @@
-import { resolveIntercomQuickAction } from "./hausman-hub-navigation.js?v=1.52.229";
-import { apiErrorMessage } from "./hausman-hub-error-taxonomy.js?v=1.52.229";
-import { filterCatalogActions } from "./hausman-hub-device-features.js?v=1.52.229";
-import { fullDeviceActionRequest, withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.229";
+import { resolveIntercomQuickAction } from "./hausman-hub-navigation.js?v=1.52.230";
+import { apiErrorMessage } from "./hausman-hub-error-taxonomy.js?v=1.52.230";
+import { filterCatalogActions } from "./hausman-hub-device-features.js?v=1.52.230";
+import { fullDeviceActionRequest, withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.230";
 
 const DEVICE_ACTION_EXECUTOR_API = "hausman_hub/v1/device-actions";
 

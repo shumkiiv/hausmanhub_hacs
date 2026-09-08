@@ -1,4 +1,4 @@
-import { createControlChannelAssistant, recommendControlChannel } from "./hausman-hub-control-channel.js?v=1.52.229";
+import { createControlChannelAssistant, recommendControlChannel } from "./hausman-hub-control-channel.js?v=1.52.230";
 
 export function renderFirstRunDeviceGroups(owner, choiceList, room, fields, allChoices, searchable, deps) {
   const {

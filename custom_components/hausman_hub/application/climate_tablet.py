@@ -22,6 +22,7 @@ from ..climate_storage_errors import ClimateOperationRevisionConflict
 from .contour_apply import ContourApplyReceipt, ContourApplyStatus, ContourApplyViolation
 from .contour_override import TemporaryTemperatureViolation
 from .home_climate_targets import HomeClimateTargetsViolation
+from .climate_mode_result import ClimateSavedModeResult
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -952,6 +953,33 @@ class ClimateTabletService:
                 fingerprint = request.fingerprint
                 requires_save = True
             normalized = _validate_receipt(dict(receipt))
+            valid_receipt = _receipt_matches_request(normalized, request)
+            valid_ledger = request.reliability_profile is None or _valid_reliable_dispatch_ledger(dispatch_ledger, normalized, request)
+            if not valid_receipt or not valid_ledger:
+                recovered = None
+                if (
+                    payload.get("version") == 6
+                    and request.reliability_profile == "climate_reliability_v1"
+                    and _valid_reliable_scope_binding(
+                        scope_bindings.get(request_id), request, normalized,
+                        dispatch_ledger, self._reliable_scope_integrity_key,
+                    )
+                ):
+                    recovered = _downgrade_authenticated_confirmation_drift(
+                        normalized, request, dispatch_ledger, self._safe_now(),
+                    )
+                if recovered is not None:
+                    normalized, dispatch_ledger = recovered
+                    _LOGGER.warning(
+                        "Recovered authenticated climate confirmation drift without redispatch"
+                    )
+                    scope_bindings[request_id] = _binding_with_checkpoint(
+                        scope_bindings[request_id], normalized, dispatch_ledger,
+                        self._reliable_scope_integrity_key,
+                    )
+                    requires_save = True
+                else:
+                    raise ClimateTabletUnavailable("stored climate operation receipt is invalid")
             if not _receipt_matches_request(normalized, request):
                 raise ClimateTabletUnavailable("stored climate operation receipt is invalid")
             if request.reliability_profile == "climate_reliability_v1":
@@ -1452,6 +1480,10 @@ class ClimateTabletService:
                         raise
                     result = acceptance_only
                     final_snapshot = snapshot
+                result = _with_saved_mode_evidence(
+                    result, request, final_snapshot, frozen_scope,
+                    self._last_reliability_metadata,
+                )
                 final_ledger: dict[str, object] | None = None
                 receipt = _receipt_from_contour_result(
                     request,
@@ -1769,6 +1801,17 @@ class ClimateTabletService:
                     )
                 )
                 self._legacy_home_reservations.pop(_legacy_correlation_id, None)
+            if isinstance(result, ClimateSavedModeResult) and _reliable_receipt_is_already_in_sync(receipt):
+                # A mode is confirmed against its durable server store. Bind
+                # that zero-call proof to this source, not to an HA power event.
+                mode_metadata = {
+                    key: {**value, "source_observed_at": value.get("mode_observed_at")}
+                    for key, value in self._last_reliability_metadata.items()
+                }
+                self._reliable_scope_bindings[request.request_id] = _reliable_scope_binding(
+                    request, receipt, self._reliable_scope_integrity_key,
+                    mode_metadata, final_ledger,
+                )
             self._remember(
                 request, receipt,
                 final_ledger if request.reliability_profile == "climate_reliability_v1" and physical_started else pending_ledger,
@@ -5161,6 +5204,78 @@ def _expire_accepted_reliable_receipt(
     return _validate_receipt(result)
 
 
+def _downgrade_authenticated_confirmation_drift(
+    receipt: Mapping[str, object], request: ClimateTabletActionRequest,
+    ledger: object, now: int,
+) -> tuple[dict[str, object], dict[str, object]] | None:
+    """Quarantine only old authenticated applied proof overwritten by polling.
+
+    The caller has verified the whole stored state and the exact separate
+    operation/scope checkpoint. This can only remove an unprovable success;
+    it never alters the request, desired goal, acceptance count or replay ban.
+    """
+
+    if (
+        request.action not in {"set_home_targets", "set_room_target", "set_room_humidity_target"}
+        or not isinstance(ledger, Mapping)
+        or ledger.get("state") not in {"accepted_unverified", "accepted_timeout", "terminal_mixed", "confirmed"}
+        or type(ledger.get("dispatched_at")) is not int
+        or receipt.get("accepted") is not True
+    ):
+        return None
+    result = json.loads(json.dumps(receipt))
+    leaves = _reliable_receipt_leaves(result)
+    if not leaves:
+        return None
+    changed = False
+    for leaf in leaves:
+        evidence = leaf.get("evidence")
+        if leaf.get("status") != "confirmed" or leaf.get("execution_state") != "applied":
+            continue
+        if not isinstance(leaf, dict) or not isinstance(evidence, Mapping) or not _strict_leaf_counts(leaf, 1, 1):
+            return None
+        if evidence.get("action") != {
+            "request_fingerprint": request.fingerprint, "action": request.action,
+            "parameters": dict(request.parameters),
+        }:
+            return None
+        observed_at = evidence.get("observed_at")
+        if type(observed_at) is not int or evidence.get("fresh") is not True:
+            return None
+        if (
+            _reliable_evidence_matches_request(evidence, request)
+            and ledger["dispatched_at"] < observed_at <= ledger["dispatched_at"] + 30_000
+        ):
+            continue
+        leaf.update(status="pending", reason="none", execution_state="accepted_unverified",
+                    message_code="pending", message="Команда принята, подтверждение не сохранено.",
+                    retry_policy="forbidden_after_dispatch")
+        leaf.pop("evidence", None)
+        changed = True
+    if not changed:
+        return None
+    result = _expire_accepted_reliable_receipt(result, now)
+    rooms = result["outcomes"]["rooms"]
+    read_back = result["read_back"]
+    result["read_back"] = {
+        **read_back, "attempted": True, "matched": False,
+        "evidence": {
+            **read_back.get("evidence", {}),
+            "confirmed_room_count": sum(
+                all(leaf["status"] == "confirmed" for leaf in room["devices"].values())
+                for room in rooms.values()
+            ),
+        },
+    }
+    new_ledger = _reliable_dispatch_ledger(
+        result, "accepted_timeout", dispatched_at=ledger["dispatched_at"],
+        metadata=_metadata_from_reliable_dispatch_ledger(ledger),
+    )
+    if not _receipt_matches_request(result, request) or not _valid_reliable_dispatch_ledger(new_ledger, result, request):
+        return None
+    return result, new_ledger
+
+
 def _reliable_receipt(
     receipt: dict[str, object],
     request: ClimateTabletActionRequest,
@@ -5221,6 +5336,7 @@ def _reliable_receipt(
         execution_outcomes=execution, reliability_metadata=reliability_metadata,
         dispatched_at=dispatched_at,
         pre_dispatch_metadata=pre_dispatch_metadata,
+        preserve_confirmed_evidence=frozen_execution_outcomes is not None,
     )
     has_deferred = any(
         leaf.get("status") == "deferred"
@@ -5425,6 +5541,40 @@ def _reliable_scope_size(
     return len(device_ids) if isinstance(device_ids, list) else 0
 
 
+def _with_saved_mode_evidence(
+    result: object, request: ClimateTabletActionRequest,
+    snapshot: Mapping[str, object], scope: Mapping[str, object],
+    metadata: Mapping[tuple[str, str], Mapping[str, object]],
+) -> object:
+    """Bind a durable zero-call mode write to its exact authoritative read-back."""
+
+    if not isinstance(result, ClimateSavedModeResult):
+        return result
+    if (
+        request.action not in {"set_room_mode", "set_device_mode"}
+        or result.room_id != request.room_id
+        or dict(result.modes) != {key: request.parameters.get("mode") for key in scope.get("device_ids", [])}
+        or type(result.observed_at) is not int or result.observed_at <= 0
+    ):
+        return result
+    room = next((row for row in snapshot.get("rooms", []) if row.get("id") == result.room_id), {})
+    devices = {device["id"]: device for device in room.get("devices", [])}
+    outcomes: dict[str, dict[str, object]] = {}
+    for device_id, mode in result.modes:
+        private = metadata.get((result.room_id, device_id), {})
+        device = devices.get(device_id, {})
+        reported_mode = room.get("mode") if request.action == "set_room_mode" else device.get("mode")
+        if private.get("mode_observed_at") != result.observed_at or reported_mode != mode:
+            return result
+        outcomes[device_id] = {
+            "status": "confirmed", "reason": "none", "execution_state": "already_in_sync",
+            "message_code": "confirmed", "message": "Результат подтверждён чтением состояния.",
+            "command_count": 0, "accepted_count": 0,
+            "evidence": _reliable_evidence(request, room, device, snapshot, private),
+        }
+    return replace(result, device_outcomes=outcomes)
+
+
 def _has_exact_reliable_device_outcomes(
     result: object,
     snapshot: Mapping[str, object],
@@ -5582,7 +5732,9 @@ def _valid_already_in_sync_evidence(
         return False
     expected = _reliable_evidence(request, room, device, snapshot, metadata)
     action = evidence.get("action")
-    source_observed_at = metadata.get("source_observed_at")
+    source_observed_at = metadata.get(
+        "mode_observed_at" if request.action in {"set_room_mode", "set_device_mode"} else "source_observed_at"
+    )
     actual = evidence.get("observed_actual")
     expected_actual = expected.get("observed_actual")
     if not isinstance(actual, Mapping) or not isinstance(expected_actual, Mapping):
@@ -5651,7 +5803,7 @@ def _device_supports_action(
     powered = kind in {
         "air_conditioner", "humidifier", "radiator_thermostat", "floor_heating",
     }
-    mode = kind in {"air_conditioner", "radiator_thermostat"}
+    mode = powered
     if request.action == "set_device_mode":
         return device.get("id") == request.parameters.get("device_id") and mode
     if request.action in {"set_room_target", "clear_room_override", "set_room_min_target", "set_room_target_strategy"}:
@@ -5702,6 +5854,7 @@ def _reliable_outcomes(
     reliability_metadata: Mapping[tuple[str, str], Mapping[str, object]] | None = None,
     dispatched_at: int | None = None,
     pre_dispatch_metadata: Mapping[tuple[str, str], Mapping[str, object]] | None = None,
+    preserve_confirmed_evidence: bool = False,
 ) -> tuple[dict[str, object], int]:
     room_index = {item.get("id"): item for item in snapshot.get("rooms", []) if isinstance(item, Mapping)} if isinstance(snapshot.get("rooms"), list) else {}
     rooms: dict[str, object] = {}
@@ -5734,6 +5887,11 @@ def _reliable_outcomes(
                 and isinstance(execution_leaf.get("evidence"), Mapping)
             ):
                 leaf = dict(execution_leaf)
+                if preserve_confirmed_evidence:
+                    # A terminal sibling is an immutable historical fact.
+                    # A later thermostat adjustment must not overwrite its proof.
+                    leaves[device_id] = json.loads(json.dumps(leaf))
+                    continue
                 # Native executor evidence is intentionally minimal.  Before
                 # persisting a reliable receipt, bind the leaf to the exact
                 # tablet request and the authoritative post-dispatch view.
@@ -5747,6 +5905,22 @@ def _reliable_outcomes(
                     reliability_metadata.get((room_id, device_id), {})
                     if isinstance(reliability_metadata, Mapping) else {},
                 )
+                if (
+                    not _reliable_evidence_matches_request(leaf["evidence"], request)
+                    or leaf.get("execution_state") == "applied" and (
+                        type(dispatched_at) is not int
+                        or not dispatched_at < leaf["evidence"]["observed_at"] <= dispatched_at + 30_000
+                    )
+                ):
+                    # A native flag without matching device-level evidence is
+                    # acceptance, not confirmation of this exact target.
+                    leaves[device_id] = {
+                        "status": "pending", "reason": "none", "execution_state": "accepted_unverified",
+                        "message_code": "pending", "message": "Команда принята, ожидается подтверждение состояния.",
+                        "command_count": 1, "accepted_count": 1, "retry_policy": "forbidden_after_dispatch",
+                    }
+                    unfinished += 1
+                    continue
                 if leaf.get("execution_state") == "already_in_sync":
                     # The public reliability contract intentionally uses one
                     # stable confirmation vocabulary for both a read-back
@@ -5898,7 +6072,7 @@ def _reliable_evidence(
     reported_strategy = room.get("target_strategy")
     reported_mode = (
         device.get("mode")
-        if request.action in {"set_room_mode", "set_device_mode"}
+        if request.action == "set_device_mode"
         else room.get("mode")
     )
     reported_state = device.get("state")
@@ -5926,7 +6100,7 @@ def _reliable_evidence(
         "desired_synchronization": "in_sync" if request.action == "synchronize_home" else None, "reported_synchronization": reported_synchronization,
     }
     observed_at = (
-        metadata.get("source_observed_at")
+        metadata.get("mode_observed_at" if request.action in {"set_room_mode", "set_device_mode"} else "source_observed_at")
         if isinstance(metadata, Mapping) else None
     )
     return {"desired_target_temperature": desired_temperature, "desired_target_humidity": desired_humidity,
@@ -6377,9 +6551,14 @@ def _validate_private_recovery_metadata(value: Mapping[str, object]) -> dict[str
     """Accept only bounded private proof fields from the runtime boundary."""
     allowed = {
         "manual_reason", "source_observed_at", "reported_target_temperature",
-        "reported_target_humidity",
+        "reported_target_humidity", "mode_observed_at",
     }
     if not set(value) <= allowed:
+        raise ClimateTabletUnavailable("climate recovery proof is invalid")
+    mode_source = value.get("mode_observed_at")
+    if "mode_observed_at" in value and (
+        type(mode_source) is not int or not 0 <= mode_source <= 9_007_199_254_740_991
+    ):
         raise ClimateTabletUnavailable("climate recovery proof is invalid")
     source = value.get("source_observed_at")
     if "source_observed_at" in value and (

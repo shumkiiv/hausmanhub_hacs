@@ -60,6 +60,7 @@ from ..domain.contours import ContourDefinition, ContourMode, ContourRegistry
 from ..domain.native_climate import NativeClimatePolicy, preview_native_climate
 from ..domain.climate_targets import ClimateTargetSnapshot
 from .climate_application import ClimateDesiredStateChanges
+from .climate_mode_result import ClimateSavedModeResult
 from .climate_tablet import (
     CLIMATE_ACTION_CONTRACT_NAME,
     CLIMATE_TABLET_CONTRACT_VERSION,
@@ -695,6 +696,7 @@ class ClimateRuntime:
                 self._recovery_private_metadata = {
                     (device.room_id, device.device_id): {
                         "manual_reason": manual_reasons.get(device.device_id),
+                        "mode_observed_at": self._manual_memory.updated_at,
                         "source_observed_at": (
                             (observed.observed_at or observation.observed_at)
                             if observed is not None
@@ -1255,9 +1257,11 @@ class ClimateRuntime:
         if canonical.action == "synchronize_home":
             return await self.async_synchronize_climate()
         if canonical.action == "set_room_mode":
-            return await self.async_set_room_mode(canonical.room_id, canonical.parameters.get("mode"))
+            await self.async_set_room_mode(canonical.room_id, canonical.parameters.get("mode"))
+            return await self._async_saved_mode_result(canonical.room_id)
         if canonical.action == "set_device_mode":
-            return await self.async_set_device_mode(canonical.room_id, canonical.parameters.get("device_id"), canonical.parameters.get("mode"))
+            await self.async_set_device_mode(canonical.room_id, canonical.parameters.get("device_id"), canonical.parameters.get("mode"))
+            return await self._async_saved_mode_result(canonical.room_id, canonical.parameters.get("device_id"))
         if canonical.action == "set_room_humidity_target":
             return await self.async_room_humidity_target(request_id=canonical.request_id, room_id=canonical.room_id, target_humidity=canonical.parameters.get("target_humidity"))
         if canonical.action == "set_room_min_target":
@@ -1284,6 +1288,30 @@ class ClimateRuntime:
         pre_reserved_resulting_control_revision=resulting_control_revision,
         external_reliability_identity=tablet_identity,
         )
+
+    async def _async_saved_mode_result(
+        self, room_id: str, device_id: object = None,
+    ) -> ClimateSavedModeResult | _ClimateRoomModeReceipt:
+        """Read the persisted mode authority, never an unrelated HA timestamp."""
+
+        async with self._lock:
+            if self._manual_store is None:
+                return _ClimateRoomModeReceipt()
+            contour = self._climate_contour()
+            assignment = next(room for room in contour.rooms if room.room_id == room_id)
+            manual_rooms = set(effective_manual_room_ids(self._manual_memory, self._registry))
+            manual_devices = set(self._manual_memory.manual_device_ids)
+            modes = tuple(sorted(
+                (
+                    device.device_id,
+                    "manual" if room_id in manual_rooms or device.device_id in manual_devices else "automatic",
+                )
+                for device in self._registry.devices
+                if device.device_id in assignment.device_ids
+                and device.kind in _POWER_CONTROLLED_KINDS
+                and (device_id is None or device.device_id == device_id)
+            ))
+            return ClimateSavedModeResult(room_id, modes, self._manual_memory.updated_at)
 
     async def async_apply_contour(self, payload: object) -> ContourApplyReceipt:
         """Idempotently apply three supported settings after explicit consent."""
