@@ -17,6 +17,15 @@
       "set_home_targets",
       "synchronize_home"
     ],
+    "action_inputs": {
+      "set_home_targets": {
+        "target_temperature": {
+          "minimum": 18,
+          "maximum": 28,
+          "step": 0.5
+        }
+      }
+    },
     "blocked_reasons": []
   },
   "rooms": [

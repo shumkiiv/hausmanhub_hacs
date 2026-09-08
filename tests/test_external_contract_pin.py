@@ -24,7 +24,7 @@ VENDORED_CONTRACT_HASHES = {
     "custom_components/hausman_hub/contracts/v1/climate-reliability-semantic-rules.json": "1dbd75b40be1cfb5d1c23fce79819a047ba7a28556938782150dabeb88b6a6b2",
     "custom_components/hausman_hub/contracts/v1/climate-room-recovery-receipt.schema.json": "d34b54a177fcc5c77cd48d28233f4f90e6fde07e17596cfdbe27bde4c56246fe",
     "custom_components/hausman_hub/contracts/v1/climate-room-recovery-request.schema.json": "80b560590455e94dd944c2a6bbcbb00b47528e95ce8d036d320d485d156579e9",
-    "custom_components/hausman_hub/contracts/v1/climate-runtime.schema.json": "964fa93b11fcee6bd5c705a5631af1609c44bd0324f5b022bc37fb86c61fbaa3",
+    "custom_components/hausman_hub/contracts/v1/climate-runtime.schema.json": "867074d4e65c3a1aed9f446c5c74c1fe1ec17a6c1f37e8039c4b244ebfc58f6f",
     "fixtures/hausmanhub_climate_reliability_v1/climate-room-recovery-receipt.json": "b615ab5e034ca7fa97153b81a07c3bb062a0fe9d9224e94a3e6f080bab9c707e",
     "fixtures/hausmanhub_climate_reliability_v1/climate-room-recovery-request.json": "ddd81c5f38871f247466ffed040153eb2c77610885c6dfcd6345b598a5172957",
     "custom_components/hausman_hub/contracts/v1/scenario-definition.schema.json": "60e93c0e3a970c684a9a95acd471ffd9664652e61fc5e29f5f21c7463285ea57",
