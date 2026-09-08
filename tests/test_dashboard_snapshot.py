@@ -1072,6 +1072,18 @@ class DashboardSnapshotTest(unittest.TestCase):
 
         self.assertEqual(25.0, snapshot["rooms"][0]["targetTemp"])
 
+    def test_home_target_excludes_rooms_outside_authoritative_climate_contour(self) -> None:
+        snapshot = build_dashboard_snapshot(
+            areas=(DashboardArea("bedroom", "Спальня"), DashboardArea("hall", "Коридор")),
+            devices=(), entities=(DashboardEntity(
+                "climate.hall", "climate", "off", "Коридор",
+                {"temperature": 25.0}, None, "hall",
+            ),), generated_at_ms=1,
+            local_iso="2026-09-08T13:00:00+03:00",
+            climate_targets={"bedroom": (25.5, 45)},
+        )
+        self.assertEqual(25.5, snapshot["summary"]["targetTemp"])
+
     def test_inventory_canonicalizes_only_probable_virtual_duplicates(self) -> None:
         snapshot = build_dashboard_snapshot(
             areas=(DashboardArea("kids", "Детская"), DashboardArea("living", "Гостиная")),

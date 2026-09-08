@@ -1,4 +1,4 @@
-"""Detect external direct Wi-Fi shutdowns and persist room ownership."""
+"""Track manual power choices and preserve climate command ownership."""
 
 from __future__ import annotations
 
@@ -106,6 +106,7 @@ def reconcile_climate_manual_memory(
         manual_device_ids=manual_device_ids,
         devices=devices,
         attributions=attributions,
+        hausman_context_ids=memory.hausman_context_ids,
     )
     if updated == memory:
         return memory, False
@@ -116,8 +117,11 @@ def update_direct_wifi_observation(
     memory: ClimateManualMemory,
     registry: ClimateRegistry,
     observation: ClimateObservationSnapshot,
+    *,
+    external_device_ids: Sequence[str] = (),
+    hausman_device_ids: Sequence[str] = (),
 ) -> tuple[ClimateManualMemory, bool]:
-    """Enter manual mode after an unattributed active-to-off transition."""
+    """Map external power off/on to manual/automatic for direct Wi-Fi ACs."""
 
     if not isinstance(memory, ClimateManualMemory):
         raise ClimateManualViolation("validated manual-control memory is required")
@@ -159,22 +163,34 @@ def update_direct_wifi_observation(
             and observation.observed_at - previous.commanded_at
             <= DIRECT_WIFI_COMMAND_ATTRIBUTION_MS
         )
-        own_off = bool(
-            command_fresh
-            and previous is not None
-            and previous.commanded_phase is ClimateDirectWifiPhase.INACTIVE
+        own_transition = bool(
+            configured.device_id in hausman_device_ids
+            or (
+                configured.device_id not in external_device_ids
+                and command_fresh
+                and previous is not None
+                and previous.commanded_phase is phase
+            )
         )
         if (
             previous is not None
             and previous.observed_phase is ClimateDirectWifiPhase.ACTIVE
             and phase is ClimateDirectWifiPhase.INACTIVE
-            and not own_off
+            and not own_transition
         ):
             manual_devices.add(configured.device_id)
             attributions[configured.device_id] = ClimateManualAttribution(
                 device_id=configured.device_id, reason="external_off",
                 source="observation", changed_at=observation.observed_at,
             )
+        elif (
+            previous is not None
+            and previous.observed_phase is ClimateDirectWifiPhase.INACTIVE
+            and phase is ClimateDirectWifiPhase.ACTIVE
+            and not own_transition
+        ):
+            manual_devices.discard(configured.device_id)
+            attributions.pop(configured.device_id, None)
         phase_changed = previous is None or previous.observed_phase is not phase
         states.append(
             ClimateDirectWifiState(
@@ -188,12 +204,12 @@ def update_direct_wifi_observation(
                 ),
                 commanded_phase=(
                     None
-                    if own_off or not command_fresh
+                    if own_transition or not command_fresh
                     else None if previous is None else previous.commanded_phase
                 ),
                 commanded_at=(
                     None
-                    if own_off or not command_fresh
+                    if own_transition or not command_fresh
                     else None if previous is None else previous.commanded_at
                 ),
             )
@@ -216,6 +232,7 @@ def update_direct_wifi_observation(
             attributions[item.device_id] for item in registry.devices
             if item.device_id in attributions and item.device_id in manual_devices
         ),
+        hausman_context_ids=memory.hausman_context_ids,
     )
     return updated, updated != memory
 
@@ -226,9 +243,10 @@ def update_climate_manual_observation(
     observation: ClimateObservationSnapshot,
     *,
     external_device_ids: Sequence[str] = (),
+    hausman_device_ids: Sequence[str] = (),
     context_by_device: Mapping[str, Mapping[str, object]] | None = None,
 ) -> tuple[ClimateManualMemory, bool]:
-    """Record explicitly attributed external shutdowns for every actuator kind.
+    """Apply explicitly attributed external power choices for every actuator.
 
     A plain state transition is deliberately not enough for non direct-Wi-Fi
     devices: Home Assistant can publish it after a Hausman command.  The
@@ -237,7 +255,11 @@ def update_climate_manual_observation(
     function changes ownership.  This keeps unknown observations fail-closed.
     """
 
-    updated, changed = update_direct_wifi_observation(memory, registry, observation)
+    updated, _ = update_direct_wifi_observation(
+        memory, registry, observation,
+        external_device_ids=external_device_ids,
+        hausman_device_ids=hausman_device_ids,
+    )
     external = frozenset(external_device_ids)
     contexts = context_by_device or {}
     manual_devices = set(updated.manual_device_ids)
@@ -257,16 +279,21 @@ def update_climate_manual_observation(
             or observed.room_id != device.room_id
         ):
             continue
-        if phase is not None and device.control_channel is not ClimateControlChannel.DIRECT_WIFI:
+        direct_wifi_ac = (
+            device.kind is ClimateDeviceKind.AIR_CONDITIONER
+            and device.control_channel is ClimateControlChannel.DIRECT_WIFI
+        )
+        if phase is not None and not direct_wifi_ac:
             states[device.device_id] = ClimateDirectWifiState(
                 device_id=device.device_id, room_id=device.room_id,
                 observed_phase=phase, observed_at=observation.observed_at,
             )
         if (
             device.device_id not in external
+            or device.device_id in hausman_device_ids
             or previous is None
-            or previous.observed_phase is not ClimateDirectWifiPhase.ACTIVE
-            or phase is not ClimateDirectWifiPhase.INACTIVE
+            or phase is None
+            or previous.observed_phase is phase
         ):
             continue
         context = contexts.get(device.device_id, {})
@@ -276,15 +303,19 @@ def update_climate_manual_observation(
             raise ClimateManualViolation("manual attribution context id is invalid")
         if operation_id is not None and not isinstance(operation_id, str):
             raise ClimateManualViolation("manual attribution operation id is invalid")
-        manual_devices.add(device.device_id)
-        attributions[device.device_id] = ClimateManualAttribution(
-            device_id=device.device_id,
-            reason="external_off",
-            source="ha_context" if context_id else "direct_observation",
-            changed_at=observation.observed_at,
-            context_id=context_id,
-            operation_id=operation_id,
-        )
+        if phase is ClimateDirectWifiPhase.INACTIVE:
+            manual_devices.add(device.device_id)
+            attributions[device.device_id] = ClimateManualAttribution(
+                device_id=device.device_id,
+                reason="external_off",
+                source="ha_context" if context_id else "direct_observation",
+                changed_at=observation.observed_at,
+                context_id=context_id,
+                operation_id=operation_id,
+            )
+        else:
+            manual_devices.discard(device.device_id)
+            attributions.pop(device.device_id, None)
     result = replace(
         updated,
         updated_at=(observation.observed_at if manual_devices != set(updated.manual_device_ids) else updated.updated_at),
@@ -352,6 +383,7 @@ def record_direct_wifi_commands(
         # Command attribution must not erase manual ownership already
         # established for unrelated leaves.
         attributions=memory.attributions,
+        hausman_context_ids=memory.hausman_context_ids,
     )
     return updated, updated != memory
 
@@ -382,6 +414,7 @@ def with_climate_room_mode(
         manual_device_ids=memory.manual_device_ids,
         devices=memory.devices,
         attributions=memory.attributions,
+        hausman_context_ids=memory.hausman_context_ids,
     )
 
 
@@ -424,6 +457,7 @@ def with_climate_device_mode(
             attributions[item.device_id] for item in registry.devices
             if item.device_id in attributions and item.device_id in selected
         ),
+        hausman_context_ids=memory.hausman_context_ids,
     )
 
 

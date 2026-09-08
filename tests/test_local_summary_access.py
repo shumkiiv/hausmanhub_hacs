@@ -4220,7 +4220,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.228", panel.payload["integration_version"])
+        self.assertEqual("1.52.229", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -4972,7 +4972,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         self.assertEqual(404, wrong_path.status)
 
-    def test_manual_ac_off_returns_ac_to_automatic_mode_after_command(self) -> None:
+    def test_manual_ac_off_keeps_ac_in_manual_mode_after_command(self) -> None:
         path = "/api/hausman_hub/v1/device-actions"
         view = next(item for item in self.hass.http.views if item.url == path)
         service = self.hass.data["hausman_hub"]["scenario_service"]
@@ -5019,16 +5019,46 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, response.status)
-        self.assertEqual("automatic", response.payload["climateMode"])
-        self.assertEqual("Автоматический режим", response.payload["climateModeName"])
+        self.assertEqual("manual", response.payload["climateMode"])
+        self.assertEqual("Ручной режим", response.payload["climateModeName"])
         self.assertEqual(
             [
                 ("resolve", ("office-ac", "turn_off")),
                 ("execute", ("office-ac", "turn_off", None)),
-                ("mode", ("climate.office", "automatic")),
+                ("mode", ("climate.office", "manual")),
             ],
             events,
         )
+
+    def test_manual_power_on_returns_each_climate_domain_to_automatic(self) -> None:
+        path = "/api/hausman_hub/v1/device-actions"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        runtime = self.hass.data["hausman_hub"]["climate_runtime"]
+        for domain in ("climate", "humidifier", "switch"):
+            with self.subTest(domain=domain):
+                modes = []
+
+                async def resolve(target_id, action_id):
+                    return f"{domain}.office", domain
+
+                async def execute(target_id, action_id, value, *, correlation_id=None):
+                    return {"accepted": True, "confirmed": True, "status": "confirmed"}
+
+                async def mode_writer(entity_id, mode):
+                    modes.append((entity_id, mode))
+                    return {"mode": mode, "changed": True}
+
+                service.async_resolve_device_action = resolve
+                service.async_execute_device_action = execute
+                runtime.async_set_device_mode_for_entity = mode_writer
+                response = asyncio.run(view.post(FakeJsonRequest(
+                    "192.168.1.20", reader_user("system-users"), path,
+                    {"targetId": "office-device", "actionId": "turn_on"},
+                )))
+                self.assertEqual(200, response.status)
+                self.assertEqual([(f"{domain}.office", "automatic")], modes)
+                self.assertEqual("automatic", response.payload["climateMode"])
 
     def test_rejected_manual_ac_off_keeps_existing_contour_ownership(self) -> None:
         path = "/api/hausman_hub/v1/device-actions"
@@ -8537,7 +8567,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertFalse(response.payload["confirmed"])
         self.assertTrue(response.payload["commandSent"])
         self.assertEqual(
-            [{"mode": "automatic", "expected_revision": 1, "expected_mode": "manual"}],
+            [{"mode": "manual", "expected_revision": 1, "expected_mode": "manual"}],
             writes,
         )
         self.assertEqual("manual", final_mode)

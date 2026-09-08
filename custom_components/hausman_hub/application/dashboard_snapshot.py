@@ -1408,7 +1408,13 @@ def build_dashboard_snapshot(
         )
 
     room_temperatures = [_number(room.get("temp")) for room in room_payloads]
-    room_targets = [_number(room.get("targetTemp")) for room in room_payloads]
+    # A corridor or an unassigned thermostat is not a Hausman comfort goal.
+    # The shared contour is authoritative whenever it provides any targets.
+    room_targets = (
+        [_number(target[0]) for target in climate_targets.values()]
+        if climate_targets
+        else [_number(room.get("targetTemp")) for room in room_payloads]
+    )
     weather = _weather_summary(all_entities)
     summary: dict[str, object] = {
         "homeName": home_name,

@@ -1006,6 +1006,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         (Platform.SENSOR, Platform.SWITCH),
     )
     if unloaded:
+        climate_tablet = hass.data.get("hausman_hub", {}).get("climate_tablet")
+        if climate_tablet is not None:
+            close_climate = getattr(climate_tablet, "async_close", None)
+            if callable(close_climate):
+                await close_climate()
         if safe_device_command_lifecycle is not None:
             close = getattr(safe_device_command_lifecycle, "async_close", None)
             if callable(close):

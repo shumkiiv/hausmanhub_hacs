@@ -1064,14 +1064,14 @@ class DeviceActionView(HomeAssistantView):
             mode_writer = None
         try:
             climate_entity_id = None
-            if not dry_run and action_id == "turn_off" and callable(mode_writer):
-                if context is not None and context[1] == "climate":
+            if not dry_run and action_id in {"turn_on", "turn_off"} and callable(mode_writer):
+                if context is not None and context[1] in {"climate", "humidifier", "switch"}:
                     climate_entity_id = context[0]
                 else:
                     resolved = await service.async_resolve_device_action(
                         target_id, action_id
                     )
-                    if resolved is not None and resolved[1] == "climate":
+                    if resolved is not None and resolved[1] in {"climate", "humidifier", "switch"}:
                         climate_entity_id = resolved[0]
             climate_mode_precondition = _climate_mode_precondition(
                 climate_runtime, climate_entity_id
@@ -1135,14 +1135,14 @@ class DeviceActionView(HomeAssistantView):
                         climate_mode_change = await _async_write_climate_mode(
                             mode_writer,
                             climate_entity_id,
-                            "automatic",
+                            "automatic" if action_id == "turn_on" else "manual",
                             climate_mode_precondition,
                         )
                         if isinstance(climate_mode_change, Mapping):
                             owned_result.update(
                                 {
                                     "climateMode": climate_mode_change["mode"],
-                                    "climateModeName": "Автоматический режим",
+                                    "climateModeName": "Автоматический режим" if climate_mode_change["mode"] == "automatic" else "Ручной режим",
                                 }
                             )
                     except Exception:  # noqa: BLE001
@@ -1308,14 +1308,17 @@ class DeviceActionView(HomeAssistantView):
             and climate_entity_id is not None
         ):
             try:
-                climate_mode_change = await mode_writer(
-                    climate_entity_id, "automatic"
+                climate_mode_change = await _async_write_climate_mode(
+                    mode_writer, climate_entity_id,
+                    "automatic" if action_id == "turn_on" else "manual",
+                    climate_mode_precondition,
                 )
-                result = {
-                    **result,
-                    "climateMode": climate_mode_change["mode"],
-                    "climateModeName": "Автоматический режим",
-                }
+                if isinstance(climate_mode_change, Mapping):
+                    result = {
+                        **result,
+                        "climateMode": climate_mode_change["mode"],
+                        "climateModeName": "Автоматический режим" if climate_mode_change["mode"] == "automatic" else "Ручной режим",
+                    }
             except Exception:  # noqa: BLE001
                 _LOGGER.warning(
                     "HausmanHub climate mode postprocessing failed after device action",
@@ -2064,8 +2067,8 @@ class DeviceActionBatchView(HomeAssistantView):
                     )
                     mode_precondition = (
                         _climate_mode_precondition(climate_runtime, context[0])
-                        if item["actionId"] == "turn_off"
-                        and context[1] == "climate"
+                        if item["actionId"] in {"turn_on", "turn_off"}
+                        and context[1] in {"climate", "humidifier", "switch"}
                         and callable(mode_writer)
                         else None
                     )
@@ -2118,22 +2121,22 @@ class DeviceActionBatchView(HomeAssistantView):
                         )
                         if (
                             item_result.get("accepted") is True
-                            and item["actionId"] == "turn_off"
-                            and context[1] == "climate"
+                            and item["actionId"] in {"turn_on", "turn_off"}
+                            and context[1] in {"climate", "humidifier", "switch"}
                             and callable(mode_writer)
                         ):
                             try:
                                 mode_change = await _async_write_climate_mode(
                                     mode_writer,
                                     context[0],
-                                    "automatic",
+                                    "automatic" if item["actionId"] == "turn_on" else "manual",
                                     mode_precondition,
                                 )
                                 if isinstance(mode_change, Mapping):
                                     item_result.update(
                                         {
                                             "climateMode": mode_change["mode"],
-                                            "climateModeName": "Автоматический режим",
+                                            "climateModeName": "Автоматический режим" if mode_change["mode"] == "automatic" else "Ручной режим",
                                         }
                                     )
                             except Exception:  # noqa: BLE001

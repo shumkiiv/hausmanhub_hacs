@@ -210,6 +210,10 @@ from .climate_application_models import ClimateTargetAxis
 _CLIMATE_READBACK_ATTEMPTS = 33
 _CLIMATE_READBACK_INTERVAL_SECONDS = 0.25
 _CLIMATE_DEVIATION_OFF_READBACK_ATTEMPTS = 20
+_POWER_CONTROLLED_KINDS = frozenset({
+    ClimateDeviceKind.AIR_CONDITIONER, ClimateDeviceKind.HUMIDIFIER,
+    ClimateDeviceKind.RADIATOR_THERMOSTAT, ClimateDeviceKind.FLOOR_HEATING,
+})
 
 _LOGGER = logging.getLogger(__name__)
 from .contour_override import (
@@ -609,63 +613,63 @@ class ClimateRuntime:
     ) -> dict[str, tuple[float, int]]:
         """Return effective HausmanHub comfort goals for the shared dashboard."""
 
-        async with self._lock:
-            contour = self._contours.contour(CLIMATE_CONTOUR_ID)
-            if contour is None:
-                return {}
-            return {
-                room.room_id: (
-                    room.active_settings.target_temperature,
-                    room.active_settings.target_humidity,
-                )
-                for room in contour.rooms
-            }
+        # These immutable values are replaced only after their durable save.
+        # There is no await between capture and projection, so dashboard reads
+        # do not need the lock held while a slow physical command is running.
+        contour = self._contours.contour(CLIMATE_CONTOUR_ID)
+        if contour is None:
+            return {}
+        return {
+            room.room_id: (
+                room.active_settings.target_temperature,
+                room.active_settings.target_humidity,
+            )
+            for room in contour.rooms
+        }
 
     async def async_dashboard_outdoor_temperature_entity_ids(self) -> tuple[str, ...]:
         """Return the configured outdoor sources in failover order for the dashboard."""
 
-        async with self._lock:
-            return self._registry.home.prioritized_outdoor_temperature_entity_ids
+        return self._registry.home.prioritized_outdoor_temperature_entity_ids
 
     async def async_dashboard_climate_ownership(self) -> dict[str, dict[str, str]]:
         """Return private lookup keys used to annotate shared device cards."""
 
-        async with self._lock:
-            contour = self._contours.contour(CLIMATE_CONTOUR_ID)
-            if contour is None:
-                return {"rooms": {}, "entities": {}}
-            assigned_device_ids = {
-                device_id
-                for room in contour.rooms
-                for device_id in room.device_ids
-            }
-            manual_room_ids = set(
-                effective_manual_room_ids(self._manual_memory, self._registry)
+        contour = self._contours.contour(CLIMATE_CONTOUR_ID)
+        if contour is None:
+            return {"rooms": {}, "entities": {}}
+        assigned_device_ids = {
+            device_id
+            for room in contour.rooms
+            for device_id in room.device_ids
+        }
+        manual_room_ids = set(
+            effective_manual_room_ids(self._manual_memory, self._registry)
+        )
+        manual_device_ids = set(self._manual_memory.manual_device_ids)
+        rooms = {
+            room.room_id: (
+                "manual" if room.room_id in manual_room_ids else "automatic"
             )
-            manual_device_ids = set(self._manual_memory.manual_device_ids)
-            rooms = {
-                room.room_id: (
-                    "manual" if room.room_id in manual_room_ids else "automatic"
-                )
-                for room in contour.rooms
-            }
-            entities: dict[str, str] = {}
-            for device in self._registry.devices:
-                if (
-                    device.device_id not in assigned_device_ids
-                    or device.kind is not ClimateDeviceKind.AIR_CONDITIONER
-                ):
-                    continue
-                endpoint = device.endpoint(ClimateEndpointRole.CONTROL)
-                if endpoint is None:
-                    continue
-                entities[endpoint.entity_id] = (
-                    "manual"
-                    if device.room_id in manual_room_ids
-                    or device.device_id in manual_device_ids
-                    else "automatic"
-                )
-            return {"rooms": rooms, "entities": entities}
+            for room in contour.rooms
+        }
+        entities: dict[str, str] = {}
+        for device in self._registry.devices:
+            if (
+                device.device_id not in assigned_device_ids
+                or device.kind not in _POWER_CONTROLLED_KINDS
+            ):
+                continue
+            endpoint = device.endpoint(ClimateEndpointRole.CONTROL)
+            if endpoint is None:
+                continue
+            entities[endpoint.entity_id] = (
+                "manual"
+                if device.room_id in manual_room_ids
+                or device.device_id in manual_device_ids
+                else "automatic"
+            )
+        return {"rooms": rooms, "entities": entities}
 
     async def async_public_snapshot(self) -> dict[str, object]:
         """Refresh and return the private-id-free tablet contract."""
@@ -1677,7 +1681,7 @@ class ClimateRuntime:
         expected_revision: object | None = None,
         expected_mode: object | None = None,
     ) -> dict[str, object] | None:
-        """Persist an AC ownership choice resolved from its control entity."""
+        """Persist actuator ownership resolved from its registered control entity."""
 
         if not isinstance(entity_id, str) or mode not in {"automatic", "manual"}:
             raise ClimateManualViolation("climate device entity mode request is invalid")
@@ -1695,7 +1699,7 @@ class ClimateRuntime:
                     candidate
                     for candidate in self._registry.devices
                     if candidate.device_id in assigned_device_ids
-                    and candidate.kind is ClimateDeviceKind.AIR_CONDITIONER
+                    and candidate.kind in _POWER_CONTROLLED_KINDS
                     and (
                         endpoint := candidate.endpoint(ClimateEndpointRole.CONTROL)
                     ) is not None
@@ -1780,7 +1784,7 @@ class ClimateRuntime:
                 candidate
                 for candidate in self._registry.devices
                 if candidate.device_id in assigned_device_ids
-                and candidate.kind is ClimateDeviceKind.AIR_CONDITIONER
+                and candidate.kind in _POWER_CONTROLLED_KINDS
                 and (
                     endpoint := candidate.endpoint(ClimateEndpointRole.CONTROL)
                 ) is not None
@@ -2630,7 +2634,7 @@ class ClimateRuntime:
         await self._async_record_direct_wifi_commands(attribution_calls, executed_count=attribution_count)
         await self._async_record_deviation_off_commands(attribution_calls, executed_count=attribution_count)
         if accepted_count != len(plan.strict_calls):
-            return self._contour_applications.update(
+            partial_receipt = self._contour_applications.update(
                 request_id,
                 status=(
                     ContourApplyStatus.PARTIAL
@@ -2641,6 +2645,11 @@ class ClimateRuntime:
                 confirmed_room_count=0,
                 reasons=("command_result_unavailable",),
             ).receipt
+            # A mixed result is just as durable as a fully accepted batch.
+            # Without this save, restart kept the initial 0 accepted count
+            # even though healthy devices had already received their calls.
+            await self._async_persist_direct_control_unlocked()
+            return partial_receipt
         verified = await self._async_verify_native_contour_application_unlocked(
             request_id,
             plan,
@@ -3736,6 +3745,7 @@ class ClimateRuntime:
         if callable(recent):
             hausman.update(recent())
         external: list[str] = []
+        owned: list[str] = []
         contexts: dict[str, dict[str, object]] = {}
         for device in self._registry.devices:
             endpoint = device.endpoint(ClimateEndpointRole.CONTROL)
@@ -3760,7 +3770,12 @@ class ClimateRuntime:
                     "parent_id": parent_id if isinstance(parent_id, str) else None,
                     "user_id": user_id if isinstance(user_id, str) else None,
                 }
-        return {"external_device_ids": tuple(external), "context_by_device": contexts}
+            elif ids & hausman:
+                owned.append(device.device_id)
+        return {
+            "external_device_ids": tuple(external), "hausman_device_ids": tuple(owned),
+            "context_by_device": contexts,
+        }
 
     def _native_ha_observation(
         self,

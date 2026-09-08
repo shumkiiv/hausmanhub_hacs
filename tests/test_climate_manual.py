@@ -106,6 +106,107 @@ def _with_ac_activity(observation, activity: ClimateDeviceActivity):
 
 
 class ClimateManualTest(unittest.TestCase):
+    def test_external_power_on_returns_every_actuator_to_automatic_after_restart(self) -> None:
+        registry, observation = _inputs()
+        for kind in (
+            ClimateDeviceKind.AIR_CONDITIONER, ClimateDeviceKind.HUMIDIFIER,
+            ClimateDeviceKind.FLOOR_HEATING, ClimateDeviceKind.RADIATOR_THERMOSTAT,
+        ):
+            for channel in (ClimateControlChannel.DIRECT_WIFI, ClimateControlChannel.UNIVERSAL_IR, None):
+                with self.subTest(kind=kind, channel=channel):
+                    configured = replace(registry, devices=tuple(
+                        replace(device, kind=kind, control_channel=channel,
+                                capabilities=(ClimateCapability.POWER, ClimateCapability.TARGET_TEMPERATURE,
+                                              ClimateCapability.TARGET_HUMIDITY, ClimateCapability.HVAC_MODE,
+                                              ClimateCapability.FAN_MODE))
+                        if device.device_id == "living_air_conditioner" else device
+                        for device in registry.devices
+                    ))
+                    active = replace(observation, devices=tuple(
+                        replace(device, kind=ClimateObservationDeviceKind(kind.value), activity=ClimateDeviceActivity.RUNNING)
+                        if device.device_id == "living_air_conditioner" else device
+                        for device in observation.devices
+                    ))
+                    seeded, _ = update_climate_manual_observation(
+                        empty_climate_manual_memory(updated_at=NOW - 1), configured, active,
+                    )
+                    stopped = _with_ac_activity(replace(active, observed_at=NOW + 1), ClimateDeviceActivity.STOPPED)
+                    manual, _ = update_climate_manual_observation(
+                        seeded, configured, stopped,
+                        external_device_ids=("living_air_conditioner",),
+                    )
+                    self.assertIn("living_air_conditioner", manual.manual_device_ids)
+                    restarted = climate_manual_from_payload(climate_manual_to_payload(manual))
+                    restarted, _ = reconcile_climate_manual_memory(restarted, configured, now_ms=NOW + 2)
+                    # An enabled thermostat can be idle while its power is on.
+                    running = _with_ac_activity(replace(active, observed_at=NOW + 3), ClimateDeviceActivity.IDLE)
+                    automatic, _ = update_climate_manual_observation(
+                        restarted, configured, running,
+                        external_device_ids=("living_air_conditioner",),
+                    )
+                    self.assertNotIn("living_air_conditioner", automatic.manual_device_ids)
+                    self.assertEqual((), automatic.attributions)
+                    self.assertEqual(automatic, climate_manual_from_payload(climate_manual_to_payload(automatic)))
+
+    def test_direct_wifi_external_power_on_clears_exclusion_without_ha_context(self) -> None:
+        registry, observation = _inputs()
+        stopped = _with_ac_activity(observation, ClimateDeviceActivity.STOPPED)
+        seeded, _ = update_direct_wifi_observation(
+            empty_climate_manual_memory(updated_at=NOW - 1), registry, stopped,
+        )
+        manual = with_climate_device_mode(
+            seeded, registry, room_id="living", device_id="living_air_conditioner",
+            manual=True, updated_at=NOW,
+        )
+        automatic, _ = update_direct_wifi_observation(
+            manual, registry,
+            _with_ac_activity(replace(observation, observed_at=NOW + 1), ClimateDeviceActivity.COOLING),
+        )
+        self.assertEqual((), automatic.manual_device_ids)
+        self.assertEqual((), automatic.attributions)
+
+    def test_own_power_on_does_not_clear_manual_exclusion(self) -> None:
+        registry, observation = _inputs()
+        seeded, _ = update_direct_wifi_observation(
+            empty_climate_manual_memory(updated_at=NOW - 1), registry,
+            _with_ac_activity(observation, ClimateDeviceActivity.STOPPED),
+        )
+        manual = with_climate_device_mode(
+            seeded, registry, room_id="living", device_id="living_air_conditioner",
+            manual=True, updated_at=NOW,
+        )
+        commanded, _ = record_direct_wifi_commands(
+            manual, registry,
+            (ClimateHaServiceCall(ClimateHaService.CLIMATE_SET_HVAC_MODE,
+                                 "climate.living_air_conditioner", hvac_mode=ClimateHaHvacMode.COOL),),
+            executed_count=1, commanded_at=NOW + 1,
+        )
+        result, _ = update_climate_manual_observation(
+            commanded, registry,
+            _with_ac_activity(replace(observation, observed_at=NOW + 2), ClimateDeviceActivity.COOLING),
+        )
+        self.assertEqual(("living_air_conditioner",), result.manual_device_ids)
+
+    def test_runtime_memory_updates_preserve_own_command_provenance(self) -> None:
+        registry, observation = _inputs()
+        initial, _ = update_climate_manual_observation(
+            empty_climate_manual_memory(updated_at=NOW - 1), registry, observation,
+        )
+        memory = replace(initial, hausman_context_ids=("hausman.own.1",))
+        updates = (
+            reconcile_climate_manual_memory(memory, registry, now_ms=NOW + 1)[0],
+            update_climate_manual_observation(memory, registry, replace(observation, observed_at=NOW + 1))[0],
+            with_climate_room_mode(memory, registry, room_id="living", manual=True, updated_at=NOW + 1),
+            with_climate_device_mode(memory, registry, room_id="living", device_id="living_air_conditioner", manual=True, updated_at=NOW + 1),
+            record_direct_wifi_commands(memory, registry,
+                (ClimateHaServiceCall(ClimateHaService.CLIMATE_SET_HVAC_MODE,
+                    "climate.living_air_conditioner", hvac_mode=ClimateHaHvacMode.OFF),),
+                executed_count=1, commanded_at=NOW + 1)[0],
+        )
+        for index, result in enumerate(updates):
+            with self.subTest(index=index):
+                self.assertEqual(("hausman.own.1",), result.hausman_context_ids)
+
     def test_hausman_context_provenance_round_trips_and_migrates_v3(self) -> None:
         memory = empty_climate_manual_memory(updated_at=NOW)
         persisted = replace(memory, hausman_context_ids=("hausman.ctx.1", "hausman.ctx.2"))
@@ -429,6 +530,45 @@ class MemoryManualStore:
 
 
 class ClimateManualRuntimeTest(unittest.IsolatedAsyncioTestCase):
+    async def test_entity_power_mode_covers_every_climate_actuator(self) -> None:
+        from tests.test_climate_tablet import native_home_target_runtime
+
+        runtime, _store, _contours, executor = native_home_target_runtime(include_humidifier=True)
+        await runtime.async_start()
+        for entity_id in (
+            "climate.living_air_conditioner", "climate.living_radiator",
+            "climate.living_floor", "humidifier.living",
+        ):
+            with self.subTest(entity_id=entity_id):
+                self.assertIsNotNone(runtime.device_mode_snapshot_for_entity(entity_id))
+                manual = await runtime.async_set_device_mode_for_entity(entity_id, "manual")
+                self.assertEqual("manual", manual["mode"])
+                automatic = await runtime.async_set_device_mode_for_entity(entity_id, "automatic")
+                self.assertEqual("automatic", automatic["mode"])
+        self.assertEqual([], executor.batches)
+
+    async def test_native_context_links_distinguish_own_and_external_power(self) -> None:
+        from tests.test_climate_tablet import native_home_target_runtime
+
+        runtime, _store, _contours, executor = native_home_target_runtime(include_humidifier=True)
+        await runtime.async_start()
+        runtime._manual_memory = replace(runtime._manual_memory, hausman_context_ids=("hausman.own",))
+        entity_id = "climate.living_air_conditioner"
+        current = executor._state_view.states[entity_id]
+        executor._state_view.states[entity_id] = replace(
+            current, context_id="child.own", context_parent_id="hausman.own",
+        )
+        inputs = runtime._native_manual_context_inputs()
+        self.assertIn("living_air_conditioner", inputs["hausman_device_ids"])
+        self.assertNotIn("living_air_conditioner", inputs["external_device_ids"])
+        executor._state_view.states[entity_id] = replace(
+            current, context_id="user.power", context_parent_id="hausman.own",
+            context_user_id="user.local",
+        )
+        inputs = runtime._native_manual_context_inputs()
+        self.assertIn("living_air_conditioner", inputs["external_device_ids"])
+        self.assertNotIn("living_air_conditioner", inputs["hausman_device_ids"])
+
     async def test_entity_mode_cas_does_not_overwrite_newer_manual_choice(self) -> None:
         registry = native_registry(ClimateControlScope.MANAGED)
         store = MemoryManualStore()

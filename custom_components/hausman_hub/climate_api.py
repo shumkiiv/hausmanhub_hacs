@@ -569,7 +569,7 @@ class ClimateActionView(_ClimateView):
             return _api_error(self, "unavailable")
         try:
             payload = await _request_json(request)
-            receipt = await service.async_execute(payload)
+            receipt = await service.async_submit(payload)
         except ClimateTabletViolation as error:
             return _api_error(self, error.code)
         except (ValueError, json.JSONDecodeError):

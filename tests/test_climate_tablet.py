@@ -3385,7 +3385,9 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         restored = await restarted.async_snapshot()
         device = restored["rooms"][0]["devices"][0]
         self.assertIsNone(device["desired_target_temperature"])
-        self.assertEqual(50, device["desired_target_humidity"])
+        self.assertIsNone(device["desired_target_humidity"])
+        self.assertEqual(50, restored["rooms"][0]["desired_target_humidity"])
+        self.assertEqual(50, restored["rooms"][0]["devices"][1]["desired_target_humidity"])
 
     async def test_durable_intent_merges_target_and_humidity_patches_after_restart(self) -> None:
         self.runtime.home["rooms"][0]["devices"].append(
@@ -3420,9 +3422,12 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         await self.service.async_execute(humidity)
         restarted = ClimateTabletService(FakeRuntime(self.runtime.home), MemoryOperationStore(self.store.payload))
         await restarted.async_load()
-        device = (await restarted.async_snapshot())["rooms"][0]["devices"][0]
+        restored = await restarted.async_snapshot()
+        device = restored["rooms"][0]["devices"][0]
         self.assertEqual(23.5, device["desired_target_temperature"])
-        self.assertEqual(50, device["desired_target_humidity"])
+        self.assertIsNone(device["desired_target_humidity"])
+        self.assertEqual(50, restored["rooms"][0]["desired_target_humidity"])
+        self.assertEqual(50, restored["rooms"][0]["devices"][1]["desired_target_humidity"])
         self.assertEqual(2, device["control_revision"])
 
 

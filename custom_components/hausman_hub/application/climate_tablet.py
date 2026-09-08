@@ -749,6 +749,101 @@ class ClimateTabletService:
         self._last_reliability_metadata: dict[tuple[str, str], dict[str, object]] = {}
         self._last_safe_snapshot: dict[str, object] | None = None
         self._lock = asyncio.Lock()
+        self._background_submissions: dict[str, tuple[str, asyncio.Task, asyncio.Future]] = {}
+        self._background_snapshot: dict[str, object] | None = None
+        self._published_receipts: dict[str, dict[str, object]] = {}
+        self._closing = False
+
+    async def async_submit(self, payload: object) -> dict[str, object]:
+        """Acknowledge a durable desired goal, not completion by every device.
+
+        The service owns the task after submission. Cancelling an HTTP reader
+        cannot cancel a saved command or cause another physical dispatch.
+        Legacy clients retain their existing synchronous receipt semantics.
+        """
+        if self._closing:
+            raise ClimateTabletUnavailable("climate service is closing")
+        request = parse_climate_tablet_action(payload)
+        if request.reliability_profile != "climate_reliability_v1":
+            return await self.async_execute(payload)
+        self._require_reliability_health()
+        existing = self._background_submissions.get(request.request_id)
+        if existing is not None:
+            if existing[0] != request.fingerprint:
+                raise ClimateTabletViolation("request id was already used for another climate action", code="revision_conflict")
+            return {**await asyncio.shield(existing[2]), "duplicate": True}
+        # Do not accumulate unbounded tasks behind a slow actuator. The saved
+        # receipt remains pollable; a new action can be submitted afterwards.
+        if self._background_submissions:
+            raise ClimateTabletUnavailable("another climate action is applying")
+        ready = asyncio.get_running_loop().create_future()
+        # Retrieve failures even if the HTTP reader has already disconnected.
+        ready.add_done_callback(lambda future: future.exception() if not future.cancelled() else None)
+
+        def acknowledge(receipt: dict[str, object], snapshot: dict[str, object]) -> None:
+            self._published_receipts[receipt["operation_id"]] = json.loads(json.dumps(receipt))
+            projection = json.loads(json.dumps(snapshot))
+            projection["control_revision"] = self._control_revision
+            projection["active_operations"] = [
+                _operation_summary(record.receipt)
+                for record in self._records_by_request.values()
+                if record.receipt.get("final") is False
+            ]
+            control = projection.get("home_control")
+            if isinstance(control, dict):
+                control["enabled"] = False
+                control["allowed_actions"] = []
+                control["blocked_reasons"] = list(dict.fromkeys([
+                    *control.get("blocked_reasons", []), "operation_pending",
+                ]))
+            self._background_snapshot = _with_reliability_projection(
+                projection, self._desired_intents, self._control_revision,
+                self._last_reliability_metadata,
+            )
+            self._remember_safe_snapshot(self._background_snapshot)
+            if not ready.done():
+                ready.set_result(json.loads(json.dumps(receipt)))
+
+        async def execute() -> None:
+            try:
+                result = await self.async_execute(payload, _on_reserved=acknowledge)
+                if not ready.done():
+                    ready.set_result(result)
+            except asyncio.CancelledError:
+                if not ready.done():
+                    ready.set_exception(ClimateTabletUnavailable("climate service stopped"))
+                raise
+            except Exception as error:
+                if not ready.done():
+                    ready.set_exception(
+                        error if isinstance(error, (ClimateTabletViolation, ClimateTabletUnavailable))
+                        else ClimateTabletUnavailable("climate action could not be saved")
+                    )
+                else:
+                    _LOGGER.exception("background climate action failed: %s", type(error).__name__)
+            finally:
+                self._background_submissions.pop(request.request_id, None)
+                self._background_snapshot = None
+                self._published_receipts.clear()
+
+        task = asyncio.create_task(execute(), name="hausman-climate-action")
+        self._background_submissions[request.request_id] = (request.fingerprint, task, ready)
+        return await asyncio.shield(ready)
+
+    async def async_drain(self) -> None:
+        """Wait for owned work without coupling its lifetime to a caller."""
+        tasks = [item[1] for item in self._background_submissions.values()]
+        if tasks:
+            await asyncio.shield(asyncio.gather(*tasks, return_exceptions=True))
+
+    async def async_close(self) -> None:
+        """Stop owned work on unload; persisted dispatch boundaries survive."""
+        self._closing = True
+        tasks = [item[1] for item in self._background_submissions.values()]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def async_load(self) -> None:
         """Restore only exact bounded operation records; damaged data fails closed."""
@@ -1053,6 +1148,8 @@ class ClimateTabletService:
     async def async_snapshot(self) -> dict[str, object]:
         """Read the canonical runtime projection without changing climate state."""
 
+        if self._background_snapshot is not None:
+            return json.loads(json.dumps(self._background_snapshot))
         async with self._lock:
             if self._maintenance_unhealthy():
                 if self._last_safe_snapshot is None:
@@ -1131,6 +1228,7 @@ class ClimateTabletService:
         _lock_held: bool = False,
         _legacy_fail_fast: bool = False,
         _legacy_correlation_id: str | None = None,
+        _on_reserved: Callable[[dict[str, object], dict[str, object]], None] | None = None,
     ) -> dict[str, object]:
         """Reserve, execute at most once, persist and return one operation receipt."""
 
@@ -1306,6 +1404,8 @@ class ClimateTabletService:
                 )
             self._remember(request, receipt, pending_ledger)
             await self._async_save()
+            if _on_reserved is not None:
+                _on_reserved(receipt, snapshot)
             frozen_scope = receipt.get("action_snapshot", {}).get("resolved_scope", {})
             physical_started = False
             native_terminal_checkpoint_failed = False
@@ -1778,6 +1878,11 @@ class ClimateTabletService:
 
         if not isinstance(operation_id, str) or _OPERATION_ID.fullmatch(operation_id) is None:
             raise ClimateTabletOperationNotFound(operation_id)
+        published = self._published_receipts.get(operation_id)
+        if published is not None:
+            if self._maintenance_unhealthy():
+                raise ClimateTabletUnavailable("climate operation persistence is unavailable")
+            return json.loads(json.dumps(published))
         async with self._lock:
             if self._maintenance_unhealthy():
                 raise ClimateTabletUnavailable("climate operation persistence is unavailable")
@@ -6344,6 +6449,10 @@ def _with_reliability_projection(
             if not isinstance(device, dict) or not isinstance(device.get("id"), str):
                 continue
             device_id = device["id"]
+            kind = device.get("kind")
+            temperature_owner = kind in {"air_conditioner", "radiator_thermostat", "floor_heating"}
+            humidity_owner = kind == "humidifier"
+            actuator = temperature_owner or humidity_owner
             device_intent = intents.get(f"device:{room_id}:{device_id}", intent)
             device_parameters = device_intent.get("parameters", {}) if isinstance(device_intent, Mapping) else {}
             mode = device.get("mode") if device.get("mode") in {"automatic", "manual"} else "automatic"
@@ -6362,6 +6471,10 @@ def _with_reliability_projection(
                 if "target_humidity" in device_parameters
                 else room["desired_target_humidity"]
             )
+            if not temperature_owner:
+                desired_temperature = None
+            if not humidity_owner:
+                desired_humidity = None
             reported_humidity = source.get(
                 "reported_target_humidity", device.get("target_humidity")
             )
@@ -6408,11 +6521,12 @@ def _with_reliability_projection(
             # These are independent dimensions.  An offline manually
             # excluded leaf remains excluded and is also unavailable; using a
             # mutually exclusive bucket silently lost ownership on restart.
-            counts[mode] += 1
-            if not available:
-                counts["unavailable"] += 1
-            if participation["synchronization"] in {"deferred", "pending"}:
-                counts["deferred"] += 1
+            if actuator and device.get("control_scope") in {"managed", "canary"}:
+                counts[mode] += 1
+                if not available:
+                    counts["unavailable"] += 1
+                if mode == "automatic" and participation["synchronization"] in {"deferred", "pending"}:
+                    counts["deferred"] += 1
             # Recovery is a one-step return from either explicitly recorded
             # manual reason.  An automatic or unknown device is never a
             # recovery candidate.
