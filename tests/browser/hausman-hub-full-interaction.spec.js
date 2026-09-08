@@ -347,6 +347,24 @@ test("сброс browser storage не ломает страницу с opaque or
   }
 });
 
+test("fresh state context initializes route telemetry before the first local request", async ({ browser }) => {
+  const telemetry = {};
+  const context = await createStateContext(browser, telemetry);
+  try {
+    await freshStatePage(context, ["overview", ""]);
+    expect(telemetry).toMatchObject({
+      continued_requests: expect.any(Array),
+      mutation_escape_requests: expect.any(Array),
+      unexpected_local_requests: expect.any(Array),
+      blocked_external_requests: expect.any(Array),
+      unexpected_external_requests: expect.any(Array),
+    });
+    expect(telemetry.continued_requests.length).toBeGreaterThan(0);
+  } finally {
+    await context.close();
+  }
+});
+
 test("настроечные маршруты открывают заявленные подвиды и оставляют исходную точку защиты света в аудите", async ({ browser }) => {
   const context = await createStateContext(browser, { blocked: [], blockedAttempts: 0, continued: [], continuedExternal: [] });
   try {
@@ -509,11 +527,14 @@ function requestRecord(request) {
   return { method: request.method(), resource_type: request.resourceType(), url: `${url.origin}${url.pathname}` };
 }
 
-function createRouteTelemetry() {
-  return {
-    continued_requests: [], mutation_escape_requests: [], unexpected_local_requests: [],
-    blocked_external_requests: [], unexpected_external_requests: [],
-  };
+function createRouteTelemetry(telemetry = {}) {
+  for (const name of [
+    "continued_requests", "mutation_escape_requests", "unexpected_local_requests",
+    "blocked_external_requests", "unexpected_external_requests",
+  ]) {
+    if (!Array.isArray(telemetry[name])) telemetry[name] = [];
+  }
+  return telemetry;
 }
 
 function attachRouteTelemetry(report, routeTelemetry) {
@@ -528,6 +549,7 @@ function expectedBlockedExternal(record) {
 }
 
 async function createStateContext(browser, routeTelemetry, identity = { state: "test", key: null, occurrence: null, lane: null }) {
+  routeTelemetry = createRouteTelemetry(routeTelemetry);
   let context;
   try {
     return await withHarnessDeadline({ ...identity, phase: "create" }, async () => {
