@@ -2853,6 +2853,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                     "actions": [
                         {"action_id": "turn_on", "title": "Включить", "allowed_fields": []},
                         {"action_id": "turn_off", "title": "Выключить", "allowed_fields": []},
+                        {"action_id": "set_brightness_percent", "title": "Яркость", "allowed_fields": ["value"]},
+                        {"action_id": "set_color_temperature", "title": "Температура света", "allowed_fields": ["value"]},
                     ],
                 },
             ]
@@ -2990,6 +2992,30 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (lightTargets.length !== 1 || !textOf(lightTargets[0]).includes("Основное управление")
           || !textOf(lightTargets[0]).includes("Выключить")) {
           throw new Error("light sheet does not prioritize its current power action");
+        }
+        if (findAll(lightTargets[0], (node) => String(node.className).split(" ").includes("device-value-action")).length) {
+          throw new Error("generic text controls duplicated canonical light ranges");
+        }
+        const colorRange = modalRanges.find((node) => textOf(node).includes("Температура света"));
+        const colorSlider = findAll(colorRange, (node) => node.tagName === "INPUT" && node.type === "range")[0];
+        if (!colorSlider || colorSlider.min !== "2000" || colorSlider.max !== "6535" || colorSlider.step !== "100") {
+          throw new Error("color range did not retain its configured bounds");
+        }
+        colorSlider.value = "4100";
+        colorSlider.fire("input");
+        findAll(colorRange, (node) => node.tagName === "BUTTON" && node.textContent === "Применить")[0].fire("click", { preventDefault() {} });
+        await tick(10);
+        const colorPost = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/device-actions"
+          && call.payload.actionId === "set_color_temperature");
+        if (!colorPost || typeof colorPost.payload.value !== "number" || colorPost.payload.value !== 4100) {
+          throw new Error("color range did not send a numeric Kelvin value");
+        }
+        if (validRangeControl({ control: {
+          kind: "range", minimum: "2000", maximum: 6535, step: 100,
+          targetId: "entity_fedcba9876543210", actionId: "set_color_temperature",
+        } }) !== null) {
+          throw new Error("invalid canonical range was accepted");
         }
             """,
         )
@@ -3347,6 +3373,11 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             "home_control": {
                 "enabled": True,
                 "allowed_actions": ["set_home_targets", "synchronize_home"],
+                "action_inputs": {
+                    "set_home_targets": {
+                        "target_temperature": {"minimum": 18, "maximum": 28, "step": 0.5},
+                    },
+                },
                 "blocked_reasons": [],
             },
             "rooms": [],
@@ -3518,6 +3549,40 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         panel._render();
         if (byClass(byClass(overview, "overview-canon-climate-controls")[0], "overview-canon-link").length !== 0) {
           throw new Error("embedded target restored secondary actions after busy state");
+        }
+        panel._climateRuntime.home_control.allowed_actions = ["set_home_targets"];
+        panel._homeDashboard.summary.targetTemp = 18;
+        panel._render();
+        const minimumCard = byClass(overview, "overview-canon-climate-controls")[0];
+        const minimumSteps = byClass(minimumCard, "overview-canon-target-step");
+        const minimumSlider = findAll(minimumCard, (node) => node.tagName === "INPUT" && node.type === "range")[0];
+        if (!minimumSteps[0].disabled || minimumSteps[1].disabled
+          || !minimumSlider || minimumSlider.min !== "18" || minimumSlider.max !== "28" || minimumSlider.step !== "0.5") {
+          throw new Error("home target lower boundary is not enforced by the UI");
+        }
+        minimumSteps[0].fire("click");
+        await tick(8);
+        if (targetPosts().length !== 1) throw new Error("16 degree target was posted");
+        minimumSlider.value = "16";
+        minimumSlider.fire("change");
+        await tick(8);
+        if (targetPosts().length !== 1) throw new Error("out of range slider target was posted");
+        panel._homeDashboard.summary.targetTemp = 28;
+        panel._render();
+        const maximumCard = byClass(overview, "overview-canon-climate-controls")[0];
+        const maximumSteps = byClass(maximumCard, "overview-canon-target-step");
+        if (maximumSteps[0].disabled || !maximumSteps[1].disabled) {
+          throw new Error("home target upper boundary is not enforced by the UI");
+        }
+        maximumSteps[1].fire("click");
+        await tick(8);
+        if (targetPosts().length !== 1) throw new Error("30 degree target was posted");
+        const validSlider = findAll(maximumCard, (node) => node.tagName === "INPUT" && node.type === "range")[0];
+        validSlider.value = "27.5";
+        validSlider.fire("change");
+        await tick(8);
+        if (targetPosts().at(-1).payload.parameters.target_temperature !== 27.5) {
+          throw new Error("valid fractional target did not retain its JSON number");
         }
             """,
         )

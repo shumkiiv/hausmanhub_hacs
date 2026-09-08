@@ -34,8 +34,13 @@ class GitHubLocalQualityWorkflowTest(unittest.TestCase):
         self.assertIn("run: npm ci", workflow)
         self.assertIn("run: npx playwright install --with-deps chromium", workflow)
         self.assertIn("run: npm run test:browser", workflow)
+        self.assertIn(
+            "HACS_RUNTIME_REPORT: ${{ runner.temp }}/hausman-browser-gate/hacs-full-interaction-runtime.json",
+            workflow,
+        )
+        self.assertIn("run: python3 qa/full-functional/check_manifest.py", workflow)
         self.assertEqual(4, workflow.count("\n        uses:"))
-        self.assertEqual(6, workflow.count("\n        run:"))
+        self.assertEqual(7, workflow.count("\n        run:"))
 
     def test_workflow_runs_for_main_changes_and_has_no_home_target(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8").lower()

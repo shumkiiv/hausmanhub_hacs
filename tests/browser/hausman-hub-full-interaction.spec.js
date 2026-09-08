@@ -544,8 +544,10 @@ function attachRouteTelemetry(report, routeTelemetry) {
   report.blocked_external_attempts = report.blocked_external_requests.length + report.unexpected_external_requests.length;
 }
 
-function expectedBlockedExternal(record) {
-  return record.method === "GET" && record.resource_type === "image" && EXPECTED_BLOCKED_EXTERNAL_IMAGES.has(record.url);
+function expectedBlockedExternal(record, originalUrl) {
+  const parsed = new URL(originalUrl);
+  return record.method === "GET" && record.resource_type === "image"
+    && !parsed.search && !parsed.hash && EXPECTED_BLOCKED_EXTERNAL_IMAGES.has(record.url);
 }
 
 async function createStateContext(browser, routeTelemetry, identity = { state: "test", key: null, occurrence: null, lane: null }) {
@@ -557,14 +559,15 @@ async function createStateContext(browser, routeTelemetry, identity = { state: "
       await context.addInitScript(resetLocalStateAndFreezeClock, FIXED_NOW);
       await context.addInitScript(auditInit);
       await context.route("**/*", async route => {
-        const record = requestRecord(route.request());
+        const request = route.request();
+        const record = requestRecord(request);
         if (new URL(record.url).origin === HARNESS_ORIGIN) {
           if (record.method !== "GET") routeTelemetry.mutation_escape_requests.push(record);
           else if (ALLOWED_LOCAL_REQUEST_PATHS.has(new URL(record.url).pathname)) {
             routeTelemetry.continued_requests.push(record);
             return route.continue();
           } else routeTelemetry.unexpected_local_requests.push(record);
-        } else if (expectedBlockedExternal(record)) {
+        } else if (expectedBlockedExternal(record, request.url())) {
           routeTelemetry.blocked_external_requests.push(record);
         } else {
           routeTelemetry.unexpected_external_requests.push(record);
@@ -684,6 +687,11 @@ test("route policy classifies local mutation and unexpected external requests wh
         image.addEventListener("error", resolve, { once: true });
         image.src = "https://www.zigbee2mqtt.io/images/devices/TS0505B_1.png";
       });
+      await new Promise((resolve) => {
+        const image = new Image();
+        image.addEventListener("error", resolve, { once: true });
+        image.src = "https://www.zigbee2mqtt.io/images/devices/TS0505B_1.png?probe";
+      });
     });
 
     expect(routeTelemetry.mutation_escape_requests).toEqual([
@@ -691,6 +699,7 @@ test("route policy classifies local mutation and unexpected external requests wh
     ]);
     expect(routeTelemetry.unexpected_external_requests).toEqual([
       { method: "GET", resource_type: "fetch", url: "https://example.invalid/security-probe" },
+      { method: "GET", resource_type: "image", url: "https://www.zigbee2mqtt.io/images/devices/TS0505B_1.png" },
     ]);
     expect(routeTelemetry.blocked_external_requests).toEqual([
       { method: "GET", resource_type: "image", url: "https://www.zigbee2mqtt.io/images/devices/TS0505B_1.png" },
@@ -824,5 +833,5 @@ test("every visible enabled HACS control is located and safely exercised in the 
   expect(report.continued_requests.every((request) => request.method === "GET" && request.url.startsWith(`${HARNESS_ORIGIN}/`))).toBe(true);
   writeReport(report);
   if (INVENTORY_ONLY) return;
-  expect(report.missing).toEqual([]); expect(report.errors).toEqual([]); expect(report.unclassified).toEqual([]); expect(report.unrecorded_commands).toEqual([]); expect(report.unexpected_calls).toEqual([]); expect(report.failed_effects).toEqual([]); expect(report.external_network).toBe(false); expect(report.signatures.length).toBeGreaterThan(0);
+  expect(report.missing).toEqual([]); expect(report.errors).toEqual([]); expect(report.unclassified).toEqual([]); expect(report.unrecorded_commands).toEqual([]); expect(report.unexpected_calls).toEqual([]); expect(report.failed_effects).toEqual([]); expect(report.mutation_escape_requests).toEqual([]); expect(report.unexpected_local_requests).toEqual([]); expect(report.unexpected_external_requests).toEqual([]); expect(report.mutation_escape).toBe(report.mutation_escape_requests.length > 0); expect(report.external_network).toBe(report.unexpected_external_requests.length > 0); expect(report.mutation_escape).toBe(false); expect(report.external_network).toBe(false); expect(report.signatures.length).toBeGreaterThan(0);
 });

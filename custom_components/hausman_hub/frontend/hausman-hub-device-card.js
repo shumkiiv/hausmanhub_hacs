@@ -1,7 +1,7 @@
 /* Canonical physical-device card shared by all tablet-style HACS sections. */
 
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.227";
-import { renderDeviceTargetControls } from "./hausman-hub-device-controls.js?v=1.52.227";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.228";
+import { renderDeviceTargetControls } from "./hausman-hub-device-controls.js?v=1.52.228";
 
 const STATE_LABELS = {
   on: "Включено",
@@ -408,7 +408,16 @@ export function openPhysicalDeviceSheet(owner, device, deps) {
   hero.appendChild(identity);
   sheet.appendChild(hero);
 
-  const targets = owner._catalogTargets(device);
+  const canonicalRangeActions = new Set((Array.isArray(device.details) ? device.details : [])
+    .map((detail) => detail?.control)
+    .filter((control) => control?.kind === "range" && RANGE_ACTIONS.has(control.actionId))
+    .map((control) => control.actionId));
+  const targets = owner._catalogTargets(device).map((target) => ({
+    ...target,
+    actions: (Array.isArray(target.actions) ? target.actions : []).filter((action) => (
+      !canonicalRangeActions.has(action.action_id)
+    )),
+  }));
   const targetEntities = new Set(targets.map((target) => target.entity_id));
   const details = conciseDetails(device).filter((detail) => !targetEntities.has(detail.entityId));
   if (details.length) {

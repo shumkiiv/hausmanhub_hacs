@@ -1,11 +1,11 @@
 /* Climate control surface shared with the tablet information architecture. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.227";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.227";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.227";
-import { pendingOperationId, requiresSnapshotRefresh, resolveApiError, resolveClimateReceipt } from "./hausman-hub-error-taxonomy.js?v=1.52.227";
-import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.227";
-import { renderClimateSide } from "./hausman-hub-climate-side.js?v=1.52.227";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.228";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.228";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.228";
+import { pendingOperationId, requiresSnapshotRefresh, resolveApiError, resolveClimateReceipt } from "./hausman-hub-error-taxonomy.js?v=1.52.228";
+import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.228";
+import { renderClimateSide } from "./hausman-hub-climate-side.js?v=1.52.228";
 
 const CLIMATE_ACTION_API = "hausman_hub/v1/climate/actions";
 const CLIMATE_OPERATION_API = "hausman_hub/v1/climate/operations";
@@ -136,7 +136,8 @@ export async function setClimateHomeTarget(panel, targetTemperature) {
   const homeControl = panel._climateRuntime && panel._climateRuntime.home_control;
   const allowed = homeControl && Array.isArray(homeControl.allowed_actions)
     && homeControl.allowed_actions.includes("set_home_targets");
-  if (panel._busy || !allowed || !Number.isFinite(targetTemperature)) return false;
+  const bounds = homeTargetBounds(homeControl);
+  if (panel._busy || !allowed || !validHomeTarget(targetTemperature, bounds)) return false;
   panel._busy = true;
   panel._climateModePendingKey = "home:set_home_targets";
   panel._notice = "Сохраняем общую цель климата...";
@@ -168,11 +169,30 @@ export async function setClimateHomeTarget(panel, targetTemperature) {
   }
 }
 
+const HOME_TARGET_BOUNDS = Object.freeze({ minimum: 18, maximum: 28, step: 0.5 });
+
+function homeTargetBounds(homeControl) {
+  const supplied = homeControl?.action_inputs?.set_home_targets?.target_temperature;
+  const minimum = Number(supplied?.minimum);
+  const maximum = Number(supplied?.maximum);
+  const step = Number(supplied?.step);
+  if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || !Number.isFinite(step)
+    || minimum < HOME_TARGET_BOUNDS.minimum || maximum > HOME_TARGET_BOUNDS.maximum
+    || minimum > maximum || step < HOME_TARGET_BOUNDS.step) return HOME_TARGET_BOUNDS;
+  return { minimum, maximum, step };
+}
+
+function validHomeTarget(value, bounds) {
+  return Number.isFinite(value) && value >= bounds.minimum && value <= bounds.maximum
+    && Math.abs((value - bounds.minimum) / bounds.step - Math.round((value - bounds.minimum) / bounds.step)) < 1e-9;
+}
+
 export function renderHomeTargetCard(panel, dashboard, deps, options = {}) {
   const embedded = options.embedded === true;
   const control = panel._climateRuntime?.home_control || {};
   const allowed = Array.isArray(control.allowed_actions) ? control.allowed_actions : [];
   const canSetTargets = allowed.includes("set_home_targets");
+  const bounds = homeTargetBounds(control);
   const raw = dashboard.summary && dashboard.summary.targetTemp;
   const target = raw !== null && raw !== undefined && raw !== "" && Number.isFinite(Number(raw))
     ? Number(raw) : null;
@@ -190,14 +210,15 @@ export function renderHomeTargetCard(panel, dashboard, deps, options = {}) {
   const stepButton = (label, delta, aria) => {
     const button = deps.el("button", "overview-canon-target-step");
     button.type = "button";
-    button.disabled = panel._busy || !canSetTargets || target === null;
+    const next = target === null ? null : Math.round((target + delta) / bounds.step) * bounds.step;
+    button.disabled = panel._busy || !canSetTargets || target === null || !validHomeTarget(next, bounds);
     deps.setAttr(button, "aria-label", aria);
     button.appendChild(climateIcon(delta < 0 ? "minus" : "plus", deps));
     const hint = deps.el("span", "visually-hidden", label);
     button.appendChild(hint);
     button.addEventListener("click", () => {
       if (button.disabled || target === null) return;
-      setClimateHomeTarget(panel, Math.round((target + delta) * 2) / 2);
+      setClimateHomeTarget(panel, next);
     });
     return button;
   };
@@ -211,9 +232,9 @@ export function renderHomeTargetCard(panel, dashboard, deps, options = {}) {
     const sliderWrap = deps.el("div", "overview-canon-target-slider");
     const slider = deps.el("input");
     slider.type = "range";
-    slider.min = "16";
-    slider.max = "30";
-    slider.step = "0.5";
+    slider.min = String(bounds.minimum);
+    slider.max = String(bounds.maximum);
+    slider.step = String(bounds.step);
     slider.value = String(target);
     slider.disabled = panel._busy || !canSetTargets;
     deps.setAttr(slider, "aria-label", "Общая целевая температура дома");
@@ -222,8 +243,8 @@ export function renderHomeTargetCard(panel, dashboard, deps, options = {}) {
       if (Number.isFinite(next)) value.textContent = formatTarget(next);
     });
     slider.addEventListener("change", () => {
-      const next = Math.round(Number(slider.value) * 2) / 2;
-      if (!slider.disabled && Number.isFinite(next) && next !== target) {
+      const next = Math.round((Number(slider.value) - bounds.minimum) / bounds.step) * bounds.step + bounds.minimum;
+      if (!slider.disabled && validHomeTarget(next, bounds) && next !== target) {
         setClimateHomeTarget(panel, next);
       }
     });
