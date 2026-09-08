@@ -5564,7 +5564,15 @@ def _with_saved_mode_evidence(
         private = metadata.get((result.room_id, device_id), {})
         device = devices.get(device_id, {})
         reported_mode = room.get("mode") if request.action == "set_room_mode" else device.get("mode")
-        if private.get("mode_observed_at") != result.observed_at or reported_mode != mode:
+        mode_observed_at = private.get("mode_observed_at")
+        # A later durable observation may refresh the manual-memory timestamp
+        # without changing this mode. Bind proof to that authoritative read,
+        # but never use a pre-write observation or a different reported mode.
+        if (
+            type(mode_observed_at) is not int
+            or mode_observed_at < result.observed_at
+            or reported_mode != mode
+        ):
             return result
         outcomes[device_id] = {
             "status": "confirmed", "reason": "none", "execution_state": "already_in_sync",

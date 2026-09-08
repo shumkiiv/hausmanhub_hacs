@@ -2,6 +2,7 @@
 
 import copy
 from dataclasses import replace
+from itertools import count
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -11,8 +12,10 @@ from custom_components.hausman_hub.application.climate_tablet import (
     _StoredOperation,
     _reliable_outcomes,
     _tablet_state_with_checkpoint,
+    _with_saved_mode_evidence,
     parse_climate_tablet_action,
 )
+from custom_components.hausman_hub.application.climate_mode_result import ClimateSavedModeResult
 from tests.test_climate_runtime import MemoryStore
 from tests.test_climate_tablet import contract_validator, native_home_target_runtime
 
@@ -30,6 +33,55 @@ def request(action, parameters, *, revision=0, room_id="living", request_id="mod
 
 
 class SavedModeProofTests(unittest.IsolatedAsyncioTestCase):
+    async def test_mode_confirmation_rejects_older_observation_or_different_mode(self):
+        runtime, store, _, _ = native_home_target_runtime(include_humidifier=True)
+        runtime._manual_store = MemoryStore(None)
+        await runtime.async_start()
+        service = ClimateTabletService(runtime, store, now_ms=lambda: NOW)
+        await service.async_load()
+        snapshot = await service.async_snapshot()
+        device_id = "living_air_conditioner"
+        parsed = parse_climate_tablet_action(request("set_device_mode", {"device_id": device_id, "mode": "automatic"}))
+        result = ClimateSavedModeResult("living", ((device_id, "automatic"),), NOW)
+        scope = {"device_ids": [device_id]}
+        metadata = copy.deepcopy(service._last_reliability_metadata)
+        metadata[("living", device_id)]["mode_observed_at"] = NOW - 1
+        older = _with_saved_mode_evidence(result, parsed, snapshot, scope, metadata)
+        self.assertIsNone(older.device_outcomes)
+        metadata[("living", device_id)]["mode_observed_at"] = NOW + 1
+        next(d for d in snapshot["rooms"][0]["devices"] if d["id"] == device_id)["mode"] = "manual"
+        different = _with_saved_mode_evidence(result, parsed, snapshot, scope, metadata)
+        self.assertIsNone(different.device_outcomes)
+
+    async def test_background_mode_confirmation_survives_a_moving_runtime_clock(self):
+        for device_id in ("living_air_conditioner", "living_radiator", "living_floor", "living_humidifier"):
+            for mode in ("manual", "automatic"):
+                with self.subTest(device=device_id, mode=mode):
+                    runtime, store, _, executor = native_home_target_runtime(include_humidifier=True)
+                    runtime._manual_store = MemoryStore(None)
+                    clock = count(NOW)
+                    runtime._now_ms = lambda: next(clock)
+                    await runtime.async_start()
+                    if mode == "automatic":
+                        await runtime.async_set_device_mode("living", device_id, "manual")
+                    service = ClimateTabletService(runtime, store, now_ms=lambda: next(clock))
+                    await service.async_load()
+                    body = request("set_device_mode", {"device_id": device_id, "mode": mode})
+                    accepted = await service.async_submit(body)
+                    await service.async_drain()
+                    receipt = await service.async_operation(accepted["operation_id"])
+                    self.assertEqual("confirmed", receipt["status"], receipt)
+                    leaf = receipt["outcomes"]["rooms"]["living"]["devices"][device_id]
+                    self.assertEqual("already_in_sync", leaf["execution_state"])
+                    self.assertEqual((0, 0), (leaf["command_count"], leaf["accepted_count"]))
+                    self.assertEqual([], executor.batches)
+                    contract_validator("climate-operation-receipt.schema.json").validate(receipt)
+                    restored = ClimateTabletService(runtime, store, now_ms=lambda: next(clock))
+                    await restored.async_load()
+                    replay = await restored.async_execute(body)
+                    self.assertTrue(replay["duplicate"])
+                    self.assertEqual("confirmed", replay["status"])
+
     async def test_native_device_modes_confirm_all_actuator_kinds_without_ha_calls(self):
         for device_id in ("living_air_conditioner", "living_radiator", "living_floor", "living_humidifier"):
             for mode in ("manual", "automatic"):
@@ -61,15 +113,22 @@ class SavedModeProofTests(unittest.IsolatedAsyncioTestCase):
     async def test_native_room_mode_confirms_all_owners_with_zero_physical_calls(self):
         runtime, store, _, executor = native_home_target_runtime(include_humidifier=True)
         runtime._manual_store = MemoryStore(None)
+        clock = count(NOW)
+        runtime._now_ms = lambda: next(clock)
         await runtime.async_start()
-        service = ClimateTabletService(runtime, store, now_ms=lambda: NOW)
+        service = ClimateTabletService(runtime, store, now_ms=lambda: next(clock))
         await service.async_load()
-        receipt = await service.async_execute(request("set_room_mode", {"mode": "manual"}))
+        accepted = await service.async_submit(request("set_room_mode", {"mode": "manual"}))
+        await service.async_drain()
+        receipt = await service.async_operation(accepted["operation_id"])
         self.assertEqual("confirmed", receipt["status"], receipt)
         leaves = receipt["outcomes"]["rooms"]["living"]["devices"]
         self.assertEqual(4, len(leaves))
         self.assertTrue(all(leaf["execution_state"] == "already_in_sync" for leaf in leaves.values()))
         self.assertEqual([], executor.batches)
+        restored = ClimateTabletService(runtime, store, now_ms=lambda: next(clock))
+        await restored.async_load()
+        self.assertEqual("confirmed", (await restored.async_operation(receipt["operation_id"]))["status"])
 
 
 class FrozenClimateProofTests(unittest.IsolatedAsyncioTestCase):
