@@ -817,9 +817,8 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         overview = OVERVIEW_JS.read_text(encoding="utf-8")
         overview_css = OVERVIEW_CSS.read_text(encoding="utf-8")
 
-        self.assertIn('const stepAmount = formatTarget(bounds.step).slice(0, -1);', climate_overview)
-        self.assertIn('stepButton(`−${stepAmount}`, -bounds.step, `Понизить общую цель на ${stepAmount} °C`)', climate_overview)
-        self.assertIn('stepButton(`+${stepAmount}`, bounds.step, `Повысить общую цель на ${stepAmount} °C`)', climate_overview)
+        self.assertIn('"−0,5", -0.5, "Понизить общую цель на 0,5 °C"', climate_overview)
+        self.assertIn('"+0,5", 0.5, "Повысить общую цель на 0,5 °C"', climate_overview)
         self.assertIn("overview-canon-target-dial", climate_overview)
         self.assertIn("overview-canon-target-value", climate_overview)
         self.assertIn("overview-canon-target-step", climate_overview)
