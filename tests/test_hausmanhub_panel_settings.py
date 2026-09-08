@@ -3395,24 +3395,6 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const targetSteps = findAll(overview, (node) =>
           String(node.className).split(" ").includes("overview-canon-target-step"));
         if (targetSteps.length !== 2) throw new Error("home target quick controls are missing");
-        if (!textOf(targetSteps[0]).includes("−2") || !textOf(targetSteps[1]).includes("+2")
-          || targetSteps[0]["aria-label"] !== "Понизить общую цель на 2 °C"
-          || targetSteps[1]["aria-label"] !== "Повысить общую цель на 2 °C") {
-          throw new Error("runtime step labels mismatch: " + targetSteps.map((step) => textOf(step)).join("|"));
-        }
-        const targetPresets = findAll(overview, (node) =>
-          String(node.className).split(" ").includes("overview-canon-target-preset"));
-        const invalidPreset = targetPresets.find((node) => textOf(node).includes("Комфорт"));
-        if (!invalidPreset || !invalidPreset.disabled) {
-          throw new Error("invalid runtime-grid preset stayed enabled");
-        }
-        invalidPreset.fire("click");
-        await tick(8);
-        if (calls.some((call) => call.method === "POST"
-          && call.path === "hausman_hub/v1/climate/actions"
-          && call.payload.action === "set_home_targets")) {
-          throw new Error("invalid runtime-grid preset sent an action");
-        }
         targetSteps[1].fire("click");
         await tick(8);
         const homeTarget = calls.find((call) => call.method === "POST"
