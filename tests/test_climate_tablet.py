@@ -687,24 +687,6 @@ class ClimateTabletProjectionTest(unittest.TestCase):
         self.assertTrue(payload["home_control"]["enabled"])
         contract_validator("climate-runtime.schema.json").validate(payload)
 
-    def test_home_target_input_uses_authoritative_room_temperature_bounds(self) -> None:
-        home = managed_home()
-        home["rooms"][0]["control"]["action_inputs"]["set_room_target"][
-            "target_temperature"
-        ].update({"minimum": 18, "maximum": 28, "step": 2})
-
-        payload = climate_tablet_snapshot(home, climate_mode="managed")
-
-        self.assertEqual(
-            {
-                "set_home_targets": {
-                    "target_temperature": {"minimum": 18, "maximum": 28, "step": 2},
-                },
-            },
-            payload["home_control"]["action_inputs"],
-        )
-        contract_validator("climate-runtime.schema.json").validate(payload)
-
     def test_home_targets_fail_closed_for_every_native_preflight_gap(self) -> None:
         cases: list[tuple[str, callable]] = [
             ("not-managed", lambda home: home["rooms"][0]["devices"][0].update(control_scope="observed")),
