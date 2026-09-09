@@ -113,6 +113,56 @@ def reconcile_climate_manual_memory(
     return replace(updated, updated_at=now_ms), True
 
 
+def return_climate_contour_to_automatic(
+    memory: ClimateManualMemory,
+    registry: ClimateRegistry,
+    contour: ContourDefinition,
+    *,
+    updated_at: int,
+) -> tuple[ClimateManualMemory, bool]:
+    """Clear only current-contour manual ownership without touching observations."""
+
+    if not isinstance(memory, ClimateManualMemory):
+        raise ClimateManualViolation("validated manual-control memory is required")
+    if not isinstance(registry, ClimateRegistry):
+        raise ClimateManualViolation("validated climate registry is required")
+    if not isinstance(contour, ContourDefinition):
+        raise ClimateManualViolation("validated climate contour is required")
+    _timestamp(updated_at, "manual-control automatic return time")
+    contour_room_ids = {room.room_id for room in contour.rooms}
+    contour_device_ids = {
+        device_id
+        for room in contour.rooms
+        for device_id in room.device_ids
+    }
+    manual_room_ids = tuple(
+        room_id
+        for room_id in memory.manual_room_ids
+        if room_id not in contour_room_ids
+    )
+    manual_device_ids = tuple(
+        device_id
+        for device_id in memory.manual_device_ids
+        if device_id not in contour_device_ids
+    )
+    if (
+        manual_room_ids == memory.manual_room_ids
+        and manual_device_ids == memory.manual_device_ids
+    ):
+        return memory, False
+    return ClimateManualMemory(
+        updated_at=max(memory.updated_at, updated_at),
+        manual_room_ids=manual_room_ids,
+        manual_device_ids=manual_device_ids,
+        devices=memory.devices,
+        attributions=tuple(
+            item for item in memory.attributions
+            if item.device_id not in contour_device_ids
+        ),
+        hausman_context_ids=memory.hausman_context_ids,
+    ), True
+
+
 def update_direct_wifi_observation(
     memory: ClimateManualMemory,
     registry: ClimateRegistry,

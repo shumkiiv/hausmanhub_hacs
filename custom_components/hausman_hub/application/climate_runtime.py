@@ -61,6 +61,7 @@ from ..domain.native_climate import NativeClimatePolicy, preview_native_climate
 from ..domain.climate_targets import ClimateTargetSnapshot
 from .climate_application import ClimateDesiredStateChanges
 from .climate_mode_result import ClimateSavedModeResult
+from .climate_manual import return_climate_contour_to_automatic
 from .climate_tablet import (
     CLIMATE_ACTION_CONTRACT_NAME,
     CLIMATE_TABLET_CONTRACT_VERSION,
@@ -1256,6 +1257,8 @@ class ClimateRuntime:
             reserved_plan_fingerprint=reserved_plan_fingerprint)
         if canonical.action == "synchronize_home":
             return await self.async_synchronize_climate()
+        if canonical.action == "return_all_to_automatic":
+            return await self.async_return_all_to_automatic()
         if canonical.action == "set_room_mode":
             await self.async_set_room_mode(canonical.room_id, canonical.parameters.get("mode"))
             return await self._async_saved_mode_result(canonical.room_id)
@@ -1700,6 +1703,47 @@ class ClimateRuntime:
                 self._manual_memory = updated
             self.last_error = None
             return _ClimateRoomModeReceipt()
+
+    async def async_return_all_to_automatic(self) -> _ClimateRoomModeReceipt:
+        """Clear current-contour manual ownership without calling equipment."""
+
+        async with self._lock:
+            contour = self._climate_contour()
+            contour_room_ids = {room.room_id for room in contour.rooms}
+            contour_device_ids = {
+                device_id for room in contour.rooms for device_id in room.device_ids
+            }
+            changed_room_ids = contour_room_ids.intersection(
+                self._manual_memory.manual_room_ids
+            )
+            changed_device_ids = contour_device_ids.intersection(
+                self._manual_memory.manual_device_ids
+            )
+            updated, changed = return_climate_contour_to_automatic(
+                self._manual_memory,
+                self._registry,
+                contour,
+                updated_at=self._safe_now(),
+            )
+            if not changed:
+                raise ClimateManualViolation(
+                    "climate contour has no manual ownership to return"
+                )
+            await self._async_save_manual(updated)
+            self._manual_memory = updated
+            self.last_error = None
+            changed_room_count = len(changed_room_ids) + len(
+                {
+                    device.room_id
+                    for device in self._registry.devices
+                    if device.device_id in changed_device_ids
+                    and device.room_id not in changed_room_ids
+                }
+            )
+            return _ClimateRoomModeReceipt(
+                confirmed_room_count=changed_room_count,
+                accepted_count=changed_room_count,
+            )
 
     async def async_set_device_mode_for_entity(
         self,

@@ -64,7 +64,8 @@
         "set_room_humidity_target",
         "set_room_min_target",
         "set_room_target_strategy",
-        "turn_room_off"
+        "turn_room_off",
+        "return_all_to_automatic"
       ]
     },
     "action_parameters": {

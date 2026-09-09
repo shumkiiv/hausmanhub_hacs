@@ -629,7 +629,11 @@ class ClimateTabletProjectionTest(unittest.TestCase):
             payload["rooms"][0]["devices"][0]["mode_name"],
         )
         self.assertEqual(
-            ["set_home_targets", "synchronize_home"],
+            [
+                "set_home_targets",
+                "synchronize_home",
+                "return_all_to_automatic",
+            ],
             payload["home_control"]["allowed_actions"],
         )
         room = payload["rooms"][0]
@@ -824,6 +828,22 @@ class ClimateTabletProjectionTest(unittest.TestCase):
         with self.assertRaises(ClimateTabletViolation):
             parse_climate_tablet_action(request)
 
+    def test_return_all_to_automatic_rejects_reliability_profile(self) -> None:
+        request = action_request(
+            managed_home()["state_revision"],
+            request_id="tablet.climate.return-auto-profile",
+        )
+        request.update(
+            action="return_all_to_automatic",
+            room_id=None,
+            parameters={},
+            reliability_profile="climate_reliability_v1",
+            expected_control_revision=0,
+        )
+
+        with self.assertRaises(ClimateTabletViolation):
+            parse_climate_tablet_action(request)
+
     def test_recovery_preflight_revision_is_js_safe(self) -> None:
         from custom_components.hausman_hub.application.climate_tablet import (
             _canonical_fingerprint,
@@ -865,6 +885,43 @@ class ClimateTabletProjectionTest(unittest.TestCase):
 
 
 class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_return_all_to_automatic_is_one_idempotent_zero_call_operation(self) -> None:
+        runtime, store, _contour_store, executor = native_home_target_runtime(
+            include_humidifier=False,
+        )
+        await runtime.async_start()
+        await runtime.async_set_device_mode("living", "living_radiator", "manual")
+        service = ClimateTabletService(runtime, store, now_ms=lambda: 1784280005000)
+        await service.async_load()
+        before = await service.async_snapshot()
+        self.assertIn(
+            "return_all_to_automatic",
+            before["home_control"]["allowed_actions"],
+        )
+        request = {
+            "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+            "request_id": "tablet.climate.return-auto.1",
+            "correlation_id": "corr.climate.return-auto.1",
+            "expected_state_revision": before["state_revision"],
+            "action": "return_all_to_automatic",
+            "room_id": None,
+            "parameters": {},
+        }
+
+        receipt = await service.async_execute(request)
+        duplicate = await service.async_execute(request)
+        after = await service.async_snapshot()
+
+        self.assertEqual("confirmed", receipt["status"])
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(receipt["operation_id"], duplicate["operation_id"])
+        self.assertEqual([], executor.batches)
+        self.assertEqual("automatic", after["rooms"][0]["devices"][1]["mode"])
+        self.assertNotIn(
+            "return_all_to_automatic",
+            after["home_control"]["allowed_actions"],
+        )
+
     def setUp(self) -> None:
         self.now = 1_785_949_320_000
         self.home = managed_home()

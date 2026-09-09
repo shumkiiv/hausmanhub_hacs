@@ -14,6 +14,7 @@ from custom_components.hausman_hub.application.climate_manual import (
     effective_manual_room_ids,
     record_direct_wifi_commands,
     reconcile_climate_manual_memory,
+    return_climate_contour_to_automatic,
     update_climate_manual_observation,
     update_direct_wifi_observation,
     with_climate_device_mode,
@@ -39,6 +40,8 @@ from custom_components.hausman_hub.domain.climate_ha_calls import (
 )
 from custom_components.hausman_hub.domain.climate_manual import (
     ClimateDirectWifiPhase,
+    ClimateDirectWifiState,
+    ClimateManualAttribution,
     ClimateManualMemory,
     ClimateManualViolation,
     empty_climate_manual_memory,
@@ -106,6 +109,53 @@ def _with_ac_activity(observation, activity: ClimateDeviceActivity):
 
 
 class ClimateManualTest(unittest.TestCase):
+    def test_return_all_to_automatic_clears_only_current_contour_ownership(self) -> None:
+        registry = native_registry(ClimateControlScope.MANAGED)
+        contour = replace(
+            native_contours().contour("climate"),
+            rooms=(replace(native_contours().contour("climate").rooms[0], device_ids=("living_ac",)),),
+        )
+        memory = ClimateManualMemory(
+            updated_at=NOW,
+            manual_room_ids=("living", "retired_room"),
+            manual_device_ids=("living_ac", "living_temperature", "retired_device"),
+            devices=(ClimateDirectWifiState(
+                device_id="living_ac", room_id="living",
+                observed_phase=ClimateDirectWifiPhase.INACTIVE, observed_at=NOW,
+            ),),
+            attributions=(
+                ClimateManualAttribution(
+                    device_id="living_ac", reason="external_off",
+                    source="observation", changed_at=NOW,
+                ),
+                ClimateManualAttribution(
+                    device_id="living_temperature", reason="user_excluded",
+                    source="user", changed_at=NOW,
+                ),
+                ClimateManualAttribution(
+                    device_id="retired_device", reason="user_excluded",
+                    source="user", changed_at=NOW,
+                ),
+            ),
+            hausman_context_ids=("hausman.climate.1",),
+        )
+
+        updated, changed = return_climate_contour_to_automatic(
+            memory, registry, contour, updated_at=NOW + 1,
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual(("retired_room",), updated.manual_room_ids)
+        self.assertEqual(
+            ("living_temperature", "retired_device"), updated.manual_device_ids,
+        )
+        self.assertEqual(memory.devices, updated.devices)
+        self.assertEqual(
+            ("living_temperature", "retired_device"),
+            tuple(item.device_id for item in updated.attributions),
+        )
+        self.assertEqual(memory.hausman_context_ids, updated.hausman_context_ids)
+
     def test_external_power_on_returns_every_actuator_to_automatic_after_restart(self) -> None:
         registry, observation = _inputs()
         for kind in (

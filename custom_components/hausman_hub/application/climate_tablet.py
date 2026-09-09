@@ -52,6 +52,7 @@ _SUPPORTED_ACTIONS = frozenset(
     {
         "set_home_targets",
         "synchronize_home",
+        "return_all_to_automatic",
         "set_room_target",
         "set_room_humidity_target",
         "set_room_min_target",
@@ -91,6 +92,7 @@ _ALL_ACTIONS = frozenset(
     {
         "set_home_targets",
         "synchronize_home",
+        "return_all_to_automatic",
         "set_room_target",
         "clear_room_override",
         "set_room_mode",
@@ -171,6 +173,8 @@ class ClimateTabletRuntime(Protocol):
     async def async_home_climate_targets(self, payload: object) -> object: ...
 
     async def async_synchronize_climate(self) -> object: ...
+
+    async def async_return_all_to_automatic(self) -> object: ...
 
     async def async_room_humidity_target(
         self, *, request_id: str, room_id: str, target_humidity: int
@@ -294,6 +298,10 @@ def parse_climate_tablet_action(payload: object) -> ClimateTabletActionRequest:
     action = payload.get("action")
     if not isinstance(action, str) or action not in _ALL_ACTIONS:
         raise ClimateTabletViolation("climate action is unsupported")
+    if action == "return_all_to_automatic" and reliability_profile is not None:
+        raise ClimateTabletViolation(
+            "return-to-automatic action cannot use climate reliability profile"
+        )
     room_id = payload.get("room_id")
     if room_id is not None and (
         not isinstance(room_id, str) or _STABLE_ID.fullmatch(room_id) is None
@@ -314,9 +322,9 @@ def parse_climate_tablet_action(payload: object) -> ClimateTabletActionRequest:
             _validate_temperature(normalized["target_temperature"])
         if "target_humidity" in normalized:
             _validate_humidity(normalized["target_humidity"])
-    elif action == "synchronize_home":
+    elif action in {"synchronize_home", "return_all_to_automatic"}:
         if room_id is not None or normalized:
-            raise ClimateTabletViolation("home climate synchronization is invalid")
+            raise ClimateTabletViolation("home climate action is invalid")
     elif action == "set_room_target":
         _require_room(room_id)
         if set(normalized) != {"target_temperature"}:
@@ -652,6 +660,13 @@ def climate_tablet_snapshot(
     home_actions = [
         *(["set_home_targets"] if home_targets_allowed else []),
         *(["synchronize_home"] if home_base_allowed else []),
+        *([
+            "return_all_to_automatic"
+        ] if home_base_allowed and any(
+            room["mode"] == "manual"
+            or any(device.get("mode") == "manual" for device in room["devices"])
+            for room in projected_rooms
+        ) else []),
     ]
     home_allowed = bool(home_actions)
     if home_allowed:
@@ -1404,7 +1419,10 @@ class ClimateTabletService:
                     **dict(receipt.get("action_snapshot", {})),
                     "resolved_scope": preflight_scope,
                 }
-            if receipt.get("accepted") is True:
+            if (
+                receipt.get("accepted") is True
+                and request.action != "return_all_to_automatic"
+            ):
                 self._control_revision = next_control_revision
                 intent_key = _intent_key(request)
                 self._desired_intents[intent_key] = _desired_intent(
@@ -2313,6 +2331,8 @@ class ClimateTabletService:
             )
         if request.action == "synchronize_home":
             return await self._runtime.async_synchronize_climate()
+        if request.action == "return_all_to_automatic":
+            return await self._runtime.async_return_all_to_automatic()
         if request.action == "set_room_mode":
             return await self._runtime.async_set_room_mode(
                 request.room_id,
@@ -2949,7 +2969,9 @@ def _require_action_allowed(
         raise ClimateTabletViolation(
             "climate action is not available", code="climate_action_unsupported"
         )
-    if request.action in {"set_home_targets", "synchronize_home"}:
+    if request.action in {
+        "set_home_targets", "synchronize_home", "return_all_to_automatic",
+    }:
         control = snapshot.get("home_control")
     else:
         rooms = snapshot.get("rooms")
@@ -3388,7 +3410,9 @@ def _valid_frozen_scope(
     if request.room_id is not None:
         if canonical_rooms != [request.room_id]:
             return False
-    elif request.action not in {"set_home_targets", "synchronize_home"}:
+    elif request.action not in {
+        "set_home_targets", "synchronize_home", "return_all_to_automatic",
+    }:
         return False
     if request.action == "set_device_mode":
         return canonical_devices == [request.parameters.get("device_id")]
