@@ -1171,6 +1171,48 @@ class TamburHaObservationCoordinator:
     def freshness_reason(self, target_id: str) -> str:
         return self._reasons.get(target_id, "continuity_not_observed")
 
+    async def async_authority_snapshot(
+        self, target_id: str, observation_epoch: int
+    ) -> dict[str, object]:
+        """Bind ownership to this coordinator's fresh observed state."""
+
+        entity_id = self._target_entities.get(target_id)
+        if entity_id is None:
+            return {
+                "owner": "uncertain",
+                "generation": 0,
+                "protectionActive": True,
+                "observedRevision": 0,
+                "observedAtMs": 0,
+                "observationEpoch": observation_epoch,
+                "fresh": False,
+            }
+        observation = await self._observation(
+            target_id, entity_id, observation_epoch
+        )
+        ownership = await _maybe_await(self._authority_provider(target_id))
+        if not isinstance(ownership, Mapping):
+            ownership = {}
+        state = getattr(
+            getattr(self._hass, "states", None), "get", lambda _id: None
+        )(entity_id)
+        updated = getattr(state, "last_updated", None)
+        evidence_revision = (
+            updated.isoformat()
+            if isinstance(updated, datetime)
+            else None
+        )
+        return {
+            "owner": ownership.get("owner", "uncertain"),
+            "generation": ownership.get("generation", 0),
+            "protectionActive": ownership.get("protectionActive", True),
+            "observedRevision": observation["revision"],
+            "observedAtMs": observation["observedAtMs"],
+            "observationEpoch": observation_epoch,
+            "fresh": observation["fresh"],
+            "evidenceRevision": evidence_revision,
+        }
+
     async def _observation(
         self, target_id: str, entity_id: str, observation_epoch: int
     ) -> dict[str, object]:

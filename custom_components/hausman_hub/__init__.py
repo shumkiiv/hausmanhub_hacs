@@ -497,45 +497,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     domain_data["curtain_scale_confirmation"] = curtain_scale_confirmation
     from .application.managed_switch_migration import (
         HomeAssistantManagedSwitchMigrationStore,
-        FULL_MIGRATION_MANIFEST,
-        MIGRATION_MANIFEST,
         ManagedSwitchActivation,
-        ManagedSwitchMigration,
-        ManagedSwitchStartupCoordinator,
-        async_load_managed_switch_migration_entries,
     )
-    from .application.native_automation_migration import (
-        HomeAssistantNativeAutomationAdapter,
-        HomeAssistantNativeAutomationMigrationStore,
-        NativeAutomationMigration,
-    )
-
-    managed_switch_migration = ManagedSwitchMigration(
-        scenario_service,
-        HomeAssistantManagedSwitchMigrationStore(hass, entry.entry_id),
-        source_loader=lambda: async_load_managed_switch_migration_entries(
-            hass.async_add_executor_job, FULL_MIGRATION_MANIFEST
-        ),
-        native_automation_migration=NativeAutomationMigration(
-            HomeAssistantNativeAutomationAdapter(hass),
-            HomeAssistantNativeAutomationMigrationStore(hass, entry.entry_id),
-        ),
-        manifest=FULL_MIGRATION_MANIFEST,
-    )
-    from .application.managed_switch_binding_migration import (
-        HomeAssistantManagedSwitchBindingMigrationStore,
-        ManagedSwitchBindingMigration,
+    from .application.tambur_room_migration import (
+        HomeAssistantTamburRoomMigrationStore,
+        TAMBUR_INPUT_TARGET_IDS,
+        TAMBUR_PRESENCE_TARGET_IDS,
+        TamburRoomMigration,
+        TamburRoomStartupCoordinator,
+        build_home_assistant_tambur_native_migration,
     )
 
-    managed_switch_binding_migration = ManagedSwitchBindingMigration(
+    migration_lock = asyncio.Lock()
+    global_migration_store = HomeAssistantManagedSwitchMigrationStore(
+        hass, entry.entry_id
+    )
+    domain_data["managed_switch_migration"] = {
+        "state": "deferred",
+        "reason": "tambur_room_only",
+    }
+    tambur_room_migration = TamburRoomMigration(
         scenario_service,
-        HomeAssistantManagedSwitchBindingMigrationStore(hass, entry.entry_id),
+        HomeAssistantTamburRoomMigrationStore(hass, entry.entry_id),
+        global_receipt_store=global_migration_store,
+        native_automation_migration=build_home_assistant_tambur_native_migration(
+            hass, entry.entry_id
+        ),
+        migration_lock=migration_lock,
     )
 
     sensor_states: dict[str, object] = {}
     for sensor_target_id in (
-        "entity_156050daca86aa6c",
-        "entity_10b78187426f8485",
+        *TAMBUR_PRESENCE_TARGET_IDS,
     ):
         sensor = scenario_service.current_catalog().device(sensor_target_id)
         entity_id = getattr(sensor, "entity_id", None)
@@ -670,8 +663,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
     )
     entry.async_on_unload(scenario_service.cancel_running_scenarios)
-    from .scenario_events import async_start_scenario_events
     from .application.activation_latch import ActivationLatch
+    from .application.scenario_decision_bridge import (
+        ScenarioDecisionBridge,
+        TamburHaObservationCoordinator,
+    )
+    from .application.tambur_decision_runtime import TamburDecisionRuntime
+    from .scenario_decision_bridge_storage import (
+        HomeAssistantScenarioDecisionBridgeStore,
+    )
     from .application.smart_switch_runtime import (
         HomeAssistantSmartSwitchDedupStore,
         SmartSwitchTriggerAdapter,
@@ -682,136 +682,227 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         scenario_service,
         state_store=HomeAssistantSmartSwitchDedupStore(hass, entry.entry_id),
         readiness_check=lambda: bool(
-            managed_switch_startup.activation_authorized
-            and manual_light_off_protection.ready_for_release_owned_switches
+            manual_light_off_protection.ready_for_release_owned_switches
             and all(
                 scenario_service.current_catalog().device(target_id) is not None
-                for migration in FULL_MIGRATION_MANIFEST
-                for target_id in migration.input_target_ids
+                for target_id in TAMBUR_INPUT_TARGET_IDS
             )
         ),
         activation_latch=activation_latch,
+        included_bindings=frozenset({"tambur-light-group"}),
     )
     scenario_service.set_smart_switch_receipt_consumer(smart_switch_adapter)
 
-    activation_unloads: list[object] = []
+    tambur_runtime_holder: dict[str, object] = {}
 
-    class _ActivationEntry:
-        def async_on_unload(self, callback: object) -> None:
-            activation_unloads.append(callback)
-
-    def _cleanup_managed_switch_runtime() -> None:
+    def _cleanup_tambur_runtime() -> None:
         activation_latch.close()
         errors: list[Exception] = []
+        runtime = tambur_runtime_holder.pop("runtime", None)
+        cancel_runtime = getattr(runtime, "cancel", None)
+        if callable(cancel_runtime):
+            try:
+                cancel_runtime()
+            except Exception as error:  # noqa: BLE001
+                errors.append(error)
         try:
             smart_switch_adapter.async_unload()
         except Exception as error:  # noqa: BLE001
             errors.append(error)
-        callbacks = list(reversed(activation_unloads))
-        activation_unloads.clear()
-        for callback in callbacks:
-            try:
-                callback()
-            except Exception as error:  # noqa: BLE001
-                errors.append(error)
         if errors:
-            raise RuntimeError("managed switch runtime cleanup failed") from errors[0]
+            raise RuntimeError("Tambur runtime cleanup failed") from errors[0]
 
-    async def _async_activate_managed_switch_runtime() -> ManagedSwitchActivation:
-        """Start every dependent runtime once after verified migration."""
+    async def _async_activate_tambur_runtime(scope: object) -> ManagedSwitchActivation:
+        """Prepare only the decision bridge and inputs for the migrated room."""
 
         try:
-            staged_entry = _ActivationEntry()
-            await scenario_control_coordinator.async_start(
-                staged_entry, activation_latch
-            )
-            await async_start_scenario_schedule(
+            if (
+                getattr(scope, "scenario_ids", None)
+                != ("system-tambur-adaptive-controller",)
+                or getattr(scope, "presence_target_ids", None)
+                != TAMBUR_PRESENCE_TARGET_IDS
+                or getattr(getattr(hass, "config", None), "time_zone", None)
+                != "Asia/Omsk"
+            ):
+                raise RuntimeError("Tambur activation scope is invalid")
+            bindings = {
+                "chandelier": "entity_71859313239a14e4",
+                "points": "entity_cd0098e5ff95da46",
+                "mirror": "entity_fbdf27871edb89bf",
+                "power": "entity_b47991988cc6b9f3",
+                "presenceSensors": list(TAMBUR_PRESENCE_TARGET_IDS),
+            }
+            settings = {
+                "morningStart": "09:00",
+                "morningEnd": "10:00",
+                "eveningLatestStart": "21:00",
+                "mainOff": "23:00",
+                "mirrorOff": "01:00",
+                "minPercent": 5,
+                "maxPercent": 80,
+                "dayKelvin": 3000,
+                "eveningKelvin": 2200,
+                "absenceDaySeconds": 600,
+                "absenceNightSeconds": 180,
+                "fadeSeconds": 20,
+                "manualOffMinSeconds": 600,
+                "manualOffAbsenceSeconds": 30,
+                "manualOnHoldSeconds": 3600,
+            }
+
+            def entity_id_for(target_id: str) -> str | None:
+                device = scenario_service.current_catalog().device(target_id)
+                entity_id = getattr(device, "entity_id", None)
+                return entity_id if isinstance(entity_id, str) else None
+
+            async def ownership_for(target_id: str) -> dict[str, object]:
+                entity_id = entity_id_for(target_id)
+                if entity_id is None:
+                    return {
+                        "owner": "uncertain",
+                        "generation": 0,
+                        "protectionActive": True,
+                    }
+                manual = bool(
+                    light_priority.manual_claim_entity_ids(
+                        frozenset({entity_id})
+                    )
+                )
+                owned = light_priority.is_owned(entity_id, hass)
+                return {
+                    "owner": "manual" if manual else "automatic" if owned else "none",
+                    "generation": 0,
+                    "protectionActive": manual,
+                }
+
+            now_ms = lambda: int(dt_util.utcnow().timestamp() * 1000)
+            observations = TamburHaObservationCoordinator(
                 hass,
-                staged_entry,
-                scenario_service,
-                activation_latch,
-                scenario_control_coordinator.owned_scenario_ids,
-                curtain_protection,
+                bindings=bindings,
+                entity_id_provider=entity_id_for,
+                settings=settings,
+                settings_revision=1,
+                authority_provider=ownership_for,
+                freshness_deadline_provider=(
+                    lambda _target, _entity, reported: reported + 120_000
+                ),
+                now_ms=now_ms,
+                timezone_name="Asia/Omsk",
             )
-            await async_start_scenario_events(
+            observation_epoch = {"value": 0}
+
+            async def decision_authority(target_id: str) -> dict[str, object]:
+                return await observations.async_authority_snapshot(
+                    target_id, observation_epoch["value"]
+                )
+
+            bridge = ScenarioDecisionBridge(
+                HomeAssistantScenarioDecisionBridgeStore(hass, entry.entry_id),
+                snapshot_provider=observations.async_snapshot_source,
+                authority_provider=decision_authority,
+                now_ms=now_ms,
+                executor=scenario_executor,
+            )
+
+            async def register_tambur_manual_intent(
+                request_id: str,
+                target_id: str,
+                action_id: str,
+                value: object | None,
+            ) -> None:
+                if target_id in {
+                    bindings["chandelier"],
+                    bindings["points"],
+                    bindings["mirror"],
+                }:
+                    await bridge.async_register_manual_intent(
+                        request_id, target_id, action_id, value
+                    )
+
+            scenario_service.set_manual_action_pre_admission(
+                register_tambur_manual_intent
+            )
+            presence_entities = {
+                entity_id: target_id
+                for target_id in TAMBUR_PRESENCE_TARGET_IDS
+                if (entity_id := entity_id_for(target_id)) is not None
+            }
+            if len(presence_entities) != len(TAMBUR_PRESENCE_TARGET_IDS):
+                raise RuntimeError("Tambur presence binding is incomplete")
+            runtime = TamburDecisionRuntime(
                 hass,
-                staged_entry,
-                scenario_service,
-                scenario_command_contexts,
-                activation_latch,
-                scenario_control_coordinator.owned_scenario_ids,
+                scenario_node_red_backend,
+                bridge,
+                observations,
+                presence_entities=presence_entities,
+                now_ms=now_ms,
+                recovered_callback=lambda epoch: observation_epoch.update(
+                    value=epoch
+                ),
             )
+            await runtime.async_start()
+            tambur_runtime_holder["runtime"] = runtime
+            tambur_runtime_holder["bridge"] = bridge
             await smart_switch_adapter.async_start()
-            staged_entry.async_on_unload(curtain_protection.start(hass))
         except asyncio.CancelledError:
             try:
-                _cleanup_managed_switch_runtime()
+                _cleanup_tambur_runtime()
             except Exception:  # noqa: BLE001
-                _LOGGER.error("Managed switch runtime cleanup failed")
+                _LOGGER.error("Tambur runtime cleanup failed")
             raise
         except Exception as activation_error:  # noqa: BLE001
-            # Device automation discovery is optional and fail-closed. Existing
-            # state/event scenarios remain available when MQTT is not ready.
             cleanup_failed = False
             try:
-                _cleanup_managed_switch_runtime()
+                _cleanup_tambur_runtime()
             except Exception:  # noqa: BLE001
                 cleanup_failed = True
-                _LOGGER.error("Smart switch device trigger cleanup failed")
+                _LOGGER.error("Tambur runtime cleanup failed")
             domain_data["smart_switch_runtime"] = {
                 "state": "unavailable",
                 "reason": (
-                    "device_trigger_cleanup_failed"
+                    "tambur_runtime_cleanup_failed"
                     if cleanup_failed
-                    else "device_trigger_attach_failed"
+                    else "tambur_runtime_attach_failed"
                 ),
             }
-            raise RuntimeError("managed switch runtime activation failed") from activation_error
-        def _commit_managed_switch_runtime() -> None:
-            # The coordinator installs cleanup before this synchronous commit.
-            # No await follows it, so no callback can observe a half-owned
-            # runtime with an open latch.
+            raise RuntimeError("Tambur runtime activation failed") from activation_error
+
+        def _commit_tambur_runtime() -> None:
             activation_latch.open()
-            scenario_control_coordinator.activate()
+            runtime.activate()
             domain_data["smart_switch_runtime"] = {
                 "state": "ready",
                 "adapter": smart_switch_adapter,
             }
+            domain_data["tambur_decision_runtime"] = runtime
 
         return ManagedSwitchActivation(
-            _cleanup_managed_switch_runtime,
-            _commit_managed_switch_runtime,
+            _cleanup_tambur_runtime,
+            _commit_tambur_runtime,
             activation_latch.close,
         )
 
-    def _publish_managed_switch_status(status: dict[str, str]) -> None:
-        domain_data["managed_switch_migration"] = dict(status)
+    def _publish_tambur_status(status: dict[str, str]) -> None:
+        domain_data["tambur_room_migration"] = dict(status)
         if status.get("state") == "waiting":
             domain_data["smart_switch_runtime"] = {
                 "state": "waiting",
-                "reason": "verified_migration_pending",
+                "reason": "tambur_room_pending",
             }
         elif status.get("state") == "blocked":
-            current_runtime = domain_data.get("smart_switch_runtime")
-            if not (
-                isinstance(current_runtime, dict)
-                and current_runtime.get("state") == "unavailable"
-            ):
-                domain_data["smart_switch_runtime"] = {
-                    "state": "unavailable",
-                    "reason": status.get("reason", "verified_migration_failed"),
-                }
+            domain_data["smart_switch_runtime"] = {
+                "state": "unavailable",
+                "reason": status.get("stage", "binding"),
+            }
 
-    managed_switch_startup = ManagedSwitchStartupCoordinator(
+    tambur_room_startup = TamburRoomStartupCoordinator(
         scenario_service,
-        managed_switch_migration,
-        _async_activate_managed_switch_runtime,
-        binding_migration=managed_switch_binding_migration,
-        status_publisher=_publish_managed_switch_status,
-        manifest=FULL_MIGRATION_MANIFEST,
+        tambur_room_migration,
+        _async_activate_tambur_runtime,
+        status_publisher=_publish_tambur_status,
     )
-    entry.async_on_unload(managed_switch_startup.cancel)
-    await managed_switch_startup.async_start()
+    entry.async_on_unload(tambur_room_startup.cancel)
+    await tambur_room_startup.async_start()
     entry.async_on_unload(scenario_service.start_catalog_warmup())
     from .manual_light_off_protection_events import (
         async_start_manual_light_off_protection_events,

@@ -168,6 +168,7 @@ class SmartSwitchTriggerAdapter:
         receipt_factory: Callable[[], str] | None = None,
         readiness_check: Callable[[], bool] | None = None,
         activation_latch: object | None = None,
+        included_bindings: frozenset[str] | None = None,
     ) -> None:
         self._hass = hass
         self._service = service
@@ -179,6 +180,14 @@ class SmartSwitchTriggerAdapter:
         )
         self._readiness_check = readiness_check or (lambda: True)
         self._activation_latch = activation_latch
+        if included_bindings is None:
+            self._configs = _ALL_CONFIGS
+        elif included_bindings == frozenset({"tambur-light-group"}):
+            self._configs = PASS_THROUGH_TRIGGER_CONFIGS
+        elif included_bindings == frozenset({"shower-cabinet"}):
+            self._configs = SHOWER_TRIGGER_CONFIGS
+        else:
+            raise ValueError("smart switch binding scope is invalid")
         self._receipts: list[dict[str, object]] = []
         # Only receipts accepted by this live adapter generation may authorize
         # execution. Persisted receipts remain useful for deduplication after a
@@ -238,7 +247,9 @@ class SmartSwitchTriggerAdapter:
         if not callable(get_triggers) or not callable(attach):
             raise RuntimeError("Home Assistant device automation trigger API unavailable")
         discovered_by_device: dict[str, tuple[Mapping[str, object], ...]] = {}
-        for device_id in (SHOWER_DEVICE_ID, PASSTHROUGH_DEVICE_ID):
+        for device_id in dict.fromkeys(
+            str(item["device_id"]) for item in self._configs
+        ):
             discovered = await get_triggers(self._hass, device_id)
             if not isinstance(discovered, list):
                 _LOGGER.error(
@@ -248,7 +259,7 @@ class SmartSwitchTriggerAdapter:
             discovered_by_device[device_id] = tuple(
                 item for item in discovered if isinstance(item, Mapping)
             )
-        for expected in _ALL_CONFIGS:
+        for expected in self._configs:
             discovered = discovered_by_device[str(expected["device_id"])]
             if not any(validate_exact_device_trigger(item, expected) for item in discovered):
                 _LOGGER.error(
@@ -259,7 +270,7 @@ class SmartSwitchTriggerAdapter:
         pending: list[Callable[[], None]] = []
         generation = {"active": False}
         try:
-            for index, expected in enumerate(_ALL_CONFIGS):
+            for index, expected in enumerate(self._configs):
                 cleanup = await attach(
                     self._hass,
                     dict(expected),
@@ -344,7 +355,7 @@ class SmartSwitchTriggerAdapter:
             return False
         if self._activation_latch is not None and not self._activation_latch.is_open:
             return False
-        if not any(validate_exact_device_trigger(config, item) for item in _ALL_CONFIGS):
+        if not any(validate_exact_device_trigger(config, item) for item in self._configs):
             _LOGGER.info(
                 "smart_switch_trigger_skipped "
                 "code=SMART_SWITCH_TRIGGER_NOT_ALLOWLISTED "

@@ -158,6 +158,45 @@ def test_adapter_attaches_only_allowlisted_configs_and_unloads() -> None:
     asyncio.run(run())
 
 
+def test_tambur_scope_discovers_and_attaches_only_pass_through_switch() -> None:
+    requested_devices: list[str] = []
+    attached: list[dict[str, object]] = []
+
+    async def get_triggers(
+        _hass: object, device_id: str
+    ) -> list[dict[str, object]]:
+        requested_devices.append(device_id)
+        assert device_id == PASS_THROUGH_TRIGGER_CONFIGS[0]["device_id"]
+        return [{**item, "metadata": {}} for item in PASS_THROUGH_TRIGGER_CONFIGS]
+
+    async def attach(
+        _hass: object,
+        config: dict[str, object],
+        _action: object,
+        _info: object,
+    ) -> object:
+        attached.append(config)
+        return lambda: None
+
+    async def run() -> None:
+        adapter = SmartSwitchTriggerAdapter(
+            SimpleNamespace(),
+            SimpleNamespace(async_run_typed_intent=SimpleNamespace()),
+            trigger_api=SimpleNamespace(
+                async_get_triggers=get_triggers,
+                async_attach_trigger=attach,
+            ),
+            included_bindings=frozenset({"tambur-light-group"}),
+        )
+
+        await adapter.async_start()
+
+        assert requested_devices == [PASS_THROUGH_TRIGGER_CONFIGS[0]["device_id"]]
+        assert attached == list(PASS_THROUGH_TRIGGER_CONFIGS)
+
+    asyncio.run(run())
+
+
 @pytest.mark.asyncio
 async def test_shower_alias_is_deduplicated_and_up_is_ignored() -> None:
     calls: list[dict[str, object]] = []

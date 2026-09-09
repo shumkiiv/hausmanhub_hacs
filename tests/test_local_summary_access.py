@@ -10612,26 +10612,19 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         self.assertEqual(200, response.status)
 
-    def test_setup_keeps_switch_runtime_unavailable_when_attach_cleanup_fails(self) -> None:
+    def test_setup_keeps_global_and_switch_runtimes_closed_while_tambur_waits(self) -> None:
         from custom_components.hausman_hub.application.managed_switch_migration import (
             ManagedSwitchMigration,
-            ManagedSwitchStartupCoordinator,
-        )
-        from custom_components.hausman_hub.application.managed_switch_binding_migration import (
-            ManagedSwitchBindingMigration,
         )
         from custom_components.hausman_hub.application.smart_switch_runtime import (
             SmartSwitchTriggerAdapter,
         )
 
-        async def migration_ready(_migration: object) -> str:
-            return "completed"
+        async def unexpected_global_migration(_migration: object) -> str:
+            raise AssertionError("global migration must stay deferred in room mode")
 
-        async def attach_failure(_adapter: object) -> None:
-            raise RuntimeError("attach failed with private details")
-
-        def cleanup_failure(_adapter: object) -> None:
-            raise RuntimeError("device trigger cleanup failed")
+        async def unexpected_switch_attach(_adapter: object) -> None:
+            raise AssertionError("switches must stay closed before room migration")
 
         hass = FakeHomeAssistant()
         entry = FakeEntry(
@@ -10644,36 +10637,40 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         hass.config_entries.entries = [entry]
 
-        with self.assertLogs("custom_components.hausman_hub", level="ERROR") as logs:
-            with (
-                patch.object(ManagedSwitchMigration, "async_apply", migration_ready),
-                patch.object(
-                    ManagedSwitchBindingMigration,
-                    "async_apply",
-                    migration_ready,
-                ),
-                patch.object(
-                    ManagedSwitchStartupCoordinator,
-                    "_catalog_has_required_targets",
-                    return_value=True,
-                ),
-                patch.object(SmartSwitchTriggerAdapter, "async_start", attach_failure),
-                patch.object(SmartSwitchTriggerAdapter, "async_unload", cleanup_failure),
-            ):
-                self.assertTrue(asyncio.run(self.integration.async_setup_entry(hass, entry)))
+        with (
+            patch.object(
+                ManagedSwitchMigration,
+                "async_apply",
+                unexpected_global_migration,
+            ),
+            patch.object(
+                SmartSwitchTriggerAdapter,
+                "async_start",
+                unexpected_switch_attach,
+            ),
+        ):
+            self.assertTrue(asyncio.run(self.integration.async_setup_entry(hass, entry)))
 
         self.assertEqual(
             {
-                "state": "unavailable",
-                "reason": "device_trigger_cleanup_failed",
+                "state": "deferred",
+                "reason": "tambur_room_only",
+            },
+            hass.data["hausman_hub"]["managed_switch_migration"],
+        )
+        self.assertEqual(
+            {"state": "waiting", "stage": "binding"},
+            hass.data["hausman_hub"]["tambur_room_migration"],
+        )
+        self.assertEqual(
+            {
+                "state": "waiting",
+                "reason": "tambur_room_pending",
             },
             hass.data["hausman_hub"]["smart_switch_runtime"],
         )
-        rendered_logs = "\n".join(logs.output)
-        self.assertIn("Smart switch device trigger cleanup failed", rendered_logs)
-        self.assertNotIn("private details", rendered_logs)
 
-    def test_setup_blocks_incomplete_controller_content_before_runtime(self) -> None:
+    def test_setup_defers_incomplete_global_controller_content_in_room_mode(self) -> None:
         from custom_components.hausman_hub.application import (
             managed_switch_migration as migration_module,
         )
@@ -10702,15 +10699,19 @@ class LocalSummaryAccessTest(unittest.TestCase):
 
         self.assertEqual(
             {
-                "state": "blocked",
-                "reason": "managed_controller_content_incomplete",
+                "state": "deferred",
+                "reason": "tambur_room_only",
             },
             hass.data["hausman_hub"]["managed_switch_migration"],
         )
         self.assertEqual(
+            {"state": "waiting", "stage": "binding"},
+            hass.data["hausman_hub"]["tambur_room_migration"],
+        )
+        self.assertEqual(
             {
-                "state": "unavailable",
-                "reason": "managed_controller_content_incomplete",
+                "state": "waiting",
+                "reason": "tambur_room_pending",
             },
             hass.data["hausman_hub"]["smart_switch_runtime"],
         )

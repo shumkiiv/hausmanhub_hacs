@@ -834,6 +834,13 @@ class _ManagedSwitchBindingMigrationTransaction:
     scenario_id: str
 
 
+@dataclass(frozen=True)
+class _TamburRoomMigrationTransaction:
+    previous_registry: ScenarioRegistry
+    migrated_registry: ScenarioRegistry
+    decision_created: bool
+
+
 def _legacy_input_target_ids_match(
     actual: tuple[str, ...],
     expected: tuple[str, ...],
@@ -962,6 +969,9 @@ class ScenarioService:
         self._managed_switch_replace_staging: dict[str, tuple[str, str, str]] = {}
         self._managed_switch_binding_migration_transaction: (
             _ManagedSwitchBindingMigrationTransaction | None
+        ) = None
+        self._tambur_room_migration_transaction: (
+            _TamburRoomMigrationTransaction | None
         ) = None
         self._path_metrics = ScenarioPathMetrics()
         self._scenario_content_revision_key: tuple[tuple[str, int], ...] | None = None
@@ -1677,6 +1687,494 @@ class ScenarioService:
         } | set(REGISTRY_SCENARIO_IDS_TO_DRAIN)
         async with self._run_lock:
             self._managed_switch_blocked_runs.difference_update(scenario_ids)
+
+    @staticmethod
+    def _tambur_room_scenario_matches_plan(
+        scenario: Scenario,
+        plan: object,
+        *,
+        migrated: bool,
+    ) -> bool:
+        metadata = scenario.definition.node_red
+        if (
+            scenario.id != str(getattr(plan, "scenario_id", ""))
+            or not scenario.protected
+            or scenario.definition.execution_backend
+            is not ScenarioExecutionBackend.NODE_RED
+            or metadata is None
+        ):
+            return False
+        if migrated:
+            return bool(
+                scenario.revision == int(getattr(plan, "legacy_revision")) + 1
+                and metadata.flow_id == getattr(plan, "decision_flow_id")
+                and metadata.source_hash == getattr(plan, "decision_topology_hash")
+                and metadata.input_target_ids
+                == tuple(getattr(plan, "input_target_ids"))
+                and metadata.generated_by is ScenarioNodeRedGeneratedBy.HAUSMAN
+                and metadata.sync_status is ScenarioNodeRedSyncStatus.SYNCED
+            )
+        return bool(
+            scenario.revision == int(getattr(plan, "legacy_revision"))
+            and metadata.flow_id == getattr(plan, "legacy_flow_id")
+            and metadata.source_hash == getattr(plan, "legacy_source_hash")
+            and _legacy_input_target_ids_match(
+                metadata.input_target_ids,
+                tuple(getattr(plan, "legacy_input_target_ids")),
+            )
+        )
+
+    @classmethod
+    def _verify_tambur_room_registry_transition(
+        cls,
+        before: ScenarioRegistry,
+        after: ScenarioRegistry,
+        plan: object,
+    ) -> None:
+        scenario_id = str(getattr(plan, "scenario_id", ""))
+        before_scenario = before.scenario(scenario_id)
+        after_scenario = after.scenario(scenario_id)
+        if (
+            before_scenario is None
+            or after_scenario is None
+            or not cls._tambur_room_scenario_matches_plan(
+                before_scenario, plan, migrated=False
+            )
+            or not cls._tambur_room_scenario_matches_plan(
+                after_scenario, plan, migrated=True
+            )
+            or tuple(item.id for item in before.scenarios)
+            != tuple(item.id for item in after.scenarios)
+        ):
+            raise ScenarioServiceError(
+                "Tambur room registry transition is invalid.", status=409
+            )
+        before_payloads = _scenario_payloads(before)
+        after_payloads = _scenario_payloads(after)
+        if any(
+            after_payloads[item_id] != before_payloads[item_id]
+            for item_id in before_payloads
+            if item_id != scenario_id
+        ):
+            raise ScenarioServiceError(
+                "A foreign scenario changed during Tambur migration.", status=409
+            )
+        before_payload = before_payloads[scenario_id]
+        after_payload = after_payloads[scenario_id]
+        if _without_fields(
+            before_payload, frozenset({"definition", "revision", "updatedAt"})
+        ) != _without_fields(
+            after_payload, frozenset({"definition", "revision", "updatedAt"})
+        ):
+            raise ScenarioServiceError(
+                "Tambur scenario changed outside its decision binding.", status=409
+            )
+        before_definition = dict(before_payload["definition"])
+        after_definition = dict(after_payload["definition"])
+        before_definition.pop("nodeRed", None)
+        after_definition.pop("nodeRed", None)
+        if before_definition != after_definition:
+            raise ScenarioServiceError(
+                "Tambur scenario definition changed outside Node-RED.", status=409
+            )
+
+    async def _async_tambur_decision_evidence(self) -> dict[str, object]:
+        backend = self._node_red_backend
+        if backend is None:
+            raise ScenarioServiceError("Node-RED backend is unavailable.", status=503)
+        from .scenario_node_red_decision import (  # noqa: PLC0415
+            prepare_tambur_decision_bundle,
+            validate_tambur_decision_install_target,
+            verify_tambur_decision_global_nodes,
+        )
+
+        snapshot = getattr(backend, "_async_global_snapshot", None)
+        if not callable(snapshot):
+            raise ScenarioServiceError(
+                "Tambur decision capture is unavailable.", status=503
+            )
+        revision, nodes = await snapshot()
+        bundle = prepare_tambur_decision_bundle()
+        try:
+            topology_hash = verify_tambur_decision_global_nodes(nodes, bundle)
+        except ValueError:
+            try:
+                validate_tambur_decision_install_target(nodes)
+            except ValueError as error:
+                raise ScenarioServiceError(
+                    "Tambur decision install target conflicts.", status=409
+                ) from error
+            return {"state": "absent", "revision": revision}
+        verify = getattr(backend, "_async_tambur_decision_snapshot", None)
+        if not callable(verify):
+            raise ScenarioServiceError(
+                "Tambur decision verification is unavailable.", status=503
+            )
+        verified_revision, verified_hash = await verify()
+        if verified_revision != revision or verified_hash != topology_hash:
+            raise ScenarioServiceError(
+                "Tambur decision snapshot changed.", status=409
+            )
+        return {
+            "state": "present",
+            "revision": revision,
+            "flowId": bundle["id"],
+            "topologyHash": topology_hash,
+        }
+
+    async def async_capture_tambur_room_migration(
+        self, plan: object
+    ) -> dict[str, object]:
+        """Capture one room and the reserved graph without a global baseline."""
+
+        self._require_running()
+        async with self._lock:
+            registry = self._ensure_loaded()
+            scenario_id = str(getattr(plan, "scenario_id", ""))
+            scenario = registry.scenario(scenario_id)
+            if scenario is None or not (
+                self._tambur_room_scenario_matches_plan(
+                    scenario, plan, migrated=False
+                )
+                or self._tambur_room_scenario_matches_plan(
+                    scenario, plan, migrated=True
+                )
+            ):
+                raise ScenarioServiceError(
+                    "Tambur scenario CAS evidence changed.", status=409
+                )
+            if self._tambur_room_scenario_matches_plan(
+                scenario, plan, migrated=False
+            ):
+                backend = self._node_red_backend
+                if backend is None:
+                    raise ScenarioServiceError(
+                        "Node-RED backend is unavailable.", status=503
+                    )
+                evidence = await backend.async_verify_managed_topology(
+                    scenario_id, str(getattr(plan, "legacy_flow_id"))
+                )
+                if (
+                    evidence.get("topology") != getattr(plan, "legacy_topology")
+                    or evidence.get("source_hash")
+                    != getattr(plan, "legacy_source_hash")
+                ):
+                    raise ScenarioServiceError(
+                        "Tambur legacy source changed.", status=409
+                    )
+            decision = await self._async_tambur_decision_evidence()
+            return {
+                "registry": registry.to_storage(),
+                "scenario": _scenario_to_payload(scenario),
+                "decision": decision,
+            }
+
+    async def async_stage_tambur_room_migration(
+        self,
+        plan: object,
+        *,
+        journal: Mapping[str, object],
+        on_staged: Callable[[Mapping[str, object]], Awaitable[None]],
+    ) -> None:
+        """Prepare only the reserved Tambur decision graph."""
+
+        self._require_running()
+        before = journal.get("before")
+        if not isinstance(before, Mapping) or not isinstance(
+            before.get("registry"), Mapping
+        ):
+            raise ScenarioServiceError("Tambur migration journal is invalid.", status=409)
+        previous = ScenarioRegistry.from_storage(before["registry"])
+        async with self._lock:
+            if (
+                self._managed_switch_migration_transaction is not None
+                or self._tambur_room_migration_transaction is not None
+                or self._ensure_loaded() != previous
+            ):
+                raise ScenarioServiceError(
+                    "A scenario migration transaction is active.", status=409
+                )
+        await self._async_close_managed_switch_execution(
+            (str(getattr(plan, "scenario_id")),)
+        )
+        backend = self._node_red_backend
+        prepare = getattr(backend, "async_prepare_tambur_decision_bundle", None)
+        if not callable(prepare):
+            raise ScenarioServiceError(
+                "Tambur decision staging is unavailable.", status=503
+            )
+        result = await prepare()
+        if (
+            not isinstance(result, Mapping)
+            or result.get("flowId") != getattr(plan, "decision_flow_id")
+            or result.get("topologyHash")
+            != getattr(plan, "decision_topology_hash")
+            or not isinstance(result.get("revision"), str)
+            or type(result.get("created")) is not bool
+        ):
+            raise ScenarioServiceError(
+                "Tambur decision staging evidence is invalid.", status=409
+            )
+        await on_staged(
+            {
+                "state": "applied",
+                "created": result["created"],
+                "flowId": result["flowId"],
+                "revision": result["revision"],
+                "topologyHash": result["topologyHash"],
+            }
+        )
+
+    async def async_apply_tambur_room_migration(
+        self,
+        plan: object,
+        *,
+        journal: Mapping[str, object],
+        on_registry: Callable[[Mapping[str, object]], Awaitable[None]],
+    ) -> str:
+        """CAS-replace only the Tambur Node-RED metadata."""
+
+        self._require_running()
+        before = journal.get("before")
+        staged = journal.get("staged")
+        if (
+            not isinstance(before, Mapping)
+            or not isinstance(before.get("registry"), Mapping)
+            or not isinstance(staged, Mapping)
+            or staged.get("state") != "applied"
+            or staged.get("flowId") != getattr(plan, "decision_flow_id")
+            or staged.get("topologyHash")
+            != getattr(plan, "decision_topology_hash")
+        ):
+            raise ScenarioServiceError("Tambur migration journal is invalid.", status=409)
+        previous = ScenarioRegistry.from_storage(before["registry"])
+        async with self._lock:
+            if self._managed_switch_migration_transaction is not None:
+                raise ScenarioServiceError(
+                    "Global migration transaction is active.", status=409
+                )
+            registry = self._ensure_loaded()
+            if registry != previous:
+                try:
+                    self._verify_tambur_room_registry_transition(previous, registry, plan)
+                except ScenarioServiceError:
+                    raise ScenarioServiceError(
+                        "Tambur registry CAS evidence changed.", status=409
+                    ) from None
+                self._tambur_room_migration_transaction = (
+                    _TamburRoomMigrationTransaction(
+                        previous, registry, bool(staged.get("created"))
+                    )
+                )
+                return "completed"
+            scenario_id = str(getattr(plan, "scenario_id"))
+            scenario = registry.scenario(scenario_id)
+            if scenario is None or not self._tambur_room_scenario_matches_plan(
+                scenario, plan, migrated=False
+            ):
+                raise ScenarioServiceError(
+                    "Tambur legacy scenario changed.", status=409
+                )
+            for target_id in tuple(getattr(plan, "input_target_ids")):
+                device = self._catalog.device(target_id)
+                if device is None or getattr(device, "target_id", None) != target_id:
+                    raise ScenarioServiceError(
+                        "Tambur migration target is missing.", status=409
+                    )
+            await self._async_tambur_decision_evidence()
+            metadata = scenario.definition.node_red
+            assert metadata is not None
+            next_metadata = replace(
+                metadata,
+                flow_id=str(getattr(plan, "decision_flow_id")),
+                flow_revision=metadata.flow_revision + 1,
+                source_hash=str(getattr(plan, "decision_topology_hash")),
+                generated_by=ScenarioNodeRedGeneratedBy.HAUSMAN,
+                sync_status=ScenarioNodeRedSyncStatus.SYNCED,
+                input_target_ids=tuple(getattr(plan, "input_target_ids")),
+            )
+            migrated = replace(
+                scenario,
+                definition=replace(scenario.definition, node_red=next_metadata),
+                revision=scenario.revision + 1,
+                updated_at=int(time.time() * 1000),
+            )
+            next_registry = ScenarioRegistry(
+                scenarios=tuple(
+                    migrated if item.id == scenario_id else item
+                    for item in registry.scenarios
+                )
+            )
+            self._verify_tambur_room_registry_transition(
+                previous, next_registry, plan
+            )
+            intent = {
+                "state": "intent",
+                "beforeHash": _registry_storage_hash(previous),
+                "afterHash": _registry_storage_hash(next_registry),
+            }
+            await on_registry(intent)
+            await self._async_save_managed_migration_registry(
+                next_registry, expected=registry
+            )
+            self._registry = next_registry
+            self._scenario_content_revision_key = None
+            self._scenario_content_revision = None
+            self._tambur_room_migration_transaction = _TamburRoomMigrationTransaction(
+                previous, next_registry, bool(staged.get("created"))
+            )
+            await on_registry({**intent, "state": "applied"})
+            return "completed"
+
+    async def async_verify_tambur_room_migration(
+        self,
+        plan: object,
+        *,
+        journal: Mapping[str, object],
+        require_final: bool,
+    ) -> str:
+        """Verify the single-record diff and exact decision graph."""
+
+        del require_final
+        before = journal.get("before")
+        if not isinstance(before, Mapping) or not isinstance(
+            before.get("registry"), Mapping
+        ):
+            raise ScenarioServiceError("Tambur migration journal is invalid.", status=409)
+        previous = ScenarioRegistry.from_storage(before["registry"])
+        async with self._lock:
+            current = self._ensure_loaded()
+            self._verify_tambur_room_registry_transition(previous, current, plan)
+            evidence = await self._async_tambur_decision_evidence()
+            if (
+                evidence.get("state") != "present"
+                or evidence.get("flowId") != getattr(plan, "decision_flow_id")
+                or evidence.get("topologyHash")
+                != getattr(plan, "decision_topology_hash")
+            ):
+                raise ScenarioServiceError(
+                    "Tambur decision graph changed.", status=409
+                )
+            return str(evidence["revision"])
+
+    async def async_finalize_tambur_room_migration(
+        self,
+        plan: object,
+        *,
+        journal: Mapping[str, object],
+        on_registry: Callable[[Mapping[str, object]], Awaitable[None]],
+    ) -> None:
+        """Finalize without opening any legacy or foreign runtime latch."""
+
+        await self.async_verify_tambur_room_migration(
+            plan, journal=journal, require_final=True
+        )
+        record = journal.get("registry")
+        if not isinstance(record, Mapping):
+            raise ScenarioServiceError("Tambur migration journal is invalid.", status=409)
+        await on_registry({**dict(record), "state": "finalized"})
+
+    async def async_commit_tambur_room_migration(
+        self, plan: object, *, journal: Mapping[str, object]
+    ) -> None:
+        """Forget compensation while keeping generic scenario execution closed."""
+
+        await self.async_verify_tambur_room_migration(
+            plan, journal=journal, require_final=True
+        )
+        async with self._lock:
+            self._tambur_room_migration_transaction = None
+
+    async def _async_remove_tambur_decision_bundle(
+        self, plan: object
+    ) -> bool:
+        """Remove only the exact graph created by this room transaction."""
+
+        backend = self._node_red_backend
+        snapshot = getattr(backend, "_async_global_snapshot", None)
+        request = getattr(backend, "_raw_request", None)
+        if not callable(snapshot) or not callable(request):
+            return False
+        from .scenario_node_red_decision import (  # noqa: PLC0415
+            prepare_tambur_decision_bundle,
+            tambur_decision_global_nodes,
+            verify_tambur_decision_global_nodes,
+        )
+
+        bundle = prepare_tambur_decision_bundle()
+        revision, nodes = await snapshot()
+        try:
+            verify_tambur_decision_global_nodes(nodes, bundle)
+        except ValueError:
+            return False
+        owned_ids = {
+            str(item["id"])
+            for item in tambur_decision_global_nodes(bundle)
+            if isinstance(item, Mapping) and isinstance(item.get("id"), str)
+        }
+        remaining = [
+            copy.deepcopy(item)
+            for item in nodes
+            if not (isinstance(item, Mapping) and item.get("id") in owned_ids)
+        ]
+        status, _ = await request(
+            "POST", "/flows", payload={"rev": revision, "flows": remaining}, ingress=True
+        )
+        revision_after, after = await snapshot()
+        if (
+            status != 200
+            or revision_after == revision
+            or after != remaining
+            or any(
+                isinstance(item, Mapping) and item.get("id") in owned_ids
+                for item in after
+            )
+        ):
+            return False
+        return True
+
+    async def async_rollback_tambur_room_migration(
+        self, plan: object, *, journal: Mapping[str, object]
+    ) -> bool:
+        """Restore only own after-images; manual or foreign drift blocks rollback."""
+
+        before = journal.get("before")
+        if not isinstance(before, Mapping) or not isinstance(
+            before.get("registry"), Mapping
+        ):
+            return False
+        try:
+            previous = ScenarioRegistry.from_storage(before["registry"])
+        except (ScenarioViolation, TypeError, ValueError):
+            return False
+        async with self._lock:
+            current = self._ensure_loaded()
+            if current != previous:
+                try:
+                    self._verify_tambur_room_registry_transition(
+                        previous, current, plan
+                    )
+                except ScenarioServiceError:
+                    return False
+                await self._async_save_managed_migration_registry(
+                    previous, expected=current
+                )
+                self._registry = previous
+                self._scenario_content_revision_key = None
+                self._scenario_content_revision = None
+            self._tambur_room_migration_transaction = None
+        decision_before = before.get("decision")
+        staged = journal.get("staged")
+        if (
+            isinstance(decision_before, Mapping)
+            and decision_before.get("state") == "absent"
+            and isinstance(staged, Mapping)
+            and staged.get("state") in {"intent", "applied"}
+        ):
+            evidence = await self._async_tambur_decision_evidence()
+            if evidence.get("state") == "present" and not await self._async_remove_tambur_decision_bundle(plan):
+                return False
+        return True
 
     async def async_stage_managed_switch_migration(
         self,
