@@ -71,6 +71,8 @@ const startOrContinueFade = reason => {
 
 if (!t.mirrorScheduled && t.automatic[id.mirror] && obs(id.mirror).state === 'on') {
   decide('mirror_schedule_off', id.mirror, 'turn_off');
+} else if (t.mirrorScheduled && t.nightTransitionHandled) {
+  if (t.reason === 'no_action_required') t.reason = 'mirror_handover_not_retried';
 } else if (t.mirrorScheduled) {
   let handover = false;
   let blockedReason = null;
@@ -135,23 +137,28 @@ const updateAutomaticProfile = () => {
   return false;
 };
 
-if (!t.action && t.absenceDue) startOrContinueFade('absence');
+const daytimeActivation = !t.action && t.mainAllowed && t.activationRequested;
+if (daytimeActivation) {
+  t.nextState.phase = 'occupied';
+  t.nextState.phaseStartedAtMs = q.durable.phase === 'occupied'
+    ? q.durable.phaseStartedAtMs : t.now;
+  t.nextState.absenceSinceMs = null;
+  t.nextState.absenceEpoch = null;
+  t.nextState.fadeStartPercent = null;
+  t.nextState.fadeStartedAtMs = null;
+  t.nextState.fadeReason = null;
+  t.wakeups = t.wakeups.filter(item => item.kind !== 'absence' && item.kind !== 'fade');
+}
+
+let fadeEvaluated = false;
+if (!t.action && !daytimeActivation && t.absenceDue)
+  fadeEvaluated = startOrContinueFade('absence');
 
 const profileRefresh = t.activationRequested || !t.absent || q.event.kind === 'clock' ||
   q.event.kind === 'settings' ||
   (q.event.kind === 'wakeup' && q.event.wakeupId === 'tambur.profile');
-if (!t.action && t.mainAllowed && profileRefresh &&
+if (!t.action && !fadeEvaluated && t.mainAllowed && profileRefresh &&
     (t.activationRequested || t.automatic[id.chandelier])) {
-  if (t.activationRequested && t.nextState.fadeReason !== 'night') {
-    t.nextState.phase = 'occupied';
-    t.nextState.phaseStartedAtMs = q.durable.phase === 'occupied' ? q.durable.phaseStartedAtMs : t.now;
-    t.nextState.absenceSinceMs = null;
-    t.nextState.absenceEpoch = null;
-    t.nextState.fadeStartPercent = null;
-    t.nextState.fadeStartedAtMs = null;
-    t.nextState.fadeReason = null;
-    t.wakeups = t.wakeups.filter(item => item.kind !== 'absence' && item.kind !== 'fade');
-  }
   updateAutomaticProfile();
   if (!t.action && t.activationRequested && !t.protected[id.points] &&
       t.available[id.points] && obs(id.points).state === 'off')

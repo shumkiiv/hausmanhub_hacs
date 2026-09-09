@@ -573,6 +573,340 @@ def test_presence_cancels_absence_fade_and_arrival_obeys_day_and_night_rules() -
     assert _decision(arrival)["action"] is None
 
 
+def _set_profile_refresh_event(request: dict[str, object], kind: str) -> None:
+    request["event"]["kind"] = kind
+    request["event"].pop("wakeupId", None)
+    if kind == "wakeup":
+        request["event"]["wakeupId"] = "tambur.profile"
+
+
+def _active_fade_request(
+    minute: int,
+    *,
+    reason: str,
+    brightness: int | None,
+    sensor_state: str,
+    event_kind: str,
+) -> dict[str, object]:
+    request = _request(
+        minute, sensor_states=(sensor_state,), event_kind=event_kind
+    )
+    _set_light(
+        request,
+        CHANDELIER,
+        "on",
+        "automatic",
+        brightness=brightness,
+        kelvin=2200 if reason == "night" else 3000,
+    )
+    if reason == "night":
+        _set_light(request, MIRROR, "on", "automatic")
+    request["durable"].update(
+        phase="fade",
+        phaseStartedAtMs=NOW - 15_000,
+        absenceSinceMs=NOW - 615_000 if reason == "absence" else None,
+        absenceEpoch=4 if reason == "absence" else None,
+        fadeStartPercent=40,
+        fadeStartedAtMs=NOW - 15_000,
+        fadeReason=reason,
+    )
+    return request
+
+
+def test_absence_fade_preempts_profile_refresh_and_keeps_its_deadline() -> None:
+    for event_kind in ("clock", "settings", "wakeup"):
+        for brightness in (5, None):
+            started = _request(
+                12 * 60, sensor_states=("off",), event_kind=event_kind
+            )
+            _set_profile_refresh_event(started, event_kind)
+            _set_light(
+                started,
+                CHANDELIER,
+                "on",
+                "automatic",
+                brightness=brightness,
+                kelvin=3000,
+            )
+            started["durable"].update(
+                phase="absent",
+                phaseStartedAtMs=NOW - 600_000,
+                absenceSinceMs=NOW - 600_000,
+                absenceEpoch=4,
+            )
+            decision = _decision(started)
+            assert decision["action"] is None
+            assert decision["reasonCode"] in {
+                "absence_fade_started",
+                "absence_fade_brightness_unknown",
+            }
+            assert decision["nextState"]["phase"] == "fade"
+            assert decision["nextState"]["fadeStartPercent"] == brightness
+            assert decision["nextState"]["fadeStartedAtMs"] == NOW
+            assert next(
+                item for item in decision["wakeups"] if item["kind"] == "fade"
+            )["dueAtMs"] == NOW + (1_000 if brightness == 5 else 20_000)
+
+            middle = _active_fade_request(
+                12 * 60,
+                reason="absence",
+                brightness=brightness,
+                sensor_state="off",
+                event_kind=event_kind,
+            )
+            _set_profile_refresh_event(middle, event_kind)
+            decision = _decision(middle)
+            assert decision["action"] is None
+            assert decision["reasonCode"] in {
+                "fade_snapshot_already_lower",
+                "absence_fade_brightness_unknown",
+            }
+            assert decision["nextState"]["fadeStartPercent"] == 40
+            assert decision["nextState"]["fadeStartedAtMs"] == NOW - 15_000
+            assert next(
+                item for item in decision["wakeups"] if item["kind"] == "fade"
+            )["dueAtMs"] == NOW + (1_000 if brightness == 5 else 5_000)
+
+        before_due = _request(
+            12 * 60, sensor_states=("off",), event_kind=event_kind
+        )
+        _set_profile_refresh_event(before_due, event_kind)
+        _set_light(
+            before_due,
+            CHANDELIER,
+            "on",
+            "automatic",
+            brightness=5,
+            kelvin=3000,
+        )
+        before_due["durable"].update(
+            phase="absent",
+            phaseStartedAtMs=NOW - 599_000,
+            absenceSinceMs=NOW - 599_000,
+            absenceEpoch=4,
+        )
+        assert _action_signature(_decision(before_due)) == (
+            CHANDELIER,
+            "set_brightness_percent",
+            80,
+        )
+
+
+def test_absence_fade_middle_end_and_points_order_remain_literal() -> None:
+    request = _active_fade_request(
+        12 * 60,
+        reason="absence",
+        brightness=40,
+        sensor_state="off",
+        event_kind="clock",
+    )
+    _set_light(request, POINTS, "on", "automatic")
+    middle = _decision(request)
+    assert _action_signature(middle) == (
+        CHANDELIER,
+        "set_brightness_percent",
+        10,
+    )
+
+    request["durable"].update(middle["nextState"])
+    _move_now(request, NOW + 5_000)
+    _set_light(request, CHANDELIER, "on", "automatic", brightness=10)
+    finished = _decision(request)
+    assert _action_signature(finished) == (CHANDELIER, "turn_off", None)
+
+    request["durable"].update(finished["nextState"])
+    _set_light(request, CHANDELIER, "off", "automatic", brightness=0)
+    points = _decision(request)
+    assert _action_signature(points) == (POINTS, "turn_off", None)
+
+
+def test_day_arrival_preempts_existing_fade_and_restores_profile() -> None:
+    for event_kind in ("sensor", "arrival"):
+        for brightness in (40, 5):
+            request = _active_fade_request(
+                12 * 60,
+                reason="absence",
+                brightness=brightness,
+                sensor_state="on" if event_kind == "sensor" else "off",
+                event_kind=event_kind,
+            )
+            if event_kind == "sensor":
+                request["event"]["targetId"] = request["bindings"][
+                    "presenceSensors"
+                ][0]
+            decision = _decision(request)
+            assert _action_signature(decision) == (
+                CHANDELIER,
+                "set_brightness_percent",
+                80,
+            )
+            assert decision["nextState"]["phase"] == "occupied"
+            assert decision["nextState"]["absenceSinceMs"] is None
+            assert decision["nextState"]["absenceEpoch"] is None
+            assert decision["nextState"]["fadeStartPercent"] is None
+            assert decision["nextState"]["fadeStartedAtMs"] is None
+            assert decision["nextState"]["fadeReason"] is None
+            assert not any(
+                item["kind"] in {"absence", "fade"}
+                for item in decision["wakeups"]
+            )
+
+
+def _night_fade_request(
+    *, event_kind: str, sensor_state: str = "on"
+) -> dict[str, object]:
+    request = _active_fade_request(
+        23 * 60 + 30,
+        reason="night",
+        brightness=40,
+        sensor_state=sensor_state,
+        event_kind=event_kind,
+    )
+    if event_kind == "sensor":
+        request["event"]["targetId"] = request["bindings"][
+            "presenceSensors"
+        ][0]
+    return request
+
+
+def _assert_night_fade_cancelled(decision: dict[str, object]) -> None:
+    assert decision["action"] is None
+    assert decision["nextState"]["phase"] == "night"
+    assert decision["nextState"]["phaseStartedAtMs"] == NOW
+    assert decision["nextState"]["absenceSinceMs"] is None
+    assert decision["nextState"]["absenceEpoch"] is None
+    assert decision["nextState"]["fadeStartPercent"] is None
+    assert decision["nextState"]["fadeStartedAtMs"] is None
+    assert decision["nextState"]["fadeReason"] is None
+    assert not any(
+        item["kind"] in {"absence", "fade"} for item in decision["wakeups"]
+    )
+
+
+def test_night_arrival_cancels_fade_once_and_marker_blocks_restart() -> None:
+    for event_kind, sensor_state in (("sensor", "on"), ("arrival", "off")):
+        request = _night_fade_request(
+            event_kind=event_kind, sensor_state=sensor_state
+        )
+        cancelled = _decision(request)
+        _assert_night_fade_cancelled(cancelled)
+
+        request["durable"].update(cancelled["nextState"])
+        request["event"].pop("targetId", None)
+        for repeated_kind in ("clock", "receipt"):
+            request["event"]["kind"] = repeated_kind
+            repeated = _decision(request)
+            assert repeated["action"] is None
+            assert repeated["nextState"]["phase"] == "night"
+            assert repeated["nextState"]["fadeReason"] is None
+            assert not any(
+                item["kind"] == "fade" for item in repeated["wakeups"]
+            )
+            request["durable"].update(repeated["nextState"])
+
+
+def test_night_transition_ignores_snapshot_only_and_invalid_sensor_arrivals() -> None:
+    for event_kind in ("clock", "receipt"):
+        request = _request(
+            23 * 60, sensor_states=("on",), event_kind=event_kind
+        )
+        _set_light(
+            request,
+            CHANDELIER,
+            "on",
+            "automatic",
+            brightness=40,
+            kelvin=2200,
+        )
+        _set_light(request, MIRROR, "on", "automatic")
+        decision = _decision(request)
+        assert decision["reasonCode"] == "night_fade_started"
+        assert decision["nextState"]["fadeReason"] == "night"
+
+    invalid_cases = (
+        (None, "on", True, 4),
+        ("sensor.foreign", "on", True, 4),
+        (SENSORS[0], "off", True, 4),
+        (SENSORS[0], "unknown", True, 4),
+        (SENSORS[0], "on", False, 4),
+        (SENSORS[0], "on", True, 3),
+    )
+    for target_id, state, fresh, epoch in invalid_cases:
+        request = _night_fade_request(
+            event_kind="sensor", sensor_state=state
+        )
+        if target_id is None:
+            request["event"].pop("targetId", None)
+        else:
+            request["event"]["targetId"] = target_id
+        sensor = request["bindings"]["presenceSensors"][0]
+        request["observations"][sensor]["fresh"] = fresh
+        request["observations"][sensor]["continuityEpoch"] = epoch
+        decision = _decision(request)
+        assert decision["nextState"]["phase"] == "fade"
+        assert decision["nextState"]["fadeReason"] == "night"
+        assert decision["nextState"]["fadeStartedAtMs"] == NOW - 15_000
+
+
+def test_night_cancel_then_new_absence_waits_180_seconds_and_next_window_runs() -> None:
+    request = _night_fade_request(event_kind="sensor", sensor_state="on")
+    cancelled = _decision(request)
+    _assert_night_fade_cancelled(cancelled)
+
+    request["durable"].update(cancelled["nextState"])
+    _move_now(request, NOW + 1_000)
+    sensor = request["bindings"]["presenceSensors"][0]
+    request["observations"][sensor]["state"] = "off"
+    request["observations"][sensor]["revision"] += 1
+    request["event"].update(kind="sensor", targetId=sensor)
+    waiting = _decision(request)
+    assert waiting["action"] is None
+    assert waiting["nextState"]["phase"] == "night"
+    assert waiting["nextState"]["absenceSinceMs"] == NOW + 1_000
+    assert next(
+        item for item in waiting["wakeups"] if item["kind"] == "absence"
+    )["dueAtMs"] == NOW + 181_000
+
+    request["durable"].update(waiting["nextState"])
+    _move_now(request, NOW + 180_000)
+    request["event"].update(kind="clock")
+    before_due = _decision(request)
+    assert before_due["action"] is None
+    assert before_due["nextState"]["phase"] == "night"
+    assert next(
+        item for item in before_due["wakeups"] if item["kind"] == "absence"
+    )["dueAtMs"] == NOW + 181_000
+
+    request["durable"].update(before_due["nextState"])
+    _move_now(request, NOW + 181_000)
+    request["event"].update(kind="wakeup", wakeupId="tambur.absence")
+    faded = _decision(request)
+    assert faded["action"] is None
+    assert faded["reasonCode"] == "absence_fade_started"
+    assert faded["nextState"]["phase"] == "fade"
+    assert faded["nextState"]["fadeReason"] == "absence"
+
+    after_window = _night_fade_request(event_kind="clock", sensor_state="on")
+    after_window["durable"].update(cancelled["nextState"])
+    _move_now(after_window, NOW + 90 * 60 * 1000)
+    after_window["clock"]["minutesOfDay"] = 60
+    after_window_decision = _decision(after_window)
+    assert _action_signature(after_window_decision) == (
+        MIRROR,
+        "turn_off",
+        None,
+    )
+    assert after_window_decision["nextState"]["fadeReason"] is None
+
+    next_window = _night_fade_request(event_kind="clock", sensor_state="on")
+    next_window["durable"].update(cancelled["nextState"])
+    _move_now(next_window, NOW + 24 * 60 * 60 * 1000)
+    next_window["clock"]["minutesOfDay"] = 23 * 60 + 30
+    decision = _decision(next_window)
+    assert decision["reasonCode"] == "night_fade_started"
+    assert decision["nextState"]["fadeReason"] == "night"
+
+
 def test_manual_hold_expiry_never_assigns_or_releases_authority() -> None:
     request = _request(12 * 60)
     _set_light(request, CHANDELIER, "on", "manual", brightness=100, manual_until=NOW + 3_600_000)
@@ -1045,6 +1379,12 @@ class TamburNodeRedDecisionReleaseTest(unittest.TestCase):
         test_fade_uses_fresh_snapshots_never_raises_and_points_follow_chandelier()
         test_missing_or_zero_fade_brightness_is_never_replaced_with_100()
         test_presence_cancels_absence_fade_and_arrival_obeys_day_and_night_rules()
+        test_absence_fade_preempts_profile_refresh_and_keeps_its_deadline()
+        test_absence_fade_middle_end_and_points_order_remain_literal()
+        test_day_arrival_preempts_existing_fade_and_restores_profile()
+        test_night_arrival_cancels_fade_once_and_marker_blocks_restart()
+        test_night_transition_ignores_snapshot_only_and_invalid_sensor_arrivals()
+        test_night_cancel_then_new_absence_waits_180_seconds_and_next_window_runs()
         test_recovery_restarts_absence_for_new_epoch()
 
     def test_real_internal_http_path(self) -> None:

@@ -28,6 +28,9 @@ const sensorFresh = q.bindings.presenceSensors.map(fresh);
 t.present = q.bindings.presenceSensors.some(id => fresh(id) && observation(id).state === 'on');
 t.absent = sensorFresh.every(Boolean) && q.bindings.presenceSensors.every(id => observation(id).state === 'off');
 t.sensorReliable = sensorFresh.every(Boolean);
+t.confirmedArrival = q.event.kind === 'arrival' ||
+  (q.event.kind === 'sensor' && q.bindings.presenceSensors.includes(q.event.targetId) &&
+   fresh(q.event.targetId) && observation(q.event.targetId).state === 'on');
 t.activationRequested = t.present || q.event.kind === 'arrival';
 t.fresh = Object.fromEntries(Object.values(t.targets).map(id => [id, fresh(id)]));
 t.protected = Object.fromEntries(Object.values(t.targets).map(id => [id, protectedTarget(id)]));

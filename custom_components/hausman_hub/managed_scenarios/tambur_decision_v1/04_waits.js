@@ -12,7 +12,23 @@ const holdDeadlines = Object.values(q.authority).flatMap(item =>
   [item.protectedUntilMs, item.manualOnHoldUntilMs].filter(value => Number.isSafeInteger(value) && value > t.now));
 if (holdDeadlines.length) addWakeup('tambur.hold', 'hold', Math.min(...holdDeadlines));
 
-if (t.present && t.nextState.fadeReason !== 'night') {
+const activeNightFade = q.durable.fadeReason === 'night' &&
+  Number.isSafeInteger(q.durable.fadeStartedAtMs);
+t.nightTransitionHandled = q.durable.phase === 'night' && q.durable.fadeReason === null &&
+  Number.isSafeInteger(q.durable.phaseStartedAtMs) && t.mirrorScheduled &&
+  t.now >= q.durable.phaseStartedAtMs && t.now - q.durable.phaseStartedAtMs < t.mirrorWindowMs;
+t.nightFadeCancelled = activeNightFade && t.confirmedArrival;
+
+if (t.nightFadeCancelled) {
+  t.nextState = {
+    phase: 'night', phaseStartedAtMs: t.now, absenceSinceMs: null,
+    absenceEpoch: null, fadeStartPercent: null, fadeStartedAtMs: null, fadeReason: null,
+  };
+  t.wakeups = t.wakeups.filter(item => item.kind !== 'absence' && item.kind !== 'fade');
+  t.nightTransitionHandled = true;
+  t.waitReason = 'night_arrival_cancelled';
+  t.reason = 'night_arrival_cancelled';
+} else if (t.present && t.nextState.fadeReason !== 'night' && !t.nightTransitionHandled) {
   t.nextState = {
     phase: 'occupied',
     phaseStartedAtMs: t.nextState.phase === 'occupied' ? t.nextState.phaseStartedAtMs : t.now,
@@ -21,7 +37,7 @@ if (t.present && t.nextState.fadeReason !== 'night') {
   };
   t.waitReason = 'presence_confirmed';
 } else if (!t.sensorReliable) {
-  if (t.nextState.fadeReason !== 'night') {
+  if (t.nextState.fadeReason !== 'night' && !t.nightTransitionHandled) {
     t.nextState = {
       phase: 'idle', phaseStartedAtMs: t.now, absenceSinceMs: null,
       absenceEpoch: null, fadeStartPercent: null, fadeStartedAtMs: null, fadeReason: null,
@@ -32,12 +48,15 @@ if (t.present && t.nextState.fadeReason !== 'night') {
   }
   t.waitReason = 'absence_continuity_reset';
 } else if (t.absent) {
+  const preserveNightMarker = t.nightTransitionHandled && t.nextState.fadeReason === null;
   const seconds = t.nightMain ? q.settings.absenceNightSeconds : q.settings.absenceDaySeconds;
   const oldEpoch = q.durable.absenceEpoch;
   const restart = q.event.kind === 'recovery' || oldEpoch !== q.observationEpoch;
   if (q.durable.absenceSinceMs === null || restart) {
-    t.nextState.phase = 'absent';
-    t.nextState.phaseStartedAtMs = t.now;
+    if (!preserveNightMarker) {
+      t.nextState.phase = 'absent';
+      t.nextState.phaseStartedAtMs = t.now;
+    }
     t.nextState.absenceSinceMs = t.now;
     t.nextState.absenceEpoch = q.observationEpoch;
     if (t.nextState.fadeReason !== 'night') {
