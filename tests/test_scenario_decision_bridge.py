@@ -4,18 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import inspect
 import unittest
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from custom_components.hausman_hub.application import scenario_decision_bridge
 from custom_components.hausman_hub.application.scenario_decision_bridge import (
     ScenarioDecisionBridge,
     ScenarioDecisionConflict,
     ScenarioDecisionRejected,
     TamburHaObservationCoordinator,
-    _record_trusted_executor_evidence,
     valid_scenario_decision_bridge_payload,
 )
 from custom_components.hausman_hub.application.scenario_executor import ScenarioExecutor
@@ -234,48 +235,25 @@ async def loaded_bridge(
     source: SnapshotSource | None = None,
     *,
     now_ms=lambda: NOW,
+    executor: ScenarioExecutor | None = None,
 ) -> tuple[ScenarioDecisionBridge, MemoryStore, SnapshotSource]:
     actual_store = store or MemoryStore()
     actual_source = source or SnapshotSource()
+    bridge_options: dict[str, object] = {}
+    if executor is not None:
+        bridge_options["executor"] = executor
     bridge = ScenarioDecisionBridge(
         actual_store,
         snapshot_provider=actual_source.snapshot,
         authority_provider=actual_source.authority,
         now_ms=now_ms,
+        **bridge_options,
     )
     await bridge.async_recover()
     return bridge, actual_store, actual_source
 
 
 class ScenarioDecisionBridgeTests(unittest.IsolatedAsyncioTestCase):
-    @staticmethod
-    def _record_executor_proof(
-        bridge: ScenarioDecisionBridge,
-        plan: Mapping[str, object],
-        receipt_id: str,
-        *,
-        evidence_revision: str = "evidence.after.dispatch",
-    ) -> None:
-        action = plan["action"]
-        assert isinstance(action, Mapping)
-        _record_trusted_executor_evidence(
-            bridge,
-            plan_id=str(plan["planId"]),
-            decision_action_id=str(action["id"]),
-            receipt_id=receipt_id,
-            target_id=str(action["targetId"]),
-            action_id=str(action["actionId"]),
-            value=action.get("value"),
-            result={
-                "status": "completed",
-                "confirmed": True,
-                "read_back": {
-                    "matched": True,
-                    "evidenceRevision": evidence_revision,
-                },
-            },
-        )
-
     async def test_accept_persists_next_state_wakeups_and_prepared_ledger_before_dispatch(self) -> None:
         bridge, store, _source = await loaded_bridge()
         request = await bridge.async_snapshot(SCENARIO_ID, event())
@@ -307,15 +285,19 @@ class ScenarioDecisionBridgeTests(unittest.IsolatedAsyncioTestCase):
             await bridge.async_accept(changed)
 
     async def test_repeated_prepared_plan_never_enters_executor_again(self) -> None:
-        bridge, store, _source = await loaded_bridge()
+        states = _ExecutorStates()
+        executor = ScenarioExecutor(
+            SimpleNamespace(states=states, services=_ExecutorServices(states)),
+            ScenarioCatalog(devices={}, scenarios={}),
+            lambda *_args, **_kwargs: None,
+        )
+        bridge, store, _source = await loaded_bridge(executor=executor)
         request = await bridge.async_snapshot(SCENARIO_ID, event())
         plan = decision(request)
         await bridge.async_accept(plan)
         saved = len(store.saved)
 
-        result = await ScenarioExecutor.async_execute_tambur_decision(
-            SimpleNamespace(), copy.deepcopy(plan), bridge
-        )
+        result = await bridge.async_execute_decision(copy.deepcopy(plan))
 
         self.assertEqual("prepared", result["status"])
         self.assertTrue(result["replayed"])
@@ -500,55 +482,76 @@ class ScenarioDecisionBridgeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("dispatching", store.value["history"][-1]["status"])
 
-    async def test_confirmed_receipt_consumes_exact_private_executor_proof(self) -> None:
-        mismatch_fields = {
-            "bridgeToken": object(),
-            "observationEpoch": 2,
-            "planId": "plan.other",
-            "decisionActionId": "action.other",
-            "receiptId": "receipt.other",
-            "targetId": POINTS,
-            "actionId": "turn_off",
-            "value": 40,
-        }
-        for field, bad_value in mismatch_fields.items():
-            with self.subTest(field=field):
-                bridge, store, source = await loaded_bridge()
-                request = await bridge.async_snapshot(SCENARIO_ID, event())
-                plan = decision(request)
-                accepted = await bridge.async_accept(plan)
-                await bridge.async_before_dispatch(
-                    plan["planId"], plan["action"]["id"]
-                )
-                bridge.mark_dispatch_crossed(
-                    plan["planId"], plan["action"]["id"]
-                )
-                source.authorities[CHAND].update(
-                    observedRevision=23,
-                    observedAtMs=NOW + 555,
-                    evidenceRevision="evidence.after.dispatch",
-                )
-                self._record_executor_proof(
-                    bridge, plan, str(accepted["receiptId"])
-                )
-                registry = bridge._trusted_executor_evidence[str(plan["planId"])]
-                registry[field] = bad_value
+    async def test_proof_writer_token_and_registry_are_not_exposed(self) -> None:
+        states = _ExecutorStates()
+        executor = ScenarioExecutor(
+            SimpleNamespace(states=states, services=_ExecutorServices(states)),
+            ScenarioCatalog(devices={}, scenarios={}),
+            lambda *_args, **_kwargs: None,
+        )
+        bridge, _store, _source = await loaded_bridge(executor=executor)
 
-                result = await bridge.async_record_receipt(
-                    str(plan["planId"]),
-                    {
-                        "id": accepted["receiptId"],
-                        "planId": plan["planId"],
-                        "actionId": "turn_on",
-                        "targetId": CHAND,
-                        "status": "confirmed",
-                        "observedRevision": 999,
-                        "observedAtMs": NOW + 999,
-                    },
-                )
+        self.assertFalse(
+            hasattr(scenario_decision_bridge, "_record_trusted_executor_evidence")
+        )
+        self.assertFalse(hasattr(bridge, "_trusted_executor_token"))
+        self.assertFalse(hasattr(bridge, "_trusted_executor_evidence"))
+        self.assertFalse(hasattr(ScenarioDecisionBridge, "_trusted_executor_token"))
+        self.assertFalse(
+            hasattr(ScenarioDecisionBridge, "_trusted_executor_evidence")
+        )
+        self.assertEqual(
+            ["decision"],
+            list(inspect.signature(bridge.async_execute_decision).parameters),
+        )
 
-                self.assertEqual("uncertain", result["status"])
-                self.assertEqual("uncertain", store.value["history"][-1]["status"])
+    async def test_fake_executor_or_factory_cannot_bind_a_bridge(self) -> None:
+        source = SnapshotSource()
+        store = MemoryStore()
+
+        with self.assertRaises(TypeError):
+            ScenarioDecisionBridge(
+                store,
+                snapshot_provider=source.snapshot,
+                authority_provider=source.authority,
+                now_ms=lambda: NOW,
+                executor=SimpleNamespace(
+                    _build_tambur_execution=lambda *_args: lambda _decision: None
+                ),
+            )
+
+        with self.assertRaises(TypeError):
+            ScenarioDecisionBridge(
+                store,
+                snapshot_provider=source.snapshot,
+                authority_provider=source.authority,
+                now_ms=lambda: NOW,
+                execution=lambda _decision: None,
+            )
+
+        states = _ExecutorStates()
+        executor = ScenarioExecutor(
+            SimpleNamespace(states=states, services=_ExecutorServices(states)),
+            ScenarioCatalog(devices={}, scenarios={}),
+            lambda *_args, **_kwargs: None,
+        )
+        fake_factory_calls: list[object] = []
+        executor._build_tambur_execution = lambda *_args: fake_factory_calls.append(
+            object()
+        )
+        bridge, _store, _source = await loaded_bridge(executor=executor)
+
+        self.assertEqual([], fake_factory_calls)
+        with self.assertRaises(TypeError):
+            await bridge.async_execute_decision({}, proof=object())
+        with self.assertRaises(TypeError):
+            await bridge.async_record_receipt("plan.fake", {}, proof=object())
+
+    async def test_unbound_bridge_cannot_execute_or_confirm_a_decision(self) -> None:
+        bridge, _store, _source = await loaded_bridge()
+
+        with self.assertRaisesRegex(ScenarioDecisionRejected, "unavailable"):
+            await bridge.async_execute_decision({})
 
     async def test_confirmation_requires_fresh_matching_authority_evidence(self) -> None:
         authority_mismatches = {
@@ -563,38 +566,45 @@ class ScenarioDecisionBridgeTests(unittest.IsolatedAsyncioTestCase):
         }
         for field, bad_value in authority_mismatches.items():
             with self.subTest(field=field):
-                bridge, store, source = await loaded_bridge()
+                source = SnapshotSource()
+                states = _ExecutorStates()
+
+                def advance_bridge_observation() -> None:
+                    source.authorities[CHAND].update(
+                        observedRevision=23,
+                        observedAtMs=NOW + 555,
+                        evidenceRevision=states.value.last_updated.isoformat(),
+                    )
+                    source.authorities[CHAND][field] = bad_value
+
+                hass = SimpleNamespace(
+                    states=states,
+                    services=_ExecutorServices(states, advance_bridge_observation),
+                )
+                action = ScenarioDeviceAction(
+                    "turn_on", "Включить", "light", "turn_on", frozenset()
+                )
+                executor = ScenarioExecutor(
+                    hass,
+                    ScenarioCatalog(
+                        devices={
+                            CHAND: ScenarioDeviceEntry(
+                                CHAND, "Люстра", "light.chandelier", (action,)
+                            )
+                        },
+                        scenarios={},
+                    ),
+                    lambda *_args, **_kwargs: None,
+                    readback_window_seconds=0.02,
+                    readback_interval_seconds=0.01,
+                )
+                bridge, store, _source = await loaded_bridge(
+                    source=source, executor=executor
+                )
                 request = await bridge.async_snapshot(SCENARIO_ID, event())
                 plan = decision(request)
-                accepted = await bridge.async_accept(plan)
-                await bridge.async_before_dispatch(
-                    plan["planId"], plan["action"]["id"]
-                )
-                bridge.mark_dispatch_crossed(
-                    plan["planId"], plan["action"]["id"]
-                )
-                source.authorities[CHAND].update(
-                    observedRevision=23,
-                    observedAtMs=NOW + 555,
-                    evidenceRevision="evidence.after.dispatch",
-                )
-                source.authorities[CHAND][field] = bad_value
-                self._record_executor_proof(
-                    bridge, plan, str(accepted["receiptId"])
-                )
 
-                result = await bridge.async_record_receipt(
-                    str(plan["planId"]),
-                    {
-                        "id": accepted["receiptId"],
-                        "planId": plan["planId"],
-                        "actionId": "turn_on",
-                        "targetId": CHAND,
-                        "status": "confirmed",
-                        "observedRevision": 999,
-                        "observedAtMs": NOW + 999,
-                    },
-                )
+                result = await bridge.async_execute_decision(plan)
 
                 self.assertEqual("uncertain", result["status"])
                 self.assertEqual("uncertain", store.value["history"][-1]["status"])
@@ -606,6 +616,7 @@ class ScenarioDecisionBridgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_manual_fence_during_authority_fetch_forces_uncertain(self) -> None:
         source = SnapshotSource()
         store = MemoryStore()
+        states = _ExecutorStates()
         authority_entered = asyncio.Event()
         release_authority = asyncio.Event()
         block_authority = False
@@ -616,36 +627,49 @@ class ScenarioDecisionBridgeTests(unittest.IsolatedAsyncioTestCase):
                 await release_authority.wait()
             return await source.authority(target_id)
 
+        def advance_bridge_observation() -> None:
+            nonlocal block_authority
+            source.authorities[CHAND].update(
+                observedRevision=23,
+                observedAtMs=NOW + 555,
+                evidenceRevision=states.value.last_updated.isoformat(),
+            )
+            block_authority = True
+
+        hass = SimpleNamespace(
+            states=states,
+            services=_ExecutorServices(states, advance_bridge_observation),
+        )
+        action = ScenarioDeviceAction(
+            "turn_on", "Включить", "light", "turn_on", frozenset()
+        )
+        executor = ScenarioExecutor(
+            hass,
+            ScenarioCatalog(
+                devices={
+                    CHAND: ScenarioDeviceEntry(
+                        CHAND, "Люстра", "light.chandelier", (action,)
+                    )
+                },
+                scenarios={},
+            ),
+            lambda *_args, **_kwargs: None,
+            readback_window_seconds=0.02,
+            readback_interval_seconds=0.01,
+        )
+
         bridge = ScenarioDecisionBridge(
             store,
             snapshot_provider=source.snapshot,
             authority_provider=authority,
             now_ms=lambda: NOW,
+            executor=executor,
         )
         await bridge.async_recover()
         request = await bridge.async_snapshot(SCENARIO_ID, event())
         plan = decision(request)
-        accepted = await bridge.async_accept(plan)
-        await bridge.async_before_dispatch(plan["planId"], plan["action"]["id"])
-        bridge.mark_dispatch_crossed(plan["planId"], plan["action"]["id"])
-        source.authorities[CHAND].update(
-            observedRevision=23,
-            observedAtMs=NOW + 555,
-            evidenceRevision="evidence.after.dispatch",
-        )
-        self._record_executor_proof(bridge, plan, str(accepted["receiptId"]))
-        block_authority = True
         recording = asyncio.create_task(
-            bridge.async_record_receipt(
-                str(plan["planId"]),
-                {
-                    "id": accepted["receiptId"],
-                    "planId": plan["planId"],
-                    "actionId": "turn_on",
-                    "targetId": CHAND,
-                    "status": "confirmed",
-                },
-            )
+            bridge.async_execute_decision(plan)
         )
         await asyncio.wait_for(authority_entered.wait(), 0.2)
         manual = asyncio.create_task(
@@ -664,23 +688,23 @@ class ScenarioDecisionBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("uncertain", store.value["history"][-1]["status"])
 
     async def test_skipped_decision_is_persisted_before_executor_returns_skipped(self) -> None:
-        bridge, store, _source = await loaded_bridge()
+        states = _ExecutorStates()
+        executor = ScenarioExecutor(
+            SimpleNamespace(states=states, services=_ExecutorServices(states)),
+            ScenarioCatalog(devices={}, scenarios={}),
+            lambda *_args, **_kwargs: None,
+        )
+        bridge, store, _source = await loaded_bridge(executor=executor)
         request = await bridge.async_snapshot(SCENARIO_ID, event(kind="clock"))
         plan = decision(request)
         plan.update(status="skipped", reasonCode="absence_waiting", action=None)
-        executor = SimpleNamespace()
-
-        result = await ScenarioExecutor.async_execute_tambur_decision(
-            executor, plan, bridge
-        )
+        result = await bridge.async_execute_decision(plan)
         self.assertEqual("skipped", result["status"])
         self.assertEqual("cancelled", store.value["history"][-1]["status"])
         self.assertEqual("absence_waiting", store.value["history"][-1]["reasonCode"])
 
     async def test_decided_action_runs_through_real_executor_emulator_and_records_receipt(self) -> None:
-        bridge, store, source = await loaded_bridge()
-        request = await bridge.async_snapshot(SCENARIO_ID, event())
-        plan = decision(request)
+        source = SnapshotSource()
         states = _ExecutorStates()
 
         def advance_bridge_observation() -> None:
@@ -712,13 +736,18 @@ class ScenarioDecisionBridgeTests(unittest.IsolatedAsyncioTestCase):
             readback_window_seconds=0.02,
             readback_interval_seconds=0.01,
         )
+        bridge, store, _source = await loaded_bridge(
+            source=source, executor=executor
+        )
+        request = await bridge.async_snapshot(SCENARIO_ID, event())
+        plan = decision(request)
 
         observed_at_ms = NOW + 777
         with patch(
             "custom_components.hausman_hub.application.scenario_executor.time.time",
             return_value=observed_at_ms / 1000,
         ):
-            result = await executor.async_execute_tambur_decision(plan, bridge)
+            result = await bridge.async_execute_decision(plan)
 
         self.assertEqual("confirmed", result["status"])
         self.assertEqual([("light", "turn_on", {"entity_id": "light.chandelier"})], hass.services.calls)
@@ -741,9 +770,6 @@ class ScenarioDecisionBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved, len(store.saved))
 
     async def test_confirmed_readback_without_new_bridge_observation_is_uncertain(self) -> None:
-        bridge, store, _source = await loaded_bridge()
-        request = await bridge.async_snapshot(SCENARIO_ID, event())
-        plan = decision(request)
         states = _ExecutorStates()
         hass = SimpleNamespace(states=states, services=_ExecutorServices(states))
         action = ScenarioDeviceAction(
@@ -763,8 +789,11 @@ class ScenarioDecisionBridgeTests(unittest.IsolatedAsyncioTestCase):
             readback_window_seconds=0.02,
             readback_interval_seconds=0.01,
         )
+        bridge, store, _source = await loaded_bridge(executor=executor)
+        request = await bridge.async_snapshot(SCENARIO_ID, event())
+        plan = decision(request)
 
-        result = await executor.async_execute_tambur_decision(plan, bridge)
+        result = await bridge.async_execute_decision(plan)
 
         self.assertEqual("uncertain", result["status"])
         self.assertEqual("uncertain", store.value["history"][-1]["status"])
@@ -901,9 +930,6 @@ class ScenarioDecisionBridgeTests(unittest.IsolatedAsyncioTestCase):
             ("note_results", "uncertain"),
         ):
             with self.subTest(failure_point=failure_point):
-                bridge, store, _source = await loaded_bridge()
-                request = await bridge.async_snapshot(SCENARIO_ID, event())
-                plan = decision(request)
                 states = _ExecutorStates()
                 hass = SimpleNamespace(
                     states=states, services=_ExecutorServices(states)
@@ -939,7 +965,12 @@ class ScenarioDecisionBridgeTests(unittest.IsolatedAsyncioTestCase):
 
                     executor._light_priority.note_results = fail_note_results
 
-                result = await executor.async_execute_tambur_decision(plan, bridge)
+                bridge, store, _source = await loaded_bridge(
+                    executor=executor
+                )
+                request = await bridge.async_snapshot(SCENARIO_ID, event())
+                plan = decision(request)
+                result = await bridge.async_execute_decision(plan)
 
                 self.assertEqual(expected_status, result["status"])
                 self.assertEqual(expected_status, store.value["history"][-1]["status"])

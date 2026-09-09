@@ -356,6 +356,7 @@ class ScenarioDecisionBridge:
         snapshot_provider: Callable[[str, object, int], object],
         authority_provider: Callable[[str], object],
         now_ms: Callable[[], int],
+        executor: object | None = None,
     ) -> None:
         if not all(
             callable(candidate)
@@ -371,8 +372,183 @@ class ScenarioDecisionBridge:
         self._snapshots: dict[str, dict[str, object]] = {}
         self._cancellations: dict[str, asyncio.Event] = {}
         self._dispatch_crossed: set[str] = set()
-        self._trusted_executor_token = object()
-        self._trusted_executor_evidence: dict[str, dict[str, object]] = {}
+        proof_state: dict[str, dict[str, object]] = {}
+
+        def record_evidence(
+            *,
+            plan_id: str,
+            decision_action_id: str,
+            receipt_id: str,
+            target_id: str,
+            action_id: str,
+            value: object,
+            result: Mapping[str, object],
+        ) -> None:
+            payload = self._loaded()
+            read_back = result.get("read_back")
+            proof_state[plan_id] = {
+                "observationEpoch": payload["observationEpoch"],
+                "planId": plan_id,
+                "decisionActionId": decision_action_id,
+                "receiptId": receipt_id,
+                "targetId": target_id,
+                "actionId": action_id,
+                "value": copy.deepcopy(value),
+                "completed": result.get("status") == "completed",
+                "confirmed": result.get("confirmed") is True,
+                "evidenceRevision": (
+                    read_back.get("evidenceRevision")
+                    if isinstance(read_back, Mapping)
+                    else None
+                ),
+            }
+
+        async def async_record_receipt(
+            plan_id: str, receipt: Mapping[str, object]
+        ) -> dict[str, object]:
+            """Consume closed executor evidence and persist one outcome."""
+
+            if not _valid_receipt_input(receipt):
+                raise ScenarioDecisionRejected("scenario receipt is invalid")
+            async with self._lock:
+                current = self._loaded()
+                record = self._find(current, plan_id)
+                action = record.get("action") if record is not None else None
+                if record is None or not isinstance(action, Mapping):
+                    raise ScenarioDecisionRejected(
+                        "scenario receipt plan is invalid"
+                    )
+                expected = {
+                    "id": record["receiptId"],
+                    "planId": plan_id,
+                    "actionId": action["actionId"],
+                    "targetId": action["targetId"],
+                }
+                if any(
+                    receipt.get(key) != expected_value
+                    for key, expected_value in expected.items()
+                ):
+                    raise ScenarioDecisionRejected(
+                        "scenario receipt binding is invalid"
+                    )
+                status = receipt.get("status")
+                if status not in {"confirmed", "failed", "uncertain"}:
+                    raise ScenarioDecisionRejected(
+                        "scenario receipt status is invalid"
+                    )
+                crossed = plan_id in self._dispatch_crossed
+                if status == "confirmed" and not crossed:
+                    raise ScenarioDecisionRejected(
+                        "scenario receipt has no physical dispatch evidence"
+                    )
+                proof = proof_state.pop(plan_id, None)
+                authority: object = None
+                if status == "confirmed" and record["status"] == "dispatching":
+                    try:
+                        authority = await _maybe_await(
+                            self._authority_provider(str(action["targetId"]))
+                        )
+                    except Exception:  # noqa: BLE001 - fail-closed evidence
+                        authority = None
+                proof_matches = (
+                    isinstance(proof, Mapping)
+                    and proof.get("observationEpoch")
+                    == current["observationEpoch"]
+                    and proof.get("planId") == plan_id
+                    and proof.get("decisionActionId") == action.get("id")
+                    and proof.get("receiptId") == record["receiptId"]
+                    and proof.get("targetId") == action.get("targetId")
+                    and proof.get("actionId") == action.get("actionId")
+                    and proof.get("value") == action.get("value")
+                    and proof.get("completed") is True
+                    and proof.get("confirmed") is True
+                    and isinstance(proof.get("evidenceRevision"), str)
+                    and bool(proof.get("evidenceRevision"))
+                )
+                authority_matches = (
+                    isinstance(authority, Mapping)
+                    and authority.get("fresh") is True
+                    and authority.get("observationEpoch")
+                    == current["observationEpoch"]
+                    and authority.get("generation")
+                    == action.get("authorityGeneration")
+                    and authority.get("owner") in {"none", "automatic"}
+                    and authority.get("protectionActive") is False
+                    and _valid_safe_integer(
+                        authority.get("observedRevision")
+                    )
+                    and int(authority["observedRevision"])
+                    > int(action["observedRevision"])
+                    and _valid_safe_integer(authority.get("observedAtMs"))
+                    and isinstance(authority.get("evidenceRevision"), str)
+                    and isinstance(proof, Mapping)
+                    and authority.get("evidenceRevision")
+                    == proof.get("evidenceRevision")
+                )
+                if status == "confirmed" and not (
+                    record["status"] == "dispatching"
+                    and crossed
+                    and not self.cancellation_event(plan_id).is_set()
+                    and proof_matches
+                    and authority_matches
+                ):
+                    status = "uncertain"
+                stored_receipt = self._terminal_receipt(
+                    record,
+                    str(status),
+                    observed_revision=(
+                        int(authority["observedRevision"])
+                        if status == "confirmed"
+                        and isinstance(authority, Mapping)
+                        else None
+                    ),
+                    observed_at_ms=(
+                        int(authority["observedAtMs"])
+                        if status == "confirmed"
+                        and isinstance(authority, Mapping)
+                        else None
+                    ),
+                )
+                updated = copy.deepcopy(current)
+                changed = self._find(updated, plan_id)
+                assert changed is not None
+                changed["status"] = status
+                changed["receipt"] = copy.deepcopy(stored_receipt)
+                changed["updatedAtMs"] = self._now_ms()
+                durable = dict(updated["durable"])
+                durable["pendingReceiptId"] = None
+                updated["durable"] = durable
+                self._replace_recent_receipt(updated, stored_receipt)
+                await self._save(updated)
+                self._payload = updated
+                event = {
+                    "id": f"event.{record['receiptId']}",
+                    "kind": "receipt",
+                    "observedAtMs": self._now_ms(),
+                    "targetId": action["targetId"],
+                    "receiptId": record["receiptId"],
+                }
+                return {
+                    "status": status,
+                    "event": event,
+                    "receipt": copy.deepcopy(stored_receipt),
+                }
+
+        self.async_record_receipt = async_record_receipt
+        self._tambur_execution: Callable[
+            [Mapping[str, object]], Awaitable[dict[str, object]]
+        ] | None = None
+        if executor is not None:
+            from .scenario_executor import ScenarioExecutor
+
+            if type(executor) is not ScenarioExecutor:
+                raise TypeError("scenario decision executor is invalid")
+            execution = ScenarioExecutor._build_tambur_execution(
+                executor, self, record_evidence
+            )
+            if not callable(execution):
+                raise TypeError("scenario decision executor channel is invalid")
+            self._tambur_execution = execution
 
     async def _save(self, payload: dict[str, object]) -> None:
         if not valid_scenario_decision_bridge_payload(payload):
@@ -430,7 +606,6 @@ class ScenarioDecisionBridge:
             self._payload = payload
             self._snapshots.clear()
             self._dispatch_crossed.clear()
-            self._trusted_executor_evidence.clear()
             self._cancellations = {
                 str(item["planId"]): asyncio.Event()
                 for item in payload["history"]
@@ -606,7 +781,7 @@ class ScenarioDecisionBridge:
                 target_id = str(action["targetId"])
                 if not self._resolve_uncertain(updated, target_id):
                     raise ScenarioDecisionRejected(
-                        "uncertain target requires newer fresh evidence"
+                        "uncertain target requires explicit reconciliation"
                     )
                 if any(
                     item["status"] in {"prepared", "dispatching"}
@@ -805,155 +980,16 @@ class ScenarioDecisionBridge:
             await self._save(updated)
             self._payload = updated
 
-    async def async_record_receipt(
-        self, plan_id: str, receipt: Mapping[str, object]
+    async def async_execute_decision(
+        self, decision: Mapping[str, object]
     ) -> dict[str, object]:
-        """Bind one outcome and return the only permitted next-calculation event."""
+        """Execute through the closed channel bound during bridge creation."""
 
-        if not _valid_receipt_input(receipt):
-            raise ScenarioDecisionRejected("scenario receipt is invalid")
-        async with self._lock:
-            current = self._loaded()
-            record = self._find(current, plan_id)
-            action = record.get("action") if record is not None else None
-            if record is None or not isinstance(action, Mapping):
-                raise ScenarioDecisionRejected("scenario receipt plan is invalid")
-            expected = {
-                "id": record["receiptId"],
-                "planId": plan_id,
-                "actionId": action["actionId"],
-                "targetId": action["targetId"],
-            }
-            if any(receipt.get(key) != value for key, value in expected.items()):
-                raise ScenarioDecisionRejected("scenario receipt binding is invalid")
-            status = receipt.get("status")
-            if status not in {"confirmed", "failed", "uncertain"}:
-                raise ScenarioDecisionRejected("scenario receipt status is invalid")
-            crossed = plan_id in self._dispatch_crossed
-            if status == "confirmed" and not crossed:
-                raise ScenarioDecisionRejected(
-                    "scenario receipt has no physical dispatch evidence"
-                )
-            proof = self._trusted_executor_evidence.pop(plan_id, None)
-            authority: object = None
-            if status == "confirmed" and record["status"] == "dispatching":
-                try:
-                    authority = await _maybe_await(
-                        self._authority_provider(str(action["targetId"]))
-                    )
-                except Exception:  # noqa: BLE001 - evidence failure is fail-closed
-                    authority = None
-            proof_matches = (
-                isinstance(proof, Mapping)
-                and proof.get("bridgeToken") is self._trusted_executor_token
-                and proof.get("observationEpoch") == current["observationEpoch"]
-                and proof.get("planId") == plan_id
-                and proof.get("decisionActionId") == action.get("id")
-                and proof.get("receiptId") == record["receiptId"]
-                and proof.get("targetId") == action.get("targetId")
-                and proof.get("actionId") == action.get("actionId")
-                and proof.get("value") == action.get("value")
-                and proof.get("completed") is True
-                and proof.get("confirmed") is True
-                and isinstance(proof.get("evidenceRevision"), str)
-                and bool(proof.get("evidenceRevision"))
+        if self._tambur_execution is None:
+            raise ScenarioDecisionRejected(
+                "scenario decision executor is unavailable"
             )
-            authority_matches = (
-                isinstance(authority, Mapping)
-                and authority.get("fresh") is True
-                and authority.get("observationEpoch") == current["observationEpoch"]
-                and authority.get("generation") == action.get("authorityGeneration")
-                and authority.get("owner") in {"none", "automatic"}
-                and authority.get("protectionActive") is False
-                and _valid_safe_integer(authority.get("observedRevision"))
-                and int(authority["observedRevision"])
-                > int(action["observedRevision"])
-                and _valid_safe_integer(authority.get("observedAtMs"))
-                and isinstance(authority.get("evidenceRevision"), str)
-                and isinstance(proof, Mapping)
-                and authority.get("evidenceRevision")
-                == proof.get("evidenceRevision")
-            )
-            if status == "confirmed" and not (
-                record["status"] == "dispatching"
-                and crossed
-                and not self.cancellation_event(plan_id).is_set()
-                and proof_matches
-                and authority_matches
-            ):
-                status = "uncertain"
-            stored_receipt = self._terminal_receipt(
-                record,
-                str(status),
-                observed_revision=(
-                    int(authority["observedRevision"])
-                    if status == "confirmed" and isinstance(authority, Mapping)
-                    else None
-                ),
-                observed_at_ms=(
-                    int(authority["observedAtMs"])
-                    if status == "confirmed" and isinstance(authority, Mapping)
-                    else None
-                ),
-            )
-            updated = copy.deepcopy(current)
-            changed = self._find(updated, plan_id)
-            assert changed is not None
-            changed["status"] = status
-            changed["receipt"] = copy.deepcopy(stored_receipt)
-            changed["updatedAtMs"] = self._now_ms()
-            durable = dict(updated["durable"])
-            durable["pendingReceiptId"] = None
-            updated["durable"] = durable
-            self._replace_recent_receipt(updated, stored_receipt)
-            await self._save(updated)
-            self._payload = updated
-            event = {
-                "id": f"event.{record['receiptId']}",
-                "kind": "receipt",
-                "observedAtMs": self._now_ms(),
-                "targetId": action["targetId"],
-                "receiptId": record["receiptId"],
-            }
-            return {
-                "status": status,
-                "event": event,
-                "receipt": copy.deepcopy(stored_receipt),
-            }
-
-
-def _record_trusted_executor_evidence(
-    bridge: ScenarioDecisionBridge,
-    *,
-    plan_id: str,
-    decision_action_id: str,
-    receipt_id: str,
-    target_id: str,
-    action_id: str,
-    value: object,
-    result: Mapping[str, object],
-) -> None:
-    """Capture one process-local executor result for single-use verification."""
-
-    payload = bridge._loaded()
-    read_back = result.get("read_back")
-    bridge._trusted_executor_evidence[plan_id] = {
-        "bridgeToken": bridge._trusted_executor_token,
-        "observationEpoch": payload["observationEpoch"],
-        "planId": plan_id,
-        "decisionActionId": decision_action_id,
-        "receiptId": receipt_id,
-        "targetId": target_id,
-        "actionId": action_id,
-        "value": copy.deepcopy(value),
-        "completed": result.get("status") == "completed",
-        "confirmed": result.get("confirmed") is True,
-        "evidenceRevision": (
-            read_back.get("evidenceRevision")
-            if isinstance(read_back, Mapping)
-            else None
-        ),
-    }
+        return await self._tambur_execution(decision)
 
 
 class TamburHaObservationCoordinator:

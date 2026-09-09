@@ -10902,6 +10902,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             snapshot_provider=source,
             authority_provider=authority,
             now_ms=lambda: now_ms,
+            executor=executor,
         )
         service.set_manual_action_pre_admission(bridge.async_register_manual_intent)
         self.hass.data["hausman_hub"]["scenario_service"] = service
