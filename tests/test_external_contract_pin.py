@@ -32,6 +32,20 @@ VENDORED_CONTRACT_HASHES = {
     "custom_components/hausman_hub/contracts/v1/scenario-definition.schema.json": "60e93c0e3a970c684a9a95acd471ffd9664652e61fc5e29f5f21c7463285ea57",
     "custom_components/hausman_hub/contracts/v1/scenario-node-red-status.schema.json": "d1d219653a87c5d68834afd5bea6544924967d42a4053e6ea2269e0780766d6f",
     "custom_components/hausman_hub/contracts/v1/scenario-node-red-execution.schema.json": "1780fbeb06bc5777217e3a18059158354f28bce61cdf8aadab67e6a61ae1d597",
+    "custom_components/hausman_hub/contracts/v1/scenario-node-red-decision-input.schema.json": "009a8757807b6f8082835a048094fd15ad7bfca7b0946178def2db34ee1ffeff",
+    "custom_components/hausman_hub/contracts/v1/scenario-node-red-decision.schema.json": "95fc1356cd0cb2dc5a0fd5865c2db7cebf3ba433cb5b95b84889f118ef27ea75",
+    "custom_components/hausman_hub/contracts/v1/fixtures/scenario-node-red-decision-day-input.json": "189b681b47ac91069e5485895e210aa66e3ba409d04e3d99cdcb5c72dc398f9e",
+    "custom_components/hausman_hub/contracts/v1/fixtures/scenario-node-red-decision-day.json": "921603b308ff0ce2b73b3639c3c375145d80c8e2fd072cb12e4241c4b55f727e",
+    "custom_components/hausman_hub/contracts/v1/fixtures/scenario-node-red-decision-manual-input.json": "3a2214fcf9ea35c0f87262ac78f4cb55d547fd1cc06350caee330c1558bc2d30",
+    "custom_components/hausman_hub/contracts/v1/fixtures/scenario-node-red-decision-manual.json": "fd7b40624525256be7a06b565480f862d70cea9cc132eb3daaf0db55a30c919b",
+    "custom_components/hausman_hub/contracts/v1/fixtures/scenario-node-red-decision-absence-input.json": "a64ec35812060829e0e04017dc4c1b0f118a7755833eb21bb5a3969e8d78004b",
+    "custom_components/hausman_hub/contracts/v1/fixtures/scenario-node-red-decision-absence.json": "4ea4e64c2eff7797b7247de3b478d752e8b56b22e700b1944fc7d30ff2bddb4c",
+    "custom_components/hausman_hub/contracts/v1/fixtures/scenario-node-red-decision-protection-input.json": "61ebe82f9bec3d4586067e2249a30349a5d8e282f6e4c5dcf80da8e7c66db9b3",
+    "custom_components/hausman_hub/contracts/v1/fixtures/scenario-node-red-decision-protection.json": "06df3cffa14f9c66f0823f5dd70174f57a8f685ee1cc375bc106d7ad4be45970",
+    "custom_components/hausman_hub/contracts/v1/fixtures/scenario-node-red-decision-night-input.json": "5d048fda1d4bda8353619afb144e9fcb4ea2bfc48bd3e73a01703b16399c38bd",
+    "custom_components/hausman_hub/contracts/v1/fixtures/scenario-node-red-decision-night.json": "8d882f67235c63ef18fb8baa367e057a30bc9104b687d3f6b6a63fdc63e7c492",
+    "custom_components/hausman_hub/contracts/v1/fixtures/scenario-node-red-decision-recovery-input.json": "569ec705d20e3934cc6bd6ef758bb7468e0fef441efde32b9e71fbcbea9e0059",
+    "custom_components/hausman_hub/contracts/v1/fixtures/scenario-node-red-decision-recovery.json": "3461946648ffdb110ba41a7a49d1ea955f4df67830984315c409b43da7cd9bf0",
     "custom_components/hausman_hub/contracts/v1/scenario-node-red-source.schema.json": "4f281f11c55a235b78bb418977f948a06d4d1ba8b90b1fef4e389b3842e9f7ec",
     "custom_components/hausman_hub/contracts/v1/scenario-node-red-source-update-request.schema.json": "7712607bfe1e8cbe9a9287ea4812caed2ac2c47e93ff079458fea0a945a677a0",
     "custom_components/hausman_hub/contracts/v1/scenario-node-red-source-update-receipt.schema.json": "b57b3adcbd850af02c3c1112de9eef70fcf2e41483ae4c633b20d6db6dd33040",
@@ -107,14 +121,14 @@ def test_external_contract_pin_is_explicit_and_canonical() -> None:
 
     assert pin == {
         "repository": "shumkiiv/hausmanhub-contracts",
-        "version": "0.65.2",
-        "commit": "69fe733",
+        "version": "0.65.3",
+        "commit": "dc0ba55",
         "canonical": True,
         "role": "runtime-consumer",
     }
 
 
-def test_contract_0_65_2_vendored_files_match_canonical_hashes() -> None:
+def test_contract_0_65_3_vendored_files_match_canonical_hashes() -> None:
     for relative_path, expected_hash in VENDORED_CONTRACT_HASHES.items():
         payload = (REPOSITORY_ROOT / relative_path).read_bytes()
         assert hashlib.sha256(payload).hexdigest() == expected_hash, relative_path
