@@ -950,6 +950,9 @@ class ScenarioService:
         self._electrical_breaker_device_ids_resolver = (
             electrical_breaker_device_ids_resolver
         )
+        self._manual_action_pre_admission: (
+            Callable[[str, str, str, object | None], Awaitable[None]] | None
+        ) = None
         self._catalog = self._apply_electrical_breaker_policy(catalog)
         self._smart_switch_receipt_consumer: object | None = None
         self._managed_switch_migration_transaction: (
@@ -1353,6 +1356,16 @@ class ScenarioService:
         """Wire the executor after both objects are created."""
 
         self._executor = executor
+
+    def set_manual_action_pre_admission(
+        self,
+        callback: Callable[[str, str, str, object | None], Awaitable[None]],
+    ) -> None:
+        """Register manual intent before the executor waits for light authority."""
+
+        if not callable(callback):
+            raise TypeError("manual action pre-admission callback must be callable")
+        self._manual_action_pre_admission = callback
 
     def set_smart_switch_receipt_consumer(self, consumer: object) -> None:
         """Wire the sole durable authority for release-owned switch receipts."""
@@ -4890,6 +4903,23 @@ class ScenarioService:
             )
         if current_contextual_action:
             options["contextually_dangerous"] = True
+
+        if (
+            not dry_run
+            and not automatic_reassert
+            and self._manual_action_pre_admission is not None
+        ):
+            if request_id is None:
+                new_run_id = getattr(self._executor, "new_run_id", None)
+                if not callable(new_run_id):
+                    raise ScenarioServiceError(
+                        "Manual action request identity unavailable", status=503
+                    )
+                request_id = str(new_run_id())
+                options["request_id"] = request_id
+            await self._manual_action_pre_admission(
+                request_id, target_id, action_id, value
+            )
 
         if intercom_release_required or (
             dangerous_authorized and current_intercom_action

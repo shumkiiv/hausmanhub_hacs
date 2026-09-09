@@ -66,6 +66,7 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
     from .manual_light_off_protection import ManualLightOffProtectionCoordinator
     from .scenario_command_context import ScenarioCommandContextRegistry
+    from .scenario_decision_bridge import ScenarioDecisionBridge
 
 
 _DEFAULT_DEVICE_READBACK_WINDOW_SECONDS = 8.0
@@ -709,6 +710,120 @@ class ScenarioExecutor:
             raise TypeError("curtain protection coordinator is invalid")
         self._curtain_protection = protection
 
+    async def async_execute_tambur_decision(
+        self,
+        decision: Mapping[str, object],
+        bridge: ScenarioDecisionBridge,
+    ) -> dict[str, object]:
+        """Persist and execute one server-owned Tambur decision action."""
+
+        accepted = await bridge.async_accept(decision)
+        action_payload = accepted.get("action")
+        if accepted.get("replayed") is True:
+            return {
+                "status": str(accepted["status"]),
+                "planId": accepted["planId"],
+                "replayed": True,
+            }
+        if not isinstance(action_payload, Mapping):
+            return {
+                "status": "skipped",
+                "reasonCode": str(decision.get("reasonCode", "skipped")),
+                "planId": accepted["planId"],
+            }
+        plan_id = str(accepted["planId"])
+        decision_action_id = str(action_payload["id"])
+        action = ScenarioAction(
+            id="decision_action",
+            type=ScenarioActionType.DEVICE_ACTION,
+            target_id=str(action_payload["targetId"]),
+            action_id=str(action_payload["actionId"]),
+            value=action_payload.get("value"),
+        )
+        dependencies = (
+            self._power_dependency_resolver()
+            if self._power_dependency_resolver is not None
+            else {}
+        )
+        crossed = {"value": False}
+
+        def mark_crossed() -> None:
+            crossed["value"] = True
+            bridge.mark_dispatch_crossed(plan_id, decision_action_id)
+
+        async def before_dispatch() -> None:
+            await bridge.async_before_dispatch(plan_id, decision_action_id)
+
+        internal: dict[str, Any] | None = None
+        failure: Exception | None = None
+        async with self._light_priority.authority_lock():
+            priority_plan = self._light_priority.plan(
+                (action,),
+                self._catalog,
+                self._hass,
+                scenario_id=str(decision.get("scenarioId", "")),
+                scenario_text="",
+                trigger_context={"source": "decision_bridge"},
+                power_dependencies=dependencies,
+            )
+            try:
+                internal = await self._device_action_receipt(
+                    action,
+                    {
+                        "action_id": action.id,
+                        "correlation_id": str(decision.get("correlationId", plan_id)),
+                        "type": "device_action",
+                        "status": "pending",
+                    },
+                    automatic=True,
+                    authority_lock_held=True,
+                    before_dispatch=before_dispatch,
+                    power_dependencies=dependencies,
+                    dispatch_marker=mark_crossed,
+                    dispatch_cancel_event=bridge.cancellation_event(plan_id),
+                    command_request_id=str(accepted["receiptId"]),
+                    force_new_readback=True,
+                )
+            except Exception as error:  # the durable marker decides uncertainty
+                failure = error
+            if internal is not None:
+                await self._light_priority.note_results(
+                    (action,),
+                    (internal,),
+                    priority_plan,
+                    self._catalog,
+                    self._hass,
+                    automatic=True,
+                    dry_run=False,
+                    scenario_id=str(decision.get("scenarioId", "")),
+                    run_id=plan_id,
+                    authority_lock_held=True,
+                )
+
+        read_back = internal.get("read_back") if isinstance(internal, Mapping) else None
+        confirmed = bool(
+            isinstance(internal, Mapping)
+            and internal.get("status") == "completed"
+            and internal.get("confirmed") is True
+            and isinstance(read_back, Mapping)
+            and type(read_back.get("evidenceSequence")) is int
+        )
+        status = "confirmed" if confirmed else "uncertain" if crossed["value"] else "failed"
+        receipt: dict[str, object] = {
+            "id": accepted["receiptId"],
+            "planId": plan_id,
+            "actionId": action.action_id,
+            "targetId": action.target_id,
+            "status": status,
+        }
+        if confirmed and isinstance(read_back, Mapping):
+            receipt["observedRevision"] = read_back["evidenceSequence"]
+            receipt["observedAtMs"] = int(time.time() * 1000)
+        recorded = await bridge.async_record_receipt(plan_id, receipt)
+        if failure is not None:
+            recorded["error"] = type(failure).__name__
+        return recorded
+
     async def async_execute_device_action(
         self,
         target_id: str,
@@ -1179,6 +1294,8 @@ class ScenarioExecutor:
                         observed_value = _device_action_observed_value(
                             state, action_id
                         )
+                        evidence_revision = current_revision
+                        evidence_sequence = observed_at
                     break
             remaining = deadline - loop.time()
             if remaining <= 0:
@@ -2576,6 +2693,7 @@ class ScenarioExecutor:
         power_dependencies: Mapping[str, DevicePowerDependency] | None = None,
         dispatch_marker: Callable[[], None] | None = None,
         require_safe_evidence: bool = False,
+        dispatch_cancel_event: asyncio.Event | None = None,
     ) -> dict[str, Any]:
         external_dispatch_marker = dispatch_marker
         physical_dispatch_state = {"crossed": False}
@@ -3161,6 +3279,7 @@ class ScenarioExecutor:
                         else None
                     ),
                     before_dispatch=before_dispatch,
+                    cancellation_event=dispatch_cancel_event,
                 )
             )
         except Exception as error:  # noqa: BLE001
@@ -3262,6 +3381,12 @@ class ScenarioExecutor:
                         "effective_state": observed_state,
                     }
         if not dry_run:
+            if dispatch_cancel_event is not None and dispatch_cancel_event.is_set():
+                return failed_after_power_dispatch({
+                    **base,
+                    "status": "failed",
+                    "error": "dispatch_cancelled",
+                })
             current_device = self._catalog.device(action.target_id)
             current_allowed = (
                 current_device.action(action.action_id)
@@ -3747,6 +3872,7 @@ class ScenarioExecutor:
         request_id: str,
         dispatch_marker: Callable[[], None] | None = None,
         before_dispatch: Callable[[], Awaitable[None]] | None = None,
+        cancellation_event: asyncio.Event | None = None,
         visiting: frozenset[str] = frozenset(),
     ) -> tuple[str | None, dict[str, object] | None, frozenset[str]]:
         """Ensure an automatic upstream source is on before a device command."""
@@ -3790,6 +3916,7 @@ class ScenarioExecutor:
             request_id=request_id,
             dispatch_marker=dispatch_marker,
             before_dispatch=before_dispatch,
+            cancellation_event=cancellation_event,
             visiting=visiting | {entity_id},
         )
         precondition: dict[str, object] = {
@@ -3810,7 +3937,15 @@ class ScenarioExecutor:
                 dependency.warmup_seconds - (loop.time() - activated_at),
             )
             if remaining > 0 and not dry_run:
-                await asyncio.sleep(remaining)
+                if cancellation_event is None:
+                    await asyncio.sleep(remaining)
+                else:
+                    try:
+                        await asyncio.wait_for(cancellation_event.wait(), remaining)
+                    except TimeoutError:
+                        pass
+                    else:
+                        return "dispatch_cancelled", precondition, upstream_sources
             precondition["waitedSeconds"] = round(remaining, 3) if not dry_run else 0
             precondition["sourceTurnedOnByPreviousAction"] = True
             if not dry_run:
@@ -3981,7 +4116,15 @@ class ScenarioExecutor:
                     return "power_source_unavailable", precondition, upstream_sources
             wait_seconds = float(dependency.warmup_seconds) if source_turned_on else 0.0
             if wait_seconds > 0:
-                await asyncio.sleep(wait_seconds)
+                if cancellation_event is None:
+                    await asyncio.sleep(wait_seconds)
+                else:
+                    try:
+                        await asyncio.wait_for(cancellation_event.wait(), wait_seconds)
+                    except TimeoutError:
+                        pass
+                    else:
+                        return "dispatch_cancelled", precondition, upstream_sources
             precondition["sourceTurnedOn"] = source_turned_on
             precondition["waitedSeconds"] = wait_seconds
             confirmed_source = self._entity_state_object(source_entity_id)

@@ -10749,6 +10749,216 @@ class LocalSummaryAccessTest(unittest.TestCase):
         with self.assertRaisesRegex(JournalArchiveError, "archive_storage_unavailable"):
             asyncio.run(archive_service.async_archive("admin"))
 
+    def test_public_manual_off_cancels_tambur_auto_on_during_power_warmup(self) -> None:
+        """The real public path fences auto work before waiting for light authority."""
+
+        from custom_components.hausman_hub.application.scenario_decision_bridge import (
+            ScenarioDecisionBridge,
+        )
+        from custom_components.hausman_hub.application.scenario_executor import (
+            ScenarioExecutor,
+        )
+        from custom_components.hausman_hub.application.scenario_service import (
+            ScenarioService,
+        )
+        from custom_components.hausman_hub.application.scenarios import (
+            ScenarioCatalog,
+            ScenarioDeviceAction,
+            ScenarioDeviceEntry,
+        )
+        from custom_components.hausman_hub.domain.device_power_dependencies import (
+            DevicePowerDependency,
+        )
+
+        target_id = "lamp_chandelier_demo"
+        entity_id = "light.tambur_chandelier"
+        power_entity_id = "switch.tambur_power"
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        class Store:
+            value = None
+
+            async def async_load(inner_self):
+                return copy.deepcopy(inner_self.value)
+
+            async def async_save(inner_self, value):
+                inner_self.value = copy.deepcopy(value)
+
+        catalog = ScenarioCatalog(
+            devices={
+                target_id: ScenarioDeviceEntry(
+                    target_id=target_id,
+                    name="Люстра тамбура",
+                    entity_id=entity_id,
+                    actions=(
+                        ScenarioDeviceAction(
+                            "turn_on", "Включить", "light", "turn_on", frozenset()
+                        ),
+                        ScenarioDeviceAction(
+                            "turn_off", "Выключить", "light", "turn_off", frozenset()
+                        ),
+                    ),
+                )
+            },
+            scenarios={},
+        )
+        stamp = datetime.now(timezone.utc)
+        self.hass.states.values[entity_id] = SimpleNamespace(
+            state="off", attributes={}, last_changed=stamp,
+            last_updated=stamp, last_reported=stamp,
+        )
+        self.hass.states.values[power_entity_id] = SimpleNamespace(
+            state="off", attributes={}, last_changed=stamp,
+            last_updated=stamp, last_reported=stamp,
+        )
+        power_on = asyncio.Event()
+        calls: list[tuple[str, str, str]] = []
+
+        class Services:
+            async def async_call(
+                inner_self,
+                domain: str,
+                action_id: str,
+                data: dict[str, object],
+                **_kwargs: object,
+            ) -> None:
+                current_entity = str(data["entity_id"])
+                calls.append((domain, action_id, current_entity))
+                observed = datetime.now(timezone.utc)
+                self.hass.states.values[current_entity] = SimpleNamespace(
+                    state="on" if action_id == "turn_on" else "off",
+                    attributes={}, last_changed=observed,
+                    last_updated=observed, last_reported=observed,
+                )
+                if current_entity == power_entity_id and action_id == "turn_on":
+                    power_on.set()
+
+        self.hass.services = Services()
+        service = ScenarioService(self.hass, Store(), catalog)
+        executor = ScenarioExecutor(
+            self.hass,
+            catalog,
+            service.async_run_scenario,
+            power_dependency_resolver=lambda: {
+                entity_id: DevicePowerDependency(
+                    entity_id, power_entity_id, "auto_turn_on", 30
+                )
+            },
+            command_guard=lambda *_args: None,
+            electrical_breaker_resolver=lambda _entity: False,
+            readback_window_seconds=0.05,
+            readback_interval_seconds=0.01,
+        )
+        service.set_executor(executor)
+
+        async def source(_scenario_id, event, observation_epoch):
+            return {
+                "settingsRevision": 7,
+                "issuedAtMs": now_ms,
+                "expiresAtMs": now_ms + 60_000,
+                "event": event,
+                "clock": {
+                    "nowMs": now_ms,
+                    "timezone": "Asia/Omsk",
+                    "localDate": "2027-01-15",
+                    "minutesOfDay": 660,
+                    "sunsetAtMs": now_ms + 20_000_000,
+                },
+                "bindings": {
+                    "chandelier": target_id,
+                    "points": "lamp_points_demo",
+                    "mirror": "lamp_mirror_demo",
+                    "power": "power_demo",
+                    "presenceSensors": ["sensor_demo"],
+                },
+                "settings": {
+                    "morningStart": "09:00", "morningEnd": "10:00",
+                    "eveningLatestStart": "21:00", "mainOff": "23:00",
+                    "mirrorOff": "01:00", "minPercent": 5, "maxPercent": 80,
+                    "dayKelvin": 3000, "eveningKelvin": 2200,
+                    "absenceDaySeconds": 600, "absenceNightSeconds": 180,
+                    "fadeSeconds": 20, "manualOffMinSeconds": 600,
+                    "manualOffAbsenceSeconds": 30, "manualOnHoldSeconds": 3600,
+                },
+                "observations": {
+                    target_id: {"state": "off", "revision": 11, "observedAtMs": now_ms, "fresh": True, "continuityEpoch": observation_epoch},
+                    "lamp_points_demo": {"state": "off", "revision": 12, "observedAtMs": now_ms, "fresh": True, "continuityEpoch": observation_epoch},
+                    "lamp_mirror_demo": {"state": "off", "revision": 13, "observedAtMs": now_ms, "fresh": True, "continuityEpoch": observation_epoch},
+                    "sensor_demo": {"state": "on", "revision": 20, "observedAtMs": now_ms, "fresh": True, "continuityEpoch": observation_epoch},
+                },
+                "authority": {
+                    target_id: {"owner": "none", "generation": 2, "protectionActive": False},
+                    "lamp_points_demo": {"owner": "none", "generation": 3, "protectionActive": False},
+                    "lamp_mirror_demo": {"owner": "none", "generation": 4, "protectionActive": False},
+                },
+            }
+
+        async def authority(_target_id):
+            return {"generation": 2, "observedRevision": 11, "observedAtMs": now_ms, "observationEpoch": 1, "fresh": True, "owner": "none", "protectionActive": False}
+
+        bridge_store = Store()
+        bridge = ScenarioDecisionBridge(
+            bridge_store,
+            snapshot_provider=source,
+            authority_provider=authority,
+            now_ms=lambda: now_ms,
+        )
+        service.set_manual_action_pre_admission(bridge.async_register_manual_intent)
+        self.hass.data["hausman_hub"]["scenario_service"] = service
+        device_view = next(
+            view for view in self.hass.http.views
+            if view.url == "/api/hausman_hub/v1/device-actions"
+        )
+
+        async def run_race() -> tuple[dict[str, object], object]:
+            await bridge.async_recover()
+            request = await bridge.async_snapshot(
+                "system-tambur-adaptive-controller",
+                {"id": "presence.1", "kind": "sensor", "observedAtMs": now_ms, "targetId": "sensor_demo"},
+            )
+            decision = {
+                "contract": {"name": "hausman-node-red-decision", "version": 1},
+                "correlationId": request["correlationId"],
+                "scenarioId": "system-tambur-adaptive-controller",
+                "planId": request["correlationId"],
+                "controllerVersion": 1, "settingsRevision": 7,
+                "baseRevision": request["durable"]["revision"],
+                "snapshotRevision": request["snapshotRevision"],
+                "observationEpoch": request["observationEpoch"],
+                "expiresAtMs": request["expiresAtMs"],
+                "status": "decided", "reasonCode": "presence_day", "trace": [],
+                "nextState": {"phase": "occupied", "phaseStartedAtMs": now_ms, "absenceSinceMs": None, "absenceEpoch": None, "fadeStartPercent": None, "fadeStartedAtMs": None, "fadeReason": None},
+                "wakeups": [],
+                "action": {"id": f"{str(request['correlationId'])[:119]}.act", "targetId": target_id, "actionId": "turn_on", "authorityGeneration": 2, "observedRevision": 11},
+            }
+            automatic = asyncio.create_task(
+                executor.async_execute_tambur_decision(decision, bridge)
+            )
+            await asyncio.wait_for(power_on.wait(), 1)
+            manual = asyncio.create_task(
+                device_view.post(
+                    FakeJsonRequest(
+                        "192.168.1.20", reader_user("system-users"),
+                        "/api/hausman_hub/v1/device-actions",
+                        {"targetId": target_id, "actionId": "turn_off"},
+                    )
+                )
+            )
+            return await automatic, await manual
+
+        automatic_result, manual_response = asyncio.run(run_race())
+
+        self.assertIn(automatic_result["status"], {"failed", "uncertain"})
+        self.assertEqual(200, manual_response.status)
+        self.assertTrue(bridge_store.value["manualIntents"])
+        self.assertEqual(
+            [("switch", "turn_on", power_entity_id)],
+            [call for call in calls if call[1] == "turn_on"],
+        )
+        self.assertNotIn(("light", "turn_on", entity_id), calls)
+        self.assertNotIn(("switch", "turn_off", power_entity_id), calls)
+        self.assertFalse(executor._light_priority.authority_lock().locked())  # noqa: SLF001
+
     def test_setup_rejects_an_unsafe_entry_before_registering_the_view(self) -> None:
         """A rejected entry must not open even the local count-only path."""
 

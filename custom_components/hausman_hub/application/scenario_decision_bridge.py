@@ -1,0 +1,1077 @@
+"""Durable, fail-closed execution bridge for the staged Tambur controller.
+
+The module is intentionally inactive.  Task 4 creates it only after the exact
+Tambur bindings and settings migration has committed.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import copy
+from collections.abc import Awaitable, Callable, Mapping
+from datetime import date, datetime, timezone
+import hashlib
+import inspect
+import json
+import math
+import re
+from typing import Any
+from zoneinfo import ZoneInfo
+
+from .scenario_node_red_decision import (
+    TAMBUR_DECISION_SCENARIO_ID,
+    _validate_schema as _validate_tambur_schema,
+    validate_tambur_decision,
+    validate_tambur_decision_input,
+)
+
+
+_STORE_VERSION = 1
+_MAX_HISTORY = 128
+_MAX_MANUAL_INTENTS = 64
+_MAX_RECEIPTS = 4
+_MAX_SAFE_INTEGER = 9_007_199_254_740_991
+_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_ACTION_IDS = frozenset(
+    {"turn_on", "turn_off", "set_brightness_percent", "set_color_temperature"}
+)
+_LEDGER_STATUSES = frozenset(
+    {"prepared", "dispatching", "confirmed", "failed", "uncertain", "cancelled"}
+)
+_UNAVAILABLE_STATES = frozenset({"unknown", "unavailable"})
+
+
+class ScenarioDecisionRejected(RuntimeError):
+    """The request cannot safely cross the physical dispatch boundary."""
+
+
+class ScenarioDecisionConflict(ScenarioDecisionRejected):
+    """A plan ID was reused with different content."""
+
+
+def _digest(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _valid_id(value: object) -> bool:
+    return isinstance(value, str) and _ID_PATTERN.fullmatch(value) is not None
+
+
+def _valid_safe_integer(value: object) -> bool:
+    return type(value) is int and 0 <= value <= _MAX_SAFE_INTEGER
+
+
+def _valid_wakeup(value: object) -> bool:
+    return (
+        isinstance(value, Mapping)
+        and set(value) == {"id", "kind", "dueAtMs"}
+        and _valid_id(value.get("id"))
+        and value.get("kind") in {"profile", "absence", "fade", "mirror", "hold"}
+        and _valid_safe_integer(value.get("dueAtMs"))
+    )
+
+
+def _valid_receipt(value: object) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    required = {"id", "planId", "actionId", "targetId", "status"}
+    optional = {"observedRevision", "observedAtMs"}
+    if not required.issubset(value) or not set(value).issubset(required | optional):
+        return False
+    if (
+        not all(_valid_id(value.get(key)) for key in ("id", "planId", "targetId"))
+        or value.get("actionId") not in _ACTION_IDS
+        or value.get("status") not in {"confirmed", "failed", "uncertain"}
+    ):
+        return False
+    if any(
+        key in value and not _valid_safe_integer(value.get(key))
+        for key in optional
+    ):
+        return False
+    return value.get("status") != "confirmed" or optional.issubset(value)
+
+
+def _valid_action(value: object) -> bool:
+    if value is None:
+        return True
+    if not isinstance(value, Mapping):
+        return False
+    required = {"id", "targetId", "actionId", "authorityGeneration", "observedRevision"}
+    if not required.issubset(value) or not set(value).issubset(required | {"value"}):
+        return False
+    action_id = value.get("actionId")
+    if (
+        not _valid_id(value.get("id"))
+        or not _valid_id(value.get("targetId"))
+        or action_id not in _ACTION_IDS
+        or not _valid_safe_integer(value.get("authorityGeneration"))
+        or not _valid_safe_integer(value.get("observedRevision"))
+    ):
+        return False
+    if action_id in {"turn_on", "turn_off"}:
+        return "value" not in value
+    action_value = value.get("value")
+    if type(action_value) is not int:
+        return False
+    if action_id == "set_brightness_percent":
+        return 0 <= action_value <= 100
+    return 1_500 <= action_value <= 10_000
+
+
+def _valid_manual_value(value: object, *, depth: int = 0) -> bool:
+    if value is None or isinstance(value, bool):
+        return True
+    if isinstance(value, str):
+        return len(value) <= 256
+    if type(value) is int:
+        return -1_000_000 <= value <= 1_000_000
+    if type(value) is float:
+        return math.isfinite(value) and -1_000_000 <= value <= 1_000_000
+    if depth >= 3:
+        return False
+    if isinstance(value, list):
+        return len(value) <= 32 and all(
+            _valid_manual_value(item, depth=depth + 1) for item in value
+        )
+    if isinstance(value, Mapping):
+        return len(value) <= 32 and all(
+            isinstance(key, str)
+            and len(key) <= 256
+            and _valid_manual_value(item, depth=depth + 1)
+            for key, item in value.items()
+        )
+    return False
+
+
+def _valid_stored_decision(value: object) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    try:
+        _validate_tambur_schema(
+            value,
+            "scenario-node-red-decision.schema.json",
+            "stored response",
+        )
+    except ValueError:
+        return False
+    return True
+
+
+def _initial_durable() -> dict[str, object]:
+    return {
+        "revision": 0,
+        "phase": "idle",
+        "phaseStartedAtMs": None,
+        "absenceSinceMs": None,
+        "absenceEpoch": None,
+        "fadeStartPercent": None,
+        "fadeStartedAtMs": None,
+        "fadeReason": None,
+        "pendingReceiptId": None,
+        "wakeups": [],
+    }
+
+
+def _initial_payload() -> dict[str, object]:
+    return {
+        "version": _STORE_VERSION,
+        "scenarioId": TAMBUR_DECISION_SCENARIO_ID,
+        "observationEpoch": 1,
+        "snapshotRevision": 0,
+        "durable": _initial_durable(),
+        "receipts": [],
+        "history": [],
+        "manualIntents": [],
+    }
+
+
+def valid_scenario_decision_bridge_payload(value: object) -> bool:
+    """Return whether one storage generation is complete and bounded."""
+
+    if not isinstance(value, Mapping) or set(value) != {
+        "version",
+        "scenarioId",
+        "observationEpoch",
+        "snapshotRevision",
+        "durable",
+        "receipts",
+        "history",
+        "manualIntents",
+    }:
+        return False
+    if (
+        value.get("version") != _STORE_VERSION
+        or value.get("scenarioId") != TAMBUR_DECISION_SCENARIO_ID
+        or not _valid_safe_integer(value.get("observationEpoch"))
+        or int(value["observationEpoch"]) < 1
+        or not _valid_safe_integer(value.get("snapshotRevision"))
+    ):
+        return False
+    durable = value.get("durable")
+    if not isinstance(durable, Mapping) or set(durable) != set(_initial_durable()):
+        return False
+    if not _valid_safe_integer(durable.get("revision")):
+        return False
+    if durable.get("phase") not in {
+        "idle", "occupied", "absent", "fade", "mirror_handover", "night", "blocked"
+    }:
+        return False
+    nullable_ints = (
+        "phaseStartedAtMs", "absenceSinceMs", "absenceEpoch",
+        "fadeStartPercent", "fadeStartedAtMs",
+    )
+    if any(
+        durable.get(key) is not None and not _valid_safe_integer(durable.get(key))
+        for key in nullable_ints
+    ):
+        return False
+    if (
+        durable.get("fadeStartPercent") is not None
+        and int(durable["fadeStartPercent"]) > 100
+    ):
+        return False
+    if durable.get("fadeReason") not in {None, "absence", "night"}:
+        return False
+    if durable.get("pendingReceiptId") is not None and not _valid_id(
+        durable.get("pendingReceiptId")
+    ):
+        return False
+    wakeups = durable.get("wakeups")
+    if (
+        not isinstance(wakeups, list)
+        or len(wakeups) > 4
+        or not all(_valid_wakeup(item) for item in wakeups)
+        or len({item["id"] for item in wakeups}) != len(wakeups)
+    ):
+        return False
+    receipts = value.get("receipts")
+    history = value.get("history")
+    manual = value.get("manualIntents")
+    if (
+        not isinstance(receipts, list)
+        or len(receipts) > _MAX_RECEIPTS
+        or not all(_valid_receipt(item) for item in receipts)
+        or len({item["id"] for item in receipts}) != len(receipts)
+        or not isinstance(history, list)
+        or len(history) > _MAX_HISTORY
+        or not isinstance(manual, list)
+        or len(manual) > _MAX_MANUAL_INTENTS
+    ):
+        return False
+    history_keys = {
+        "planId", "fingerprint", "status", "reasonCode", "action", "receiptId",
+        "receipt", "decision", "preparedAtMs", "updatedAtMs",
+    }
+    plan_ids: set[str] = set()
+    for item in history:
+        if (
+            not isinstance(item, Mapping)
+            or set(item) != history_keys
+            or not _valid_id(item.get("planId"))
+            or not isinstance(item.get("fingerprint"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", str(item["fingerprint"])) is None
+            or item.get("status") not in _LEDGER_STATUSES
+            or not isinstance(item.get("reasonCode"), str)
+            or not 1 <= len(str(item["reasonCode"])) <= 120
+            or not _valid_stored_decision(item.get("decision"))
+            or not _valid_safe_integer(item.get("preparedAtMs"))
+            or not _valid_safe_integer(item.get("updatedAtMs"))
+        ):
+            return False
+        plan_id = str(item["planId"])
+        if plan_id in plan_ids:
+            return False
+        plan_ids.add(plan_id)
+        action = item.get("action")
+        decision = item["decision"]
+        if (
+            not _valid_action(action)
+            or item["fingerprint"] != _digest(decision)
+            or decision.get("planId") != plan_id
+            or decision.get("reasonCode") != item["reasonCode"]
+            or decision.get("action") != action
+        ):
+            return False
+        receipt = item.get("receipt")
+        if receipt is not None and (
+            not _valid_receipt(receipt)
+            or receipt.get("planId") != plan_id
+            or not isinstance(action, Mapping)
+            or receipt.get("id") != item.get("receiptId")
+            or receipt.get("targetId") != action.get("targetId")
+            or receipt.get("actionId") != action.get("actionId")
+            or receipt.get("status") != item.get("status")
+        ):
+            return False
+        if (
+            not _valid_id(item.get("receiptId"))
+            or item.get("receiptId") != f"receipt.{_digest(plan_id)[:24]}"
+        ):
+            return False
+    manual_keys = {"requestId", "targetId", "actionId", "value", "registeredAtMs"}
+    if any(
+        not isinstance(item, Mapping)
+        or set(item) != manual_keys
+        or not all(
+            _valid_id(item.get(key))
+            for key in ("requestId", "targetId", "actionId")
+        )
+        or not _valid_manual_value(item.get("value"))
+        or not _valid_safe_integer(item.get("registeredAtMs"))
+        for item in manual
+    ):
+        return False
+    return len({item["requestId"] for item in manual}) == len(manual)
+
+
+async def _maybe_await(value: object) -> object:
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+class ScenarioDecisionBridge:
+    """Persist decisions and receipts before and after physical execution."""
+
+    def __init__(
+        self,
+        store: object,
+        *,
+        snapshot_provider: Callable[[str, object, int], object],
+        authority_provider: Callable[[str], object],
+        now_ms: Callable[[], int],
+    ) -> None:
+        if not all(
+            callable(candidate)
+            for candidate in (snapshot_provider, authority_provider, now_ms)
+        ):
+            raise TypeError("scenario decision bridge providers are invalid")
+        self._store = store
+        self._snapshot_provider = snapshot_provider
+        self._authority_provider = authority_provider
+        self._now_ms = now_ms
+        self._lock = asyncio.Lock()
+        self._payload: dict[str, object] | None = None
+        self._snapshots: dict[str, dict[str, object]] = {}
+        self._cancellations: dict[str, asyncio.Event] = {}
+        self._dispatch_crossed: set[str] = set()
+
+    async def _save(self, payload: dict[str, object]) -> None:
+        if not valid_scenario_decision_bridge_payload(payload):
+            raise RuntimeError("scenario decision bridge store is invalid")
+        save = getattr(self._store, "async_save", None)
+        if not callable(save):
+            raise RuntimeError("scenario decision bridge store is unavailable")
+        await save(copy.deepcopy(payload))
+
+    def _loaded(self) -> dict[str, object]:
+        if self._payload is None:
+            raise RuntimeError("scenario decision bridge is not recovered")
+        return self._payload
+
+    async def async_recover(self) -> dict[str, object]:
+        """Load exact storage and invalidate work that crossed a restart."""
+
+        async with self._lock:
+            load = getattr(self._store, "async_load", None)
+            if not callable(load):
+                raise RuntimeError("scenario decision bridge store is unavailable")
+            loaded = await load()
+            if getattr(self._store, "recovered_previous", False):
+                raise RuntimeError(
+                    "scenario decision bridge previous generation is ambiguous"
+                )
+            if loaded is None:
+                payload = _initial_payload()
+                await self._save(payload)
+            else:
+                if not valid_scenario_decision_bridge_payload(loaded):
+                    raise RuntimeError("scenario decision bridge store is corrupt")
+                payload = copy.deepcopy(dict(loaded))
+                payload["observationEpoch"] = int(payload["observationEpoch"]) + 1
+                durable = dict(payload["durable"])
+                durable.update(
+                    absenceSinceMs=None,
+                    absenceEpoch=None,
+                    pendingReceiptId=None,
+                    wakeups=[],
+                )
+                payload["durable"] = durable
+                for record in payload["history"]:
+                    if record["status"] == "prepared":
+                        record["status"] = "cancelled"
+                        record["updatedAtMs"] = self._now_ms()
+                    elif record["status"] == "dispatching":
+                        record["status"] = "uncertain"
+                        record["updatedAtMs"] = self._now_ms()
+                await self._save(payload)
+            self._payload = payload
+            self._snapshots.clear()
+            self._dispatch_crossed.clear()
+            self._cancellations = {
+                str(item["planId"]): asyncio.Event()
+                for item in payload["history"]
+                if item["status"] in {"prepared", "dispatching"}
+            }
+            return copy.deepcopy(payload)
+
+    async def async_snapshot(
+        self, scenario_id: str, event: object
+    ) -> dict[str, object]:
+        """Capture one validator-bound request from real HA observations."""
+
+        if scenario_id != TAMBUR_DECISION_SCENARIO_ID:
+            raise ScenarioDecisionRejected("scenario decision bridge scenario is invalid")
+        async with self._lock:
+            current = self._loaded()
+            revision = int(current["snapshotRevision"]) + 1
+            epoch = int(current["observationEpoch"])
+            source = await _maybe_await(
+                self._snapshot_provider(scenario_id, copy.deepcopy(event), epoch)
+            )
+            if not isinstance(source, Mapping):
+                raise ScenarioDecisionRejected("scenario snapshot source is invalid")
+            event_digest = _digest(event)[:16]
+            correlation_id = f"tambur.{epoch}.{revision}.{event_digest}"
+            request = {
+                **copy.deepcopy(dict(source)),
+                "contract": {
+                    "name": "hausman-node-red-decision-input",
+                    "version": 1,
+                },
+                "correlationId": correlation_id,
+                "scenarioId": scenario_id,
+                "controllerVersion": 1,
+                "snapshotRevision": revision,
+                "observationEpoch": epoch,
+                "event": copy.deepcopy(event),
+                "durable": copy.deepcopy(current["durable"]),
+                "receipts": copy.deepcopy(current["receipts"]),
+            }
+            try:
+                validate_tambur_decision_input(request)
+            except ValueError as error:
+                raise ScenarioDecisionRejected(str(error)) from error
+            updated = copy.deepcopy(current)
+            updated["snapshotRevision"] = revision
+            await self._save(updated)
+            self._payload = updated
+            self._snapshots = {correlation_id: copy.deepcopy(request)}
+            return request
+
+    def _history(self, payload: Mapping[str, object]) -> list[dict[str, object]]:
+        return payload["history"]  # type: ignore[return-value]
+
+    def _find(self, payload: Mapping[str, object], plan_id: str) -> dict[str, object] | None:
+        return next(
+            (item for item in reversed(self._history(payload)) if item["planId"] == plan_id),
+            None,
+        )
+
+    def _accepted(
+        self, record: Mapping[str, object], *, replayed: bool
+    ) -> dict[str, object]:
+        return {
+            "planId": record["planId"],
+            "receiptId": record["receiptId"],
+            "status": record["status"],
+            "action": copy.deepcopy(record["action"]),
+            "replayed": replayed,
+        }
+
+    def _append_history(
+        self,
+        history: list[dict[str, object]],
+        record: dict[str, object],
+    ) -> list[dict[str, object]]:
+        overflow = len(history) + 1 - _MAX_HISTORY
+        if overflow <= 0:
+            return [*history, record]
+        terminal_indexes = [
+            index
+            for index, item in enumerate(history)
+            if item["status"] not in {"prepared", "dispatching", "uncertain"}
+        ]
+        if len(terminal_indexes) < overflow:
+            raise ScenarioDecisionRejected(
+                "scenario history is blocked by unresolved plans"
+            )
+        removed = set(terminal_indexes[:overflow])
+        return [
+            *(item for index, item in enumerate(history) if index not in removed),
+            record,
+        ]
+
+    def _resolve_uncertain(
+        self, payload: dict[str, object], request: Mapping[str, object], target_id: str
+    ) -> bool:
+        observations = request.get("observations")
+        observation = observations.get(target_id) if isinstance(observations, Mapping) else None
+        if (
+            not isinstance(observation, Mapping)
+            or observation.get("fresh") is not True
+            or observation.get("continuityEpoch") != payload["observationEpoch"]
+        ):
+            return False
+        revision = observation.get("revision")
+        if type(revision) is not int:
+            return False
+        unresolved = [
+            item
+            for item in self._history(payload)
+            if item["status"] == "uncertain"
+            and isinstance(item.get("action"), Mapping)
+            and item["action"].get("targetId") == target_id
+        ]
+        if not unresolved:
+            return True
+        if any(revision <= int(item["action"].get("observedRevision", revision)) for item in unresolved):
+            return False
+        for item in unresolved:
+            action = item["action"]
+            desired = "on" if action.get("actionId") == "turn_on" else "off" if action.get("actionId") == "turn_off" else None
+            item["status"] = "confirmed" if desired == observation.get("state") else "failed"
+            item["updatedAtMs"] = self._now_ms()
+        return True
+
+    async def async_accept(self, decision: Mapping[str, object]) -> dict[str, object]:
+        """Persist one validated decision before any device side effect."""
+
+        if not isinstance(decision, Mapping):
+            raise ScenarioDecisionRejected("scenario decision is invalid")
+        plan_id = decision.get("planId")
+        correlation_id = decision.get("correlationId")
+        if not isinstance(plan_id, str) or not isinstance(correlation_id, str):
+            raise ScenarioDecisionRejected("scenario decision identity is invalid")
+        fingerprint = _digest(decision)
+        async with self._lock:
+            current = self._loaded()
+            existing = self._find(current, plan_id)
+            if existing is not None:
+                if existing["fingerprint"] != fingerprint:
+                    raise ScenarioDecisionConflict("scenario plan content conflicts")
+                return self._accepted(existing, replayed=True)
+            request = self._snapshots.get(correlation_id)
+            if request is None:
+                raise ScenarioDecisionRejected("scenario decision snapshot is stale")
+            try:
+                validate_tambur_decision(request, decision)
+            except ValueError as error:
+                raise ScenarioDecisionRejected(str(error)) from error
+            if self._now_ms() > int(decision["expiresAtMs"]):
+                raise ScenarioDecisionRejected("scenario decision has expired")
+            updated = copy.deepcopy(current)
+            action = decision.get("action")
+            if isinstance(action, Mapping):
+                target_id = str(action["targetId"])
+                if not self._resolve_uncertain(updated, request, target_id):
+                    raise ScenarioDecisionRejected(
+                        "uncertain target requires newer fresh evidence"
+                    )
+                if any(
+                    item["status"] in {"prepared", "dispatching"}
+                    and isinstance(item.get("action"), Mapping)
+                    and item["action"].get("targetId") == target_id
+                    for item in self._history(updated)
+                ):
+                    raise ScenarioDecisionRejected(
+                        "scenario target already has an active plan"
+                    )
+            durable = {
+                **copy.deepcopy(dict(decision["nextState"])),
+                "revision": int(current["durable"]["revision"]) + 1,
+                "pendingReceiptId": None,
+                "wakeups": copy.deepcopy(decision["wakeups"]),
+            }
+            receipt_id = f"receipt.{_digest(plan_id)[:24]}"
+            status = "prepared" if isinstance(action, Mapping) else "cancelled"
+            if isinstance(action, Mapping):
+                durable["pendingReceiptId"] = receipt_id
+            now = self._now_ms()
+            record = {
+                "planId": plan_id,
+                "fingerprint": fingerprint,
+                "status": status,
+                "reasonCode": str(decision["reasonCode"]),
+                "action": copy.deepcopy(action),
+                "receiptId": receipt_id,
+                "receipt": None,
+                "decision": copy.deepcopy(dict(decision)),
+                "preparedAtMs": now,
+                "updatedAtMs": now,
+            }
+            updated["durable"] = durable
+            updated["history"] = self._append_history(
+                self._history(updated), record
+            )
+            await self._save(updated)
+            self._payload = updated
+            self._cancellations[plan_id] = asyncio.Event()
+            return self._accepted(record, replayed=False)
+
+    def cancellation_event(self, plan_id: str) -> asyncio.Event:
+        """Return the live fence used to interrupt a dependency warmup."""
+
+        return self._cancellations.setdefault(plan_id, asyncio.Event())
+
+    def mark_dispatch_crossed(self, plan_id: str, action_id: str) -> None:
+        """Mark the in-process physical boundary without pretending it is durable."""
+
+        payload = self._loaded()
+        record = self._find(payload, plan_id)
+        action = record.get("action") if record is not None else None
+        if isinstance(action, Mapping) and action.get("id") == action_id:
+            self._dispatch_crossed.add(plan_id)
+
+    async def async_before_dispatch(self, plan_id: str, action_id: str) -> None:
+        """Revalidate authority and persist dispatching before every side effect."""
+
+        async with self._lock:
+            current = self._loaded()
+            record = self._find(current, plan_id)
+            action = record.get("action") if record is not None else None
+            if (
+                record is None
+                or not isinstance(action, Mapping)
+                or action.get("id") != action_id
+                or record["status"] not in {"prepared", "dispatching"}
+            ):
+                raise ScenarioDecisionRejected("scenario plan is not dispatchable")
+            cancellation = self.cancellation_event(plan_id)
+            if cancellation.is_set():
+                raise ScenarioDecisionRejected("scenario plan was cancelled manually")
+            authority = await _maybe_await(self._authority_provider(str(action["targetId"])))
+            if (
+                not isinstance(authority, Mapping)
+                or authority.get("fresh") is not True
+                or authority.get("observationEpoch") != current["observationEpoch"]
+                or authority.get("generation") != action.get("authorityGeneration")
+                or authority.get("owner") not in {"none", "automatic"}
+                or authority.get("protectionActive") is not False
+                or type(authority.get("observedRevision")) is not int
+                or int(authority["observedRevision"]) < int(action["observedRevision"])
+            ):
+                updated = copy.deepcopy(current)
+                changed = self._find(updated, plan_id)
+                assert changed is not None
+                changed["status"] = "cancelled"
+                changed["updatedAtMs"] = self._now_ms()
+                await self._save(updated)
+                self._payload = updated
+                cancellation.set()
+                raise ScenarioDecisionRejected("scenario authority changed before dispatch")
+            if record["status"] == "prepared":
+                updated = copy.deepcopy(current)
+                changed = self._find(updated, plan_id)
+                assert changed is not None
+                changed["status"] = "dispatching"
+                changed["updatedAtMs"] = self._now_ms()
+                await self._save(updated)
+                self._payload = updated
+            if cancellation.is_set():
+                raise ScenarioDecisionRejected("scenario plan was cancelled manually")
+
+    async def async_register_manual_intent(
+        self,
+        request_id: str,
+        target_id: str,
+        action_id: str,
+        value: object | None,
+    ) -> None:
+        """Fence automatic work before the public manual path waits on light lock."""
+
+        if (
+            not _valid_id(request_id)
+            or not _valid_id(target_id)
+            or not _valid_id(action_id)
+            or not _valid_manual_value(value)
+        ):
+            raise ScenarioDecisionRejected("manual intent is invalid")
+
+        def matching_intent(payload: Mapping[str, object]) -> Mapping[str, object] | None:
+            return next(
+                (
+                    item
+                    for item in reversed(payload["manualIntents"])
+                    if item["requestId"] == request_id
+                ),
+                None,
+            )
+
+        def is_same(item: Mapping[str, object]) -> bool:
+            return (
+                item.get("targetId") == target_id
+                and item.get("actionId") == action_id
+                and item.get("value") == value
+            )
+
+        def affected_plans(payload: Mapping[str, object]) -> set[str]:
+            return {
+                str(record["planId"])
+                for record in self._history(payload)
+                if record["status"] in {"prepared", "dispatching"}
+                and isinstance(record.get("action"), Mapping)
+                and record["action"].get("targetId") == target_id
+            }
+
+        payload = self._loaded()
+        existing = matching_intent(payload)
+        if existing is not None:
+            if is_same(existing):
+                return
+            raise ScenarioDecisionConflict("manual request content conflicts")
+        affected = affected_plans(payload)
+        for plan_id in affected:
+            self.cancellation_event(plan_id).set()
+        async with self._lock:
+            current = self._loaded()
+            existing = matching_intent(current)
+            if existing is not None:
+                if is_same(existing):
+                    return
+                raise ScenarioDecisionConflict("manual request content conflicts")
+            affected.update(affected_plans(current))
+            for plan_id in affected:
+                self.cancellation_event(plan_id).set()
+            # A response derived from any older snapshot cannot overwrite a
+            # manual fence or reintroduce wakeups, even if persistence fails.
+            self._snapshots.clear()
+            updated = copy.deepcopy(current)
+            for plan_id in affected:
+                record = self._find(updated, plan_id)
+                if record is not None and record["status"] in {"prepared", "dispatching"}:
+                    record["status"] = (
+                        "uncertain" if plan_id in self._dispatch_crossed else "cancelled"
+                    )
+                    record["updatedAtMs"] = self._now_ms()
+            manual = {
+                "requestId": request_id,
+                "targetId": target_id,
+                "actionId": action_id,
+                "value": copy.deepcopy(value),
+                "registeredAtMs": self._now_ms(),
+            }
+            updated["manualIntents"] = [
+                *updated["manualIntents"], manual
+            ][-_MAX_MANUAL_INTENTS:]
+            durable = dict(updated["durable"])
+            durable["wakeups"] = []
+            updated["durable"] = durable
+            await self._save(updated)
+            self._payload = updated
+
+    async def async_record_receipt(
+        self, plan_id: str, receipt: Mapping[str, object]
+    ) -> dict[str, object]:
+        """Bind one outcome and return the only permitted next-calculation event."""
+
+        if not _valid_receipt(receipt):
+            raise ScenarioDecisionRejected("scenario receipt is invalid")
+        async with self._lock:
+            current = self._loaded()
+            record = self._find(current, plan_id)
+            action = record.get("action") if record is not None else None
+            if record is None or not isinstance(action, Mapping):
+                raise ScenarioDecisionRejected("scenario receipt plan is invalid")
+            expected = {
+                "id": record["receiptId"],
+                "planId": plan_id,
+                "actionId": action["actionId"],
+                "targetId": action["targetId"],
+            }
+            if any(receipt.get(key) != value for key, value in expected.items()):
+                raise ScenarioDecisionRejected("scenario receipt binding is invalid")
+            status = receipt.get("status")
+            if status not in {"confirmed", "failed", "uncertain"}:
+                raise ScenarioDecisionRejected("scenario receipt status is invalid")
+            if status == "confirmed" and (
+                record["status"] != "dispatching"
+                or plan_id not in self._dispatch_crossed
+            ):
+                raise ScenarioDecisionRejected(
+                    "scenario receipt has no physical dispatch evidence"
+                )
+            if status == "confirmed" and (
+                type(receipt.get("observedRevision")) is not int
+                or int(receipt["observedRevision"]) <= int(action["observedRevision"])
+                or type(receipt.get("observedAtMs")) is not int
+            ):
+                raise ScenarioDecisionRejected("scenario receipt evidence is stale")
+            updated = copy.deepcopy(current)
+            changed = self._find(updated, plan_id)
+            assert changed is not None
+            changed["status"] = status
+            changed["receipt"] = copy.deepcopy(dict(receipt))
+            changed["updatedAtMs"] = self._now_ms()
+            durable = dict(updated["durable"])
+            durable["pendingReceiptId"] = None
+            updated["durable"] = durable
+            updated["receipts"] = [
+                *updated["receipts"], copy.deepcopy(dict(receipt))
+            ][-_MAX_RECEIPTS:]
+            await self._save(updated)
+            self._payload = updated
+            event = {
+                "id": f"event.{record['receiptId']}",
+                "kind": "receipt",
+                "observedAtMs": self._now_ms(),
+                "targetId": action["targetId"],
+                "receiptId": record["receiptId"],
+            }
+            return {"status": status, "event": event, "receipt": copy.deepcopy(dict(receipt))}
+
+
+class TamburHaObservationCoordinator:
+    """Translate real HA state reports into contract observations, never policy."""
+
+    def __init__(
+        self,
+        hass: object,
+        *,
+        bindings: Mapping[str, object],
+        entity_id_provider: Callable[[str], str | None],
+        settings: Mapping[str, object],
+        settings_revision: int,
+        authority_provider: Callable[[str], object],
+        freshness_deadline_provider: Callable[[str, str, int], object],
+        now_ms: Callable[[], int],
+        timezone_name: str | None = None,
+        sunset_provider: Callable[[str], object] | None = None,
+        track_state_changes: Callable[..., Callable[[], None]] | None = None,
+        track_state_reports: Callable[..., Callable[[], None]] | None = None,
+    ) -> None:
+        if not all(
+            callable(candidate)
+            for candidate in (
+                entity_id_provider,
+                authority_provider,
+                freshness_deadline_provider,
+                now_ms,
+            )
+        ):
+            raise TypeError("Tambur observation providers are invalid")
+        configured_timezone = timezone_name or getattr(
+            getattr(hass, "config", None), "time_zone", None
+        )
+        if not isinstance(configured_timezone, str) or not configured_timezone:
+            raise ValueError("Tambur Home Assistant timezone is unavailable")
+        self._timezone = ZoneInfo(configured_timezone)
+        self._hass = hass
+        self._bindings = copy.deepcopy(dict(bindings))
+        self._settings = copy.deepcopy(dict(settings))
+        self._settings_revision = settings_revision
+        self._entity_id_provider = entity_id_provider
+        self._authority_provider = authority_provider
+        self._freshness_deadline_provider = freshness_deadline_provider
+        self._now_ms = now_ms
+        self._sunset_provider = sunset_provider or self._ha_sunset_for_date
+        self._track_changes = track_state_changes
+        self._track_reports = track_state_reports
+        self._running = False
+        self._continuity_generation = 0
+        self._sequence = 0
+        self._observed: dict[str, dict[str, object]] = {}
+        self._reasons: dict[str, str] = {}
+        self._unsubscribers: list[Callable[[], None]] = []
+        targets = [
+            self._bindings.get("chandelier"),
+            self._bindings.get("points"),
+            self._bindings.get("mirror"),
+            *(self._bindings.get("presenceSensors") or []),
+        ]
+        self._target_entities = {
+            str(target): entity
+            for target in targets
+            if isinstance(target, str)
+            and isinstance((entity := entity_id_provider(target)), str)
+        }
+        self._entity_targets = {
+            entity: target for target, entity in self._target_entities.items()
+        }
+
+    def _ha_sunset_for_date(self, local_date: str) -> int | None:
+        try:
+            from homeassistant.const import SUN_EVENT_SUNSET
+            from homeassistant.helpers.sun import get_astral_event_date
+
+            requested = date.fromisoformat(local_date)
+            observed = get_astral_event_date(self._hass, SUN_EVENT_SUNSET, requested)
+        except (ImportError, RuntimeError, TypeError, ValueError):
+            return None
+        if not isinstance(observed, datetime):
+            return None
+        if observed.tzinfo is None:
+            observed = observed.replace(tzinfo=timezone.utc)
+        return int(observed.timestamp() * 1000)
+
+    def start(self) -> Callable[[], None]:
+        """Subscribe explicitly; construction alone never activates the controller."""
+
+        if self._running:
+            raise RuntimeError("Tambur observation coordinator is already active")
+        if self._track_changes is None or self._track_reports is None:
+            from homeassistant.helpers.event import (
+                async_track_state_change_event,
+                async_track_state_report_event,
+            )
+
+            self._track_changes = async_track_state_change_event
+            self._track_reports = async_track_state_report_event
+        self._running = True
+        self._continuity_generation += 1
+        entities = tuple(self._entity_targets)
+        self._unsubscribers = [
+            self._track_changes(self._hass, entities, self._record_event),
+            self._track_reports(self._hass, entities, self._record_event),
+        ]
+
+        def stop() -> None:
+            if not self._running:
+                return
+            self._running = False
+            self._continuity_generation += 1
+            for unsubscribe in self._unsubscribers:
+                unsubscribe()
+            self._unsubscribers.clear()
+
+        return stop
+
+    def _record_event(self, event: object) -> None:
+        data = getattr(event, "data", None)
+        if not self._running or not isinstance(data, Mapping):
+            return
+        state = data.get("new_state")
+        entity_id = data.get("entity_id") or getattr(state, "entity_id", None)
+        target_id = self._entity_targets.get(str(entity_id))
+        if target_id is None or state is None:
+            return
+        reported = data.get("last_reported") or getattr(state, "last_reported", None)
+        reported_ms: int | None = None
+        if isinstance(reported, datetime):
+            if reported.tzinfo is None:
+                reported = reported.replace(tzinfo=timezone.utc)
+            reported_ms = int(reported.timestamp() * 1000)
+        self._sequence += 1
+        self._observed[target_id] = {
+            "state": str(getattr(state, "state", "unknown")),
+            "attributes": copy.deepcopy(getattr(state, "attributes", {})),
+            "reportedAtMs": reported_ms,
+            "revision": self._sequence,
+            "continuityGeneration": self._continuity_generation,
+        }
+
+    def freshness_reason(self, target_id: str) -> str:
+        return self._reasons.get(target_id, "continuity_not_observed")
+
+    async def _observation(
+        self, target_id: str, entity_id: str, observation_epoch: int
+    ) -> dict[str, object]:
+        recorded = self._observed.get(target_id)
+        current_state = getattr(getattr(self._hass, "states", None), "get", lambda _id: None)(entity_id)
+        state_value = str(getattr(current_state, "state", "unknown"))
+        revision = int(recorded["revision"]) if recorded is not None else 0
+        observed_at = int(recorded["reportedAtMs"] or 0) if recorded is not None else 0
+        reason = "continuity_not_observed"
+        fresh = False
+        if not self._running:
+            reason = "continuity_broken"
+        elif recorded is None or recorded.get("continuityGeneration") != self._continuity_generation:
+            reason = "continuity_not_observed"
+        elif str(recorded.get("state")) in _UNAVAILABLE_STATES or state_value in _UNAVAILABLE_STATES:
+            reason = f"state_{state_value if state_value in _UNAVAILABLE_STATES else recorded['state']}"
+        elif str(recorded.get("state")) != state_value:
+            reason = "continuity_broken"
+        elif recorded.get("reportedAtMs") is None:
+            reason = "last_reported_missing"
+        else:
+            try:
+                deadline = await _maybe_await(
+                    self._freshness_deadline_provider(
+                        target_id, entity_id, observed_at
+                    )
+                )
+            except Exception:  # noqa: BLE001 - provider failure is safety evidence
+                reason = "freshness_deadline_unavailable"
+            else:
+                if deadline is None:
+                    reason = "freshness_deadline_missing"
+                elif type(deadline) is not int:
+                    reason = "freshness_deadline_invalid"
+                elif int(deadline) < self._now_ms():
+                    reason = "freshness_deadline_expired"
+                else:
+                    reason = "fresh"
+                    fresh = True
+        self._reasons[target_id] = reason
+        attributes = recorded.get("attributes", {}) if recorded is not None else {}
+        result: dict[str, object] = {
+            "state": state_value,
+            "revision": revision,
+            "observedAtMs": observed_at,
+            "fresh": fresh,
+            "continuityEpoch": observation_epoch if fresh else 0,
+        }
+        if isinstance(attributes, Mapping):
+            brightness = attributes.get("brightness")
+            if type(brightness) is int and 0 <= brightness <= 255:
+                result["brightnessPercent"] = round(brightness * 100 / 255)
+            kelvin = attributes.get("color_temp_kelvin")
+            if type(kelvin) is int and 1500 <= kelvin <= 10000:
+                result["colorTemperatureKelvin"] = kelvin
+        return result
+
+    async def async_snapshot_source(
+        self, scenario_id: str, event: object, observation_epoch: int
+    ) -> dict[str, object]:
+        """Build only evidence and configuration fields; Node-RED owns policy."""
+
+        if scenario_id != TAMBUR_DECISION_SCENARIO_ID:
+            raise ScenarioDecisionRejected("Tambur snapshot scenario is invalid")
+        now = self._now_ms()
+        local = datetime.fromtimestamp(now / 1000, timezone.utc).astimezone(self._timezone)
+        local_date = local.date().isoformat()
+        sunset = await _maybe_await(self._sunset_provider(local_date))
+        sunset_ms = sunset if type(sunset) is int and sunset >= 0 else None
+        observations = {
+            target: await self._observation(target, entity, observation_epoch)
+            for target, entity in self._target_entities.items()
+        }
+        light_targets = [
+            self._bindings[name] for name in ("chandelier", "points", "mirror")
+        ]
+        authority: dict[str, object] = {}
+        allowed_authority_keys = {
+            "owner", "generation", "protectionActive", "confirmedReceiptId",
+            "confirmedStateRevision", "lastManualAtMs", "protectedUntilMs",
+            "manualOnHoldUntilMs",
+        }
+        for target in light_targets:
+            value = await _maybe_await(self._authority_provider(str(target)))
+            if not isinstance(value, Mapping):
+                value = {"owner": "uncertain", "generation": 0, "protectionActive": True}
+            authority[str(target)] = {
+                key: copy.deepcopy(item)
+                for key, item in value.items()
+                if key in allowed_authority_keys
+            }
+        return {
+            "settingsRevision": self._settings_revision,
+            "issuedAtMs": now,
+            "expiresAtMs": now + 60_000,
+            "clock": {
+                "nowMs": now,
+                "timezone": self._timezone.key,
+                "localDate": local_date,
+                "minutesOfDay": local.hour * 60 + local.minute,
+                "sunsetAtMs": sunset_ms,
+            },
+            "bindings": copy.deepcopy(self._bindings),
+            "settings": copy.deepcopy(self._settings),
+            "observations": observations,
+            "authority": authority,
+        }
