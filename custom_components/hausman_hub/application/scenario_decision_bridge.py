@@ -374,8 +374,12 @@ class ScenarioDecisionBridge:
         self._dispatch_crossed: set[str] = set()
         proof_state: dict[str, dict[str, object]] = {}
 
+        def clear_evidence() -> None:
+            proof_state.clear()
+
         def record_evidence(
             *,
+            decision_observation_epoch: object,
             plan_id: str,
             decision_action_id: str,
             receipt_id: str,
@@ -385,9 +389,32 @@ class ScenarioDecisionBridge:
             result: Mapping[str, object],
         ) -> None:
             payload = self._loaded()
+            record = self._find(payload, plan_id)
+            action = record.get("action") if record is not None else None
+            persistent_decision = (
+                record.get("decision") if record is not None else None
+            )
+            if (
+                type(decision_observation_epoch) is not int
+                or decision_observation_epoch != payload["observationEpoch"]
+                or record is None
+                or record.get("status") != "dispatching"
+                or not isinstance(action, Mapping)
+                or not isinstance(persistent_decision, Mapping)
+                or persistent_decision.get("observationEpoch")
+                != decision_observation_epoch
+                or record.get("planId") != plan_id
+                or action.get("id") != decision_action_id
+                or record.get("receiptId") != receipt_id
+                or action.get("targetId") != target_id
+                or action.get("actionId") != action_id
+                or action.get("value") != value
+                or plan_id not in self._dispatch_crossed
+            ):
+                return
             read_back = result.get("read_back")
             proof_state[plan_id] = {
-                "observationEpoch": payload["observationEpoch"],
+                "observationEpoch": decision_observation_epoch,
                 "planId": plan_id,
                 "decisionActionId": decision_action_id,
                 "receiptId": receipt_id,
@@ -534,7 +561,67 @@ class ScenarioDecisionBridge:
                     "receipt": copy.deepcopy(stored_receipt),
                 }
 
+        async def async_recover() -> dict[str, object]:
+            """Load exact storage and invalidate work that crossed a restart."""
+
+            async with self._lock:
+                load = getattr(self._store, "async_load", None)
+                if not callable(load):
+                    raise RuntimeError(
+                        "scenario decision bridge store is unavailable"
+                    )
+                loaded = await load()
+                if getattr(self._store, "recovered_previous", False):
+                    raise RuntimeError(
+                        "scenario decision bridge previous generation is ambiguous"
+                    )
+                if loaded is None:
+                    payload = _initial_payload()
+                    await self._save(payload)
+                else:
+                    if not valid_scenario_decision_bridge_payload(loaded):
+                        raise RuntimeError(
+                            "scenario decision bridge store is corrupt"
+                        )
+                    payload = copy.deepcopy(dict(loaded))
+                    payload["observationEpoch"] = (
+                        int(payload["observationEpoch"]) + 1
+                    )
+                    durable = dict(payload["durable"])
+                    durable.update(
+                        absenceSinceMs=None,
+                        absenceEpoch=None,
+                        pendingReceiptId=None,
+                        wakeups=[],
+                    )
+                    payload["durable"] = durable
+                    for record in payload["history"]:
+                        if record["status"] == "prepared":
+                            record["status"] = "cancelled"
+                            record["updatedAtMs"] = self._now_ms()
+                        elif record["status"] == "dispatching":
+                            record["status"] = "uncertain"
+                            record["receipt"] = self._terminal_receipt(
+                                record, "uncertain"
+                            )
+                            self._replace_recent_receipt(
+                                payload, record["receipt"]
+                            )
+                            record["updatedAtMs"] = self._now_ms()
+                    await self._save(payload)
+                self._payload = payload
+                clear_evidence()
+                self._snapshots.clear()
+                self._dispatch_crossed.clear()
+                self._cancellations = {
+                    str(item["planId"]): asyncio.Event()
+                    for item in payload["history"]
+                    if item["status"] in {"prepared", "dispatching"}
+                }
+                return copy.deepcopy(payload)
+
         self.async_record_receipt = async_record_receipt
+        self.async_recover = async_recover
         self._tambur_execution: Callable[
             [Mapping[str, object]], Awaitable[dict[str, object]]
         ] | None = None
@@ -562,56 +649,6 @@ class ScenarioDecisionBridge:
         if self._payload is None:
             raise RuntimeError("scenario decision bridge is not recovered")
         return self._payload
-
-    async def async_recover(self) -> dict[str, object]:
-        """Load exact storage and invalidate work that crossed a restart."""
-
-        async with self._lock:
-            load = getattr(self._store, "async_load", None)
-            if not callable(load):
-                raise RuntimeError("scenario decision bridge store is unavailable")
-            loaded = await load()
-            if getattr(self._store, "recovered_previous", False):
-                raise RuntimeError(
-                    "scenario decision bridge previous generation is ambiguous"
-                )
-            if loaded is None:
-                payload = _initial_payload()
-                await self._save(payload)
-            else:
-                if not valid_scenario_decision_bridge_payload(loaded):
-                    raise RuntimeError("scenario decision bridge store is corrupt")
-                payload = copy.deepcopy(dict(loaded))
-                payload["observationEpoch"] = int(payload["observationEpoch"]) + 1
-                durable = dict(payload["durable"])
-                durable.update(
-                    absenceSinceMs=None,
-                    absenceEpoch=None,
-                    pendingReceiptId=None,
-                    wakeups=[],
-                )
-                payload["durable"] = durable
-                for record in payload["history"]:
-                    if record["status"] == "prepared":
-                        record["status"] = "cancelled"
-                        record["updatedAtMs"] = self._now_ms()
-                    elif record["status"] == "dispatching":
-                        record["status"] = "uncertain"
-                        record["receipt"] = self._terminal_receipt(
-                            record, "uncertain"
-                        )
-                        self._replace_recent_receipt(payload, record["receipt"])
-                        record["updatedAtMs"] = self._now_ms()
-                await self._save(payload)
-            self._payload = payload
-            self._snapshots.clear()
-            self._dispatch_crossed.clear()
-            self._cancellations = {
-                str(item["planId"]): asyncio.Event()
-                for item in payload["history"]
-                if item["status"] in {"prepared", "dispatching"}
-            }
-            return copy.deepcopy(payload)
 
     async def async_snapshot(
         self, scenario_id: str, event: object

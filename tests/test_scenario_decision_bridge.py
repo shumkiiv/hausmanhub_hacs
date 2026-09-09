@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import gc
 import inspect
 import unittest
+import weakref
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -500,10 +502,312 @@ class ScenarioDecisionBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(
             hasattr(ScenarioDecisionBridge, "_trusted_executor_evidence")
         )
+        self.assertFalse(hasattr(bridge, "_clear_executor_evidence"))
+        self.assertFalse(hasattr(ScenarioDecisionBridge, "_clear_executor_evidence"))
+        self.assertFalse(
+            hasattr(scenario_decision_bridge, "_clear_executor_evidence")
+        )
         self.assertEqual(
             ["decision"],
             list(inspect.signature(bridge.async_execute_decision).parameters),
         )
+
+    async def test_recovery_clears_multiple_preexisting_executor_proofs(self) -> None:
+        source = SnapshotSource()
+        states = _MultiExecutorStates()
+        marker_one = _EvidenceText("evidence.proof.one")
+        marker_two = _EvidenceText("evidence.proof.two")
+        marker_one_ref = weakref.ref(marker_one)
+        marker_two_ref = weakref.ref(marker_two)
+        stamp_one = _EvidenceDateTime(marker_one, NOW + 1_001)
+        stamp_two = _EvidenceDateTime(marker_two, NOW + 1_002)
+
+        def advance(target_id: str, stamp: datetime) -> None:
+            source.authorities[target_id].update(
+                observedRevision=23 if target_id == CHAND else 24,
+                observedAtMs=NOW + 555,
+                evidenceRevision=stamp.isoformat(),
+            )
+
+        services = _BarrierExecutorServices(
+            states,
+            (stamp_one, stamp_two),
+            advance,
+        )
+        executor = _multi_target_executor(states, services)
+        note_entered = [asyncio.Event(), asyncio.Event()]
+        note_call = 0
+
+        async def block_after_proof(*_args: object, **_kwargs: object) -> None:
+            nonlocal note_call
+            current = note_call
+            note_call += 1
+            note_entered[current].set()
+            await asyncio.Event().wait()
+
+        executor._light_priority.note_results = block_after_proof
+        bridge, _store, _source = await loaded_bridge(
+            source=source, executor=executor
+        )
+
+        tasks: list[asyncio.Task[dict[str, object]]] = []
+        for index, target_id in enumerate((CHAND, POINTS)):
+            request = await bridge.async_snapshot(
+                SCENARIO_ID, event(ident=f"presence.proof.{index}")
+            )
+            plan = decision(request)
+            plan["action"]["targetId"] = target_id
+            plan["action"]["authorityGeneration"] = 2 + index
+            plan["action"]["observedRevision"] = 11 + index
+            task = asyncio.create_task(bridge.async_execute_decision(plan))
+            await asyncio.wait_for(note_entered[index].wait(), 0.5)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            tasks.append(task)
+
+        await bridge.async_recover()
+        states.release_evidence()
+        source.authorities[CHAND]["evidenceRevision"] = "released.one"
+        source.authorities[POINTS]["evidenceRevision"] = "released.two"
+        services.release_evidence()
+        del tasks, task, stamp_one, stamp_two, marker_one, marker_two
+        gc.collect()
+
+        self.assertIsNone(marker_one_ref())
+        self.assertIsNone(marker_two_ref())
+
+    async def test_late_executor_proof_after_recovery_is_ignored(self) -> None:
+        source = SnapshotSource()
+        states = _MultiExecutorStates()
+        marker = _EvidenceText("evidence.late.response")
+        marker_ref = weakref.ref(marker)
+        stamp = _EvidenceDateTime(marker, NOW + 1_003)
+        response_entered = asyncio.Event()
+        release_response = asyncio.Event()
+        note_entered = asyncio.Event()
+
+        def advance(target_id: str, evidence_stamp: datetime) -> None:
+            source.authorities[target_id].update(
+                observedRevision=23,
+                observedAtMs=NOW + 555,
+                evidenceRevision=evidence_stamp.isoformat(),
+            )
+
+        services = _BarrierExecutorServices(
+            states,
+            (stamp,),
+            advance,
+            response_entered=response_entered,
+            release_response=release_response,
+        )
+        executor = _multi_target_executor(states, services, targets=(CHAND,))
+
+        async def block_after_writer(*_args: object, **_kwargs: object) -> None:
+            note_entered.set()
+            await asyncio.Event().wait()
+
+        executor._light_priority.note_results = block_after_writer
+        bridge, _store, _source = await loaded_bridge(
+            source=source, executor=executor
+        )
+        request = await bridge.async_snapshot(SCENARIO_ID, event())
+        plan = decision(request)
+        execution = asyncio.create_task(bridge.async_execute_decision(plan))
+        await asyncio.wait_for(response_entered.wait(), 0.5)
+
+        await bridge.async_recover()
+        release_response.set()
+        await asyncio.wait_for(note_entered.wait(), 0.5)
+        execution.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await execution
+
+        states.release_evidence()
+        source.authorities[CHAND]["evidenceRevision"] = "released.late"
+        services.release_evidence()
+        del execution, stamp, marker
+        gc.collect()
+
+        self.assertIsNone(marker_ref())
+
+    async def test_response_during_blocked_recovery_save_is_cleared(self) -> None:
+        source = SnapshotSource()
+        store = BlockingSaveStore()
+        states = _MultiExecutorStates()
+        marker = _EvidenceText("evidence.blocked.recovery")
+        marker_ref = weakref.ref(marker)
+        stamp = _EvidenceDateTime(marker, NOW + 1_004)
+        response_entered = asyncio.Event()
+        release_response = asyncio.Event()
+        note_entered = asyncio.Event()
+
+        def advance(target_id: str, evidence_stamp: datetime) -> None:
+            source.authorities[target_id].update(
+                observedRevision=23,
+                observedAtMs=NOW + 555,
+                evidenceRevision=evidence_stamp.isoformat(),
+            )
+
+        services = _BarrierExecutorServices(
+            states,
+            (stamp,),
+            advance,
+            response_entered=response_entered,
+            release_response=release_response,
+        )
+        executor = _multi_target_executor(states, services, targets=(CHAND,))
+
+        async def block_after_writer(*_args: object, **_kwargs: object) -> None:
+            note_entered.set()
+            await asyncio.Event().wait()
+
+        executor._light_priority.note_results = block_after_writer
+        bridge, _store, _source = await loaded_bridge(
+            store=store, source=source, executor=executor
+        )
+        request = await bridge.async_snapshot(SCENARIO_ID, event())
+        execution = asyncio.create_task(
+            bridge.async_execute_decision(decision(request))
+        )
+        await asyncio.wait_for(response_entered.wait(), 0.5)
+        store.block_next_save = True
+        recovery = asyncio.create_task(bridge.async_recover())
+        await asyncio.wait_for(store.save_entered.wait(), 0.5)
+
+        release_response.set()
+        await asyncio.wait_for(note_entered.wait(), 0.5)
+        store.release_save.set()
+        await asyncio.wait_for(recovery, 0.5)
+        execution.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await execution
+
+        states.release_evidence()
+        source.authorities[CHAND]["evidenceRevision"] = "released.blocked"
+        services.release_evidence()
+        del execution, recovery, stamp, marker
+        gc.collect()
+
+        self.assertIsNone(marker_ref())
+
+    async def test_failed_recovery_save_keeps_epoch_and_valid_executor_proof(self) -> None:
+        source = SnapshotSource()
+        store = MemoryStore()
+        states = _MultiExecutorStates()
+        marker = _EvidenceText("evidence.failed.recovery")
+        stamp = _EvidenceDateTime(marker, NOW + 1_005)
+        note_entered = asyncio.Event()
+
+        def advance(target_id: str, evidence_stamp: datetime) -> None:
+            source.authorities[target_id].update(
+                observedRevision=23,
+                observedAtMs=NOW + 555,
+                evidenceRevision=evidence_stamp.isoformat(),
+            )
+
+        services = _BarrierExecutorServices(states, (stamp,), advance)
+        executor = _multi_target_executor(states, services, targets=(CHAND,))
+
+        async def block_after_writer(*_args: object, **_kwargs: object) -> None:
+            note_entered.set()
+            await asyncio.Event().wait()
+
+        executor._light_priority.note_results = block_after_writer
+        bridge, _store, _source = await loaded_bridge(
+            store=store, source=source, executor=executor
+        )
+        request = await bridge.async_snapshot(SCENARIO_ID, event())
+        plan = decision(request)
+        execution = asyncio.create_task(bridge.async_execute_decision(plan))
+        await asyncio.wait_for(note_entered.wait(), 0.5)
+        execution.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await execution
+
+        store.fail_saves = True
+        with self.assertRaises(OSError):
+            await bridge.async_recover()
+        store.fail_saves = False
+        after_failure = await bridge.async_snapshot(
+            SCENARIO_ID, event(ident="presence.after.failed.recovery")
+        )
+        self.assertEqual(request["observationEpoch"], after_failure["observationEpoch"])
+
+        record = store.value["history"][-1]
+        result = await bridge.async_record_receipt(
+            str(plan["planId"]),
+            {
+                "id": record["receiptId"],
+                "planId": plan["planId"],
+                "actionId": "turn_on",
+                "targetId": CHAND,
+                "status": "confirmed",
+            },
+        )
+
+        self.assertEqual("confirmed", result["status"])
+        self.assertEqual("confirmed", store.value["history"][-1]["status"])
+
+    async def test_repeated_recovery_allows_one_new_epoch_execution_once(self) -> None:
+        source = SnapshotSource()
+        states = _ExecutorStates()
+        current_epoch = [1]
+
+        def advance_bridge_observation() -> None:
+            source.authorities[CHAND].update(
+                observedRevision=23,
+                observedAtMs=NOW + 555,
+                evidenceRevision=states.value.last_updated.isoformat(),
+                observationEpoch=current_epoch[0],
+            )
+
+        services = _ExecutorServices(states, advance_bridge_observation)
+        executor = ScenarioExecutor(
+            SimpleNamespace(states=states, services=services),
+            ScenarioCatalog(
+                devices={
+                    CHAND: ScenarioDeviceEntry(
+                        CHAND,
+                        "Люстра",
+                        "light.chandelier",
+                        (
+                            ScenarioDeviceAction(
+                                "turn_on",
+                                "Включить",
+                                "light",
+                                "turn_on",
+                                frozenset(),
+                            ),
+                        ),
+                    )
+                },
+                scenarios={},
+            ),
+            lambda *_args, **_kwargs: None,
+            readback_window_seconds=0.02,
+            readback_interval_seconds=0.01,
+        )
+        bridge, store, _source = await loaded_bridge(
+            source=source, executor=executor
+        )
+        await bridge.async_recover()
+        recovered = await bridge.async_recover()
+        current_epoch[0] = int(recovered["observationEpoch"])
+        source.authorities[CHAND]["observationEpoch"] = current_epoch[0]
+        request = await bridge.async_snapshot(
+            SCENARIO_ID, event(ident="presence.new.epoch")
+        )
+        plan = decision(request)
+
+        first = await bridge.async_execute_decision(plan)
+        replay = await bridge.async_execute_decision(copy.deepcopy(plan))
+
+        self.assertEqual("confirmed", first["status"])
+        self.assertEqual("confirmed", replay["status"])
+        self.assertTrue(replay["replayed"])
+        self.assertEqual(1, len(services.calls))
+        self.assertEqual("confirmed", store.value["history"][-1]["status"])
 
     async def test_fake_executor_or_factory_cannot_bind_a_bridge(self) -> None:
         source = SnapshotSource()
@@ -1122,6 +1426,126 @@ class _ExecutorServices:
         )
         if self._on_dispatch is not None:
             self._on_dispatch()
+
+
+class _EvidenceText(str):
+    __slots__ = ("__weakref__",)
+
+
+class _EvidenceDateTime(datetime):
+    def __new__(cls, marker: _EvidenceText, observed_at_ms: int):
+        stamp = datetime.fromtimestamp(observed_at_ms / 1000, timezone.utc)
+        value = super().__new__(
+            cls,
+            stamp.year,
+            stamp.month,
+            stamp.day,
+            stamp.hour,
+            stamp.minute,
+            stamp.second,
+            stamp.microsecond,
+            tzinfo=timezone.utc,
+        )
+        value._marker = marker
+        return value
+
+    def isoformat(self, *args: object, **kwargs: object) -> str:
+        return self._marker
+
+
+class _MultiExecutorStates:
+    def __init__(self) -> None:
+        stamp = datetime.fromtimestamp(NOW / 1000, timezone.utc)
+        self.values = {
+            "light.chandelier": self._state("light.chandelier", "off", stamp),
+            "light.points": self._state("light.points", "off", stamp),
+        }
+
+    @staticmethod
+    def _state(entity_id: str, state: str, stamp: datetime) -> object:
+        return SimpleNamespace(
+            entity_id=entity_id,
+            state=state,
+            attributes={},
+            last_changed=stamp,
+            last_updated=stamp,
+            last_reported=stamp,
+        )
+
+    def get(self, entity_id: str) -> object | None:
+        return self.values.get(entity_id)
+
+    def set_on(self, entity_id: str, stamp: datetime) -> None:
+        self.values[entity_id] = self._state(entity_id, "on", stamp)
+
+    def release_evidence(self) -> None:
+        stamp = datetime.fromtimestamp((NOW + 2_000) / 1000, timezone.utc)
+        for entity_id, state in tuple(self.values.items()):
+            self.values[entity_id] = self._state(entity_id, state.state, stamp)
+
+
+class _BarrierExecutorServices:
+    def __init__(
+        self,
+        states: _MultiExecutorStates,
+        evidence_stamps: tuple[datetime, ...],
+        on_dispatch,
+        *,
+        response_entered: asyncio.Event | None = None,
+        release_response: asyncio.Event | None = None,
+    ) -> None:
+        self._states = states
+        self._evidence_stamps = list(evidence_stamps)
+        self._on_dispatch = on_dispatch
+        self._response_entered = response_entered
+        self._release_response = release_response
+        self.calls: list[tuple[str, str, dict[str, object]]] = []
+
+    async def async_call(
+        self, domain: str, service: str, data: dict[str, object], **_kwargs: object
+    ) -> None:
+        self.calls.append((domain, service, copy.deepcopy(data)))
+        entity_id = str(data["entity_id"])
+        stamp = self._evidence_stamps.pop(0)
+        self._states.set_on(entity_id, stamp)
+        target_id = CHAND if entity_id == "light.chandelier" else POINTS
+        self._on_dispatch(target_id, stamp)
+        if self._response_entered is not None:
+            self._response_entered.set()
+        if self._release_response is not None:
+            await self._release_response.wait()
+
+    def release_evidence(self) -> None:
+        self._evidence_stamps.clear()
+
+
+def _multi_target_executor(
+    states: _MultiExecutorStates,
+    services: _BarrierExecutorServices,
+    *,
+    targets: tuple[str, ...] = (CHAND, POINTS),
+) -> ScenarioExecutor:
+    action = ScenarioDeviceAction(
+        "turn_on", "Включить", "light", "turn_on", frozenset()
+    )
+    entries = {
+        CHAND: ScenarioDeviceEntry(
+            CHAND, "Люстра", "light.chandelier", (action,)
+        ),
+        POINTS: ScenarioDeviceEntry(
+            POINTS, "Точки", "light.points", (action,)
+        ),
+    }
+    return ScenarioExecutor(
+        SimpleNamespace(states=states, services=services),
+        ScenarioCatalog(
+            devices={target_id: entries[target_id] for target_id in targets},
+            scenarios={},
+        ),
+        lambda *_args, **_kwargs: None,
+        readback_window_seconds=0.02,
+        readback_interval_seconds=0.01,
+    )
 
 
 class _ObservationHass:

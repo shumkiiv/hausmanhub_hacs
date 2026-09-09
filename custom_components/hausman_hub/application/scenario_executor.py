@@ -725,6 +725,7 @@ class ScenarioExecutor:
         async def execute(
             decision: Mapping[str, object],
         ) -> dict[str, object]:
+            decision_observation_epoch = decision.get("observationEpoch")
             accepted = await bridge.async_accept(decision)
             action_payload = accepted.get("action")
             if accepted.get("replayed") is True:
@@ -801,6 +802,7 @@ class ScenarioExecutor:
                         force_new_readback=True,
                     )
                     record_evidence(
+                        decision_observation_epoch=decision_observation_epoch,
                         plan_id=plan_id,
                         decision_action_id=decision_action_id,
                         receipt_id=str(accepted["receiptId"]),
