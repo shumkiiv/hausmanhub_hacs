@@ -24,7 +24,9 @@ VENDORED_CONTRACT_HASHES = {
     "custom_components/hausman_hub/contracts/v1/climate-reliability-semantic-rules.json": "1dbd75b40be1cfb5d1c23fce79819a047ba7a28556938782150dabeb88b6a6b2",
     "custom_components/hausman_hub/contracts/v1/climate-room-recovery-receipt.schema.json": "d34b54a177fcc5c77cd48d28233f4f90e6fde07e17596cfdbe27bde4c56246fe",
     "custom_components/hausman_hub/contracts/v1/climate-room-recovery-request.schema.json": "80b560590455e94dd944c2a6bbcbb00b47528e95ce8d036d320d485d156579e9",
-    "custom_components/hausman_hub/contracts/v1/climate-runtime.schema.json": "964fa93b11fcee6bd5c705a5631af1609c44bd0324f5b022bc37fb86c61fbaa3",
+    "custom_components/hausman_hub/contracts/v1/climate-runtime.schema.json": "80a16fd958edc023530b56fbed17493c5d82eec20ef9099db337e3171e1cf07b",
+    "custom_components/hausman_hub/contracts/v1/climate-action-request.schema.json": "26c6ac39806aa4fad92b6a09b2cacaf9e15cc130c7639090af7f2ba7e75c2b49",
+    "custom_components/hausman_hub/contracts/v1/climate-operation-receipt.schema.json": "76e36d0ca8ca8a1f07c5ce434ffc08bfa80ded96117ea2a6ca0539c347a7e7e0",
     "fixtures/hausmanhub_climate_reliability_v1/climate-room-recovery-receipt.json": "b615ab5e034ca7fa97153b81a07c3bb062a0fe9d9224e94a3e6f080bab9c707e",
     "fixtures/hausmanhub_climate_reliability_v1/climate-room-recovery-request.json": "ddd81c5f38871f247466ffed040153eb2c77610885c6dfcd6345b598a5172957",
     "custom_components/hausman_hub/contracts/v1/scenario-definition.schema.json": "60e93c0e3a970c684a9a95acd471ffd9664652e61fc5e29f5f21c7463285ea57",
@@ -105,14 +107,14 @@ def test_external_contract_pin_is_explicit_and_canonical() -> None:
 
     assert pin == {
         "repository": "shumkiiv/hausmanhub-contracts",
-        "version": "0.65.1",
-        "commit": "648850e",
+        "version": "0.65.2",
+        "commit": "69fe733",
         "canonical": True,
         "role": "runtime-consumer",
     }
 
 
-def test_contract_0_65_1_vendored_files_match_canonical_hashes() -> None:
+def test_contract_0_65_2_vendored_files_match_canonical_hashes() -> None:
     for relative_path, expected_hash in VENDORED_CONTRACT_HASHES.items():
         payload = (REPOSITORY_ROOT / relative_path).read_bytes()
         assert hashlib.sha256(payload).hexdigest() == expected_hash, relative_path
