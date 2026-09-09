@@ -383,6 +383,10 @@ class ClimateRoomObservation:
     authority_eligible: bool = False
     cooling_allowed: bool | None = None
     heating_allowed: bool | None = None
+    # Native per-axis evidence; absent on legacy/imported observations.
+    # Aggregate room freshness is retained for existing policy consumers.
+    temperature_fresh: bool | None = None
+    humidity_fresh: bool | None = None
 
     def __post_init__(self) -> None:
         _stable_room(self.room_id, self.name)
@@ -422,6 +426,8 @@ class ClimateRoomObservation:
             raise ClimateObservationViolation("room authority must be boolean")
         _optional_bool(self.cooling_allowed, "cooling permission")
         _optional_bool(self.heating_allowed, "heating permission")
+        _optional_bool(self.temperature_fresh, "temperature freshness")
+        _optional_bool(self.humidity_fresh, "humidity freshness")
         if self.data_status is ClimateDataStatus.UNAVAILABLE and any(
             value is not None
             for value in (

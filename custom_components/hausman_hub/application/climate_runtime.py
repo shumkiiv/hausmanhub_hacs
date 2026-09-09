@@ -2996,7 +2996,10 @@ class ClimateRuntime:
             )
             return prior.receipt
         verified = build_contour_apply_plan(
-            contour_without_manual_devices(contour, self._manual_memory),
+            (
+                contour if prior.plan.desired_state_changes.requested_axes
+                else contour_without_manual_devices(contour, self._manual_memory)
+            ),
             self._registry,
             self.configuration.climate_bridge_mode,
             observation,
@@ -3005,6 +3008,10 @@ class ClimateRuntime:
             explicit_temperature_alignment=prior.plan.explicit_temperature_alignment,
             explicit_temperature_targets=dict(prior.plan.explicit_temperature_targets) or None,
             explicit_humidity_targets=dict(prior.plan.explicit_humidity_targets) or None,
+            manual_device_ids=(
+                self._effective_manual_target_device_ids(contour)
+                if prior.plan.desired_state_changes.requested_axes else frozenset()
+            ),
         )
         confirmed = len(verified.native_plan.initially_aligned_room_ids)
         if confirmed == len(verified.target_room_ids):
@@ -3055,8 +3062,11 @@ class ClimateRuntime:
                     reasons=("verification_unavailable",),
                 ).receipt
             verified = build_contour_apply_plan(
-                contour_without_manual_devices(
-                    self._climate_contour(), self._manual_memory
+                (
+                    self._climate_contour() if plan.desired_state_changes.requested_axes
+                    else contour_without_manual_devices(
+                        self._climate_contour(), self._manual_memory
+                    )
                 ),
                 self._registry,
                 self.configuration.climate_bridge_mode,
@@ -3066,6 +3076,12 @@ class ClimateRuntime:
                 explicit_temperature_alignment=plan.explicit_temperature_alignment,
                 explicit_temperature_targets=dict(plan.explicit_temperature_targets) or None,
                 explicit_humidity_targets=dict(plan.explicit_humidity_targets) or None,
+                # Requested targets preserve manual owners in their frozen
+                # scope. Read-back must classify them, not erase their axis.
+                manual_device_ids=(
+                    self._effective_manual_target_device_ids(self._climate_contour())
+                    if plan.desired_state_changes.requested_axes else frozenset()
+                ),
             )
             confirmed = len(verified.native_plan.initially_aligned_room_ids)
             if confirmed == len(plan.target_room_ids):
@@ -5117,7 +5133,19 @@ def _native_plan_resolved_scope(plan: ContourApplyPlan) -> dict[str, object]:
     """Return the canonical physical-owner scope of a frozen native plan."""
 
     target_ids = set(plan.target_room_ids)
+    # Explicit device gates already proved the requested axes and retain
+    # manual/off owners. The legacy automatic-policy projection may omit a
+    # room (for example on unrelated stale humidity), so it cannot own scope.
     rows = [
+        {
+            "room_id": room_id,
+            "device_ids": sorted(
+                gate.device_id for gate in plan.native_plan.device_gates
+                if gate.room_id == room_id
+            ),
+        }
+        for room_id in target_ids
+    ] if plan.native_plan.device_gates else [
         {
             "room_id": room.room_id,
             "device_ids": sorted(device.device_id for device in room.devices),

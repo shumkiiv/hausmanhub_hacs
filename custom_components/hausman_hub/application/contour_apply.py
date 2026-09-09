@@ -948,6 +948,17 @@ def build_contour_apply_plan(
     selected_room_ids = frozenset(
         assignment.room_id for assignment in assignments
     )
+    # A home target owns the union of its real actuator axes, not a promise
+    # that every room contains every actuator kind. Keep structural/authority
+    # validation in the native planner; only an absent kind is out of scope.
+    axis_room_ids = {
+        axis: _rooms_with_target_axis(assignments, registry, axis)
+        for axis in desired_state_changes.requested_axes
+    }
+    if any(not room_ids_for_axis for room_ids_for_axis in axis_room_ids.values()):
+        raise ContourApplyViolation("requested climate target axis has no configured owner")
+    temperature_room_ids = axis_room_ids.get(ClimateTargetAxis.TEMPERATURE, selected_room_ids)
+    humidity_room_ids = axis_room_ids.get(ClimateTargetAxis.HUMIDITY, selected_room_ids)
     try:
         native_plan = build_climate_application_plan(
             application_contour,
@@ -961,13 +972,14 @@ def build_contour_apply_plan(
                 {
                     room_id: target
                     for room_id, target in explicit_temperature_targets.items()
-                    if room_id in selected_room_ids
+                    if room_id in temperature_room_ids
                 }
                 if explicit_temperature_targets is not None
                 else (
                     {
                         assignment.room_id: assignment.target_temperature
                         for assignment in assignments
+                        if assignment.room_id in temperature_room_ids
                     }
                     if explicit_temperature_alignment or requested_temperature
                     else None
@@ -977,12 +989,13 @@ def build_contour_apply_plan(
                 {
                     room_id: target
                     for room_id, target in explicit_humidity_targets.items()
-                    if room_id in selected_room_ids
+                    if room_id in humidity_room_ids
                 }
                 if explicit_humidity_targets is not None
                 else {
                     assignment.room_id: assignment.target_humidity
                     for assignment in assignments
+                    if assignment.room_id in humidity_room_ids
                 }
                 if ClimateTargetAxis.HUMIDITY in desired_state_changes.requested_axes
                 else None
@@ -997,6 +1010,26 @@ def build_contour_apply_plan(
     if len(native_plan.strict_calls) > MAX_CONTOUR_APPLY_COMMANDS:
         raise ContourApplyViolation("contour apply has too many strict calls")
     return ContourApplyPlan(native_plan=native_plan)
+
+
+def _rooms_with_target_axis(
+    assignments: tuple[ClimateContourRoom, ...],
+    registry: ClimateRegistry,
+    axis: ClimateTargetAxis,
+) -> frozenset[str]:
+    kinds = (
+        {ClimateDeviceKind.HUMIDIFIER}
+        if axis is ClimateTargetAxis.HUMIDITY
+        else {ClimateDeviceKind.AIR_CONDITIONER, ClimateDeviceKind.RADIATOR_THERMOSTAT,
+              ClimateDeviceKind.FLOOR_HEATING}
+    )
+    return frozenset(
+        assignment.room_id for assignment in assignments
+        if any(
+            (device := registry.device(device_id)) is not None and device.kind in kinds
+            for device_id in assignment.device_ids
+        )
+    )
 
 
 def _temperature_only_application_contour(

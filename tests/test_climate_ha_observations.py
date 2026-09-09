@@ -952,6 +952,8 @@ class NativeHaObservationTest(unittest.TestCase):
         self.assertIsNotNone(room)
         assert room is not None
         self.assertIs(room.data_status, ClimateDataStatus.STALE)
+        self.assertIs(room.temperature_fresh, True)
+        self.assertIs(room.humidity_fresh, False)
 
     def test_multiple_temperature_sensors_aggregate_to_median(self) -> None:
         base = full_registry()

@@ -241,7 +241,18 @@ def _gate_explicit_device(
     leaf_can_defer = (
         observation.runtime_fresh
         and observed_room is not None
-        and observed_room.data_status.value == "fresh"
+        and (
+            observed_room.data_status.value == "fresh"
+            or (
+                # A temperature-only owner does not consume humidity. The
+                # native adapter must prove fresh temperature and identify
+                # the stale unrelated axis; legacy/unknown proof stays shut.
+                observed_room.data_status.value == "stale"
+                and temperature_owner and not humidity_owner
+                and observed_room.temperature_fresh is True
+                and observed_room.humidity_fresh is False
+            )
+        )
         and observed is not None
         and observed.room_id == room_id
         and (

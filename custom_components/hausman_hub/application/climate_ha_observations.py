@@ -252,6 +252,8 @@ def _room_observation(
         ),
         temperature=temperature,
         humidity=humidity,
+        temperature_fresh=temperature is not None and temperature_fresh,
+        humidity_fresh=humidity is not None and humidity_fresh,
         temperature_quality=(
             ClimateTemperatureQuality.NORMAL
             if temperature is not None
