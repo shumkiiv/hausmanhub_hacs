@@ -1,5 +1,24 @@
 # HausmanHub AI Context
 
+## Выпущен и установлен 1.52.235, 2026-09-09
+
+- Выпуск `v1.52.235` опубликован из `9642b28`. Он сохраняет серверное действие
+  возврата текущего ручного климатического контура в авто из `1.52.234` и
+  исправляет только подпись итогового браузерного отчёта. Contracts `0.65.2`
+  и private Android `1.0.278` опубликованы как совместимая комбинация.
+- Локально прошли 2324 unittest, 4 skipped, 72 pytest, critical coverage 75%
+  и 50 browser tests. GitHub Actions `34326173469` успешно подтвердил те же
+  серверные, coverage, browser и итоговую provenance-проверки.
+- До установки запрошены automatic backup и `homeassistant.check_config`.
+  Точная установка `v1.52.235` завершилась HTTP 200, затем installed/latest
+  стали `v1.52.235`. Один restart восстановил Home Assistant; повторная
+  `check_config` вернула HTTP 200. Физические климатические команды и новое
+  действие возврата в авто не вызывались.
+- После restart capabilities честно сообщают `climate_runtime.available=false`,
+  а `GET /climate/runtime` дважды вернул 503 `unavailable`. Read-only smoke
+  поэтому не прошёл. Это блокер отдельной read-only диагностики старта
+  climate runtime, а не причина повторять установку, restart или команды.
+
 ## Подготовлен исходный инкремент 1.52.234: возврат климата в автоматический контур, 2026-09-09
 
 - Добавлено additive-действие v1 `return_all_to_automatic`. Оно доступно
