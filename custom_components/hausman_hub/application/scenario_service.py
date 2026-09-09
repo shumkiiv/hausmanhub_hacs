@@ -841,6 +841,25 @@ class _TamburRoomMigrationTransaction:
     decision_created: bool
 
 
+class _TamburRoomMigrationOperationPermit:
+    """Opaque identity issued only by one scenario service instance."""
+
+    __slots__ = ()
+
+
+@dataclass(slots=True)
+class _TamburRoomMigrationOperationState:
+    owner: object
+    task: asyncio.Task[Any]
+    run: object
+    plan: object
+    permit: _TamburRoomMigrationOperationPermit
+    transaction: _TamburRoomMigrationTransaction | None
+    journal: Mapping[str, object] | None = None
+    cancelled: bool = False
+    used: bool = False
+
+
 def _legacy_input_target_ids_match(
     actual: tuple[str, ...],
     expected: tuple[str, ...],
@@ -973,6 +992,15 @@ class ScenarioService:
         self._tambur_room_migration_transaction: (
             _TamburRoomMigrationTransaction | None
         ) = None
+        self._tambur_room_migration_operation_states: list[
+            _TamburRoomMigrationOperationState
+        ] = []
+        self._tambur_room_migration_operation_state: (
+            _TamburRoomMigrationOperationState | None
+        ) = None
+        self._cancelled_tambur_room_migration_runs: list[
+            tuple[object, object]
+        ] = []
         self._path_metrics = ScenarioPathMetrics()
         self._scenario_content_revision_key: tuple[tuple[str, int], ...] | None = None
         self._scenario_content_revision: str | None = None
@@ -1822,6 +1850,112 @@ class ScenarioService:
             "topologyHash": topology_hash,
         }
 
+    def _issue_tambur_room_migration_operation_permit(
+        self,
+        plan: object,
+        *,
+        operation_run: object,
+    ) -> object:
+        """Issue one opaque, task-bound permit for one coordinator run."""
+
+        self._require_running()
+        task = asyncio.current_task()
+        if task is None:
+            raise ScenarioServiceError(
+                "Tambur migration operation has no task owner.", status=409
+            )
+        for state in self._tambur_room_migration_operation_states:
+            if state.run is operation_run:
+                return state.permit
+        permit = _TamburRoomMigrationOperationPermit()
+        state = _TamburRoomMigrationOperationState(
+            owner=self,
+            task=task,
+            run=operation_run,
+            plan=plan,
+            permit=permit,
+            transaction=self._tambur_room_migration_transaction,
+            cancelled=any(
+                cancelled_run is operation_run and cancelled_plan is plan
+                for cancelled_run, cancelled_plan in self._cancelled_tambur_room_migration_runs
+            ),
+        )
+        self._tambur_room_migration_operation_states.append(state)
+        self._tambur_room_migration_operation_state = state
+        return permit
+
+    def _bind_tambur_room_migration_operation_permit(
+        self,
+        plan: object,
+        *,
+        journal: Mapping[str, object],
+        operation_run: object,
+        operation_permit: object,
+    ) -> None:
+        """Bind a genuine permit to the exact journal and current transaction."""
+
+        state = self._require_tambur_room_migration_operation(
+            plan,
+            journal=journal,
+            operation_run=operation_run,
+            operation_permit=operation_permit,
+            journal_may_be_unbound=True,
+        )
+        state.journal = journal
+
+    def _cancel_tambur_room_migration_operation(
+        self,
+        plan: object,
+        *,
+        operation_run: object,
+    ) -> None:
+        """Make cancellation sticky in service-owned state for one run."""
+
+        if not any(
+            cancelled_run is operation_run and cancelled_plan is plan
+            for cancelled_run, cancelled_plan in self._cancelled_tambur_room_migration_runs
+        ):
+            self._cancelled_tambur_room_migration_runs.append(
+                (operation_run, plan)
+            )
+        for state in self._tambur_room_migration_operation_states:
+            if state.run is operation_run and state.plan is plan:
+                state.cancelled = True
+
+    def _require_tambur_room_migration_operation(
+        self,
+        plan: object,
+        *,
+        journal: Mapping[str, object],
+        operation_run: object,
+        operation_permit: object,
+        journal_may_be_unbound: bool = False,
+    ) -> _TamburRoomMigrationOperationState:
+        """Return only the exact live service-owned operation identity."""
+
+        state = self._tambur_room_migration_operation_state
+        task = asyncio.current_task()
+        if (
+            state is None
+            or state.owner is not self
+            or state.task is not task
+            or state.run is not operation_run
+            or state.plan is not plan
+            or state.permit is not operation_permit
+            or state.transaction is not self._tambur_room_migration_transaction
+            or state.used
+            or state.cancelled
+            or (
+                state.journal is not journal
+                and not (journal_may_be_unbound and state.journal is None)
+            )
+        ):
+            raise ScenarioServiceError(
+                "Tambur migration operation permit is invalid or cancelled.",
+                status=409,
+            )
+        return state
+
     async def async_capture_tambur_room_migration(
         self, plan: object
     ) -> dict[str, object]:
@@ -1931,6 +2065,8 @@ class ScenarioService:
         *,
         journal: Mapping[str, object],
         on_registry: Callable[[Mapping[str, object]], Awaitable[None]],
+        operation_run: object,
+        operation_permit: object,
     ) -> str:
         """CAS-replace only the Tambur Node-RED metadata."""
 
@@ -1949,6 +2085,12 @@ class ScenarioService:
             raise ScenarioServiceError("Tambur migration journal is invalid.", status=409)
         previous = ScenarioRegistry.from_storage(before["registry"])
         async with self._lock:
+            state = self._require_tambur_room_migration_operation(
+                plan,
+                journal=journal,
+                operation_run=operation_run,
+                operation_permit=operation_permit,
+            )
             if self._managed_switch_migration_transaction is not None:
                 raise ScenarioServiceError(
                     "Global migration transaction is active.", status=409
@@ -1961,12 +2103,23 @@ class ScenarioService:
                     raise ScenarioServiceError(
                         "Tambur registry CAS evidence changed.", status=409
                     ) from None
-                self._tambur_room_migration_transaction = (
-                    _TamburRoomMigrationTransaction(
-                        previous, registry, bool(staged.get("created"))
-                    )
+                transaction = self._tambur_room_migration_transaction
+                expected_transaction = _TamburRoomMigrationTransaction(
+                    previous, registry, bool(staged.get("created"))
                 )
+                if transaction is None:
+                    transaction = expected_transaction
+                    self._tambur_room_migration_transaction = transaction
+                elif transaction != expected_transaction:
+                    raise ScenarioServiceError(
+                        "Tambur migration transaction changed.", status=409
+                    )
+                state.transaction = transaction
                 return "completed"
+            if self._tambur_room_migration_transaction is not None:
+                raise ScenarioServiceError(
+                    "Tambur migration transaction is active.", status=409
+                )
             scenario_id = str(getattr(plan, "scenario_id"))
             scenario = registry.scenario(scenario_id)
             if scenario is None or not self._tambur_room_scenario_matches_plan(
@@ -1982,6 +2135,12 @@ class ScenarioService:
                         "Tambur migration target is missing.", status=409
                     )
             await self._async_tambur_decision_evidence()
+            self._require_tambur_room_migration_operation(
+                plan,
+                journal=journal,
+                operation_run=operation_run,
+                operation_permit=operation_permit,
+            )
             metadata = scenario.definition.node_red
             assert metadata is not None
             next_metadata = replace(
@@ -2014,16 +2173,36 @@ class ScenarioService:
                 "afterHash": _registry_storage_hash(next_registry),
             }
             await on_registry(intent)
+            self._require_tambur_room_migration_operation(
+                plan,
+                journal=journal,
+                operation_run=operation_run,
+                operation_permit=operation_permit,
+            )
             await self._async_save_managed_migration_registry(
                 next_registry, expected=registry
             )
             self._registry = next_registry
             self._scenario_content_revision_key = None
             self._scenario_content_revision = None
-            self._tambur_room_migration_transaction = _TamburRoomMigrationTransaction(
+            transaction = _TamburRoomMigrationTransaction(
                 previous, next_registry, bool(staged.get("created"))
             )
+            self._tambur_room_migration_transaction = transaction
+            state.transaction = transaction
+            self._require_tambur_room_migration_operation(
+                plan,
+                journal=journal,
+                operation_run=operation_run,
+                operation_permit=operation_permit,
+            )
             await on_registry({**intent, "state": "applied"})
+            self._require_tambur_room_migration_operation(
+                plan,
+                journal=journal,
+                operation_run=operation_run,
+                operation_permit=operation_permit,
+            )
             return "completed"
 
     async def async_verify_tambur_room_migration(
@@ -2079,7 +2258,8 @@ class ScenarioService:
         plan: object,
         *,
         journal: Mapping[str, object],
-        cancellation_fence: object | None = None,
+        operation_run: object,
+        operation_permit: object,
     ) -> None:
         """Forget compensation while keeping generic scenario execution closed."""
 
@@ -2087,11 +2267,13 @@ class ScenarioService:
             plan, journal=journal, require_final=True
         )
         async with self._lock:
-            cancelled = getattr(cancellation_fence, "cancelled", False)
-            if type(cancelled) is not bool or cancelled:
-                raise ScenarioServiceError(
-                    "Tambur migration activation was cancelled.", status=409
-                )
+            state = self._require_tambur_room_migration_operation(
+                plan,
+                journal=journal,
+                operation_run=operation_run,
+                operation_permit=operation_permit,
+            )
+            state.used = True
             self._tambur_room_migration_transaction = None
 
     async def _async_remove_tambur_decision_bundle(
@@ -2157,6 +2339,7 @@ class ScenarioService:
         except (ScenarioViolation, TypeError, ValueError):
             return False
         async with self._lock:
+            transaction = self._tambur_room_migration_transaction
             current = self._ensure_loaded()
             if current != previous:
                 try:
@@ -2172,6 +2355,14 @@ class ScenarioService:
                 self._scenario_content_revision_key = None
                 self._scenario_content_revision = None
             self._tambur_room_migration_transaction = None
+            state = self._tambur_room_migration_operation_state
+            if (
+                state is not None
+                and state.owner is self
+                and state.journal is journal
+                and state.transaction is transaction
+            ):
+                state.used = True
         decision_before = before.get("decision")
         staged = journal.get("staged")
         if (

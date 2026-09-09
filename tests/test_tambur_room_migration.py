@@ -28,6 +28,9 @@ from custom_components.hausman_hub.application.scenario_node_red_decision import
     prepare_tambur_decision_bundle,
     tambur_decision_global_nodes,
 )
+from custom_components.hausman_hub.application.scenario_service import (
+    ScenarioServiceError,
+)
 from custom_components.hausman_hub.domain.scenarios import ScenarioRegistry
 from tests.test_managed_switch_migration_service import (
     Backend,
@@ -71,6 +74,8 @@ class _ScopedService:
         self.before = copy.deepcopy(registry[TAMBUR_SCENARIO_ID])
         self.staged_flows: set[str] = set()
         self.calls: list[str] = []
+        self.operation_permits: list[tuple[object, object, object]] = []
+        self.cancelled_runs: list[object] = []
         self.catalog = _Catalog(
             (
                 "entity_156050daca86aa6c",
@@ -91,6 +96,30 @@ class _ScopedService:
     def add_catalog_warmup_observer(self, _observer):
         return lambda: None
 
+    def _issue_tambur_room_migration_operation_permit(
+        self, plan, *, operation_run
+    ):
+        for saved_run, saved_plan, permit in self.operation_permits:
+            if saved_run is operation_run:
+                return permit
+        permit = object()
+        self.operation_permits.append((operation_run, plan, permit))
+        return permit
+
+    def _bind_tambur_room_migration_operation_permit(
+        self, plan, *, journal, operation_run, operation_permit
+    ):
+        assert any(
+            saved_run is operation_run
+            and saved_plan is plan
+            and permit is operation_permit
+            for saved_run, saved_plan, permit in self.operation_permits
+        )
+
+    def _cancel_tambur_room_migration_operation(self, _plan, *, operation_run):
+        if not any(saved_run is operation_run for saved_run in self.cancelled_runs):
+            self.cancelled_runs.append(operation_run)
+
     async def async_capture_tambur_room_migration(self, _plan):
         self.calls.append("capture")
         return copy.deepcopy(self.registry[TAMBUR_SCENARIO_ID])
@@ -100,7 +129,19 @@ class _ScopedService:
         self.staged_flows.add("2886468f3eaa5735")
         await on_staged({"state": "applied", "flowId": "2886468f3eaa5735"})
 
-    async def async_apply_tambur_room_migration(self, _plan, *, journal, on_registry):
+    async def async_apply_tambur_room_migration(
+        self,
+        _plan,
+        *,
+        journal,
+        on_registry,
+        operation_run,
+        operation_permit,
+    ):
+        assert any(
+            saved_run is operation_run and permit is operation_permit
+            for saved_run, _saved_plan, permit in self.operation_permits
+        )
         self.calls.append("registry_apply")
         current = self.registry[TAMBUR_SCENARIO_ID]
         assert current == journal["before"]
@@ -122,8 +163,15 @@ class _ScopedService:
         await on_registry({"state": "finalized"})
 
     async def async_commit_tambur_room_migration(
-        self, _plan, *, journal, cancellation_fence=None
+        self, _plan, *, journal, operation_run, operation_permit
     ):
+        assert any(
+            saved_run is operation_run and permit is operation_permit
+            for saved_run, _saved_plan, permit in self.operation_permits
+        )
+        assert not any(
+            cancelled_run is operation_run for cancelled_run in self.cancelled_runs
+        )
         self.calls.append("commit")
 
 
@@ -309,6 +357,252 @@ def _owner_changed_registry() -> ScenarioRegistry:
     )
 
 
+async def _prepare_service_owned_tambur_operation():
+    registry = _owner_changed_registry()
+    registry_store = RegistryStore(registry)
+    backend = _DecisionBackend()
+    service = _service(registry_store, backend)
+    await service.async_load()
+    operation_run = object()
+    operation_permit = service._issue_tambur_room_migration_operation_permit(  # noqa: SLF001
+        TAMBUR_ROOM_PLAN,
+        operation_run=operation_run,
+    )
+    captured = await service.async_capture_tambur_room_migration(TAMBUR_ROOM_PLAN)
+    journal = {
+        "before": captured,
+        "staged": {"state": "intent"},
+        "registry": {"state": "pending"},
+        "after": None,
+    }
+    service._bind_tambur_room_migration_operation_permit(  # noqa: SLF001
+        TAMBUR_ROOM_PLAN,
+        journal=journal,
+        operation_run=operation_run,
+        operation_permit=operation_permit,
+    )
+
+    async def on_staged(value):
+        journal["staged"] = copy.deepcopy(dict(value))
+
+    async def on_registry(value):
+        journal["registry"] = copy.deepcopy(dict(value))
+
+    await service.async_stage_tambur_room_migration(
+        TAMBUR_ROOM_PLAN,
+        journal=journal,
+        on_staged=on_staged,
+    )
+    await service.async_apply_tambur_room_migration(
+        TAMBUR_ROOM_PLAN,
+        journal=journal,
+        on_registry=on_registry,
+        operation_run=operation_run,
+        operation_permit=operation_permit,
+    )
+    await service.async_finalize_tambur_room_migration(
+        TAMBUR_ROOM_PLAN,
+        journal=journal,
+        on_registry=on_registry,
+    )
+    journal["after"] = await service.async_capture_tambur_room_migration(
+        TAMBUR_ROOM_PLAN
+    )
+    return service, journal, operation_run, operation_permit
+
+
+def test_service_owned_operation_permit_rejects_every_forged_identity() -> None:
+    async def exercise() -> None:
+        service, journal, operation_run, operation_permit = (
+            await _prepare_service_owned_tambur_operation()
+        )
+        transaction = service._tambur_room_migration_transaction  # noqa: SLF001
+        assert transaction is not None
+
+        async def reject(
+            *,
+            attempted_plan=TAMBUR_ROOM_PLAN,
+            expected_transaction=transaction,
+            **overrides,
+        ):
+            arguments = {
+                "journal": journal,
+                "operation_run": operation_run,
+                "operation_permit": operation_permit,
+            }
+            arguments.update(overrides)
+            try:
+                await service.async_commit_tambur_room_migration(
+                    attempted_plan,
+                    **arguments,
+                )
+            except ScenarioServiceError as error:
+                assert error.status == 409
+            else:
+                raise AssertionError("forged operation permit must fail closed")
+            assert (  # noqa: SLF001
+                service._tambur_room_migration_transaction is expected_transaction
+            )
+
+        try:
+            await service.async_commit_tambur_room_migration(
+                TAMBUR_ROOM_PLAN,
+                journal=journal,
+            )
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("missing operation identity must be rejected")
+        assert service._tambur_room_migration_transaction is transaction  # noqa: SLF001
+
+        await reject(operation_permit=None)
+        await reject(operation_permit=object())
+        await reject(
+            operation_permit=type("FakePermit", (), {"cancelled": False})()
+        )
+        await reject(operation_run=object())
+        await reject(journal=copy.deepcopy(journal))
+        await reject(attempted_plan=dataclass_replace(TAMBUR_ROOM_PLAN))
+
+        foreign_registry_store = RegistryStore(_owner_changed_registry())
+        foreign_service = _service(foreign_registry_store, _DecisionBackend())
+        await foreign_service.async_load()
+        foreign_run = object()
+        foreign_permit = (
+            foreign_service._issue_tambur_room_migration_operation_permit(  # noqa: SLF001
+                TAMBUR_ROOM_PLAN,
+                operation_run=foreign_run,
+            )
+        )
+        await reject(operation_permit=foreign_permit)
+
+        async def commit_from_foreign_task():
+            await reject()
+
+        await asyncio.create_task(commit_from_foreign_task())
+
+        equal_transaction = dataclass_replace(transaction)
+        service._tambur_room_migration_transaction = equal_transaction  # noqa: SLF001
+        await reject(expected_transaction=equal_transaction)
+        service._tambur_room_migration_transaction = transaction  # noqa: SLF001
+
+        await service.async_commit_tambur_room_migration(
+            TAMBUR_ROOM_PLAN,
+            journal=journal,
+            operation_run=operation_run,
+            operation_permit=operation_permit,
+        )
+        assert service._tambur_room_migration_transaction is None  # noqa: SLF001
+
+        try:
+            await service.async_commit_tambur_room_migration(
+                TAMBUR_ROOM_PLAN,
+                journal=journal,
+                operation_run=operation_run,
+                operation_permit=operation_permit,
+            )
+        except ScenarioServiceError as error:
+            assert error.status == 409
+        else:
+            raise AssertionError("used operation permit must stay retired")
+        assert service._tambur_room_migration_transaction is None  # noqa: SLF001
+
+    asyncio.run(exercise())
+
+
+def test_service_owned_operation_cancel_is_sticky_and_cannot_be_forged_clear() -> None:
+    async def exercise() -> None:
+        service, journal, operation_run, operation_permit = (
+            await _prepare_service_owned_tambur_operation()
+        )
+        transaction = service._tambur_room_migration_transaction  # noqa: SLF001
+        service._cancel_tambur_room_migration_operation(  # noqa: SLF001
+            TAMBUR_ROOM_PLAN,
+            operation_run=operation_run,
+        )
+        try:
+            operation_permit.cancelled = False
+        except AttributeError:
+            pass
+        else:
+            raise AssertionError("caller must not own cancellation state")
+        replacement = service._issue_tambur_room_migration_operation_permit(  # noqa: SLF001
+            TAMBUR_ROOM_PLAN,
+            operation_run=operation_run,
+        )
+        assert replacement is operation_permit
+
+        try:
+            await service.async_commit_tambur_room_migration(
+                TAMBUR_ROOM_PLAN,
+                journal=journal,
+                operation_run=operation_run,
+                operation_permit=replacement,
+            )
+        except ScenarioServiceError as error:
+            assert error.status == 409
+        else:
+            raise AssertionError("cancelled operation must never commit")
+        assert service._tambur_room_migration_transaction is transaction  # noqa: SLF001
+
+    asyncio.run(exercise())
+
+
+def test_completed_recovery_with_active_transaction_uses_new_permit_to_clean_up() -> None:
+    async def exercise() -> None:
+        service, journal, stale_run, stale_permit = (
+            await _prepare_service_owned_tambur_operation()
+        )
+        transaction = service._tambur_room_migration_transaction  # noqa: SLF001
+        room_store = _Store(
+            {
+                "migrationId": "tambur-room-decision",
+                "version": 1,
+                "state": "completed",
+                "planHash": "7a1108c6396662a6d65fc060f6fb530671f2a50a2d35c30adb90a198111af850",
+                "stage": "binding",
+                "journal": journal,
+            }
+        )
+        native = _NativeRoomHandover(
+            {item: "off" for item in TAMBUR_NATIVE_COMPETITORS}
+        )
+        migration = TamburRoomMigration(
+            service,
+            room_store,
+            global_receipt_store=MigrationReceiptStore(
+                {
+                    "migrationId": "managed-switches",
+                    "version": 2,
+                    "state": "completed",
+                    "manifestHash": "a3554f0a7108160238cbd4fd49f2f643ad3d446d7f344dec618d9a0d979d2c60",
+                }
+            ),
+            native_automation_migration=native,
+            migration_lock=asyncio.Lock(),
+        )
+
+        assert transaction is not None
+        assert await migration.async_apply(operation_run=object()) == "completed"
+        assert service._tambur_room_migration_transaction is None  # noqa: SLF001
+        assert room_store.saves == 0
+
+        try:
+            await service.async_commit_tambur_room_migration(
+                TAMBUR_ROOM_PLAN,
+                journal=journal,
+                operation_run=stale_run,
+                operation_permit=stale_permit,
+            )
+        except ScenarioServiceError as error:
+            assert error.status == 409
+        else:
+            raise AssertionError("superseded permit must stay stale")
+        assert service._tambur_room_migration_transaction is None  # noqa: SLF001
+
+    asyncio.run(exercise())
+
+
 def test_real_scoped_service_and_native_adapter_migrate_only_tambur() -> None:
     async def exercise() -> None:
         registry = _owner_changed_registry()
@@ -338,7 +632,7 @@ def test_real_scoped_service_and_native_adapter_migrate_only_tambur() -> None:
             migration_lock=asyncio.Lock(),
         )
 
-        assert await migration.async_apply() == "completed"
+        assert await migration.async_apply(operation_run=object()) == "completed"
 
         after_storage = registry_store.registry.to_storage()
         before_by_id = {item["id"]: item for item in before_storage["scenarios"]}
@@ -363,7 +657,7 @@ def test_real_scoped_service_and_native_adapter_migrate_only_tambur() -> None:
         saved_count = len(registry_store.saved)
         native_call_count = len(services.calls)
         room_save_count = room_store.saves
-        assert await migration.async_apply() == "completed"
+        assert await migration.async_apply(operation_run=object()) == "completed"
         assert len(registry_store.saved) == saved_count
         assert len(services.calls) == native_call_count
         assert room_store.saves == room_save_count
@@ -398,7 +692,7 @@ def test_lost_stage_response_is_compensated_and_foreign_cas_drift_blocks() -> No
             migration_lock=asyncio.Lock(),
         )
         try:
-            await migration.async_apply()
+            await migration.async_apply(operation_run=object())
         except TamburRoomMigrationConflict as error:
             assert error.stage == "stage"
         else:
@@ -479,7 +773,7 @@ def test_final_verification_failure_rolls_back_receipts_and_can_retry() -> None:
         )
 
         try:
-            await migration.async_apply()
+            await migration.async_apply(operation_run=object())
         except TamburRoomMigrationConflict as error:
             assert error.stage == "binding"
         else:
@@ -498,7 +792,7 @@ def test_final_verification_failure_rolls_back_receipts_and_can_retry() -> None:
             for entity_id in TAMBUR_NATIVE_COMPETITORS
         )
 
-        assert await migration.async_apply() == "completed"
+        assert await migration.async_apply(operation_run=object()) == "completed"
         assert registry_store.registry.scenario(TAMBUR_SCENARIO_ID).revision == 9
         assert backend.decision_present is True
         assert room_store.value["state"] == "completed"
@@ -551,7 +845,7 @@ def test_partial_native_handover_is_compensated_before_retry_receipt() -> None:
         )
 
         try:
-            await migration.async_apply()
+            await migration.async_apply(operation_run=object())
         except TamburRoomMigrationConflict as error:
             assert error.stage == "native_handover"
         else:
@@ -633,7 +927,8 @@ def test_room_commit_activates_once_and_cancel_revokes_scope() -> None:
             {
                 "async_apply": lambda self, **_kwargs: asyncio.sleep(
                     0, result="completed"
-                )
+                ),
+                "cancel": lambda self, **_kwargs: None,
             },
         )()
         calls: list[str] = []
@@ -678,18 +973,23 @@ def test_cancel_during_apply_waits_for_result_and_never_activates_or_retries() -
                 return lambda: None
 
         class Migration:
-            async def async_apply(self, *, cancellation_fence=None):
+            def __init__(self):
+                self.cancelled_run = None
+
+            async def async_apply(self, *, operation_run):
                 nonlocal apply_calls, task_cancelled
                 apply_calls += 1
-                assert cancellation_fence is not None
                 entered.set()
                 try:
                     await release.wait()
                 except asyncio.CancelledError:
                     task_cancelled = True
                     raise
-                assert cancellation_fence.cancelled is True
+                assert self.cancelled_run is operation_run
                 return "completed"
+
+            def cancel(self, *, operation_run):
+                self.cancelled_run = operation_run
 
         activations = 0
 
@@ -730,9 +1030,12 @@ def test_cancel_during_activation_prep_revokes_and_cleans_without_commit() -> No
         calls: list[str] = []
 
         class Migration:
-            async def async_apply(self, *, cancellation_fence=None):
-                assert cancellation_fence is not None
+            async def async_apply(self, *, operation_run):
+                assert operation_run is not None
                 return "completed"
+
+            def cancel(self, *, operation_run):
+                assert operation_run is not None
 
         class Activation:
             cleanup = staticmethod(lambda: calls.append("cleanup"))
@@ -773,9 +1076,12 @@ def test_activation_commit_error_revokes_and_cleans_exactly_once() -> None:
         statuses: list[dict[str, str]] = []
 
         class Migration:
-            async def async_apply(self, *, cancellation_fence=None):
-                assert cancellation_fence is not None
+            async def async_apply(self, *, operation_run):
+                assert operation_run is not None
                 return "completed"
+
+            def cancel(self, *, operation_run):
+                assert operation_run is not None
 
         class Activation:
             cleanup = staticmethod(lambda: calls.append("cleanup"))
@@ -839,13 +1145,14 @@ def test_service_commit_checks_cancel_after_lock_before_forgetting_rollback() ->
                 self.base_lock.release()
 
         async def gated_commit(
-            plan, *, journal, cancellation_fence=None
+            plan, *, journal, operation_run, operation_permit
         ):
             service._lock = SecondEntryGate(service._lock)  # noqa: SLF001
             return await original_commit(
                 plan,
                 journal=journal,
-                cancellation_fence=cancellation_fence,
+                operation_run=operation_run,
+                operation_permit=operation_permit,
             )
 
         service.async_commit_tambur_room_migration = gated_commit

@@ -142,14 +142,6 @@ class TamburRoomMigrationConflict(RuntimeError):
         self.stage = stage
 
 
-@dataclass(slots=True)
-class _TamburRoomCancellationFence:
-    cancelled: bool = False
-
-    def cancel(self) -> None:
-        self.cancelled = True
-
-
 @dataclass(frozen=True, slots=True)
 class TamburRuntimeScope:
     scenario_ids: tuple[str, ...] = (TAMBUR_SCENARIO_ID,)
@@ -523,14 +515,57 @@ class TamburRoomMigration:
             raise RuntimeError(f"required room migration interface {name} is absent")
         return await callback(*args, **kwargs)
 
-    async def async_apply(
-        self, *, cancellation_fence: object | None = None
-    ) -> str:
+    def _issue_operation_permit(self, operation_run: object) -> object:
+        issue = getattr(
+            self._service,
+            "_issue_tambur_room_migration_operation_permit",
+            None,
+        )
+        if not callable(issue):
+            raise RuntimeError("Tambur migration operation permits are unavailable")
+        return issue(self._plan, operation_run=operation_run)
+
+    def _bind_operation_permit(
+        self,
+        operation_run: object,
+        operation_permit: object,
+        journal: Mapping[str, object],
+    ) -> None:
+        bind = getattr(
+            self._service,
+            "_bind_tambur_room_migration_operation_permit",
+            None,
+        )
+        if not callable(bind):
+            raise RuntimeError("Tambur migration operation binding is unavailable")
+        bind(
+            self._plan,
+            journal=journal,
+            operation_run=operation_run,
+            operation_permit=operation_permit,
+        )
+
+    def cancel(self, *, operation_run: object) -> None:
+        cancel = getattr(
+            self._service,
+            "_cancel_tambur_room_migration_operation",
+            None,
+        )
+        if not callable(cancel):
+            raise RuntimeError("Tambur migration operation cancellation is unavailable")
+        cancel(self._plan, operation_run=operation_run)
+
+    async def async_apply(self, *, operation_run: object) -> str:
         async with self._lock:
-            return await self._async_apply_locked(cancellation_fence)
+            operation_permit = self._issue_operation_permit(operation_run)
+            return await self._async_apply_locked(
+                operation_run, operation_permit
+            )
 
     async def _async_apply_locked(
-        self, cancellation_fence: object | None
+        self,
+        operation_run: object,
+        operation_permit: object,
     ) -> str:
         journal: dict[str, object] | None = None
         native_started = False
@@ -554,6 +589,9 @@ class TamburRoomMigration:
 
             if isinstance(loaded, Mapping) and loaded.get("state") == "completed":
                 journal = copy.deepcopy(dict(loaded["journal"]))
+                self._bind_operation_permit(
+                    operation_run, operation_permit, journal
+                )
                 self.stage = "verify"
                 await self._call(
                     "async_verify_tambur_room_migration",
@@ -570,12 +608,16 @@ class TamburRoomMigration:
                     "async_commit_tambur_room_migration",
                     self._plan,
                     journal=journal,
-                    cancellation_fence=cancellation_fence,
+                    operation_run=operation_run,
+                    operation_permit=operation_permit,
                 )
                 return "completed"
 
             if isinstance(loaded, Mapping):
                 journal = copy.deepcopy(dict(loaded["journal"]))
+                self._bind_operation_permit(
+                    operation_run, operation_permit, journal
+                )
             else:
                 self.stage = "capture"
                 before = await self._call(
@@ -587,6 +629,9 @@ class TamburRoomMigration:
                     "registry": {"state": "pending"},
                     "after": None,
                 }
+                self._bind_operation_permit(
+                    operation_run, operation_permit, journal
+                )
                 await self._save("prepared", journal)
 
             self.stage = "stage"
@@ -618,6 +663,8 @@ class TamburRoomMigration:
                 self._plan,
                 journal=journal,
                 on_registry=persist_registry,
+                operation_run=operation_run,
+                operation_permit=operation_permit,
             )
             self.stage = "verify"
             await self._call(
@@ -653,7 +700,8 @@ class TamburRoomMigration:
                 "async_commit_tambur_room_migration",
                 self._plan,
                 journal=journal,
-                cancellation_fence=cancellation_fence,
+                operation_run=operation_run,
+                operation_permit=operation_permit,
             )
             await self._save("completed", journal)
             return "completed"
@@ -727,7 +775,7 @@ class TamburRoomStartupCoordinator:
         self._cancelled = False
         self._activation_cleanup: Callable[[], None] | None = None
         self._activation_revoke: Callable[[], None] | None = None
-        self._cancellation_fence = _TamburRoomCancellationFence()
+        self._operation_run = object()
         self.ready = False
 
     async def async_start(self) -> None:
@@ -761,7 +809,7 @@ class TamburRoomStartupCoordinator:
                 return
             try:
                 await self._migration.async_apply(
-                    cancellation_fence=self._cancellation_fence
+                    operation_run=self._operation_run
                 )
                 if self._cancelled:
                     return
@@ -813,7 +861,7 @@ class TamburRoomStartupCoordinator:
 
     def cancel(self) -> None:
         self._cancelled = True
-        self._cancellation_fence.cancel()
+        self._migration.cancel(operation_run=self._operation_run)
         self.ready = False
         self._unsubscribe()
         try:
