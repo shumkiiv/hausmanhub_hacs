@@ -446,7 +446,13 @@ def with_climate_room_mode(
     manual: bool,
     updated_at: int,
 ) -> ClimateManualMemory:
-    """Persist an explicit manual/automatic choice for one configured room."""
+    """Persist an explicit manual/automatic choice for one configured room.
+
+    Returning a room to automatic ownership also returns every configured
+    device in that room.  Leaving a device-level exclusion behind would make
+    the room appear automatic while silently withholding its actuator from
+    the climate contour.
+    """
 
     _timestamp(updated_at, "manual-control update time")
     if registry.room(room_id) is None:
@@ -456,14 +462,30 @@ def with_climate_room_mode(
         selected.add(room_id)
     else:
         selected.discard(room_id)
+    selected_devices = set(memory.manual_device_ids)
+    attributions = {item.device_id: item for item in memory.attributions}
+    if not manual:
+        room_device_ids = {
+            device.device_id for device in registry.devices
+            if device.room_id == room_id
+        }
+        selected_devices.difference_update(room_device_ids)
+        for device_id in room_device_ids:
+            attributions.pop(device_id, None)
     return ClimateManualMemory(
         updated_at=max(memory.updated_at, updated_at),
         manual_room_ids=tuple(
             room.room_id for room in registry.rooms if room.room_id in selected
         ),
-        manual_device_ids=memory.manual_device_ids,
+        manual_device_ids=tuple(
+            device.device_id for device in registry.devices
+            if device.device_id in selected_devices
+        ),
         devices=memory.devices,
-        attributions=memory.attributions,
+        attributions=tuple(
+            attributions[device.device_id] for device in registry.devices
+            if device.device_id in attributions and device.device_id in selected_devices
+        ),
         hausman_context_ids=memory.hausman_context_ids,
     )
 

@@ -130,6 +130,34 @@ class SavedModeProofTests(unittest.IsolatedAsyncioTestCase):
         await restored.async_load()
         self.assertEqual("confirmed", (await restored.async_operation(receipt["operation_id"]))["status"])
 
+    async def test_room_automatic_clears_its_device_manual_ownership_without_ha_calls(self):
+        runtime, store, _, executor = native_home_target_runtime(include_humidifier=True)
+        runtime._manual_store = MemoryStore(None)
+        clock = count(NOW)
+        runtime._now_ms = lambda: next(clock)
+        await runtime.async_start()
+        room_device_ids = (
+            "living_air_conditioner", "living_radiator", "living_floor", "living_humidifier",
+        )
+        for device_id in room_device_ids:
+            await runtime.async_set_device_mode("living", device_id, "manual")
+        service = ClimateTabletService(runtime, store, now_ms=lambda: next(clock))
+        await service.async_load()
+
+        accepted = await service.async_submit(request(
+            "set_room_mode", {"mode": "automatic"}, request_id="room-mode-auto.1",
+        ))
+        await service.async_drain()
+
+        receipt = await service.async_operation(accepted["operation_id"])
+        self.assertEqual("confirmed", receipt["status"], receipt)
+        self.assertFalse(set(room_device_ids) & set(runtime._manual_memory.manual_device_ids))
+        self.assertTrue(all(
+            leaf["evidence"]["observed_actual"]["reported_mode"] == "automatic"
+            for leaf in receipt["outcomes"]["rooms"]["living"]["devices"].values()
+        ))
+        self.assertEqual([], executor.batches)
+
 
 class FrozenClimateProofTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
