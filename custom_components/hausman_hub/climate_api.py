@@ -553,6 +553,40 @@ class ClimateRuntimeView(_ClimateView):
         return self.json(payload, headers=NO_STORE_HEADERS)
 
 
+def _operation_receipt_payload(receipt: Mapping[str, object]) -> dict[str, object]:
+    """Render one old display string without changing verified receipt facts.
+
+    Older native writers used non-contract wording for zero-call deferred
+    devices. Stored receipts remain immutable: only this response copy changes,
+    after the service has authenticated and validated the original history.
+    """
+
+    payload = json.loads(json.dumps(receipt))
+    outcomes = payload.get("outcomes")
+    rooms = outcomes.get("rooms") if isinstance(outcomes, dict) else None
+    if not isinstance(rooms, dict):
+        return payload
+    for room in rooms.values():
+        devices = room.get("devices") if isinstance(room, dict) else None
+        if not isinstance(devices, dict):
+            continue
+        for leaf in devices.values():
+            if (
+                isinstance(leaf, dict)
+                and leaf.get("status") == "deferred"
+                and leaf.get("reason") == "device_unavailable"
+                and leaf.get("message_code") == "deferred_offline"
+                and leaf.get("message") == "Цель сохранена, устройство недоступно."
+                and "execution_state" not in leaf
+                and type(leaf.get("command_count")) is int
+                and leaf["command_count"] == 0
+                and type(leaf.get("accepted_count")) is int
+                and leaf["accepted_count"] == 0
+            ):
+                leaf["message"] = "Цель сохранена и будет применена после восстановления связи."
+    return payload
+
+
 class ClimateActionView(_ClimateView):
     """Accept one strict, durably idempotent tablet climate action."""
 
@@ -576,6 +610,7 @@ class ClimateActionView(_ClimateView):
             return _api_error(self, "invalid_request")
         except ClimateTabletUnavailable:
             return _api_error(self, "unavailable")
+        receipt = _operation_receipt_payload(receipt)
         publish_command_receipt(
             self._hass,
             receipt,
@@ -612,7 +647,7 @@ class ClimateOperationView(_ClimateView):
             return _api_error(self, "climate_operation_not_found")
         except ClimateTabletUnavailable:
             return _api_error(self, "unavailable")
-        return self.json(receipt, headers=NO_STORE_HEADERS)
+        return self.json(_operation_receipt_payload(receipt), headers=NO_STORE_HEADERS)
 
 
 class ClimateControlOperationView(ClimateOperationView):
@@ -639,7 +674,7 @@ class ClimateControlOperationView(ClimateOperationView):
             return _api_error(self, "unavailable")
         if receipt is None:
             return _api_error(self, "climate_operation_not_found")
-        return self.json(receipt, headers=NO_STORE_HEADERS)
+        return self.json(_operation_receipt_payload(receipt), headers=NO_STORE_HEADERS)
 
 
 class ClimateRecoveryView(_ClimateView):

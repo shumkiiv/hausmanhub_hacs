@@ -432,7 +432,7 @@ def _live_device_outcomes(
                 "status": "deferred",
                 "reason": "device_unavailable",
                 "message_code": "deferred_offline",
-                "message": "Цель сохранена, устройство недоступно.",
+                "message": "Цель сохранена и будет применена после восстановления связи.",
                 "command_count": 0,
                 "accepted_count": 0,
             }
@@ -655,7 +655,7 @@ class _ContourApplyLedger:
                             {
                                 "status": "deferred", "reason": "device_unavailable",
                                 "message_code": "deferred_offline",
-                                "message": "Цель сохранена, устройство недоступно.",
+                                "message": "Цель сохранена и будет применена после восстановления связи.",
                                 "command_count": 0, "accepted_count": 0,
                             }
                             if state == "deferred_offline" else {
@@ -1257,7 +1257,7 @@ def _enhanced_payload(
                 leaf = {
                     "status": "deferred", "reason": "device_unavailable",
                     "message_code": "deferred_offline",
-                    "message": "Цель сохранена, устройство недоступно.",
+                    "message": "Цель сохранена и будет применена после восстановления связи.",
                     "command_count": 0, "accepted_count": 0,
                 }
             elif leaf_state in {"manual_user_excluded", "manual_external_off"}:

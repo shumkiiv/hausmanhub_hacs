@@ -314,6 +314,7 @@ class MixedHomeTargetTests(unittest.IsolatedAsyncioTestCase):
         receipt = await service.async_operation(accepted["operation_id"])
         expected_rooms = {"living", "nursery", "office", "alice", "kitchen"}
         for result in (accepted, receipt):
+            contract_validator("climate-operation-receipt.schema.json").validate(result)
             self.assertEqual(expected_rooms, set(result["intent"]["resolved_scope"]["room_ids"]))
             self.assertEqual(expected_rooms, set(result["outcomes"]["rooms"]))
             self.assertEqual(result["action_snapshot"]["resolved_scope"],

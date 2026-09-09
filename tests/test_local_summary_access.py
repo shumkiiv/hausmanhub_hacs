@@ -3180,6 +3180,68 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertFalse(operation.payload["duplicate"])
 
 
+    def test_climate_receipt_routes_project_legacy_deferred_text_without_changing_history(self) -> None:
+        """A verified old receipt stays valid on GET, alias GET and duplicate POST."""
+        from tests.test_climate_tablet import contract_validator
+
+        canonical = json.loads((ROOT / "fixtures/hausmanhub_climate_reliability_v1/climate-operation-partial-intent.json").read_text())
+        operation_id = canonical["operation_id"]
+        views = {view.url: view for view in self.hass.http.views}
+        routes = (
+            ("/api/hausman_hub/v1/climate/operations/{operation_id}", "_climate_tablet", "get"),
+            ("/api/hausman_hub/v1/climate/control/operations/{operation_id}", "_runtime", "get"),
+            ("/api/hausman_hub/v1/climate/actions", "_climate_tablet", "post"),
+        )
+        for template, accessor, method in routes:
+            with self.subTest(route=template):
+                stored = copy.deepcopy(canonical)
+                stored["outcomes"]["rooms"]["bedroom"]["devices"]["bedroom_ac"]["message"] = "Цель сохранена, устройство недоступно."
+                original = copy.deepcopy(stored)
+
+                async def trusted_receipt(*args):
+                    return stored
+
+                service = SimpleNamespace(async_operation=trusted_receipt,
+                                          async_control_operation=trusted_receipt,
+                                          async_submit=trusted_receipt)
+                view = views[template]
+                path = template.replace("{operation_id}", operation_id)
+                with patch.object(view, accessor, return_value=service):
+                    if method == "get":
+                        response = asyncio.run(view.get(FakeRequest("127.0.0.1", reader_user("system-users"), path=path), operation_id))
+                    else:
+                        response = asyncio.run(view.post(FakeJsonRequest("127.0.0.1", reader_user("system-users"), path, {})))
+                self.assertEqual(200 if method == "get" else 202, response.status)
+                contract_validator("climate-operation-receipt.schema.json").validate(response.payload)
+                self.assertEqual(canonical, response.payload)
+                self.assertEqual(original, stored, "Presentation must not rewrite authenticated history")
+
+    def test_climate_receipt_text_projection_does_not_repair_other_leaf_fields(self) -> None:
+        """Legacy wording is not permission to hide malformed execution evidence."""
+        canonical = json.loads((ROOT / "fixtures/hausmanhub_climate_reliability_v1/climate-operation-partial-intent.json").read_text())
+        template = "/api/hausman_hub/v1/climate/operations/{operation_id}"
+        view = {item.url: item for item in self.hass.http.views}[template]
+        mutations = ({"status": "manual"}, {"reason": "configuration_error"},
+                     {"message_code": "pending"}, {"command_count": True},
+                     {"accepted_count": 1}, {"execution_state": "pending_dispatch"},
+                     {"message": "Unknown old wording"})
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                stored = copy.deepcopy(canonical)
+                leaf = stored["outcomes"]["rooms"]["bedroom"]["devices"]["bedroom_ac"]
+                leaf["message"] = "Цель сохранена, устройство недоступно."
+                leaf.update(mutation)
+                original = copy.deepcopy(stored)
+
+                async def trusted_receipt(*args):
+                    return stored
+
+                with patch.object(view, "_climate_tablet", return_value=SimpleNamespace(async_operation=trusted_receipt)):
+                    operation_id = stored["operation_id"]
+                    response = asyncio.run(view.get(FakeRequest("127.0.0.1", reader_user("system-users"), path=template.replace("{operation_id}", operation_id)), operation_id))
+                self.assertEqual(original, response.payload)
+                self.assertEqual(original, stored)
+
     def test_legacy_home_targets_route_projects_a_reliable_typed_receipt(self) -> None:
         """The legacy request shape enters the typed coordinator without a runtime bypass."""
 
@@ -4220,7 +4282,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.232", panel.payload["integration_version"])
+        self.assertEqual("1.52.233", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
