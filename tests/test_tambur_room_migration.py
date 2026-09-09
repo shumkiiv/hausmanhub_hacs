@@ -5,6 +5,7 @@ import copy
 from dataclasses import dataclass, replace as dataclass_replace
 
 from custom_components.hausman_hub.application.tambur_room_migration import (
+    TAMBUR_INPUT_TARGET_IDS,
     TAMBUR_NATIVE_COMPETITORS,
     TAMBUR_PRESENCE_TARGET_IDS,
     TAMBUR_ROOM_PLAN,
@@ -120,7 +121,9 @@ class _ScopedService:
         self.calls.append("finalize")
         await on_registry({"state": "finalized"})
 
-    async def async_commit_tambur_room_migration(self, _plan, *, journal):
+    async def async_commit_tambur_room_migration(
+        self, _plan, *, journal, cancellation_fence=None
+    ):
         self.calls.append("commit")
 
 
@@ -141,6 +144,11 @@ class _NativeRoomHandover:
 
     async def async_verify_completed(self) -> bool:
         return all(self.states[item] == "off" for item in TAMBUR_NATIVE_COMPETITORS)
+
+    async def async_rollback(self) -> bool:
+        self.states.clear()
+        self.states.update(copy.deepcopy(self.before))
+        return True
 
 
 def test_room_only_startup_and_restart_preserve_every_foreign_object() -> None:
@@ -622,7 +630,11 @@ def test_room_commit_activates_once_and_cancel_revokes_scope() -> None:
         migration = type(
             "Migration",
             (),
-            {"async_apply": lambda self: asyncio.sleep(0, result="completed")},
+            {
+                "async_apply": lambda self, **_kwargs: asyncio.sleep(
+                    0, result="completed"
+                )
+            },
         )()
         calls: list[str] = []
 
@@ -644,6 +656,316 @@ def test_room_commit_activates_once_and_cancel_revokes_scope() -> None:
         assert calls == ["prepare", "commit"]
         coordinator.cancel()
         assert calls == ["prepare", "commit", "revoke", "cleanup"]
+
+    asyncio.run(exercise())
+
+
+def test_cancel_during_apply_waits_for_result_and_never_activates_or_retries() -> None:
+    async def exercise() -> None:
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        apply_calls = 0
+        task_cancelled = False
+        late_observer = None
+
+        class CatalogService:
+            def current_catalog(self):
+                return _Catalog(TAMBUR_INPUT_TARGET_IDS)
+
+            def add_catalog_warmup_observer(self, observer):
+                nonlocal late_observer
+                late_observer = observer
+                return lambda: None
+
+        class Migration:
+            async def async_apply(self, *, cancellation_fence=None):
+                nonlocal apply_calls, task_cancelled
+                apply_calls += 1
+                assert cancellation_fence is not None
+                entered.set()
+                try:
+                    await release.wait()
+                except asyncio.CancelledError:
+                    task_cancelled = True
+                    raise
+                assert cancellation_fence.cancelled is True
+                return "completed"
+
+        activations = 0
+
+        async def activate(_scope):
+            nonlocal activations
+            activations += 1
+
+        coordinator = TamburRoomStartupCoordinator(
+            CatalogService(), Migration(), activate
+        )
+        task = asyncio.create_task(coordinator.async_start())
+        await asyncio.wait_for(entered.wait(), timeout=1)
+
+        coordinator.cancel()
+        coordinator.cancel()
+        await asyncio.sleep(0)
+        assert task.done() is False
+        assert task_cancelled is False
+
+        release.set()
+        await task
+        assert apply_calls == 1
+        assert activations == 0
+        assert coordinator.ready is False
+
+        assert late_observer is not None
+        await late_observer(_Catalog(TAMBUR_INPUT_TARGET_IDS), True)
+        assert apply_calls == 1
+        assert activations == 0
+
+    asyncio.run(exercise())
+
+
+def test_cancel_during_activation_prep_revokes_and_cleans_without_commit() -> None:
+    async def exercise() -> None:
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        calls: list[str] = []
+
+        class Migration:
+            async def async_apply(self, *, cancellation_fence=None):
+                assert cancellation_fence is not None
+                return "completed"
+
+        class Activation:
+            cleanup = staticmethod(lambda: calls.append("cleanup"))
+            commit = staticmethod(lambda: calls.append("commit"))
+            revoke = staticmethod(lambda: calls.append("revoke"))
+
+        async def activate(_scope):
+            calls.append("prepare")
+            entered.set()
+            await release.wait()
+            return Activation()
+
+        service = type(
+            "CatalogService",
+            (),
+            {
+                "current_catalog": lambda self: _Catalog(TAMBUR_INPUT_TARGET_IDS),
+                "add_catalog_warmup_observer": lambda self, observer: lambda: None,
+            },
+        )()
+        coordinator = TamburRoomStartupCoordinator(service, Migration(), activate)
+        task = asyncio.create_task(coordinator.async_start())
+        await asyncio.wait_for(entered.wait(), timeout=1)
+
+        coordinator.cancel()
+        release.set()
+        await task
+
+        assert calls == ["prepare", "revoke", "cleanup"]
+        assert coordinator.ready is False
+
+    asyncio.run(exercise())
+
+
+def test_activation_commit_error_revokes_and_cleans_exactly_once() -> None:
+    async def exercise() -> None:
+        calls: list[str] = []
+        statuses: list[dict[str, str]] = []
+
+        class Migration:
+            async def async_apply(self, *, cancellation_fence=None):
+                assert cancellation_fence is not None
+                return "completed"
+
+        class Activation:
+            cleanup = staticmethod(lambda: calls.append("cleanup"))
+            revoke = staticmethod(lambda: calls.append("revoke"))
+
+            @staticmethod
+            def commit():
+                calls.append("commit")
+                raise RuntimeError("synthetic activation commit failure")
+
+        async def activate(_scope):
+            calls.append("prepare")
+            return Activation()
+
+        service = type(
+            "CatalogService",
+            (),
+            {
+                "current_catalog": lambda self: _Catalog(TAMBUR_INPUT_TARGET_IDS),
+                "add_catalog_warmup_observer": lambda self, observer: lambda: None,
+            },
+        )()
+        coordinator = TamburRoomStartupCoordinator(
+            service, Migration(), activate, status_publisher=statuses.append
+        )
+        await coordinator.async_start()
+        coordinator.cancel()
+
+        assert calls == ["prepare", "commit", "revoke", "cleanup"]
+        assert statuses == [{"state": "blocked", "stage": "binding"}]
+        assert coordinator.ready is False
+
+    asyncio.run(exercise())
+
+
+def test_service_commit_checks_cancel_after_lock_before_forgetting_rollback() -> None:
+    async def exercise() -> None:
+        registry = _owner_changed_registry()
+        registry_store = RegistryStore(registry)
+        backend = _DecisionBackend()
+        service = _service(registry_store, backend)
+        await service.async_load()
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        original_commit = service.async_commit_tambur_room_migration
+
+        class SecondEntryGate:
+            def __init__(self, base_lock):
+                self.base_lock = base_lock
+                self.entries = 0
+
+            async def __aenter__(self):
+                await self.base_lock.acquire()
+                self.entries += 1
+                if self.entries == 2:
+                    entered.set()
+                    await release.wait()
+                return self
+
+            async def __aexit__(self, _type, _value, _traceback):
+                self.base_lock.release()
+
+        async def gated_commit(
+            plan, *, journal, cancellation_fence=None
+        ):
+            service._lock = SecondEntryGate(service._lock)  # noqa: SLF001
+            return await original_commit(
+                plan,
+                journal=journal,
+                cancellation_fence=cancellation_fence,
+            )
+
+        service.async_commit_tambur_room_migration = gated_commit
+        native_states = {
+            item: "on" for item in TAMBUR_NATIVE_COMPETITORS
+        }
+        native = _NativeRoomHandover(native_states)
+        room_store = _Store()
+        migration = TamburRoomMigration(
+            service,
+            room_store,
+            global_receipt_store=MigrationReceiptStore(
+                {
+                    "migrationId": "managed-switches",
+                    "version": 2,
+                    "state": "completed",
+                    "manifestHash": "a3554f0a7108160238cbd4fd49f2f643ad3d446d7f344dec618d9a0d979d2c60",
+                }
+            ),
+            native_automation_migration=native,
+            migration_lock=asyncio.Lock(),
+        )
+        activations = 0
+
+        async def activate(_scope):
+            nonlocal activations
+            activations += 1
+
+        coordinator = TamburRoomStartupCoordinator(service, migration, activate)
+        task = asyncio.create_task(coordinator.async_start())
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        coordinator.cancel()
+        release.set()
+        await task
+
+        assert coordinator.ready is False
+        assert activations == 0
+        assert registry_store.registry == registry
+        assert backend.decision_present is False
+        assert all(state == "on" for state in native_states.values())
+        assert room_store.value["state"] == "prepared"
+        assert room_store.value["journal"]["staged"] is None
+        assert service._tambur_room_migration_transaction is None  # noqa: SLF001
+
+    asyncio.run(exercise())
+
+
+def test_cancelled_lost_response_preserves_uncertain_evidence_without_retry() -> None:
+    async def exercise() -> None:
+        registry = _owner_changed_registry()
+        registry_store = RegistryStore(registry)
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        class LostResponseBackend(_DecisionBackend):
+            def __init__(self):
+                super().__init__()
+                self.prepares = 0
+                self.drifted = False
+
+            async def async_prepare_tambur_decision_bundle(self):
+                self.prepares += 1
+                self.decision_present = True
+                self.global_revision += 1
+                self.drifted = True
+                entered.set()
+                await release.wait()
+                raise OSError("synthetic lost response after foreign drift")
+
+            async def _async_global_snapshot(self):
+                revision, nodes = await super()._async_global_snapshot()
+                if self.drifted and nodes:
+                    nodes[0] = {**nodes[0], "name": "foreign concurrent edit"}
+                return revision, nodes
+
+        backend = LostResponseBackend()
+        service = _service(registry_store, backend)
+        await service.async_load()
+        room_store = _Store()
+        migration = TamburRoomMigration(
+            service,
+            room_store,
+            global_receipt_store=MigrationReceiptStore(
+                {
+                    "migrationId": "managed-switches",
+                    "version": 2,
+                    "state": "completed",
+                    "manifestHash": "a3554f0a7108160238cbd4fd49f2f643ad3d446d7f344dec618d9a0d979d2c60",
+                }
+            ),
+            native_automation_migration=_NativeRoomHandover(
+                {item: "on" for item in TAMBUR_NATIVE_COMPETITORS}
+            ),
+            migration_lock=asyncio.Lock(),
+        )
+        activations = 0
+
+        async def activate(_scope):
+            nonlocal activations
+            activations += 1
+
+        coordinator = TamburRoomStartupCoordinator(service, migration, activate)
+        task = asyncio.create_task(coordinator.async_start())
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        coordinator.cancel()
+        release.set()
+        await task
+
+        assert backend.prepares == 1
+        assert backend.decision_present is True
+        assert room_store.value["state"] == "prepared"
+        assert room_store.value["journal"]["staged"] == {"state": "intent"}
+        assert registry_store.registry == registry
+        assert activations == 0
+
+        await coordinator._async_catalog_snapshot(  # noqa: SLF001
+            service.current_catalog(), True
+        )
+        assert backend.prepares == 1
+        assert room_store.value["journal"]["staged"] == {"state": "intent"}
 
     asyncio.run(exercise())
 

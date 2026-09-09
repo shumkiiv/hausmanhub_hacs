@@ -142,6 +142,14 @@ class TamburRoomMigrationConflict(RuntimeError):
         self.stage = stage
 
 
+@dataclass(slots=True)
+class _TamburRoomCancellationFence:
+    cancelled: bool = False
+
+    def cancel(self) -> None:
+        self.cancelled = True
+
+
 @dataclass(frozen=True, slots=True)
 class TamburRuntimeScope:
     scenario_ids: tuple[str, ...] = (TAMBUR_SCENARIO_ID,)
@@ -515,11 +523,15 @@ class TamburRoomMigration:
             raise RuntimeError(f"required room migration interface {name} is absent")
         return await callback(*args, **kwargs)
 
-    async def async_apply(self) -> str:
+    async def async_apply(
+        self, *, cancellation_fence: object | None = None
+    ) -> str:
         async with self._lock:
-            return await self._async_apply_locked()
+            return await self._async_apply_locked(cancellation_fence)
 
-    async def _async_apply_locked(self) -> str:
+    async def _async_apply_locked(
+        self, cancellation_fence: object | None
+    ) -> str:
         journal: dict[str, object] | None = None
         native_started = False
         try:
@@ -555,7 +567,10 @@ class TamburRoomMigration:
                 if current != journal["after"] or not await self._native.async_verify_completed():
                     raise RuntimeError("room migration completion drifted")
                 await self._call(
-                    "async_commit_tambur_room_migration", self._plan, journal=journal
+                    "async_commit_tambur_room_migration",
+                    self._plan,
+                    journal=journal,
+                    cancellation_fence=cancellation_fence,
                 )
                 return "completed"
 
@@ -635,7 +650,10 @@ class TamburRoomMigration:
             if not await self._native.async_verify_completed():
                 raise RuntimeError("room native handover changed")
             await self._call(
-                "async_commit_tambur_room_migration", self._plan, journal=journal
+                "async_commit_tambur_room_migration",
+                self._plan,
+                journal=journal,
+                cancellation_fence=cancellation_fence,
             )
             await self._save("completed", journal)
             return "completed"
@@ -709,6 +727,7 @@ class TamburRoomStartupCoordinator:
         self._cancelled = False
         self._activation_cleanup: Callable[[], None] | None = None
         self._activation_revoke: Callable[[], None] | None = None
+        self._cancellation_fence = _TamburRoomCancellationFence()
         self.ready = False
 
     async def async_start(self) -> None:
@@ -741,22 +760,47 @@ class TamburRoomStartupCoordinator:
                 )
                 return
             try:
-                await self._migration.async_apply()
+                await self._migration.async_apply(
+                    cancellation_fence=self._cancellation_fence
+                )
+                if self._cancelled:
+                    return
                 result = await self._activate(TamburRuntimeScope())
                 cleanup = result if callable(result) else getattr(result, "cleanup", None)
                 commit = getattr(result, "commit", None)
                 revoke = getattr(result, "revoke", None)
                 self._activation_cleanup = cleanup if callable(cleanup) else None
                 self._activation_revoke = revoke if callable(revoke) else None
+                if self._cancelled:
+                    try:
+                        self._revoke_activation()
+                    finally:
+                        self._cleanup_activation()
+                    return
                 if callable(commit):
-                    commit()
+                    try:
+                        commit()
+                    except Exception:
+                        try:
+                            self._revoke_activation()
+                        finally:
+                            self._cleanup_activation()
+                        raise
             except asyncio.CancelledError:
                 raise
             except TamburRoomMigrationConflict as error:
+                if self._cancelled:
+                    return
                 self._publish_status({"state": "blocked", "stage": error.stage})
                 self._unsubscribe()
                 return
             except Exception:  # noqa: BLE001
+                try:
+                    self._revoke_activation()
+                finally:
+                    self._cleanup_activation()
+                if self._cancelled:
+                    return
                 self._publish_status({"state": "blocked", "stage": "binding"})
                 self._unsubscribe()
                 return
@@ -769,19 +813,25 @@ class TamburRoomStartupCoordinator:
 
     def cancel(self) -> None:
         self._cancelled = True
+        self._cancellation_fence.cancel()
         self.ready = False
         self._unsubscribe()
-        revoke = self._activation_revoke
-        self._activation_revoke = None
-        if revoke is not None:
-            revoke()
-        self._cleanup_activation()
+        try:
+            self._revoke_activation()
+        finally:
+            self._cleanup_activation()
 
     def _cleanup_activation(self) -> None:
         cleanup = self._activation_cleanup
         self._activation_cleanup = None
         if cleanup is not None:
             cleanup()
+
+    def _revoke_activation(self) -> None:
+        revoke = self._activation_revoke
+        self._activation_revoke = None
+        if revoke is not None:
+            revoke()
 
     def _unsubscribe(self) -> None:
         remove = self._remove_observer

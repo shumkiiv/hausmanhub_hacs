@@ -2075,7 +2075,11 @@ class ScenarioService:
         await on_registry({**dict(record), "state": "finalized"})
 
     async def async_commit_tambur_room_migration(
-        self, plan: object, *, journal: Mapping[str, object]
+        self,
+        plan: object,
+        *,
+        journal: Mapping[str, object],
+        cancellation_fence: object | None = None,
     ) -> None:
         """Forget compensation while keeping generic scenario execution closed."""
 
@@ -2083,6 +2087,11 @@ class ScenarioService:
             plan, journal=journal, require_final=True
         )
         async with self._lock:
+            cancelled = getattr(cancellation_fence, "cancelled", False)
+            if type(cancelled) is not bool or cancelled:
+                raise ScenarioServiceError(
+                    "Tambur migration activation was cancelled.", status=409
+                )
             self._tambur_room_migration_transaction = None
 
     async def _async_remove_tambur_decision_bundle(
