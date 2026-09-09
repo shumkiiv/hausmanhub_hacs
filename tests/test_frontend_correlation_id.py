@@ -402,7 +402,7 @@ class FrontendCorrelationSurfacesTest(unittest.TestCase):
             device_actions_source,
         )
         self.assertIn('from "./hausman-hub-correlation.js?v=', climate_source)
-        self.assertEqual(4, climate_source.count("withCorrelationId(CLIMATE_ACTION_API"))
+        self.assertEqual(5, climate_source.count("withCorrelationId(CLIMATE_ACTION_API"))
         self.assertIn('from "./hausman-hub-correlation.js?v=', inventory_source)
         self.assertIn("withCorrelationId(DEVICE_MAINTENANCE_API", inventory_source)
         self.assertIn('from "./hausman-hub-correlation.js?v=', discovery_source)

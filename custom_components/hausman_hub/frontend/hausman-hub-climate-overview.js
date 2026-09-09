@@ -1,11 +1,11 @@
 /* Climate control surface shared with the tablet information architecture. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.237";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.237";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.237";
-import { pendingOperationId, requiresSnapshotRefresh, resolveApiError, resolveClimateReceipt } from "./hausman-hub-error-taxonomy.js?v=1.52.237";
-import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.237";
-import { renderClimateSide } from "./hausman-hub-climate-side.js?v=1.52.237";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.238";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.238";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.238";
+import { pendingOperationId, requiresSnapshotRefresh, resolveApiError, resolveClimateReceipt } from "./hausman-hub-error-taxonomy.js?v=1.52.238";
+import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.238";
+import { renderClimateSide } from "./hausman-hub-climate-side.js?v=1.52.238";
 
 const CLIMATE_ACTION_API = "hausman_hub/v1/climate/actions";
 const CLIMATE_OPERATION_API = "hausman_hub/v1/climate/operations";

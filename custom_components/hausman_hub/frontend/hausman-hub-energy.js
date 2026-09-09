@@ -1,9 +1,9 @@
-import { renderEnergyHistoryChart } from "./hausman-hub-energy-chart.js?v=1.52.237";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.237";
-import { energySettingsDraft, energySettingsSaveDisabled, loadEnergyMeter, meterConfigured, meterNumber, renderEnergyAnomalyFields, renderEnergyMeterCard } from "./hausman-hub-energy-meter.js?v=1.52.237";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.237";
-import { mergeEnergyHistoryResponses, splitEnergyWindows } from "./hausman-hub-pagination.js?v=1.52.237";
-import { breakerConfirmation, configuredElectricalBreaker } from "./hausman-hub-device-actions.js?v=1.52.237";
+import { renderEnergyHistoryChart } from "./hausman-hub-energy-chart.js?v=1.52.238";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.238";
+import { energySettingsDraft, energySettingsSaveDisabled, loadEnergyMeter, meterConfigured, meterNumber, renderEnergyAnomalyFields, renderEnergyMeterCard } from "./hausman-hub-energy-meter.js?v=1.52.238";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.238";
+import { mergeEnergyHistoryResponses, splitEnergyWindows } from "./hausman-hub-pagination.js?v=1.52.238";
+import { breakerConfirmation, configuredElectricalBreaker } from "./hausman-hub-device-actions.js?v=1.52.238";
 
 const number = (value, digits = 1) => Number.isFinite(Number(value))
   ? new Intl.NumberFormat("ru-RU", { maximumFractionDigits: digits }).format(Number(value))
