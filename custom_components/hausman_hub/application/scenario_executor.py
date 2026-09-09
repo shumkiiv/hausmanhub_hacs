@@ -44,6 +44,10 @@ from .scenario_light_priority import (
     _state_revision,
     skipped_light_receipt,
 )
+from .scenario_decision_bridge import (
+    ScenarioDecisionBridge,
+    _record_trusted_executor_evidence,
+)
 from .scenario_node_red import NodeRedBackendError, NodeRedScenarioBackend
 from .light_safety_obligations import (
     RECONCILE_CONFIRMED,
@@ -66,7 +70,6 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
     from .manual_light_off_protection import ManualLightOffProtectionCoordinator
     from .scenario_command_context import ScenarioCommandContextRegistry
-    from .scenario_decision_bridge import ScenarioDecisionBridge
 
 
 _DEFAULT_DEVICE_READBACK_WINDOW_SECONDS = 8.0
@@ -784,6 +787,16 @@ class ScenarioExecutor:
                     command_request_id=str(accepted["receiptId"]),
                     force_new_readback=True,
                 )
+                _record_trusted_executor_evidence(
+                    bridge,
+                    plan_id=plan_id,
+                    decision_action_id=decision_action_id,
+                    receipt_id=str(accepted["receiptId"]),
+                    target_id=action.target_id,
+                    action_id=action.action_id,
+                    value=action.value,
+                    result=internal,
+                )
                 if internal is not None:
                     await self._light_priority.note_results(
                         (action,),
@@ -807,16 +820,17 @@ class ScenarioExecutor:
             and internal.get("status") == "completed"
             and internal.get("confirmed") is True
             and isinstance(read_back, Mapping)
+            and read_back.get("matched") is True
             and isinstance(read_back.get("evidenceRevision"), str)
             and bool(read_back.get("evidenceRevision"))
         )
-        confirmed_observation = (
-            await bridge.async_confirmed_observation(plan_id, decision_action_id)
+        status = (
+            "confirmed"
             if read_back_confirmed
-            else None
+            else "uncertain"
+            if crossed["value"]
+            else "failed"
         )
-        confirmed = confirmed_observation is not None
-        status = "confirmed" if confirmed else "uncertain" if crossed["value"] else "failed"
         receipt: dict[str, object] = {
             "id": accepted["receiptId"],
             "planId": plan_id,
@@ -824,8 +838,6 @@ class ScenarioExecutor:
             "targetId": action.target_id,
             "status": status,
         }
-        if confirmed and confirmed_observation is not None:
-            receipt.update(confirmed_observation)
         recorded = await bridge.async_record_receipt(plan_id, receipt)
         if failure is not None:
             recorded["error"] = type(failure).__name__
