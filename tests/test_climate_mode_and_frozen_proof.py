@@ -190,6 +190,57 @@ class FrozenClimateProofTests(unittest.IsolatedAsyncioTestCase):
         again = ClimateTabletService(self.runtime, self.store, now_ms=lambda: NOW + 100000)
         await again.async_load()
 
+    async def test_authenticated_mixed_timeout_ledger_is_reclassified_without_redispatch(self):
+        """Repair only an authenticated mixed result left in the timeout state."""
+
+        runtime, store, _, executor = native_home_target_runtime(include_humidifier=True)
+        runtime._manual_store = MemoryStore(None)
+        await runtime.async_start()
+        await runtime.async_set_device_mode("living", "living_floor", "manual")
+        original_execute = executor.async_execute
+
+        async def leave_radiator_unconfirmed(calls):
+            if calls[0].entity_id == "climate.living_radiator":
+                executor.batches.append(calls)
+                return len(calls)
+            return await original_execute(calls)
+
+        executor.async_execute = leave_radiator_unconfirmed
+        now = NOW
+        service = ClimateTabletService(runtime, store, now_ms=lambda: now)
+        await service.async_load()
+        body = request(
+            "set_home_targets", {"target_temperature": 25.5}, room_id=None,
+            request_id="mixed-timeout-repair.1",
+        )
+        with patch(
+            "custom_components.hausman_hub.application.climate_runtime.asyncio.sleep",
+            new_callable=AsyncMock,
+        ):
+            pending = await service.async_execute(body)
+        now += 61_000
+        receipt = await service.async_operation(pending["operation_id"])
+        leaves = receipt["outcomes"]["rooms"]["living"]["devices"]
+        self.assertEqual("confirmed", leaves["living_air_conditioner"]["status"])
+        self.assertEqual("manual", leaves["living_floor"]["status"])
+        self.assertEqual("accepted_timeout", leaves["living_radiator"]["execution_state"])
+        self.assertEqual(
+            "accepted_timeout",
+            service._records_by_request[body["request_id"]].dispatch_ledger["state"],
+        )
+        calls_before_restore = len(executor.batches)
+
+        restored = ClimateTabletService(runtime, store, now_ms=lambda: now)
+        await restored.async_load()
+
+        repaired = restored._records_by_request[body["request_id"]]
+        self.assertEqual("terminal_mixed", repaired.dispatch_ledger["state"])
+        self.assertEqual(receipt, repaired.receipt)
+        replay = await restored.async_execute(body)
+        self.assertTrue(replay["duplicate"])
+        self.assertEqual(receipt["operation_id"], replay["operation_id"])
+        self.assertEqual(calls_before_restore, len(executor.batches))
+
     async def test_unsigned_drift_still_fails_closed(self):
         leaf = self.store.payload["records"][0]["receipt"]["outcomes"]["rooms"]["living"]["devices"]["living_air_conditioner"]
         leaf["evidence"]["reported_target_temperature"] = 27.0

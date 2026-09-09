@@ -980,13 +980,17 @@ class ClimateTabletService:
                         dispatch_ledger, self._reliable_scope_integrity_key,
                     )
                 ):
-                    recovered = _downgrade_authenticated_confirmation_drift(
-                        normalized, request, dispatch_ledger, self._safe_now(),
+                    recovered = _reclassify_authenticated_mixed_timeout_ledger(
+                        normalized, request, dispatch_ledger,
                     )
+                    if recovered is None:
+                        recovered = _downgrade_authenticated_confirmation_drift(
+                            normalized, request, dispatch_ledger, self._safe_now(),
+                        )
                 if recovered is not None:
                     normalized, dispatch_ledger = recovered
                     _LOGGER.warning(
-                        "Recovered authenticated climate confirmation drift without redispatch"
+                        "Recovered authenticated climate receipt drift without redispatch"
                     )
                     scope_bindings[request_id] = _binding_with_checkpoint(
                         scope_bindings[request_id], normalized, dispatch_ledger,
@@ -5226,6 +5230,36 @@ def _expire_accepted_reliable_receipt(
         expires_at=max(result.get("expires_at", now), now),
     )
     return _validate_receipt(result)
+
+
+def _reclassify_authenticated_mixed_timeout_ledger(
+    receipt: Mapping[str, object], request: ClimateTabletActionRequest,
+    ledger: object,
+) -> tuple[dict[str, object], dict[str, object]] | None:
+    """Repair one authenticated legacy state label without changing its receipt.
+
+    A home target can finish with confirmed, manual, deferred and timed-out
+    leaves.  Older code persisted that final combination as ``accepted_timeout``
+    even though that ledger state permits no manual or deferred leaves.  The
+    authenticated operation binding must already cover the exact malformed
+    record before this function is reached.  Reclassifying it as
+    ``terminal_mixed`` changes neither intent nor physical dispatch boundary.
+    """
+
+    if (
+        request.action != "set_home_targets"
+        or not isinstance(ledger, Mapping)
+        or set(ledger) != {"state", "dispatched_at", "pre_dispatch_sources"}
+        or ledger.get("state") != "accepted_timeout"
+        or type(ledger.get("dispatched_at")) is not int
+        or not _receipt_matches_request(receipt, request)
+    ):
+        return None
+    repaired = dict(ledger)
+    repaired["state"] = "terminal_mixed"
+    if not _valid_reliable_dispatch_ledger(repaired, receipt, request):
+        return None
+    return dict(receipt), repaired
 
 
 def _downgrade_authenticated_confirmation_drift(
