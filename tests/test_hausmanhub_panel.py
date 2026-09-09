@@ -884,6 +884,19 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         primary_card_rule = overview_css.split(".overview-canon-primary-card,.overview-canon-favorites")[1]
         self.assertIn("min-width:0", primary_card_rule)
 
+    def test_climate_bulk_restore_uses_the_existing_safe_action(self) -> None:
+        climate_overview = PANEL_JS.with_name(
+            "hausman-hub-climate-overview.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("returnAllClimateToAutomatic", climate_overview)
+        self.assertIn('homeControl.allowed_actions.includes("return_all_to_automatic")', climate_overview)
+        self.assertIn('action: "return_all_to_automatic"', climate_overview)
+        self.assertIn("room_id: null", climate_overview)
+        self.assertIn("parameters: {}", climate_overview)
+        self.assertIn("Вернуть устройства в климат. контур", climate_overview)
+        self.assertIn("climate-manual-restore-all", climate_overview)
+
     def test_frontend_module_cache_versions_match_manifest(self) -> None:
         content = PANEL_JS.read_text(encoding="utf-8")
         manifest = json.loads(

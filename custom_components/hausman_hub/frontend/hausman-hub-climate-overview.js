@@ -64,6 +64,43 @@ export async function synchronizeClimate(panel) {
   }
 }
 
+export async function returnAllClimateToAutomatic(panel) {
+  const homeControl = panel._climateRuntime && panel._climateRuntime.home_control;
+  const allowed = homeControl && Array.isArray(homeControl.allowed_actions)
+    && homeControl.allowed_actions.includes("return_all_to_automatic");
+  if (panel._busy || !allowed) return false;
+  panel._busy = true;
+  panel._climateModePendingKey = "home:return_all_to_automatic";
+  panel._notice = "Возвращаем устройства в климатический контур...";
+  panel._error = false;
+  panel._render();
+  try {
+    const receipt = await panel._hass.callApi("POST", CLIMATE_ACTION_API, withCorrelationId(CLIMATE_ACTION_API, {
+      contract: { name: "hausman-hub-climate-action-request", version: 1 },
+      request_id: `hacs.climate.return-auto.${Date.now().toString(36)}`,
+      expected_state_revision: panel._climateRuntime.state_revision,
+      action: "return_all_to_automatic",
+      room_id: null,
+      parameters: {},
+    }));
+    if (!receipt || receipt.confirmed !== true) {
+      await failClimateAction(panel, null, receipt);
+      return false;
+    }
+    panel._notice = "Устройства возвращены в климатический контур.";
+    panel._error = false;
+    await panel._load();
+    return true;
+  } catch (error) {
+    await failClimateAction(panel, error, null);
+    return false;
+  } finally {
+    panel._busy = false;
+    panel._climateModePendingKey = null;
+    panel._render();
+  }
+}
+
 export async function setClimateManualMode(panel, roomId, deviceId, manual) {
   if (panel._busy || !panel._climateRuntime) return false;
   panel._busy = true;
@@ -886,6 +923,18 @@ function renderRooms(panel, container, rooms, devices, deps) {
     manualTitle.appendChild(el("strong", null, "Исключено из климатического контура"));
     manualHead.appendChild(manualTitle);
     manualHead.appendChild(el("span", "climate-manual-count", String(manualDevices.length)));
+    const homeControl = panel._climateRuntime?.home_control || {};
+    const canRestoreAll = Array.isArray(homeControl.allowed_actions)
+      && homeControl.allowed_actions.includes("return_all_to_automatic");
+    if (canRestoreAll) {
+      const restoreAll = el("button", "climate-manual-restore climate-manual-restore-all",
+        "Вернуть устройства в климат. контур");
+      restoreAll.type = "button";
+      restoreAll.disabled = Boolean(panel._busy || panel._climateModePendingKey);
+      setAttr(restoreAll, "aria-label", "Вернуть все исключённые устройства в климатический контур");
+      restoreAll.addEventListener("click", () => returnAllClimateToAutomatic(panel));
+      manualHead.appendChild(restoreAll);
+    }
     manualList.appendChild(manualHead);
     manualDevices.forEach(({ room, device }) => {
       const row = el("div", "climate-manual-list-item");
