@@ -38,6 +38,7 @@ _ACTION_IDS = frozenset(
 _LEDGER_STATUSES = frozenset(
     {"prepared", "dispatching", "confirmed", "failed", "uncertain", "cancelled"}
 )
+_RECEIPT_STATUSES = frozenset({"confirmed", "failed", "uncertain"})
 _UNAVAILABLE_STATES = frozenset({"unknown", "unavailable"})
 
 
@@ -298,6 +299,8 @@ def valid_scenario_decision_bridge_payload(value: object) -> bool:
         ):
             return False
         receipt = item.get("receipt")
+        if item.get("status") in _RECEIPT_STATUSES and receipt is None:
+            return False
         if receipt is not None and (
             not _valid_receipt(receipt)
             or receipt.get("planId") != plan_id
@@ -408,6 +411,10 @@ class ScenarioDecisionBridge:
                         record["updatedAtMs"] = self._now_ms()
                     elif record["status"] == "dispatching":
                         record["status"] = "uncertain"
+                        record["receipt"] = self._terminal_receipt(
+                            record, "uncertain"
+                        )
+                        self._replace_recent_receipt(payload, record["receipt"])
                         record["updatedAtMs"] = self._now_ms()
                 await self._save(payload)
             self._payload = payload
@@ -473,6 +480,43 @@ class ScenarioDecisionBridge:
             None,
         )
 
+    @staticmethod
+    def _terminal_receipt(
+        record: Mapping[str, object],
+        status: str,
+        *,
+        observed_revision: int | None = None,
+        observed_at_ms: int | None = None,
+    ) -> dict[str, object]:
+        action = record.get("action")
+        if not isinstance(action, Mapping) or status not in _RECEIPT_STATUSES:
+            raise RuntimeError("scenario terminal receipt source is invalid")
+        receipt: dict[str, object] = {
+            "id": record["receiptId"],
+            "planId": record["planId"],
+            "actionId": action["actionId"],
+            "targetId": action["targetId"],
+            "status": status,
+        }
+        if observed_revision is not None:
+            receipt["observedRevision"] = observed_revision
+        if observed_at_ms is not None:
+            receipt["observedAtMs"] = observed_at_ms
+        return receipt
+
+    @staticmethod
+    def _replace_recent_receipt(
+        payload: dict[str, object], receipt: Mapping[str, object]
+    ) -> None:
+        payload["receipts"] = [
+            *(
+                item
+                for item in payload["receipts"]
+                if item["id"] != receipt["id"]
+            ),
+            copy.deepcopy(dict(receipt)),
+        ][-_MAX_RECEIPTS:]
+
     def _accepted(
         self, record: Mapping[str, object], *, replayed: bool
     ) -> dict[str, object]:
@@ -519,7 +563,8 @@ class ScenarioDecisionBridge:
         ):
             return False
         revision = observation.get("revision")
-        if type(revision) is not int:
+        observed_at_ms = observation.get("observedAtMs")
+        if type(revision) is not int or not _valid_safe_integer(observed_at_ms):
             return False
         unresolved = [
             item
@@ -536,6 +581,13 @@ class ScenarioDecisionBridge:
             action = item["action"]
             desired = "on" if action.get("actionId") == "turn_on" else "off" if action.get("actionId") == "turn_off" else None
             item["status"] = "confirmed" if desired == observation.get("state") else "failed"
+            item["receipt"] = self._terminal_receipt(
+                item,
+                str(item["status"]),
+                observed_revision=revision,
+                observed_at_ms=int(observed_at_ms),
+            )
+            self._replace_recent_receipt(payload, item["receipt"])
             item["updatedAtMs"] = self._now_ms()
         return True
 
@@ -676,6 +728,41 @@ class ScenarioDecisionBridge:
             if cancellation.is_set():
                 raise ScenarioDecisionRejected("scenario plan was cancelled manually")
 
+    async def async_confirmed_observation(
+        self, plan_id: str, action_id: str
+    ) -> dict[str, int] | None:
+        """Return newer evidence from the bridge's HA observation coordinator."""
+
+        async with self._lock:
+            current = self._loaded()
+            record = self._find(current, plan_id)
+            action = record.get("action") if record is not None else None
+            if (
+                record is None
+                or record.get("status") != "dispatching"
+                or not isinstance(action, Mapping)
+                or action.get("id") != action_id
+            ):
+                return None
+            authority = await _maybe_await(
+                self._authority_provider(str(action["targetId"]))
+            )
+            if (
+                not isinstance(authority, Mapping)
+                or authority.get("fresh") is not True
+                or authority.get("observationEpoch") != current["observationEpoch"]
+                or authority.get("generation") != action.get("authorityGeneration")
+                or type(authority.get("observedRevision")) is not int
+                or int(authority["observedRevision"])
+                <= int(action["observedRevision"])
+                or not _valid_safe_integer(authority.get("observedAtMs"))
+            ):
+                return None
+            return {
+                "observedRevision": int(authority["observedRevision"]),
+                "observedAtMs": int(authority["observedAtMs"]),
+            }
+
     async def async_register_manual_intent(
         self,
         request_id: str,
@@ -748,6 +835,11 @@ class ScenarioDecisionBridge:
                     record["status"] = (
                         "uncertain" if plan_id in self._dispatch_crossed else "cancelled"
                     )
+                    if record["status"] == "uncertain":
+                        record["receipt"] = self._terminal_receipt(
+                            record, "uncertain"
+                        )
+                        self._replace_recent_receipt(updated, record["receipt"])
                     record["updatedAtMs"] = self._now_ms()
             manual = {
                 "requestId": request_id,
@@ -811,9 +903,7 @@ class ScenarioDecisionBridge:
             durable = dict(updated["durable"])
             durable["pendingReceiptId"] = None
             updated["durable"] = durable
-            updated["receipts"] = [
-                *updated["receipts"], copy.deepcopy(dict(receipt))
-            ][-_MAX_RECEIPTS:]
+            self._replace_recent_receipt(updated, receipt)
             await self._save(updated)
             self._payload = updated
             event = {

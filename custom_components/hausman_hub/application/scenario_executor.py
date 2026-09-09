@@ -757,16 +757,16 @@ class ScenarioExecutor:
         internal: dict[str, Any] | None = None
         failure: Exception | None = None
         async with self._light_priority.authority_lock():
-            priority_plan = self._light_priority.plan(
-                (action,),
-                self._catalog,
-                self._hass,
-                scenario_id=str(decision.get("scenarioId", "")),
-                scenario_text="",
-                trigger_context={"source": "decision_bridge"},
-                power_dependencies=dependencies,
-            )
             try:
+                priority_plan = self._light_priority.plan(
+                    (action,),
+                    self._catalog,
+                    self._hass,
+                    scenario_id=str(decision.get("scenarioId", "")),
+                    scenario_text="",
+                    trigger_context={"source": "decision_bridge"},
+                    power_dependencies=dependencies,
+                )
                 internal = await self._device_action_receipt(
                     action,
                     {
@@ -784,30 +784,38 @@ class ScenarioExecutor:
                     command_request_id=str(accepted["receiptId"]),
                     force_new_readback=True,
                 )
+                if internal is not None:
+                    await self._light_priority.note_results(
+                        (action,),
+                        (internal,),
+                        priority_plan,
+                        self._catalog,
+                        self._hass,
+                        automatic=True,
+                        dry_run=False,
+                        scenario_id=str(decision.get("scenarioId", "")),
+                        run_id=plan_id,
+                        authority_lock_held=True,
+                    )
             except Exception as error:  # the durable marker decides uncertainty
                 failure = error
-            if internal is not None:
-                await self._light_priority.note_results(
-                    (action,),
-                    (internal,),
-                    priority_plan,
-                    self._catalog,
-                    self._hass,
-                    automatic=True,
-                    dry_run=False,
-                    scenario_id=str(decision.get("scenarioId", "")),
-                    run_id=plan_id,
-                    authority_lock_held=True,
-                )
 
         read_back = internal.get("read_back") if isinstance(internal, Mapping) else None
-        confirmed = bool(
-            isinstance(internal, Mapping)
+        read_back_confirmed = bool(
+            failure is None
+            and isinstance(internal, Mapping)
             and internal.get("status") == "completed"
             and internal.get("confirmed") is True
             and isinstance(read_back, Mapping)
-            and type(read_back.get("evidenceSequence")) is int
+            and isinstance(read_back.get("evidenceRevision"), str)
+            and bool(read_back.get("evidenceRevision"))
         )
+        confirmed_observation = (
+            await bridge.async_confirmed_observation(plan_id, decision_action_id)
+            if read_back_confirmed
+            else None
+        )
+        confirmed = confirmed_observation is not None
         status = "confirmed" if confirmed else "uncertain" if crossed["value"] else "failed"
         receipt: dict[str, object] = {
             "id": accepted["receiptId"],
@@ -816,9 +824,8 @@ class ScenarioExecutor:
             "targetId": action.target_id,
             "status": status,
         }
-        if confirmed and isinstance(read_back, Mapping):
-            receipt["observedRevision"] = read_back["evidenceSequence"]
-            receipt["observedAtMs"] = int(time.time() * 1000)
+        if confirmed and confirmed_observation is not None:
+            receipt.update(confirmed_observation)
         recorded = await bridge.async_record_receipt(plan_id, receipt)
         if failure is not None:
             recorded["error"] = type(failure).__name__
