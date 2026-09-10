@@ -530,6 +530,60 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             strings["config"]["abort"],
         )
 
+    def test_smart_switch_binding_options_strings_match_all_translations(self) -> None:
+        """Every local preparation key is available to both supported UIs."""
+
+        strings = json.loads(
+            (ROOT / "custom_components" / "hausman_hub" / "strings.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        source_options = strings["options"]
+        source_step = source_options["step"]
+        for language in ("en", "ru"):
+            with self.subTest(language=language):
+                translated = json.loads(
+                    (
+                        ROOT
+                        / "custom_components"
+                        / "hausman_hub"
+                        / "translations"
+                        / f"{language}.json"
+                    ).read_text(encoding="utf-8")
+                )["options"]
+                self.assertEqual(
+                    source_step["advanced_settings"]["menu_options"][
+                        "smart_switch_bindings"
+                    ],
+                    translated["step"]["advanced_settings"]["menu_options"][
+                        "smart_switch_bindings"
+                    ],
+                )
+                self.assertEqual(
+                    source_step["advanced_settings"]["menu_option_descriptions"][
+                        "smart_switch_bindings"
+                    ],
+                    translated["step"]["advanced_settings"][
+                        "menu_option_descriptions"
+                    ]["smart_switch_bindings"],
+                )
+                self.assertEqual(
+                    source_step["smart_switch_bindings"],
+                    translated["step"]["smart_switch_bindings"],
+                )
+                self.assertEqual(
+                    source_options["abort"]["smart_switch_bindings_saved"],
+                    translated["abort"]["smart_switch_bindings_saved"],
+                )
+                for key in (
+                    "smart_switch_bindings_unavailable",
+                    "invalid_smart_switch_bindings",
+                ):
+                    self.assertEqual(
+                        source_options["error"][key],
+                        translated["error"][key],
+                    )
+
     async def test_office_scale_confirmation_uses_server_form_cas_only(self) -> None:
         from custom_components.hausman_hub.application.curtain_command_policy import (
             OFFICE_CURTAIN_TARGET,
