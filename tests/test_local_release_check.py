@@ -25,7 +25,7 @@ class LocalReleaseCheckTest(unittest.TestCase):
             tuple(label for label, _ in checks),
             (
                 "local tests",
-                "archive/reset pytest",
+                "pytest scenarios",
                 "common synthetic fixture",
                 "shadow synthetic fixture",
                 "diagnostics synthetic fixture",
@@ -45,7 +45,7 @@ class LocalReleaseCheckTest(unittest.TestCase):
                 "-m",
                 "pytest",
                 "-q",
-                "tests/test_operation_journal_admin.py",
+                "tests",
             ),
         )
         self.assertEqual(

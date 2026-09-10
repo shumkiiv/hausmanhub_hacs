@@ -25,6 +25,10 @@ function selectedStates(available, requested) {
   return selected;
 }
 const states = selectedStates(allStates, process.env.HACS_INTENT_STATES || "");
+const requestedActionLanes = Number.parseInt(process.env.HACS_INTENT_LANES || "1", 10);
+const actionLaneCount = Number.isInteger(requestedActionLanes) && requestedActionLanes > 0
+  ? requestedActionLanes
+  : 4;
 const output = process.env.PLAYWRIGHT_OUTPUT_DIR || process.env.QA_ARTIFACT_ROOT;
 const INVENTORY_ONLY = process.env.HACS_INTENT_INVENTORY_ONLY === "1";
 const ROOT = path.resolve(process.cwd());
@@ -763,24 +767,28 @@ test("every visible enabled HACS control is located and safely exercised in the 
       }
       report.sections[state[0]] = { visible_enabled: controls.length, attempted: 0, clicked: 0, blocked: 0 };
       if (INVENTORY_ONLY) continue;
-      // Four storage-isolated lanes retain a pristine document per action while
-      // allowing Chromium to use more than one CPU core. Each lane owns one
-      // context and Page, so navigation in one lane cannot reset another lane.
-      const laneRuns = assignControlLanes(controls, 4).map(async (lane, laneIndex) => {
+      // Each action receives a fresh document. A control may replace the panel
+      // itself, so reusing its page would leak that transition into the next
+      // action. Lanes remain independent and can be reduced for constrained
+      // local release environments.
+      const laneRuns = assignControlLanes(controls, actionLaneCount).map(async (lane, laneIndex) => {
         const laneIdentity = { state: state[0], key: null, occurrence: null, lane: laneIndex };
         const laneContext = laneIndex === 0 ? context : await createStateContext(browser, routeTelemetry, laneIdentity);
-        let action;
         let laneCleanupError;
         try {
-          action = await withHarnessDeadline({ ...laneIdentity, phase: "create" }, () => laneContext.newPage());
           const results = [];
           for (const item of lane) {
             const actionIdentity = { state: state[0], key: item.control.key, occurrence: item.control.occurrence, lane: laneIndex };
-            results.push({ ...item, ...await exerciseControl(action, state, item.control, actionIdentity) });
+            let action;
+            try {
+              action = await withHarnessDeadline({ ...actionIdentity, phase: "create" }, () => laneContext.newPage());
+              results.push({ ...item, ...await exerciseControl(action, state, item.control, actionIdentity) });
+            } finally {
+              await closeHarnessResource(action, actionIdentity);
+            }
           }
           return results;
         } finally {
-          try { await closeHarnessResource(action, laneIdentity); } catch (error) { laneCleanupError = error; }
           try { if (laneIndex !== 0) await closeHarnessResource(laneContext, laneIdentity); } catch (error) { laneCleanupError ||= error; }
           if (laneCleanupError) throw laneCleanupError;
         }

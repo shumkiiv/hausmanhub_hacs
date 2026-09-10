@@ -20,19 +20,10 @@ SOURCE = ",".join(
         "custom_components.hausman_hub.verified_safety_storage",
     )
 )
-SUITES = (
-    "tests.test_water_safety",
-    "tests.test_scenario_executor",
-    "tests.test_scenario_light_priority_storage",
-    "tests.test_intercom_release_obligation",
-    "tests.test_scenario_service",
-    "tests.test_managed_switch_migration_service",
-    "tests.test_managed_switch_binding_migration",
-    "tests.test_managed_switch_binding_migration_service",
-    "tests.test_managed_switch_startup",
-    "tests.test_climate_deviation_guard",
-    "tests.test_verified_safety_storage",
-)
+# The safety paths include pytest-style asynchronous scenarios as well as
+# unittest cases.  A hand-maintained unittest subset can omit either group, so
+# measure the complete local pytest collection required before a release.
+TEST_SUITE = ("tests",)
 MINIMUM_BRANCH_COVERAGE = 75
 
 
@@ -42,7 +33,7 @@ def run(*args: str) -> None:
 
 def main() -> int:
     run("erase")
-    run("run", "--branch", f"--source={SOURCE}", "-m", "unittest", *SUITES)
+    run("run", "--branch", f"--source={SOURCE}", "-m", "pytest", "-q", *TEST_SUITE)
     run("report", "--show-missing", f"--fail-under={MINIMUM_BRANCH_COVERAGE}")
     return 0
 

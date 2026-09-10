@@ -64,13 +64,16 @@ def is_allowed_continued_request(value: object) -> bool:
     if not valid_request_record(value) or value["method"] != "GET":
         return False
     parsed = urlsplit(value["url"])
-    return f"{parsed.scheme}://{parsed.netloc}" == HARNESS_ORIGIN and parsed.path in allowed_local_paths()
+    return f"{parsed.scheme}://{parsed.netloc}" == HARNESS_ORIGIN and parsed.path in ALLOWED_LOCAL_PATHS
 
 
 def is_expected_blocked_image(value: object) -> bool:
     return valid_request_record(value) and value == {
         "method": "GET", "resource_type": "image", "url": value["url"],
     } and value["url"] in EXPECTED_BLOCKED_EXTERNAL_IMAGES
+
+
+ALLOWED_LOCAL_PATHS = allowed_local_paths()
 
 
 data = json.loads(MANIFEST.read_text(encoding="utf-8"))
