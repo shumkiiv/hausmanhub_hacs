@@ -512,6 +512,24 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([], services.calls)
         self.assertEqual({"kept": True}, flow.config_entry.options)
 
+    def test_smart_switch_bindings_saved_abort_is_translated_for_options_flow(self) -> None:
+        """The local preparation result belongs to the options-flow namespace."""
+
+        strings = json.loads(
+            (ROOT / "custom_components" / "hausman_hub" / "strings.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        self.assertIn(
+            "smart_switch_bindings_saved",
+            strings["options"]["abort"],
+        )
+        self.assertNotIn(
+            "smart_switch_bindings_saved",
+            strings["config"]["abort"],
+        )
+
     async def test_office_scale_confirmation_uses_server_form_cas_only(self) -> None:
         from custom_components.hausman_hub.application.curtain_command_policy import (
             OFFICE_CURTAIN_TARGET,

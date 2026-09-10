@@ -74,3 +74,33 @@ tests passed, JSON корректен, ошибок пробелов в diff н�
 нужен отдельный контролируемый перезапуск интеграции, чтобы новый документ
 прочитался и ручной контур мог быть допущен. Это fail-closed ограничение,
 а не незавершённость реализации.
+
+## Fix round 1: локализация результата options flow
+
+Исправлено размещение ключа `smart_switch_bindings_saved`: он перенесён из
+`config.abort` в `options.abort`, потому что результат возвращает именно
+`HausmanHubOptionsFlow`. Добавлен regression-тест, который проверяет оба
+условия: ключ есть в options namespace и отсутствует в config namespace.
+
+RED выполнен до правки:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 /tmp/hausman-ci-6Ksvvz/venv/bin/python -m pytest -q tests/test_config_flow_adapter.py -k 'smart_switch_bindings_saved_abort'
+```
+
+Вывод: `1 failed, 26 deselected`; причина `KeyError: 'abort'` в
+`strings["options"]["abort"]`, что подтвердило отсутствующую локализацию
+options flow.
+
+После правки выполнена команда:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 /tmp/hausman-ci-6Ksvvz/venv/bin/python -m pytest -q tests/test_config_flow_adapter.py -k 'smart_switch_bindings_saved_abort or prepare_smart_switch_bindings'
+PYTHONDONTWRITEBYTECODE=1 /tmp/hausman-ci-6Ksvvz/venv/bin/python -m json.tool custom_components/hausman_hub/strings.json >/dev/null
+git diff --check
+```
+
+Вывод: `2 passed, 25 deselected`; JSON корректен, ошибок пробелов в diff нет.
+Изменены только `custom_components/hausman_hub/strings.json`,
+`tests/test_config_flow_adapter.py` и этот отчёт. Риск отсутствует: ключ не
+содержит идентификаторов устройств и не меняет поведение сохранения.
