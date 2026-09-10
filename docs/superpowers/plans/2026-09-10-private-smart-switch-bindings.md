@@ -60,21 +60,13 @@ def test_invalid_or_reused_profile_ids_do_not_resolve() -> None:
         "version": 1, "revision": 1,
         "devices": {"passthrough": "same", "marmitek": "same"},
     }) is None
-
-
-def test_public_switch_source_contains_no_static_trigger_configs() -> None:
-    source = (ROOT / "custom_components/hausman_hub/application/smart_switch_runtime.py").read_text()
-    assert "SHOWER_TRIGGER_CONFIGS" not in source
-    assert "PASSTHROUGH_TRIGGER_CONFIGS" not in source
-    assert "MARMITEK_TRIGGER_CONFIGS" not in source
 ```
 
 - [ ] **Step 2: Run the test and confirm RED**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 /tmp/hausman-ci-6Ksvvz/venv/bin/python -m pytest -q tests/test_smart_switch_bindings.py`
 
-Expected: FAIL because the binding model does not exist and the runtime still
-builds static trigger configurations.
+Expected: FAIL because the binding model does not exist.
 
 - [ ] **Step 3: Implement the model and store**
 
@@ -144,6 +136,13 @@ def test_adapter_subscribes_only_to_explicitly_resolved_synthetic_triggers() -> 
 def test_adapter_rejects_empty_or_foreign_resolved_trigger_set() -> None:
     with pytest.raises(ValueError):
         SmartSwitchTriggerAdapter(hass, service, resolved_triggers=())
+
+
+def test_public_switch_source_contains_no_static_trigger_configs() -> None:
+    source = (ROOT / "custom_components/hausman_hub/application/smart_switch_runtime.py").read_text()
+    assert "SHOWER_TRIGGER_CONFIGS" not in source
+    assert "PASSTHROUGH_TRIGGER_CONFIGS" not in source
+    assert "MARMITEK_TRIGGER_CONFIGS" not in source
 ```
 
 - [ ] **Step 2: Run the tests and confirm RED**
