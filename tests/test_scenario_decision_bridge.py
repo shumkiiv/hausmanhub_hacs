@@ -256,6 +256,37 @@ async def loaded_bridge(
 
 
 class ScenarioDecisionBridgeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_night_mirror_is_cancelled_at_dispatch_when_fresh_snapshot_is_after_sunrise(self) -> None:
+        class NightSource(SnapshotSource):
+            after_sunrise = False
+
+            async def snapshot(self, scenario_id: str, event_value: object, observation_epoch: int) -> dict[str, object]:
+                result = await super().snapshot(scenario_id, event_value, observation_epoch)
+                now = NOW + 4 * 60 * 60_000 if self.after_sunrise else NOW
+                result["issuedAtMs"] = now - 1_000
+                result["expiresAtMs"] = now + 60_000
+                result["clock"] = {
+                    **result["clock"], "nowMs": now,
+                    "minutesOfDay": 6 * 60 if self.after_sunrise else 2 * 60,
+                    "sunriseAtMs": NOW + 4 * 60 * 60_000,
+                }
+                for observation in result["observations"].values():
+                    observation["observedAtMs"] = now
+                return result
+
+        source = NightSource()
+        bridge, store, _ = await loaded_bridge(source=source)
+        request = await bridge.async_snapshot(SCENARIO_ID, event())
+        plan = decision(request)
+        plan["reasonCode"] = "night_mirror_on"
+        plan["action"].update(targetId=MIRROR, authorityGeneration=4, observedRevision=13)
+        accepted = await bridge.async_accept(plan)
+        source.after_sunrise = True
+
+        with self.assertRaises(ScenarioDecisionRejected):
+            await bridge.async_before_dispatch(accepted["planId"], plan["action"]["id"])
+        self.assertEqual("cancelled", store.value["history"][-1]["status"])
+
     async def test_accept_persists_next_state_wakeups_and_prepared_ledger_before_dispatch(self) -> None:
         bridge, store, _source = await loaded_bridge()
         request = await bridge.async_snapshot(SCENARIO_ID, event())
@@ -1615,6 +1646,42 @@ class TamburHaObservationCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(NOW + 12_000, snapshot["clock"]["sunriseAtMs"])
+
+    async def test_snapshot_preserves_verified_automatic_ownership_proof(self) -> None:
+        coordinator = self._coordinator(
+            lambda _target, _entity, reported: reported + 60_000
+        )
+
+        async def authority(target_id: str) -> dict[str, object]:
+            if target_id == MIRROR:
+                return {
+                    "owner": "automatic",
+                    "generation": 4,
+                    "protectionActive": False,
+                    "confirmedReceiptId": "ownership.receipt.4",
+                }
+            return {"owner": "none", "generation": 1, "protectionActive": False}
+
+        coordinator._authority_provider = authority  # noqa: SLF001
+        coordinator.start()
+        stamp = datetime.fromtimestamp(NOW / 1000, timezone.utc)
+        state = SimpleNamespace(
+            entity_id="switch.mirror", state="on", attributes={}, last_changed=stamp,
+            last_updated=stamp, last_reported=stamp,
+        )
+        self.hass.states.values["switch.mirror"] = state
+        self.report_callbacks[0](
+            SimpleNamespace(data={"entity_id": "switch.mirror", "new_state": state, "last_reported": stamp})
+        )
+
+        snapshot = await coordinator.async_snapshot_source(
+            SCENARIO_ID, event(), observation_epoch=1
+        )
+        self.assertEqual("ownership.receipt.4", snapshot["authority"][MIRROR]["confirmedReceiptId"])
+        self.assertEqual(
+            snapshot["observations"][MIRROR]["revision"],
+            snapshot["authority"][MIRROR]["confirmedStateRevision"],
+        )
 
     async def test_old_ha_state_is_not_fresh_until_actual_state_event_in_current_epoch(self) -> None:
         coordinator = self._coordinator(

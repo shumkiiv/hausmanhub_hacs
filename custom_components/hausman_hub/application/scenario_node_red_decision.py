@@ -7,11 +7,13 @@ authority attribution, command persistence and physical execution.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import date
 from functools import lru_cache
 import hashlib
 import json
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from jsonschema import Draft202012Validator, FormatChecker, ValidationError
 from referencing import Registry, Resource
@@ -345,6 +347,73 @@ def _time_minutes(value: object) -> int:
     return int(hour) * 60 + int(minute)
 
 
+def _validate_mirror_turn_on_semantics(
+    request: Mapping[str, object], decision: Mapping[str, object], action: Mapping[str, object]
+) -> None:
+    """Keep mirror turn-on limited to the two approved server-verifiable windows."""
+
+    bindings = request["bindings"]
+    clock = request["clock"]
+    event = request["event"]
+    observations = request["observations"]
+    authority = request["authority"]
+    settings = request["settings"]
+    if not all(
+        isinstance(value, Mapping)
+        for value in (bindings, clock, event, observations, authority, settings)
+    ):
+        raise ValueError("tambur decision night mirror semantics are invalid")
+    mirror = bindings.get("mirror")
+    if action.get("targetId") != mirror or action.get("actionId") != "turn_on":
+        return
+    minute = clock.get("minutesOfDay")
+    reason = decision.get("reasonCode")
+    if not isinstance(minute, int) or not isinstance(reason, str):
+        raise ValueError("tambur decision night mirror semantics are invalid")
+    if reason == "mirror_schedule_on":
+        if (
+            settings.get("mainOff") == "23:00"
+            and settings.get("mirrorOff") == "01:00"
+            and (minute >= 23 * 60 or minute < 60)
+        ):
+            return
+        raise ValueError("tambur decision scheduled mirror window is invalid")
+    if reason != "night_mirror_on":
+        raise ValueError("tambur decision mirror turn-on reason is invalid")
+    now = clock.get("nowMs")
+    sunrise = clock.get("sunriseAtMs")
+    timezone_name = clock.get("timezone")
+    local_date = clock.get("localDate")
+    sensor_id = event.get("targetId")
+    sensor = observations.get(sensor_id)
+    owner = authority.get(mirror)
+    try:
+        ZoneInfo(str(timezone_name))
+        date.fromisoformat(str(local_date))
+    except (TypeError, ValueError, ZoneInfoNotFoundError) as error:
+        raise ValueError("tambur decision night mirror sunrise is invalid") from error
+    sunrise_delta = sunrise - now if type(now) is int and type(sunrise) is int else 0
+    sunrise_minute = minute + sunrise_delta // 60_000
+    if (
+        type(now) is not int
+        or type(sunrise) is not int
+        or not isinstance(local_date, str)
+        or not 120 <= sunrise_minute < 12 * 60
+        or not (120 <= minute and now < sunrise)
+        or event.get("kind") != "sensor"
+        or sensor_id not in bindings.get("presenceSensors", [])
+        or not isinstance(sensor, Mapping)
+        or sensor.get("state") != "on"
+        or sensor.get("fresh") is not True
+        or sensor.get("continuityEpoch") != request.get("observationEpoch")
+        or event.get("observedAtMs") != sensor.get("observedAtMs")
+        or not isinstance(owner, Mapping)
+        or owner.get("owner") != "none"
+        or owner.get("protectionActive") is not False
+    ):
+        raise ValueError("tambur decision night mirror safety predicate is invalid")
+
+
 def validate_tambur_decision_input(request: Mapping[str, object]) -> None:
     """Apply Task 1 schema plus Tambur-specific semantic bindings."""
 
@@ -473,6 +542,7 @@ def validate_tambur_decision(
             and observation.get("state") == "off"
             and action.get("actionId") in {"turn_on", "set_brightness_percent"}
         )
+        _validate_mirror_turn_on_semantics(request, decision, action)
         if (
             target not in allowed
             or action.get("actionId") not in allowed[target]

@@ -19,7 +19,7 @@ const eveningStart = clamp(
 );
 t.mainAllowed = between(t.minute, x.morning, x.mainOff);
 t.mirrorScheduled = between(t.minute, x.mainOff, x.mirrorOff);
-t.nightMirrorCandidateTime = t.minute >= 120 && t.minute < x.morning;
+t.nightMirrorCandidateTime = t.minute >= 120;
 t.nightMirrorSunriseAvailable = Number.isSafeInteger(q.clock.sunriseAtMs) &&
   q.clock.sunriseAtMs >= 0;
 t.nightMirrorWindow = t.nightMirrorCandidateTime && t.nightMirrorSunriseAvailable &&

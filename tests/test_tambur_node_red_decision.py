@@ -310,6 +310,11 @@ def test_night_mirror_uses_literal_start_and_actual_sunrise_boundary() -> None:
     assert _action_signature(_decision(at_sunrise)) is None
 
 
+def test_night_mirror_uses_actual_sunrise_when_it_is_after_morning_start() -> None:
+    request = _night_mirror_request(9 * 60 + 30, sunrise_minute=10 * 60)
+    assert _action_signature(_decision(request)) == (MIRROR, "turn_on", None)
+
+
 def test_night_mirror_requires_fresh_sensor_event_and_trusted_future_sunrise() -> None:
     cases = (
         _night_mirror_request(120, event_kind="clock"),
@@ -329,6 +334,53 @@ def test_night_mirror_requires_fresh_sensor_event_and_trusted_future_sunrise() -
     stale["observations"][SENSORS[0]]["fresh"] = False
     stale["observations"][SENSORS[0]]["continuityEpoch"] = 0
     assert _action_signature(_decision(stale)) is None
+
+
+def test_server_rejects_forged_night_mirror_turn_on_outside_its_exact_safety_window() -> None:
+    request = _night_mirror_request(2 * 60, sunrise_minute=6 * 60)
+    decision = _decision(request)
+    assert _action_signature(decision) == (MIRROR, "turn_on", None)
+
+    after_sunrise = deepcopy(request)
+    after_sunrise["clock"]["minutesOfDay"] = 6 * 60
+    after_sunrise["clock"]["nowMs"] = NOW + 4 * 60 * 60_000
+    after_sunrise["issuedAtMs"] = after_sunrise["clock"]["nowMs"] - 1_000
+    after_sunrise["expiresAtMs"] = after_sunrise["clock"]["nowMs"] + 60_000
+    after_sunrise["event"]["observedAtMs"] = after_sunrise["clock"]["nowMs"]
+    for observation in after_sunrise["observations"].values():
+        observation["observedAtMs"] = after_sunrise["clock"]["nowMs"]
+    after_sunrise["clock"]["sunriseAtMs"] = after_sunrise["clock"]["nowMs"]
+    forged = deepcopy(decision)
+    forged["expiresAtMs"] = after_sunrise["expiresAtMs"]
+    forged["wakeups"] = [
+        {**item, "dueAtMs": after_sunrise["clock"]["nowMs"] + 600_000}
+        for item in forged["wakeups"]
+    ]
+    with pytest.raises(ValueError, match="night mirror"):
+        validate_tambur_decision(after_sunrise, forged)
+
+    next_day_sunrise = deepcopy(request)
+    next_day_sunrise["clock"]["sunriseAtMs"] = NOW + 26 * 60 * 60_000
+    with pytest.raises(ValueError, match="night mirror"):
+        validate_tambur_decision(next_day_sunrise, decision)
+
+    wrong_sensor = deepcopy(request)
+    wrong_sensor["event"]["targetId"] = "sensor.unbound"
+    with pytest.raises(ValueError, match="night mirror"):
+        validate_tambur_decision(wrong_sensor, decision)
+
+    stale_event = deepcopy(request)
+    stale_event["event"]["observedAtMs"] = NOW - 1
+    with pytest.raises(ValueError, match="night mirror"):
+        validate_tambur_decision(stale_event, decision)
+
+    manual_protection = deepcopy(request)
+    manual_protection["authority"][MIRROR] = _authority(
+        "manual", generation=4, protected=True,
+        observation=manual_protection["observations"][MIRROR],
+    )
+    with pytest.raises(ValueError, match="night mirror"):
+        validate_tambur_decision(manual_protection, decision)
 
 
 def test_night_mirror_minimum_and_fresh_absence_are_preserved_after_sunrise() -> None:

@@ -776,12 +776,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         frozenset({entity_id})
                     )
                 )
-                owned = light_priority.is_owned(entity_id, hass)
-                return {
+                ownership_revision = light_priority.ownership_revision(entity_id, hass)
+                owned = ownership_revision is not None
+                result: dict[str, object] = {
                     "owner": "manual" if manual else "automatic" if owned else "none",
                     "generation": 0,
                     "protectionActive": manual,
                 }
+                if ownership_revision is not None and not manual:
+                    result["confirmedReceiptId"] = (
+                        f"ownership.{ownership_revision.replace('+', '_')}"
+                    )
+                return result
 
             now_ms = lambda: int(dt_util.utcnow().timestamp() * 1000)
             observations = TamburHaObservationCoordinator(

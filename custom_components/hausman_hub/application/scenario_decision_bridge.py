@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 
 from .scenario_node_red_decision import (
     TAMBUR_DECISION_SCENARIO_ID,
+    _validate_mirror_turn_on_semantics,
     _validate_schema as _validate_tambur_schema,
     validate_tambur_decision,
     validate_tambur_decision_input,
@@ -892,9 +893,43 @@ class ScenarioDecisionBridge:
             cancellation = self.cancellation_event(plan_id)
             if cancellation.is_set():
                 raise ScenarioDecisionRejected("scenario plan was cancelled manually")
+            night_mirror_safe = True
+            persistent_decision = record.get("decision")
+            if (
+                action.get("actionId") == "turn_on"
+                and isinstance(persistent_decision, Mapping)
+                and persistent_decision.get("reasonCode")
+                in {"night_mirror_on", "mirror_schedule_on"}
+            ):
+                request = self._snapshots.get(plan_id)
+                if request is None:
+                    night_mirror_safe = False
+                else:
+                    try:
+                        source = await _maybe_await(
+                            self._snapshot_provider(
+                                TAMBUR_DECISION_SCENARIO_ID,
+                                copy.deepcopy(request["event"]),
+                                int(current["observationEpoch"]),
+                            )
+                        )
+                        if not isinstance(source, Mapping):
+                            raise ValueError("dispatch snapshot is invalid")
+                        current_request = {
+                            **copy.deepcopy(request),
+                            **copy.deepcopy(dict(source)),
+                            "event": copy.deepcopy(request["event"]),
+                            "observationEpoch": current["observationEpoch"],
+                        }
+                        _validate_mirror_turn_on_semantics(
+                            current_request, persistent_decision, action
+                        )
+                    except (KeyError, TypeError, ValueError):
+                        night_mirror_safe = False
             authority = await _maybe_await(self._authority_provider(str(action["targetId"])))
             if (
-                not isinstance(authority, Mapping)
+                not night_mirror_safe
+                or not isinstance(authority, Mapping)
                 or authority.get("fresh") is not True
                 or authority.get("observationEpoch") != current["observationEpoch"]
                 or authority.get("generation") != action.get("authorityGeneration")
@@ -1267,7 +1302,7 @@ class TamburHaObservationCoordinator:
             if isinstance(updated, datetime)
             else None
         )
-        return {
+        result = {
             "owner": ownership.get("owner", "uncertain"),
             "generation": ownership.get("generation", 0),
             "protectionActive": ownership.get("protectionActive", True),
@@ -1277,6 +1312,16 @@ class TamburHaObservationCoordinator:
             "fresh": observation["fresh"],
             "evidenceRevision": evidence_revision,
         }
+        confirmed_receipt = ownership.get("confirmedReceiptId")
+        if (
+            result["owner"] == "automatic"
+            and result["protectionActive"] is False
+            and isinstance(confirmed_receipt, str)
+            and confirmed_receipt
+        ):
+            result["confirmedReceiptId"] = confirmed_receipt
+            result["confirmedStateRevision"] = observation["revision"]
+        return result
 
     async def _observation(
         self, target_id: str, entity_id: str, observation_epoch: int
@@ -1371,6 +1416,12 @@ class TamburHaObservationCoordinator:
                 for key, item in value.items()
                 if key in allowed_authority_keys
             }
+            if (
+                authority[str(target)].get("owner") == "automatic"
+                and authority[str(target)].get("protectionActive") is False
+                and isinstance(authority[str(target)].get("confirmedReceiptId"), str)
+            ):
+                authority[str(target)]["confirmedStateRevision"] = observations[str(target)]["revision"]
         return {
             "settingsRevision": self._settings_revision,
             "issuedAtMs": now,
