@@ -1153,12 +1153,8 @@ async def test_cabinet_toggle_requires_fresh_trusted_on_or_off(state: str) -> No
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "cabinet",
-    [_fresh("on", restored=True), _fresh("off", age_seconds=301)],
-)
-async def test_cabinet_restored_or_stale_state_skips(cabinet: object) -> None:
-    service, calls = _typed_service({"switch.shower_cabinet": cabinet})
+async def test_cabinet_restored_state_skips() -> None:
+    service, calls = _typed_service({"switch.shower_cabinet": _fresh("on", restored=True)})
     result = await service.async_run_typed_intent(
         binding="shower-cabinet", action="toggle", correlation_id="receipt.cabinet.bad",
         source="manual", trigger_id="on_b2_down", intent_receipt_id="receipt.cabinet.bad",
@@ -1167,6 +1163,22 @@ async def test_cabinet_restored_or_stale_state_skips(cabinet: object) -> None:
     assert result["status"] == "skipped"
     assert result["reason"] == "smart_switch_state_untrusted"
     assert len(calls) == 1 and "recorded" in calls[0]
+
+
+@pytest.mark.asyncio
+async def test_manual_toggle_accepts_old_but_valid_state() -> None:
+    # Zigbee relays report only on change, so a valid on/off state can be much
+    # older than five minutes while still being the current state.
+    service, calls = _typed_service(
+        {"switch.shower_cabinet": _fresh("off", age_seconds=86_400)}
+    )
+    result = await service.async_run_typed_intent(
+        binding="shower-cabinet", action="toggle", correlation_id="receipt.cabinet.old",
+        source="manual", trigger_id="toggle_b2_down", intent_receipt_id="receipt.cabinet.old",
+        raw_subtype="toggle_b2_down", dedup_disposition="accepted",
+    )
+    assert calls[0]["trigger_context"]["direct_user_intent"] == "on"
+    assert result["status"] == "completed"
 
 
 @pytest.mark.asyncio
@@ -1215,7 +1227,6 @@ async def test_pass_through_on_off_toggle_matrix(
             attributes={"cached": True},
             last_updated=datetime.now(timezone.utc),
         ),
-        _fresh("on", age_seconds=301),
     ],
 )
 async def test_pass_through_off_requires_both_targets_fresh_and_trusted(
@@ -1292,7 +1303,7 @@ async def test_direct_off_arms_before_scenario_dispatch_and_failure_sends_no_com
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("power", [_fresh("unknown"), _fresh("on", restored=True), _fresh("on", age_seconds=301)])
+@pytest.mark.parametrize("power", [_fresh("unknown"), _fresh("on", restored=True)])
 async def test_untrusted_power_dependency_blocks_whole_group(power: object) -> None:
     states = {
         "light.tambur_chandelier": _fresh("off"),

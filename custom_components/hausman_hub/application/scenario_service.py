@@ -4680,8 +4680,14 @@ class ScenarioService:
             return None
         if observed.tzinfo is None:
             observed = observed.replace(tzinfo=timezone.utc)
-        age = (datetime.now(timezone.utc) - observed.astimezone(timezone.utc)).total_seconds()
-        return value if 0 <= age <= 300 else None
+        # A manual press must act on the last known state. Zigbee relays report
+        # only on change, so a valid on/off state can be hours old while still
+        # being current. Restored, cached, assumed and unavailable states were
+        # already rejected above.
+        age = (
+            datetime.now(timezone.utc) - observed.astimezone(timezone.utc)
+        ).total_seconds()
+        return value if age >= 0 else None
 
     async def _async_record_typed_intent_skip(
         self,
