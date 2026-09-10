@@ -331,6 +331,62 @@ def test_room_only_startup_and_restart_preserve_every_foreign_object() -> None:
     asyncio.run(exercise())
 
 
+def test_completed_receipt_recovers_after_room_registry_was_rolled_back() -> None:
+    async def exercise() -> None:
+        registry = {
+            TAMBUR_SCENARIO_ID: {
+                "id": TAMBUR_SCENARIO_ID,
+                "revision": 8,
+                "flowId": "a7a6f6b13cc83ca0",
+                "topology": "managed-three-node-v1",
+            },
+            "scenario_msirqdih": {"id": "scenario_msirqdih", "revision": 5},
+        }
+        before_scenario = copy.deepcopy(registry[TAMBUR_SCENARIO_ID])
+        global_receipt = _Store(
+            {
+                "migrationId": "managed-switches",
+                "version": 2,
+                "state": "completed",
+                "manifestHash": "a3554f0a7108160238cbd4fd49f2f643ad3d446d7f344dec618d9a0d979d2c60",
+            }
+        )
+        room_receipt = _Store()
+        service = _ScopedService(registry)
+        native_states = {item: "on" for item in TAMBUR_NATIVE_COMPETITORS}
+        native = _NativeRoomHandover(native_states)
+        migration = TamburRoomMigration(
+            service,
+            room_receipt,
+            global_receipt_store=global_receipt,
+            native_automation_migration=native,
+            migration_lock=asyncio.Lock(),
+        )
+
+        assert await migration.async_apply(operation_run=object()) == "completed"
+        assert room_receipt.value["state"] == "completed"
+        first_applies = native.applies
+
+        # Simulate the room registry reverting after the receipt was completed:
+        # the next startup must re-apply instead of failing closed forever.
+        service.registry[TAMBUR_SCENARIO_ID] = copy.deepcopy(before_scenario)
+
+        restart = TamburRoomMigration(
+            service,
+            room_receipt,
+            global_receipt_store=global_receipt,
+            native_automation_migration=native,
+            migration_lock=asyncio.Lock(),
+        )
+        assert await restart.async_apply(operation_run=object()) == "completed"
+        assert service.registry[TAMBUR_SCENARIO_ID]["flowId"] == "2886468f3eaa5735"
+        assert registry["scenario_msirqdih"] == {"id": "scenario_msirqdih", "revision": 5}
+        assert room_receipt.value["state"] == "completed"
+        assert native.applies == first_applies + 1
+
+    asyncio.run(exercise())
+
+
 class _DecisionBackend(Backend):
     def __init__(self) -> None:
         super().__init__()

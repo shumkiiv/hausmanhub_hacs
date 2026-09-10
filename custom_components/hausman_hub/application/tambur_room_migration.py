@@ -589,30 +589,37 @@ class TamburRoomMigration:
             await self._native.async_require_ready()
 
             if isinstance(loaded, Mapping) and loaded.get("state") == "completed":
-                journal = copy.deepcopy(dict(loaded["journal"]))
+                completed = copy.deepcopy(dict(loaded["journal"]))
                 self._bind_operation_permit(
-                    operation_run, operation_permit, journal
+                    operation_run, operation_permit, completed
                 )
-                self.stage = "verify"
-                await self._call(
-                    "async_verify_tambur_room_migration",
-                    self._plan,
-                    journal=journal,
-                    require_final=True,
-                )
-                current = await self._call(
+                live = await self._call(
                     "async_capture_tambur_room_migration", self._plan
                 )
-                if current != journal["after"] or not await self._native.async_verify_completed():
-                    raise RuntimeError("room migration completion drifted")
-                await self._call(
-                    "async_commit_tambur_room_migration",
-                    self._plan,
-                    journal=journal,
-                    operation_run=operation_run,
-                    operation_permit=operation_permit,
-                )
-                return "completed"
+                if live == completed.get("after"):
+                    self.stage = "verify"
+                    await self._call(
+                        "async_verify_tambur_room_migration",
+                        self._plan,
+                        journal=completed,
+                        require_final=True,
+                    )
+                    if not await self._native.async_verify_completed():
+                        raise RuntimeError("room migration completion drifted")
+                    await self._call(
+                        "async_commit_tambur_room_migration",
+                        self._plan,
+                        journal=completed,
+                        operation_run=operation_run,
+                        operation_permit=operation_permit,
+                    )
+                    return "completed"
+                if live != completed.get("before"):
+                    raise RuntimeError("room migration completion is ambiguous")
+                # The room registry reverted after the receipt was completed.
+                # Re-arm from the live evidence and re-apply instead of
+                # failing closed on every restart.
+                loaded = None
 
             if isinstance(loaded, Mapping):
                 journal = copy.deepcopy(dict(loaded["journal"]))
