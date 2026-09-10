@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import copy
 from dataclasses import dataclass, replace as dataclass_replace
+from datetime import UTC, datetime
+from types import SimpleNamespace
 
 from custom_components.hausman_hub.application.tambur_room_migration import (
     _PLAN_HASH,
@@ -1498,3 +1500,31 @@ def test_state_event_runs_on_the_event_loop() -> None:
     # thread and rejects ``hass.async_create_task`` there. Marking the listener
     # as a callback keeps every sensor event on the event loop.
     assert getattr(TamburDecisionRuntime._state_event, "_hass_callback", False) is True
+
+
+def test_completed_native_handover_survives_automation_reregistration() -> None:
+    async def exercise() -> None:
+        hass, services = _native_hass(context_prefix="tambur", updated_hour=12)
+        native_store = _MemoryNativeStore()
+        native = TamburNativeAutomationMigration(
+            HomeAssistantNativeAutomationAdapter(
+                hass, _fixture_smart_switch_bindings()
+            ),
+            native_store,
+        )
+
+        assert await native.async_apply() == "completed"
+        assert native_store.value["state"] == "completed"
+
+        # Simulate a Home Assistant restart: the automations are re-registered
+        # with new contexts and timestamps while staying off. The stable
+        # handover identity must still verify.
+        for index, entity_id in enumerate(TAMBUR_NATIVE_COMPETITORS):
+            state = services.states[entity_id]
+            state.context = SimpleNamespace(id=f"restart-{index}")
+            state.last_updated = datetime(2026, 9, 10, 20, index, tzinfo=UTC)
+
+        assert await native.async_verify_completed() is True
+        assert await native.async_apply() == "completed"
+
+    asyncio.run(exercise())

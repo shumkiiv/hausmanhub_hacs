@@ -241,6 +241,19 @@ def _valid_native_evidence(entity_id: str, value: object) -> bool:
     )
 
 
+_NATIVE_IDENTITY_FIELDS = ("state", "automationId", "definitionHash")
+
+
+def _native_identity(value: Mapping[str, object]) -> tuple[object, ...]:
+    """Return only evidence that survives a Home Assistant restart.
+
+    ``contextId`` and ``lastUpdated`` change every time the automations are
+    re-registered, so a completed handover must compare the stable identity.
+    """
+
+    return tuple(value.get(field) for field in _NATIVE_IDENTITY_FIELDS)
+
+
 def _valid_native_room_receipt(value: object) -> bool:
     if not isinstance(value, Mapping) or set(value) != {
         "version", "state", "before", "operations", "after"
@@ -351,8 +364,19 @@ class TamburNativeAutomationMigration:
         else:
             raise NativeAutomationMigrationConflict("Tambur native receipt is invalid")
         if journal["state"] == "completed":
-            if await self._snapshot() != journal["after"]:
-                raise NativeAutomationMigrationConflict("Tambur native completion drifted")
+            current = await self._snapshot()
+            after = journal["after"]
+            if (
+                not isinstance(after, Mapping)
+                or any(
+                    _native_identity(current[entity_id])
+                    != _native_identity(after[entity_id])
+                    for entity_id in TAMBUR_NATIVE_COMPETITORS
+                )
+            ):
+                raise NativeAutomationMigrationConflict(
+                    "Tambur native completion drifted"
+                )
             return "completed"
         operations = journal["operations"]
         for entity_id in TAMBUR_NATIVE_COMPETITORS:
@@ -399,10 +423,19 @@ class TamburNativeAutomationMigration:
 
     async def async_verify_completed(self) -> bool:
         loaded = await self._store.async_load()
-        return bool(
+        if not (
             _valid_native_room_receipt(loaded)
             and loaded.get("state") == "completed"
-            and await self._snapshot() == loaded.get("after")
+        ):
+            return False
+        after = loaded.get("after")
+        if not isinstance(after, Mapping):
+            return False
+        current = await self._snapshot()
+        return all(
+            _native_identity(current[entity_id])
+            == _native_identity(after[entity_id])
+            for entity_id in TAMBUR_NATIVE_COMPETITORS
         )
 
     async def async_rollback(self) -> bool:
