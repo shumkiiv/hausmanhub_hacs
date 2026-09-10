@@ -60,7 +60,7 @@ _NATIVE_DEFINITION_HASHES = {
     "hausman_shower_cabinet_off_absence_failsafe": "d239f31392212a01ed59b4c986aade5bb597e66f66fad43adefe1b6dbc02430b",
     "hausman_shower_fan_humidity_on_failsafe": "57d91b50cae1fa3709fd0e2bf855babac216297f5461acab878165d2d6c4699d",
     "hausman_shower_fan_off_absence_normal_humidity": "b0c5ba451e1caf49a6019b7415334ee7201d29c6180bf15c0087a737f987c93e",
-    "hausman_tambur_mirror_switch_all_keys": "46af74c7cd240f59021246b0fb90bf097604fb1cfe4abeeac8550a16f04a8044",
+    "hausman_tambur_mirror_switch_all_keys": "9fb1c3960742170f6a83cfe0989c2b8d59516ea4c7dca652dfafc5a9559467a1",
     "hausmanhub_shower_leak_yandex_alert": "ae2c54b501cc43d4e162b8b7f00cc2f5d9ed2be2effbea4ae09f66eba75b0489",
     "hausmanhub_yandex_dialog_conversation": "d3b662cb1372cfac89b76b0c5d8aae841ac265f0279a887c43d8e7d83f5640ea",
     "hausmanhub_yandex_welcome_home": "04f40fa9127951949ef6f02562b5b535e7998d37a286fc2f03506c6e1f6da818",

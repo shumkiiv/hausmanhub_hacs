@@ -32,6 +32,7 @@ _TAMBUR_SMART_SWITCH_BINDINGS = frozenset(
         "tambur-master-off",
     }
 )
+_SMART_SWITCH_PROFILES = frozenset({"shower", "passthrough", "marmitek"})
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -59,6 +60,8 @@ async def _async_resolve_tambur_smart_switch_triggers(
             return None
         bindings = bindings_from_payload(payload)
         if bindings is None:
+            return None
+        if set(bindings.devices) != _SMART_SWITCH_PROFILES:
             return None
         resolved = resolve_trigger_bindings(bindings, _TAMBUR_SMART_SWITCH_BINDINGS)
     except Exception:  # noqa: BLE001

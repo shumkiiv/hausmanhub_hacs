@@ -67,25 +67,37 @@ def test_invalid_or_reused_profile_ids_do_not_resolve() -> None:
 
 
 @pytest.mark.asyncio
-async def test_incomplete_tambur_bindings_do_not_resolve_startup_triggers() -> None:
-    """A saved partial profile remains inert until local preparation completes."""
+@pytest.mark.parametrize("missing_profile", ("shower", "passthrough", "marmitek"))
+async def test_startup_rejects_each_incomplete_profile_set(
+    missing_profile: str,
+) -> None:
+    """A saved partial draft remains inert at the Tambur startup boundary."""
+
+    devices = {
+        "shower": "test-shower-device",
+        "passthrough": "test-passthrough-device",
+        "marmitek": "test-marmitek-device",
+    }
+    del devices[missing_profile]
 
     class Store:
         recovered_previous = False
+        loads = 0
 
         async def async_load(self) -> object:
+            self.loads += 1
             return {
                 "version": 1,
                 "revision": 1,
-                "devices": {"passthrough": "test-passthrough-device"},
+                "devices": devices,
             }
 
-    assert (
-        await _async_resolve_tambur_smart_switch_triggers(
-            object(), "entry-a", store=Store()
-        )
-        is None
-    )
+    store = Store()
+
+    assert await _async_resolve_tambur_smart_switch_triggers(
+        object(), "entry-a", store=store
+    ) is None
+    assert store.loads == 1
 
 
 @pytest.mark.asyncio
@@ -96,6 +108,7 @@ async def test_startup_constructs_tambur_triggers_from_only_local_synthetic_ids(
         "version": 1,
         "revision": 1,
         "devices": {
+            "shower": "synthetic-shower-device",
             "passthrough": "synthetic-passthrough-device",
             "marmitek": "synthetic-mirror-device",
         },
