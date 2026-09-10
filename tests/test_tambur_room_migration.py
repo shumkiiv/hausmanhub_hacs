@@ -5,6 +5,8 @@ import copy
 from dataclasses import dataclass, replace as dataclass_replace
 
 from custom_components.hausman_hub.application.tambur_room_migration import (
+    _PLAN_HASH,
+    _valid_room_receipt,
     TAMBUR_INPUT_TARGET_IDS,
     TAMBUR_NATIVE_COMPETITORS,
     TAMBUR_PRESENCE_TARGET_IDS,
@@ -554,16 +556,22 @@ def test_completed_recovery_with_active_transaction_uses_new_permit_to_clean_up(
             await _prepare_service_owned_tambur_operation()
         )
         transaction = service._tambur_room_migration_transaction  # noqa: SLF001
-        room_store = _Store(
+        receipt = {
+            "migrationId": "tambur-room-decision",
+            "version": 1,
+            "state": "completed",
+            "planHash": _PLAN_HASH,
+            "stage": "binding",
+            "journal": journal,
+        }
+        assert _valid_room_receipt(receipt) is True
+        assert _valid_room_receipt(
             {
-                "migrationId": "tambur-room-decision",
-                "version": 1,
-                "state": "completed",
+                **receipt,
                 "planHash": "7a1108c6396662a6d65fc060f6fb530671f2a50a2d35c30adb90a198111af850",
-                "stage": "binding",
-                "journal": journal,
             }
-        )
+        ) is False
+        room_store = _Store(receipt)
         native = _NativeRoomHandover(
             {item: "off" for item in TAMBUR_NATIVE_COMPETITORS}
         )
