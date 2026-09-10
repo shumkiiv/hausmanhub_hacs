@@ -1318,3 +1318,53 @@ async def test_untrusted_power_dependency_blocks_whole_group(power: object) -> N
     )
     assert result["reason"] == "smart_switch_power_untrusted"
     assert len(calls) == 1 and "recorded" in calls[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("action", "trigger_id"),
+    [("on", "on_down"), ("toggle", "toggle_down")],
+)
+async def test_off_but_trusted_power_proceeds_so_dependency_can_enable_it(
+    action: str, trigger_id: str
+) -> None:
+    # The physical pass-through must be able to switch the group on while the
+    # chandelier power relay is off: execution proceeds instead of being
+    # skipped, so the configured power dependency can enable the source first.
+    states = {
+        "light.tambur_chandelier": _fresh("off"),
+        "switch.tambur_points": _fresh("off"),
+        "switch.tambur_power": _fresh("off"),
+    }
+    service, calls = _typed_service(states)
+
+    result = await service.async_run_typed_intent(
+        binding="tambur-light-group",
+        action=action,
+        correlation_id="receipt.power-off",
+        source="manual",
+        trigger_id=trigger_id,
+        intent_receipt_id="receipt.power-off",
+        raw_subtype=trigger_id,
+        dedup_disposition="accepted",
+    )
+
+    assert result["status"] == "completed"
+    assert calls == [
+        {
+            "scenario_id": "system-tambur-adaptive-controller",
+            "correlation_id": "receipt.power-off",
+            "trigger_context": {
+                "source": "manual",
+                "trigger_id": trigger_id,
+                "recovery": False,
+                "binding": "tambur-light-group",
+                "typed_intent": action,
+                "direct_user_intent": "on",
+                "intent_receipt_id": "receipt.power-off",
+                "raw_subtype": trigger_id,
+                "dedup_disposition": "accepted",
+                "correlation_id": "receipt.power-off",
+            },
+        }
+    ]
