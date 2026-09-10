@@ -256,12 +256,17 @@ def _fixture_bindings():
 def test_binding_aware_snapshot_hashes_exact_synthetic_mirror_definition(
     mirror_device_id: str,
 ) -> None:
-    """Replacing both verified local trigger IDs reproduces the public hash."""
+    """A matching synthetic binding hashes a copy, never the raw definition."""
 
     async def exercise() -> None:
         hass, services = _fake_hass_from_native_fixture(
             mirror_device_id=mirror_device_id
         )
+        mirror_entity = NATIVE_AUTOMATION_PRESERVE_ENTITY_IDS[
+            "hausman_tambur_mirror_switch_all_keys"
+        ]
+        raw_definition = hass.data["automation"].configs[mirror_entity]
+        raw_definition_before_snapshot = copy.deepcopy(raw_definition)
         adapter = HomeAssistantNativeAutomationAdapter(
             hass, _synthetic_bindings(mirror_device_id)
         )
@@ -270,13 +275,37 @@ def test_binding_aware_snapshot_hashes_exact_synthetic_mirror_definition(
             tuple(EXPECTED_NATIVE_AUTOMATIONS)
         )
 
-        mirror_entity = NATIVE_AUTOMATION_PRESERVE_ENTITY_IDS[
-            "hausman_tambur_mirror_switch_all_keys"
-        ]
         assert (
             snapshot[mirror_entity]["definitionHash"]
             == EXPECTED_NATIVE_AUTOMATIONS[mirror_entity]["definitionHash"]
         )
+        assert raw_definition == raw_definition_before_snapshot
+        assert services.calls == []
+
+    asyncio.run(exercise())
+
+
+def test_binding_aware_snapshot_rejects_mismatched_synthetic_binding_before_hash() -> None:
+    """The fixture hash cannot accept a mirror definition for another binding."""
+
+    async def exercise() -> None:
+        configured_mirror_device_id = "synthetic-configured-mirror"
+        hass, services = _fake_hass_from_native_fixture(
+            mirror_device_id=configured_mirror_device_id
+        )
+        mirror_entity = NATIVE_AUTOMATION_PRESERVE_ENTITY_IDS[
+            "hausman_tambur_mirror_switch_all_keys"
+        ]
+        raw_definition = hass.data["automation"].configs[mirror_entity]
+        raw_definition_before_snapshot = copy.deepcopy(raw_definition)
+        adapter = HomeAssistantNativeAutomationAdapter(
+            hass, _synthetic_bindings("synthetic-unmatched-mirror")
+        )
+
+        with pytest.raises(NativeAutomationMigrationConflict, match="binding|definition"):
+            await adapter.async_snapshot(tuple(EXPECTED_NATIVE_AUTOMATIONS))
+
+        assert raw_definition == raw_definition_before_snapshot
         assert services.calls == []
 
     asyncio.run(exercise())

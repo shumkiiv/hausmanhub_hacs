@@ -66,6 +66,26 @@ def test_invalid_or_reused_profile_ids_do_not_resolve() -> None:
     )
 
 
+def test_synthetic_bindings_copy_the_verified_device_mapping() -> None:
+    payload = {
+        "version": 1,
+        "revision": 1,
+        "devices": {
+            "shower": "synthetic-shower-device",
+            "passthrough": "synthetic-passthrough-device",
+            "marmitek": "synthetic-mirror-device",
+        },
+    }
+    bindings = bindings_from_payload(payload)
+
+    assert bindings is not None
+    payload["devices"]["marmitek"] = "synthetic-replaced-mirror"
+
+    assert bindings.devices["marmitek"] == "synthetic-mirror-device"
+    with pytest.raises(TypeError):
+        bindings.devices["marmitek"] = "synthetic-mutated-mirror"  # type: ignore[index]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("missing_profile", ("shower", "passthrough", "marmitek"))
 async def test_startup_rejects_each_incomplete_profile_set(
