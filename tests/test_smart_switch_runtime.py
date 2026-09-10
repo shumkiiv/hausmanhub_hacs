@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from types import MappingProxyType
 from collections import UserDict
@@ -9,21 +10,135 @@ from collections import UserDict
 import pytest
 
 from custom_components.hausman_hub.application.smart_switch_runtime import (
-    MARMITEK_TRIGGER_CONFIGS,
-    PASS_THROUGH_TRIGGER_CONFIGS,
-    SHOWER_TRIGGER_CONFIGS,
-    SmartSwitchTriggerAdapter,
+    SmartSwitchTriggerAdapter as _SmartSwitchTriggerAdapter,
     valid_smart_switch_dedup_payload,
     validate_exact_device_trigger,
+)
+from custom_components.hausman_hub.application.smart_switch_bindings import (
+    ResolvedSmartSwitchTrigger,
 )
 from custom_components.hausman_hub.application.scenario_service import ScenarioService
 
 
+def synthetic_resolved_triggers() -> tuple[ResolvedSmartSwitchTrigger, ...]:
+    profiles = (
+        ("shower-cabinet", "test-shower-device", ("toggle_b2_down", "on_b2_down", "toggle_b2_up")),
+        ("tambur-light-group", "test-passthrough-device", ("on_down", "toggle_down", "off_up")),
+        ("tambur-mirror-left", "test-marmitek-device", ("1_single", "1_double")),
+        ("tambur-master-off", "test-marmitek-device", ("2_single", "2_double")),
+    )
+    return tuple(
+        ResolvedSmartSwitchTrigger(
+            binding=binding,
+            config=MappingProxyType(
+                {
+                    "platform": "device",
+                    "domain": "mqtt",
+                    "type": "action",
+                    "device_id": device_id,
+                    "subtype": subtype,
+                }
+            ),
+        )
+        for binding, device_id, subtypes in profiles
+        for subtype in subtypes
+    )
+
+
+def synthetic_tambur_triggers() -> tuple[ResolvedSmartSwitchTrigger, ...]:
+    return tuple(
+        item
+        for item in synthetic_resolved_triggers()
+        if item.binding != "shower-cabinet"
+    )
+
+
+ALL_RESOLVED_TRIGGERS = synthetic_resolved_triggers()
+
+
+def SmartSwitchTriggerAdapter(*args: object, **kwargs: object) -> object:
+    included_bindings = kwargs.pop("included_bindings", None)
+    if included_bindings is None:
+        resolved_triggers = ALL_RESOLVED_TRIGGERS
+    else:
+        resolved_triggers = tuple(
+            item for item in ALL_RESOLVED_TRIGGERS if item.binding in included_bindings
+        )
+    kwargs.setdefault("resolved_triggers", resolved_triggers)
+    return _SmartSwitchTriggerAdapter(*args, **kwargs)
+
+
+SHOWER_TRIGGER_CONFIGS = tuple(
+    dict(item.config) for item in ALL_RESOLVED_TRIGGERS if item.binding == "shower-cabinet"
+)
+PASS_THROUGH_TRIGGER_CONFIGS = tuple(
+    dict(item.config) for item in ALL_RESOLVED_TRIGGERS if item.binding == "tambur-light-group"
+)
+MARMITEK_TRIGGER_CONFIGS = tuple(
+    dict(item.config)
+    for item in ALL_RESOLVED_TRIGGERS
+    if item.binding in {"tambur-mirror-left", "tambur-master-off"}
+)
 ALL_TRIGGER_CONFIGS = (
     *SHOWER_TRIGGER_CONFIGS,
     *PASS_THROUGH_TRIGGER_CONFIGS,
     *MARMITEK_TRIGGER_CONFIGS,
 )
+
+
+def test_adapter_subscribes_only_to_explicitly_resolved_synthetic_triggers() -> None:
+    adapter = SmartSwitchTriggerAdapter(
+        SimpleNamespace(),
+        SimpleNamespace(),
+        resolved_triggers=synthetic_tambur_triggers(),
+    )
+
+    assert {item["subtype"] for item in adapter.trigger_configs} == {
+        "on_down",
+        "toggle_down",
+        "off_up",
+        "1_single",
+        "1_double",
+        "2_single",
+        "2_double",
+    }
+
+
+def test_adapter_rejects_empty_or_foreign_resolved_trigger_set() -> None:
+    with pytest.raises(ValueError):
+        SmartSwitchTriggerAdapter(
+            SimpleNamespace(), SimpleNamespace(), resolved_triggers=()
+        )
+    with pytest.raises(ValueError):
+        SmartSwitchTriggerAdapter(
+            SimpleNamespace(),
+            SimpleNamespace(),
+            resolved_triggers=(
+                ResolvedSmartSwitchTrigger(
+                    binding="foreign",
+                    config=MappingProxyType(
+                        {
+                            "platform": "device",
+                            "domain": "mqtt",
+                            "type": "action",
+                            "device_id": "test-foreign-device",
+                            "subtype": "single",
+                        }
+                    ),
+                ),
+            ),
+        )
+
+
+def test_public_switch_source_contains_no_static_trigger_configs() -> None:
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "custom_components/hausman_hub/application/smart_switch_runtime.py"
+    ).read_text()
+
+    assert "SHOWER_TRIGGER_CONFIGS" not in source
+    assert "PASSTHROUGH_TRIGGER_CONFIGS" not in source
+    assert "MARMITEK_TRIGGER_CONFIGS" not in source
 
 
 def configs_for_device(device_id: str) -> tuple[dict[str, object], ...]:
@@ -398,8 +513,7 @@ async def test_discovery_failure_log_is_fixed_and_sanitized(caplog: pytest.LogCa
 
     message = " ".join(record.getMessage() for record in caplog.records)
     assert "SMART_SWITCH_DISCOVERY_INCOMPLETE" in message
-    assert "2685c1523cb5151baeaf65aebe830c53" not in message
-    assert "609ee914f1d93194cd157612d7d086e9" not in message
+    assert "device_id" not in message
 
 
 @pytest.mark.asyncio

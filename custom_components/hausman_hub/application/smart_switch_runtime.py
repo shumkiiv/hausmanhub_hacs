@@ -13,39 +13,20 @@ import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
+from types import MappingProxyType
 from typing import Any
+
+from .smart_switch_bindings import ResolvedSmartSwitchTrigger
 
 _LOGGER = logging.getLogger(__name__)
 
-SHOWER_DEVICE_ID = "2685c1523cb5151baeaf65aebe830c53"
-PASSTHROUGH_DEVICE_ID = "609ee914f1d93194cd157612d7d086e9"
-MARMITEK_DEVICE_ID = "9ca80bc371a9bbb4021c5639b10363d5"
-_BASE = {"platform": "device", "domain": "mqtt", "type": "action"}
-SHOWER_TRIGGER_CONFIGS = tuple(
-    {**_BASE, "device_id": SHOWER_DEVICE_ID, "subtype": subtype}
-    for subtype in ("toggle_b2_down", "on_b2_down", "toggle_b2_up")
-)
-PASS_THROUGH_TRIGGER_CONFIGS = tuple(
-    {**_BASE, "device_id": PASSTHROUGH_DEVICE_ID, "subtype": subtype}
-    for subtype in ("on_down", "toggle_down", "off_up")
-)
-MARMITEK_TRIGGER_CONFIGS = tuple(
-    {**_BASE, "device_id": MARMITEK_DEVICE_ID, "subtype": subtype}
-    for subtype in ("1_single", "1_double", "2_single", "2_double")
-)
-_ALL_CONFIGS = (
-    SHOWER_TRIGGER_CONFIGS
-    + PASS_THROUGH_TRIGGER_CONFIGS
-    + MARMITEK_TRIGGER_CONFIGS
-)
-_ALL_BINDINGS = frozenset(
-    {
-        "shower-cabinet",
-        "tambur-light-group",
-        "tambur-mirror-left",
-        "tambur-master-off",
-    }
-)
+_BINDING_SUBTYPES = {
+    "shower-cabinet": ("toggle_b2_down", "on_b2_down", "toggle_b2_up"),
+    "tambur-light-group": ("on_down", "toggle_down", "off_up"),
+    "tambur-mirror-left": ("1_single", "1_double"),
+    "tambur-master-off": ("2_single", "2_double"),
+}
+_ALL_BINDINGS = frozenset(_BINDING_SUBTYPES)
 _TRIGGER_IDENTITY_FIELDS = frozenset({"platform", "domain", "type", "device_id", "subtype"})
 _DEDUP_SECONDS = 0.6
 _MAX_RECEIPTS = 32
@@ -166,18 +147,44 @@ def _semantic_intent(binding: str, subtype: str) -> str:
     raise KeyError(binding)
 
 
-def _binding_for_config(config: Mapping[str, object]) -> str:
-    device_id = config.get("device_id")
-    subtype = config.get("subtype")
-    if device_id == SHOWER_DEVICE_ID:
-        return "shower-cabinet"
-    if device_id == PASSTHROUGH_DEVICE_ID:
-        return "tambur-light-group"
-    if device_id == MARMITEK_DEVICE_ID and subtype in {"1_single", "1_double"}:
-        return "tambur-mirror-left"
-    if device_id == MARMITEK_DEVICE_ID and subtype in {"2_single", "2_double"}:
-        return "tambur-master-off"
-    raise ValueError("smart switch trigger binding is invalid")
+def _validated_resolved_triggers(
+    resolved_triggers: tuple[ResolvedSmartSwitchTrigger, ...],
+) -> tuple[ResolvedSmartSwitchTrigger, ...]:
+    """Accept one complete, local scope of fixed trigger records only."""
+
+    if not isinstance(resolved_triggers, tuple) or not resolved_triggers:
+        raise ValueError("smart switch resolved triggers are invalid")
+    seen_bindings: set[str] = set()
+    expected: list[tuple[str, str]] = []
+    device_by_binding: dict[str, str] = {}
+    for item in resolved_triggers:
+        if not isinstance(item, ResolvedSmartSwitchTrigger):
+            raise ValueError("smart switch resolved triggers are invalid")
+        config = item.config
+        if (
+            item.binding not in _BINDING_SUBTYPES
+            or not isinstance(config, Mapping)
+            or set(config) != _TRIGGER_IDENTITY_FIELDS
+            or config.get("platform") != "device"
+            or config.get("domain") != "mqtt"
+            or config.get("type") != "action"
+            or not isinstance(config.get("device_id"), str)
+            or not config["device_id"].strip()
+            or not isinstance(config.get("subtype"), str)
+            or config["subtype"] not in _BINDING_SUBTYPES[item.binding]
+        ):
+            raise ValueError("smart switch resolved triggers are invalid")
+        seen_bindings.add(item.binding)
+        device_by_binding.setdefault(item.binding, config["device_id"])
+        if device_by_binding[item.binding] != config["device_id"]:
+            raise ValueError("smart switch resolved triggers are invalid")
+    for binding, subtypes in _BINDING_SUBTYPES.items():
+        if binding in seen_bindings:
+            expected.extend((binding, subtype) for subtype in subtypes)
+    actual = [(item.binding, item.config["subtype"]) for item in resolved_triggers]
+    if actual != expected:
+        raise ValueError("smart switch resolved triggers are invalid")
+    return resolved_triggers
 
 
 class HomeAssistantSmartSwitchDedupStore:
@@ -223,7 +230,7 @@ class SmartSwitchTriggerAdapter:
         receipt_factory: Callable[[], str] | None = None,
         readiness_check: Callable[[], bool] | None = None,
         activation_latch: object | None = None,
-        included_bindings: frozenset[str] | None = None,
+        resolved_triggers: tuple[ResolvedSmartSwitchTrigger, ...],
     ) -> None:
         self._hass = hass
         self._service = service
@@ -235,19 +242,11 @@ class SmartSwitchTriggerAdapter:
         )
         self._readiness_check = readiness_check or (lambda: True)
         self._activation_latch = activation_latch
-        if included_bindings is None:
-            included_bindings = _ALL_BINDINGS
-        if (
-            not isinstance(included_bindings, frozenset)
-            or not included_bindings
-            or not included_bindings <= _ALL_BINDINGS
-        ):
-            raise ValueError("smart switch binding scope is invalid")
-        self._configs = tuple(
-            config
-            for config in _ALL_CONFIGS
-            if _binding_for_config(config) in included_bindings
-        )
+        resolved_triggers = _validated_resolved_triggers(resolved_triggers)
+        self._configs = tuple(dict(item.config) for item in resolved_triggers)
+        self._config_bindings = {
+            frozenset(item.config.items()): item.binding for item in resolved_triggers
+        }
         self._receipts: list[dict[str, object]] = []
         # Only receipts accepted by this live adapter generation may authorize
         # execution. Persisted receipts remain useful for deduplication after a
@@ -258,6 +257,12 @@ class SmartSwitchTriggerAdapter:
         self._healthy = True
         self._state_loaded = False
         self._receipt_lock = asyncio.Lock()
+
+    @property
+    def trigger_configs(self) -> tuple[Mapping[str, object], ...]:
+        """Return the local, explicitly resolved trigger identities."""
+
+        return tuple(MappingProxyType(config) for config in self._configs)
 
     async def async_load_state(self) -> None:
         if self._state_loaded:
@@ -383,11 +388,19 @@ class SmartSwitchTriggerAdapter:
                 )
         return action
 
-    @staticmethod
-    def _trigger_info(config: Mapping[str, object], index: int) -> dict[str, object]:
+    def _binding_for_config(self, config: Mapping[str, object]) -> str:
+        try:
+            binding = self._config_bindings.get(frozenset(config.items()))
+        except TypeError as err:
+            raise ValueError("smart switch trigger binding is invalid") from err
+        if binding is None:
+            raise ValueError("smart switch trigger binding is invalid")
+        return binding
+
+    def _trigger_info(self, config: Mapping[str, object], index: int) -> dict[str, object]:
         """Return the complete HA 2026.9 TriggerInfo boundary object."""
 
-        binding = _binding_for_config(config)
+        binding = self._binding_for_config(config)
         return {
             "domain": "hausman_hub",
             "name": "managed-smart-switch-runtime",
@@ -431,7 +444,7 @@ class SmartSwitchTriggerAdapter:
                 except RuntimeError:
                     return False
             subtype = str(config["subtype"])
-            binding = _binding_for_config(config)
+            binding = self._binding_for_config(config)
             now_ms = max(0, int(self._wall_clock() * 1000))
             active_receipts = [
                 item

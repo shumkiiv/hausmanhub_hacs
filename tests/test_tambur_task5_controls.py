@@ -23,10 +23,11 @@ from custom_components.hausman_hub.application.scenarios import (
     ScenarioDeviceEntry,
 )
 from custom_components.hausman_hub.application.smart_switch_runtime import (
-    MARMITEK_TRIGGER_CONFIGS,
-    PASS_THROUGH_TRIGGER_CONFIGS,
-    SmartSwitchTriggerAdapter,
+    SmartSwitchTriggerAdapter as _SmartSwitchTriggerAdapter,
     valid_smart_switch_dedup_payload,
+)
+from custom_components.hausman_hub.application.smart_switch_bindings import (
+    ResolvedSmartSwitchTrigger,
 )
 
 
@@ -40,6 +41,51 @@ class _MemoryStore:
 
     async def async_save(self, payload: dict[str, object]) -> None:
         self.payload = payload
+
+
+def _synthetic_tambur_triggers() -> tuple[ResolvedSmartSwitchTrigger, ...]:
+    profiles = (
+        ("tambur-light-group", "test-passthrough-device", ("on_down", "toggle_down", "off_up")),
+        ("tambur-mirror-left", "test-marmitek-device", ("1_single", "1_double")),
+        ("tambur-master-off", "test-marmitek-device", ("2_single", "2_double")),
+    )
+    return tuple(
+        ResolvedSmartSwitchTrigger(
+            binding=binding,
+            config={
+                "platform": "device",
+                "domain": "mqtt",
+                "type": "action",
+                "device_id": device_id,
+                "subtype": subtype,
+            },
+        )
+        for binding, device_id, subtypes in profiles
+        for subtype in subtypes
+    )
+
+
+_TAMBUR_TRIGGERS = _synthetic_tambur_triggers()
+PASS_THROUGH_TRIGGER_CONFIGS = tuple(
+    dict(item.config) for item in _TAMBUR_TRIGGERS if item.binding == "tambur-light-group"
+)
+MARMITEK_TRIGGER_CONFIGS = tuple(
+    dict(item.config)
+    for item in _TAMBUR_TRIGGERS
+    if item.binding in {"tambur-mirror-left", "tambur-master-off"}
+)
+
+
+def SmartSwitchTriggerAdapter(*args: object, **kwargs: object) -> object:
+    included_bindings = kwargs.pop("included_bindings", None)
+    if included_bindings is None:
+        resolved_triggers = _TAMBUR_TRIGGERS
+    else:
+        resolved_triggers = tuple(
+            item for item in _TAMBUR_TRIGGERS if item.binding in included_bindings
+        )
+    kwargs.setdefault("resolved_triggers", resolved_triggers)
+    return _SmartSwitchTriggerAdapter(*args, **kwargs)
 
 
 def _state(
