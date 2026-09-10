@@ -979,6 +979,13 @@ class ScenarioService:
         self._manual_action_pre_admission: (
             Callable[[str, str, str, object | None], Awaitable[None]] | None
         ) = None
+        self._manual_action_batch_pre_admission: (
+            Callable[
+                [str, tuple[Mapping[str, object], ...]],
+                Awaitable[None],
+            ]
+            | None
+        ) = None
         self._catalog = self._apply_electrical_breaker_policy(catalog)
         self._smart_switch_receipt_consumer: object | None = None
         self._managed_switch_migration_transaction: (
@@ -1404,6 +1411,18 @@ class ScenarioService:
         if not callable(callback):
             raise TypeError("manual action pre-admission callback must be callable")
         self._manual_action_pre_admission = callback
+
+    def set_manual_action_batch_pre_admission(
+        self,
+        callback: Callable[
+            [str, tuple[Mapping[str, object], ...]], Awaitable[None]
+        ],
+    ) -> None:
+        """Register one durable manual fence for a bounded action group."""
+
+        if not callable(callback):
+            raise TypeError("manual action batch pre-admission callback must be callable")
+        self._manual_action_batch_pre_admission = callback
 
     def set_smart_switch_receipt_consumer(self, consumer: object) -> None:
         """Wire the sole durable authority for release-owned switch receipts."""
@@ -4222,6 +4241,8 @@ class ScenarioService:
         bindings = {
             "shower-cabinet": {"toggle_b2_down", "on_b2_down"},
             "tambur-light-group": {"on_down", "toggle_down", "off_up"},
+            "tambur-mirror-left": {"1_single", "1_double"},
+            "tambur-master-off": {"2_single", "2_double"},
         }
         if binding not in bindings or trigger_id not in bindings[binding]:
             raise ValueError("unknown smart-switch binding or trigger")
@@ -4234,7 +4255,12 @@ class ScenarioService:
             or dedup_disposition != "accepted"
         ):
             raise ValueError("smart-switch intent must be manual and correlated")
-        allowed = {"shower-cabinet": {"toggle"}, "tambur-light-group": {"on", "off", "toggle"}}[binding]
+        allowed = {
+            "shower-cabinet": {"toggle"},
+            "tambur-light-group": {"on", "off", "toggle"},
+            "tambur-mirror-left": {"toggle"},
+            "tambur-master-off": {"off"},
+        }[binding]
         if action not in allowed:
             raise ValueError("smart-switch action does not match binding")
         consume = getattr(
@@ -4263,6 +4289,16 @@ class ScenarioService:
             if binding == "shower-cabinet"
             else "system-tambur-adaptive-controller"
         )
+        tambur_light_targets = (
+            "entity_71859313239a14e4",
+            "entity_cd0098e5ff95da46",
+            "entity_fbdf27871edb89bf",
+        )
+        tambur_sensor_targets = (
+            "entity_156050daca86aa6c",
+            "entity_402b26d150a1ef3f",
+            "entity_10b78187426f8485",
+        )
         direct_user_intent = action
         if binding == "shower-cabinet":
             cabinet_state = self._trusted_typed_target_state(
@@ -4281,7 +4317,7 @@ class ScenarioService:
                     dedup_disposition=dedup_disposition,
                 )
             direct_user_intent = "off" if cabinet_state == "on" else "on"
-        else:
+        elif binding == "tambur-light-group":
             if self._trusted_typed_target_state("entity_b47991988cc6b9f3") != "on":
                 return await self._async_record_typed_intent_skip(
                     scenario_id,
@@ -4326,18 +4362,8 @@ class ScenarioService:
                     raise RuntimeError(
                         "release-owned direct-user light protection is unavailable"
                     )
-                light_entity_ids = self._typed_entity_ids(
-                    (
-                        "entity_71859313239a14e4",
-                        "entity_cd0098e5ff95da46",
-                    )
-                )
-                sensor_entity_ids = self._typed_entity_ids(
-                    (
-                        "entity_156050daca86aa6c",
-                        "entity_10b78187426f8485",
-                    )
-                )
+                light_entity_ids = self._typed_entity_ids(tambur_light_targets)
+                sensor_entity_ids = self._typed_entity_ids(tambur_sensor_targets)
                 sensor_states = {
                     entity_id: self._hass.states.get(entity_id)
                     for entity_id in sensor_entity_ids
@@ -4350,6 +4376,94 @@ class ScenarioService:
                 )
                 if inspect.isawaitable(armed):
                     await armed
+        elif binding == "tambur-mirror-left":
+            mirror_state = self._trusted_typed_target_state(
+                "entity_fbdf27871edb89bf"
+            )
+            if mirror_state is None:
+                return await self._async_record_typed_intent_skip(
+                    scenario_id,
+                    correlation_id,
+                    reason="smart_switch_state_untrusted",
+                    binding=binding,
+                    action=action,
+                    trigger_id=trigger_id,
+                    intent_receipt_id=intent_receipt_id,
+                    raw_subtype=raw_subtype,
+                    dedup_disposition=dedup_disposition,
+                )
+            resolved_action = "turn_off" if mirror_state == "on" else "turn_on"
+            actions = (
+                {
+                    "targetId": "entity_fbdf27871edb89bf",
+                    "actionId": resolved_action,
+                    "value": None,
+                },
+            )
+            await self._async_fence_typed_manual_actions(correlation_id, actions)
+            return await self._async_execute_typed_direct_actions(
+                scenario_id=scenario_id,
+                correlation_id=correlation_id,
+                binding=binding,
+                typed_action=action,
+                trigger_id=trigger_id,
+                intent_receipt_id=intent_receipt_id,
+                raw_subtype=raw_subtype,
+                dedup_disposition=dedup_disposition,
+                actions=actions,
+            )
+        else:
+            target_states = tuple(
+                self._trusted_typed_target_state(target_id)
+                for target_id in tambur_light_targets
+            )
+            if any(state is None for state in target_states):
+                return await self._async_record_typed_intent_skip(
+                    scenario_id,
+                    correlation_id,
+                    reason="smart_switch_state_untrusted",
+                    binding=binding,
+                    action=action,
+                    trigger_id=trigger_id,
+                    intent_receipt_id=intent_receipt_id,
+                    raw_subtype=raw_subtype,
+                    dedup_disposition=dedup_disposition,
+                )
+            actions = tuple(
+                {"targetId": target_id, "actionId": "turn_off", "value": None}
+                for target_id in tambur_light_targets
+            )
+            await self._async_fence_typed_manual_actions(correlation_id, actions)
+            protection = self._manual_light_off_protection
+            arm = getattr(protection, "async_arm_release_owned_direct_off", None)
+            if not callable(arm):
+                raise RuntimeError(
+                    "release-owned direct-user light protection is unavailable"
+                )
+            light_entity_ids = self._typed_entity_ids(tambur_light_targets)
+            sensor_entity_ids = self._typed_entity_ids(tambur_sensor_targets)
+            armed = arm(
+                request_id=intent_receipt_id,
+                light_entity_ids=light_entity_ids,
+                presence_sensor_entity_ids=sensor_entity_ids,
+                sensor_states={
+                    entity_id: self._hass.states.get(entity_id)
+                    for entity_id in sensor_entity_ids
+                },
+            )
+            if inspect.isawaitable(armed):
+                await armed
+            return await self._async_execute_typed_direct_actions(
+                scenario_id=scenario_id,
+                correlation_id=correlation_id,
+                binding=binding,
+                typed_action=action,
+                trigger_id=trigger_id,
+                intent_receipt_id=intent_receipt_id,
+                raw_subtype=raw_subtype,
+                dedup_disposition=dedup_disposition,
+                actions=actions,
+            )
         trigger_context = {
             "source": source,
             "trigger_id": trigger_id,
@@ -4368,6 +4482,118 @@ class ScenarioService:
             trigger_context=trigger_context,
         )
 
+    async def _async_fence_typed_manual_actions(
+        self,
+        request_id: str,
+        actions: tuple[Mapping[str, object], ...],
+    ) -> None:
+        """Fence every automatic Tambur target before any physical dispatch."""
+
+        batch = getattr(self, "_manual_action_batch_pre_admission", None)
+        if callable(batch):
+            result = batch(request_id, actions)
+            if inspect.isawaitable(result):
+                await result
+            return
+        single = getattr(self, "_manual_action_pre_admission", None)
+        if not callable(single):
+            raise RuntimeError("manual action pre-admission is unavailable")
+        for index, item in enumerate(actions):
+            result = single(
+                f"{request_id}.fence.{index + 1}",
+                str(item["targetId"]),
+                str(item["actionId"]),
+                item.get("value"),
+            )
+            if inspect.isawaitable(result):
+                await result
+
+    async def _async_execute_typed_direct_actions(
+        self,
+        *,
+        scenario_id: str,
+        correlation_id: str,
+        binding: str,
+        typed_action: str,
+        trigger_id: str,
+        intent_receipt_id: str,
+        raw_subtype: str,
+        dedup_disposition: str,
+        actions: tuple[Mapping[str, object], ...],
+    ) -> dict[str, object]:
+        """Execute an already-fenced switch group through the shared executor."""
+
+        public_receipts = await self.async_execute_device_action_batch(
+            [dict(item) for item in actions],
+            correlation_id=correlation_id,
+            request_ids=tuple(
+                f"{intent_receipt_id}.action.{index + 1}"
+                for index in range(len(actions))
+            ),
+        )
+        action_receipts: list[dict[str, object]] = []
+        for index, (requested, receipt) in enumerate(
+            zip(actions, public_receipts, strict=True)
+        ):
+            succeeded = receipt.get("accepted") is True
+            action_receipts.append(
+                {
+                    "action_id": f"typed_manual_{index + 1}",
+                    "target_id": str(requested["targetId"]),
+                    "status": "completed" if succeeded else "failed",
+                    "confirmed": receipt.get("confirmed") is True,
+                    "skipped": receipt.get("skipped") is True,
+                    "reason": receipt.get("reason"),
+                    "error": receipt.get("error"),
+                }
+            )
+        accepted_count = sum(
+            receipt.get("accepted") is True for receipt in public_receipts
+        )
+        confirmed = bool(public_receipts) and all(
+            receipt.get("confirmed") is True for receipt in public_receipts
+        )
+        status = (
+            "completed"
+            if accepted_count == len(public_receipts)
+            else "partial"
+            if accepted_count
+            else "failed"
+        )
+        trigger_context = {
+            "source": "manual",
+            "trigger_id": trigger_id,
+            "recovery": False,
+            "binding": binding,
+            "typed_intent": typed_action,
+            "direct_user_intent": (
+                "off"
+                if len(actions) > 1
+                else str(actions[0]["actionId"]).removeprefix("turn_")
+            ),
+            "intent_receipt_id": intent_receipt_id,
+            "raw_subtype": raw_subtype,
+            "dedup_disposition": dedup_disposition,
+            "correlation_id": correlation_id,
+        }
+        result: dict[str, object] = {
+            "scenario_id": scenario_id,
+            "run_id": correlation_id,
+            "execution_mode": "restart",
+            "command_mode": "live",
+            "status": status,
+            "reason": None if status == "completed" else "device_action_failed",
+            "evidence_revision": None,
+            "condition_results": [],
+            "receipts": action_receipts,
+            "accepted": status == "completed",
+            "confirmed": confirmed,
+            "trigger_context": trigger_context,
+            "device_action_receipts": public_receipts,
+        }
+        await self._async_record_scenario_result(result)
+        return result
+
     async def async_record_typed_intent_disposition(
         self,
         *,
@@ -4382,7 +4608,13 @@ class ScenarioService:
         """Journal an ignored or deduplicated release-owned trigger."""
 
         if (
-            binding not in {"shower-cabinet", "tambur-light-group"}
+            binding
+            not in {
+                "shower-cabinet",
+                "tambur-light-group",
+                "tambur-mirror-left",
+                "tambur-master-off",
+            }
             or source != "manual"
             or intent_receipt_id != correlation_id
             or raw_subtype != trigger_id
@@ -4474,6 +4706,8 @@ class ScenarioService:
                 if action is not None
                 else "upper_area"
                 if dedup_disposition == "ignored"
+                else "off"
+                if binding == "tambur-master-off"
                 else "toggle"
             ),
             "direct_user_intent": "none",

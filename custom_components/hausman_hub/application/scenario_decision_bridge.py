@@ -932,29 +932,73 @@ class ScenarioDecisionBridge:
     ) -> None:
         """Fence automatic work before the public manual path waits on light lock."""
 
+        await self.async_register_manual_intents(
+            request_id,
+            (
+                {
+                    "targetId": target_id,
+                    "actionId": action_id,
+                    "value": value,
+                },
+            ),
+        )
+
+    async def async_register_manual_intents(
+        self,
+        request_id: str,
+        actions: tuple[Mapping[str, object], ...],
+    ) -> None:
+        """Persist a bounded multi-target manual fence in one durable save."""
+
         if (
             not _valid_id(request_id)
-            or not _valid_id(target_id)
-            or not _valid_id(action_id)
-            or not _valid_manual_value(value)
+            or not 1 <= len(actions) <= 3
+            or any(
+                not isinstance(item, Mapping)
+                or set(item) != {"targetId", "actionId", "value"}
+                or not _valid_id(item.get("targetId"))
+                or not _valid_id(item.get("actionId"))
+                or not _valid_manual_value(item.get("value"))
+                for item in actions
+            )
+            or len({str(item["targetId"]) for item in actions}) != len(actions)
         ):
             raise ScenarioDecisionRejected("manual intent is invalid")
 
-        def matching_intent(payload: Mapping[str, object]) -> Mapping[str, object] | None:
-            return next(
-                (
-                    item
-                    for item in reversed(payload["manualIntents"])
-                    if item["requestId"] == request_id
+        normalized = tuple(
+            {
+                "requestId": (
+                    request_id
+                    if len(actions) == 1
+                    else f"{request_id}.fence.{index + 1}"
                 ),
-                None,
-            )
+                "targetId": str(item["targetId"]),
+                "actionId": str(item["actionId"]),
+                "value": copy.deepcopy(item.get("value")),
+            }
+            for index, item in enumerate(actions)
+        )
+        if any(not _valid_id(str(item["requestId"])) for item in normalized):
+            raise ScenarioDecisionRejected("manual intent is invalid")
+        target_ids = {str(item["targetId"]) for item in normalized}
 
-        def is_same(item: Mapping[str, object]) -> bool:
+        def matching_intents(
+            payload: Mapping[str, object],
+        ) -> dict[str, Mapping[str, object]]:
+            expected_ids = {str(item["requestId"]) for item in normalized}
+            return {
+                str(item["requestId"]): item
+                for item in reversed(payload["manualIntents"])
+                if item["requestId"] in expected_ids
+            }
+
+        def is_same(
+            item: Mapping[str, object], expected: Mapping[str, object]
+        ) -> bool:
             return (
-                item.get("targetId") == target_id
-                and item.get("actionId") == action_id
-                and item.get("value") == value
+                item.get("targetId") == expected["targetId"]
+                and item.get("actionId") == expected["actionId"]
+                and item.get("value") == expected["value"]
             )
 
         def affected_plans(payload: Mapping[str, object]) -> set[str]:
@@ -963,13 +1007,16 @@ class ScenarioDecisionBridge:
                 for record in self._history(payload)
                 if record["status"] in {"prepared", "dispatching"}
                 and isinstance(record.get("action"), Mapping)
-                and record["action"].get("targetId") == target_id
+                and record["action"].get("targetId") in target_ids
             }
 
         payload = self._loaded()
-        existing = matching_intent(payload)
-        if existing is not None:
-            if is_same(existing):
+        existing = matching_intents(payload)
+        if existing:
+            if len(existing) == len(normalized) and all(
+                is_same(existing[str(item["requestId"])], item)
+                for item in normalized
+            ):
                 return
             raise ScenarioDecisionConflict("manual request content conflicts")
         affected = affected_plans(payload)
@@ -977,9 +1024,12 @@ class ScenarioDecisionBridge:
             self.cancellation_event(plan_id).set()
         async with self._lock:
             current = self._loaded()
-            existing = matching_intent(current)
-            if existing is not None:
-                if is_same(existing):
+            existing = matching_intents(current)
+            if existing:
+                if len(existing) == len(normalized) and all(
+                    is_same(existing[str(item["requestId"])], item)
+                    for item in normalized
+                ):
                     return
                 raise ScenarioDecisionConflict("manual request content conflicts")
             affected.update(affected_plans(current))
@@ -1001,15 +1051,13 @@ class ScenarioDecisionBridge:
                         )
                         self._replace_recent_receipt(updated, record["receipt"])
                     record["updatedAtMs"] = self._now_ms()
-            manual = {
-                "requestId": request_id,
-                "targetId": target_id,
-                "actionId": action_id,
-                "value": copy.deepcopy(value),
-                "registeredAtMs": self._now_ms(),
-            }
+            registered_at = self._now_ms()
+            manuals = [
+                {**item, "registeredAtMs": registered_at}
+                for item in normalized
+            ]
             updated["manualIntents"] = [
-                *updated["manualIntents"], manual
+                *updated["manualIntents"], *manuals
             ][-_MAX_MANUAL_INTENTS:]
             durable = dict(updated["durable"])
             durable["wakeups"] = []

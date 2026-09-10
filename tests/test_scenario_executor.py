@@ -4033,7 +4033,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-    async def test_auto_dependency_reuses_fresh_confirmed_source(self) -> None:
+    async def test_auto_dependency_reasserts_fresh_confirmed_source(self) -> None:
         observed = datetime.now(timezone.utc)
         states = {
             "light.living_room": SimpleNamespace(
@@ -4057,7 +4057,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
                 states[str(data["entity_id"])] = SimpleNamespace(
                     state="on",
                     attributes={},
-                    last_updated=datetime.now(timezone.utc) + timedelta(seconds=1),
+                    last_updated=datetime.now(timezone.utc),
                 )
 
         self.hass.services.async_call.side_effect = apply_service
@@ -4071,17 +4071,18 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
                 policy="auto_turn_on", warmup_seconds=0
             ),
             electrical_breaker_resolver=lambda _entity_id: False,
+            command_guard=lambda _entity_id, _action_id, _automatic: None,
         )
 
         receipt = await executor.async_execute_device_action("device_1", "turn_on")
 
         self.assertTrue(receipt["confirmed"])
-        self.assertFalse(receipt["power_precondition"]["sourceTurnedOn"])
+        self.assertTrue(receipt["power_precondition"]["sourceTurnedOn"])
         self.assertIsNotNone(
             receipt["power_precondition"]["sourceEvidenceRevision"]
         )
         self.assertEqual(
-            ["light.living_room"],
+            ["switch.wall", "light.living_room"],
             [
                 current.args[2]["entity_id"]
                 for current in self.hass.services.async_call.await_args_list

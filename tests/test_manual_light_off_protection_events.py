@@ -247,10 +247,10 @@ def test_restart_and_stale_presence_do_not_create_release_evidence() -> None:
     "unsafe_attributes",
     [{"restored": True}, {"cached": True}, {"assumed_state": True}],
 )
-def test_untrusted_same_state_presence_event_does_not_extend_direct_off_timer(
+def test_untrusted_same_state_presence_event_cannot_release_direct_off_protection(
     unsafe_attributes: dict[str, object],
 ) -> None:
-    """A restored event cannot make the exact timer-only inhibit linger."""
+    """A restored event cannot satisfy the fresh-absence release condition."""
 
     async def exercise() -> None:
         now = datetime.now(timezone.utc)
@@ -274,7 +274,7 @@ def test_untrusted_same_state_presence_event_does_not_extend_direct_off_timer(
         listener = ManualLightOffProtectionEventListener(
             coordinator, None, set(sensors)
         )
-        now += timedelta(seconds=100)
+        now += timedelta(seconds=600)
         await listener.async_handle(
             SimpleNamespace(
                 data={
@@ -282,19 +282,36 @@ def test_untrusted_same_state_presence_event_does_not_extend_direct_off_timer(
                     "old_state": sensors["binary_sensor.tambur_motion"],
                     "new_state": SimpleNamespace(
                         state="off",
-                        last_changed=now - timedelta(seconds=100),
+                        last_changed=now,
                         attributes=unsafe_attributes,
                     ),
                 },
                 context=None,
             )
         )
-        now += timedelta(seconds=200)
-
         decision = await coordinator.async_decide_entity(
             "light.tambur_chandelier", automatic=True, dry_run=False
         )
-        assert decision.allowed
+        assert not decision.allowed
+        for sensor_id, previous in tuple(sensors.items()):
+            current = SimpleNamespace(state="off", last_changed=now, attributes={})
+            await listener.async_handle(
+                SimpleNamespace(
+                    data={
+                        "entity_id": sensor_id,
+                        "old_state": previous,
+                        "new_state": current,
+                    },
+                    context=None,
+                )
+            )
+            sensors[sensor_id] = current
+        now += timedelta(seconds=30)
+        assert (
+            await coordinator.async_decide_entity(
+                "light.tambur_chandelier", automatic=True, dry_run=False
+            )
+        ).allowed
 
     asyncio.run(exercise())
 

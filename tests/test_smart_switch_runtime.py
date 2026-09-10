@@ -9,6 +9,7 @@ from collections import UserDict
 import pytest
 
 from custom_components.hausman_hub.application.smart_switch_runtime import (
+    MARMITEK_TRIGGER_CONFIGS,
     PASS_THROUGH_TRIGGER_CONFIGS,
     SHOWER_TRIGGER_CONFIGS,
     SmartSwitchTriggerAdapter,
@@ -16,6 +17,19 @@ from custom_components.hausman_hub.application.smart_switch_runtime import (
     validate_exact_device_trigger,
 )
 from custom_components.hausman_hub.application.scenario_service import ScenarioService
+
+
+ALL_TRIGGER_CONFIGS = (
+    *SHOWER_TRIGGER_CONFIGS,
+    *PASS_THROUGH_TRIGGER_CONFIGS,
+    *MARMITEK_TRIGGER_CONFIGS,
+)
+
+
+def configs_for_device(device_id: str) -> tuple[dict[str, object], ...]:
+    return tuple(
+        config for config in ALL_TRIGGER_CONFIGS if config["device_id"] == device_id
+    )
 
 
 def test_exact_trigger_validation_rejects_wrong_device_or_subtype() -> None:
@@ -33,12 +47,9 @@ async def test_attach_uses_ha_2026_9_trigger_info_and_callback_boundary() -> Non
     infos: list[dict[str, object]] = []
 
     async def get_triggers(_hass: object, device_id: str) -> list[dict[str, object]]:
-        configs = (
-            SHOWER_TRIGGER_CONFIGS
-            if device_id == SHOWER_TRIGGER_CONFIGS[0]["device_id"]
-            else PASS_THROUGH_TRIGGER_CONFIGS
-        )
-        return [{**item, "metadata": {}} for item in configs]
+        return [
+            {**item, "metadata": {}} for item in configs_for_device(device_id)
+        ]
 
     async def attach(
         _hass: object,
@@ -65,7 +76,7 @@ async def test_attach_uses_ha_2026_9_trigger_info_and_callback_boundary() -> Non
     await actions[0]({"config": {"subtype": "off_up"}}, SimpleNamespace(id="context"))
     assert calls[0]["binding"] == "shower-cabinet"
     assert calls[0]["action"] == "toggle"
-    assert len(infos) == 6
+    assert len(infos) == len(ALL_TRIGGER_CONFIGS)
     assert {info["domain"] for info in infos} == {"hausman_hub"}
     assert {info["name"] for info in infos} == {"managed-smart-switch-runtime"}
     assert all(type(info) is dict for info in infos)
@@ -77,11 +88,13 @@ async def test_attach_uses_ha_2026_9_trigger_info_and_callback_boundary() -> Non
     assert all(type(item["id"]) is str for item in trigger_data)
     assert all(type(item["idx"]) is str for item in trigger_data)
     assert all(item["alias"] is None for item in trigger_data)
-    assert len({item["id"] for item in trigger_data}) == 6
-    assert {item["idx"] for item in trigger_data} == {str(index) for index in range(6)}
+    assert len({item["id"] for item in trigger_data}) == len(ALL_TRIGGER_CONFIGS)
+    assert {item["idx"] for item in trigger_data} == {
+        str(index) for index in range(len(ALL_TRIGGER_CONFIGS))
+    }
 
 
-@pytest.mark.parametrize("expected", [*SHOWER_TRIGGER_CONFIGS, *PASS_THROUGH_TRIGGER_CONFIGS])
+@pytest.mark.parametrize("expected", ALL_TRIGGER_CONFIGS)
 def test_exact_trigger_validation_accepts_ha_2026_9_empty_metadata(expected: dict[str, object]) -> None:
     assert validate_exact_device_trigger({**expected, "metadata": {}}, expected)
 
@@ -128,8 +141,9 @@ def test_adapter_attaches_only_allowlisted_configs_and_unloads() -> None:
     removed: list[str] = []
 
     async def get_triggers(_hass: object, device_id: str) -> list[dict[str, object]]:
-        configs = SHOWER_TRIGGER_CONFIGS if device_id == SHOWER_TRIGGER_CONFIGS[0]["device_id"] else PASS_THROUGH_TRIGGER_CONFIGS
-        return [{**item, "metadata": {}} for item in configs]
+        return [
+            {**item, "metadata": {}} for item in configs_for_device(device_id)
+        ]
 
     async def attach(_hass: object, config: dict[str, object], _action: object, _info: object):
         attached.append(config)
@@ -145,15 +159,20 @@ def test_adapter_attaches_only_allowlisted_configs_and_unloads() -> None:
         assert {item["subtype"] for item in attached} == {
             "toggle_b2_down", "on_b2_down", "toggle_b2_up",
             "on_down", "toggle_down", "off_up",
+            "1_single", "1_double", "2_single", "2_double",
         }
-        assert all(set(item) == set(expected) for item, expected in zip(attached, (*SHOWER_TRIGGER_CONFIGS, *PASS_THROUGH_TRIGGER_CONFIGS)))
+        assert all(
+            set(item) == set(expected)
+            for item, expected in zip(attached, ALL_TRIGGER_CONFIGS, strict=True)
+        )
         adapter.async_unload()
         adapter.async_unload()
         assert set(removed) == {
             "toggle_b2_down", "on_b2_down", "toggle_b2_up",
             "on_down", "toggle_down", "off_up",
+            "1_single", "1_double", "2_single", "2_double",
         }
-        assert len(removed) == 6
+        assert len(removed) == len(ALL_TRIGGER_CONFIGS)
 
     asyncio.run(run())
 
@@ -342,9 +361,10 @@ async def test_discovery_is_complete_before_first_attach() -> None:
     attached: list[dict[str, object]] = []
 
     async def get_triggers(_hass: object, device_id: str) -> list[dict[str, object]]:
-        if device_id == SHOWER_TRIGGER_CONFIGS[0]["device_id"]:
-            return [{**item, "metadata": {}} for item in SHOWER_TRIGGER_CONFIGS]
-        return [{**item, "metadata": {}} for item in PASS_THROUGH_TRIGGER_CONFIGS[:-1]]
+        configs = configs_for_device(device_id)
+        if device_id == PASS_THROUGH_TRIGGER_CONFIGS[0]["device_id"]:
+            configs = configs[:-1]
+        return [{**item, "metadata": {}} for item in configs]
 
     async def attach(_hass: object, config: dict[str, object], _action: object, _info: object):
         attached.append(config)
@@ -388,8 +408,7 @@ async def test_partial_attach_failure_cleans_every_callback_once() -> None:
     attempts = 0
 
     async def get_triggers(_hass: object, device_id: str) -> list[dict[str, object]]:
-        configs = SHOWER_TRIGGER_CONFIGS if device_id == SHOWER_TRIGGER_CONFIGS[0]["device_id"] else PASS_THROUGH_TRIGGER_CONFIGS
-        return [dict(item) for item in configs]
+        return [dict(item) for item in configs_for_device(device_id)]
 
     async def attach(_hass: object, config: dict[str, object], _action: object, _info: object):
         nonlocal attempts
@@ -417,12 +436,7 @@ async def test_cancellation_during_attach_cleans_every_completed_callback() -> N
         _hass: object,
         device_id: str,
     ) -> list[dict[str, object]]:
-        configs = (
-            SHOWER_TRIGGER_CONFIGS
-            if device_id == SHOWER_TRIGGER_CONFIGS[0]["device_id"]
-            else PASS_THROUGH_TRIGGER_CONFIGS
-        )
-        return [dict(item) for item in configs]
+        return [dict(item) for item in configs_for_device(device_id)]
 
     async def attach(
         _hass: object,
@@ -462,12 +476,7 @@ async def test_callback_during_attach_cannot_persist_or_dispatch_before_activati
     attempts = 0
 
     async def get_triggers(_hass: object, device_id: str) -> list[dict[str, object]]:
-        configs = (
-            SHOWER_TRIGGER_CONFIGS
-            if device_id == SHOWER_TRIGGER_CONFIGS[0]["device_id"]
-            else PASS_THROUGH_TRIGGER_CONFIGS
-        )
-        return [dict(item) for item in configs]
+        return [dict(item) for item in configs_for_device(device_id)]
 
     async def attach(
         _hass: object,
@@ -513,12 +522,7 @@ async def test_readiness_is_rechecked_after_all_listeners_attach_before_activati
     readiness = iter((True, False))
 
     async def get_triggers(_hass: object, device_id: str) -> list[dict[str, object]]:
-        configs = (
-            SHOWER_TRIGGER_CONFIGS
-            if device_id == SHOWER_TRIGGER_CONFIGS[0]["device_id"]
-            else PASS_THROUGH_TRIGGER_CONFIGS
-        )
-        return [dict(item) for item in configs]
+        return [dict(item) for item in configs_for_device(device_id)]
 
     async def attach(
         _hass: object,
@@ -549,8 +553,8 @@ async def test_readiness_is_rechecked_after_all_listeners_attach_before_activati
         await adapter.async_start()
     await actions[-1]({})
 
-    assert len(actions) == 6
-    assert len(removed) == 6
+    assert len(actions) == len(ALL_TRIGGER_CONFIGS)
+    assert len(removed) == len(ALL_TRIGGER_CONFIGS)
     assert store.payload is None
 
 
@@ -596,12 +600,7 @@ async def test_failed_detach_after_partial_attach_leaves_callbacks_inert() -> No
     attempts = 0
 
     async def get_triggers(_hass: object, device_id: str) -> list[dict[str, object]]:
-        configs = (
-            SHOWER_TRIGGER_CONFIGS
-            if device_id == SHOWER_TRIGGER_CONFIGS[0]["device_id"]
-            else PASS_THROUGH_TRIGGER_CONFIGS
-        )
-        return [dict(item) for item in configs]
+        return [dict(item) for item in configs_for_device(device_id)]
 
     async def attach(
         _hass: object,
@@ -769,8 +768,10 @@ async def test_typed_intent_validates_binding_and_preserves_manual_source() -> N
     entities = {
         "entity_71859313239a14e4": "light.tambur_chandelier",
         "entity_cd0098e5ff95da46": "switch.tambur_points",
+        "entity_fbdf27871edb89bf": "light.tambur_mirror",
         "entity_b47991988cc6b9f3": "switch.tambur_power",
         "entity_156050daca86aa6c": "binary_sensor.tambur_presence",
+        "entity_402b26d150a1ef3f": "binary_sensor.tambur_presence_secondary",
         "entity_10b78187426f8485": "binary_sensor.tambur_motion",
         "entity_e7a7c61eec7bdff8": "switch.shower_cabinet",
     }
@@ -977,8 +978,10 @@ def _typed_service(
     entities = {
         "entity_71859313239a14e4": "light.tambur_chandelier",
         "entity_cd0098e5ff95da46": "switch.tambur_points",
+        "entity_fbdf27871edb89bf": "light.tambur_mirror",
         "entity_b47991988cc6b9f3": "switch.tambur_power",
         "entity_156050daca86aa6c": "binary_sensor.tambur_presence",
+        "entity_402b26d150a1ef3f": "binary_sensor.tambur_presence_secondary",
         "entity_10b78187426f8485": "binary_sensor.tambur_motion",
         "entity_e7a7c61eec7bdff8": "switch.shower_cabinet",
     }
@@ -1069,8 +1072,10 @@ async def test_pass_through_on_off_toggle_matrix(
     states = {
         "light.tambur_chandelier": _fresh(chandelier),
         "switch.tambur_points": _fresh(points),
+        "light.tambur_mirror": _fresh("off"),
         "switch.tambur_power": _fresh("on"),
         "binary_sensor.tambur_presence": _fresh("off"),
+        "binary_sensor.tambur_presence_secondary": _fresh("off"),
         "binary_sensor.tambur_motion": _fresh("off"),
     }
     protection = SimpleNamespace(async_arm_release_owned_direct_off=lambda **_item: {"ok": True})
@@ -1137,8 +1142,10 @@ async def test_direct_off_arms_before_scenario_dispatch_and_failure_sends_no_com
     states = {
         "light.tambur_chandelier": _fresh("on"),
         "switch.tambur_points": _fresh("on"),
+        "light.tambur_mirror": _fresh("on"),
         "switch.tambur_power": _fresh("on"),
         "binary_sensor.tambur_presence": _fresh("off"),
+        "binary_sensor.tambur_presence_secondary": _fresh("off"),
         "binary_sensor.tambur_motion": _fresh("off"),
     }
 
@@ -1146,7 +1153,14 @@ async def test_direct_off_arms_before_scenario_dispatch_and_failure_sends_no_com
         order.append("arm")
         assert item["request_id"] == "receipt.off"
         assert set(item["light_entity_ids"]) == {
-            "light.tambur_chandelier", "switch.tambur_points"
+            "light.tambur_chandelier",
+            "switch.tambur_points",
+            "light.tambur_mirror",
+        }
+        assert set(item["presence_sensor_entity_ids"]) == {
+            "binary_sensor.tambur_presence",
+            "binary_sensor.tambur_presence_secondary",
+            "binary_sensor.tambur_motion",
         }
         raise OSError("verified save failed")
 

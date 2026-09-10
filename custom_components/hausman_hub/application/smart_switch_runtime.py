@@ -19,6 +19,7 @@ _LOGGER = logging.getLogger(__name__)
 
 SHOWER_DEVICE_ID = "2685c1523cb5151baeaf65aebe830c53"
 PASSTHROUGH_DEVICE_ID = "609ee914f1d93194cd157612d7d086e9"
+MARMITEK_DEVICE_ID = "9ca80bc371a9bbb4021c5639b10363d5"
 _BASE = {"platform": "device", "domain": "mqtt", "type": "action"}
 SHOWER_TRIGGER_CONFIGS = tuple(
     {**_BASE, "device_id": SHOWER_DEVICE_ID, "subtype": subtype}
@@ -28,7 +29,23 @@ PASS_THROUGH_TRIGGER_CONFIGS = tuple(
     {**_BASE, "device_id": PASSTHROUGH_DEVICE_ID, "subtype": subtype}
     for subtype in ("on_down", "toggle_down", "off_up")
 )
-_ALL_CONFIGS = SHOWER_TRIGGER_CONFIGS + PASS_THROUGH_TRIGGER_CONFIGS
+MARMITEK_TRIGGER_CONFIGS = tuple(
+    {**_BASE, "device_id": MARMITEK_DEVICE_ID, "subtype": subtype}
+    for subtype in ("1_single", "1_double", "2_single", "2_double")
+)
+_ALL_CONFIGS = (
+    SHOWER_TRIGGER_CONFIGS
+    + PASS_THROUGH_TRIGGER_CONFIGS
+    + MARMITEK_TRIGGER_CONFIGS
+)
+_ALL_BINDINGS = frozenset(
+    {
+        "shower-cabinet",
+        "tambur-light-group",
+        "tambur-mirror-left",
+        "tambur-master-off",
+    }
+)
 _TRIGGER_IDENTITY_FIELDS = frozenset({"platform", "domain", "type", "device_id", "subtype"})
 _DEDUP_SECONDS = 0.6
 _MAX_RECEIPTS = 32
@@ -69,7 +86,7 @@ def valid_smart_switch_dedup_payload(value: object) -> bool:
             not isinstance(receipt_id, str)
             or _RECEIPT_ID.fullmatch(receipt_id) is None
             or receipt_id in seen
-            or binding not in {"shower-cabinet", "tambur-light-group"}
+            or binding not in _ALL_BINDINGS
             or not isinstance(subtype, str)
             or disposition not in {"accepted", "deduplicated", "ignored"}
             or lifecycle not in {"accepted", "consumed"}
@@ -84,6 +101,14 @@ def valid_smart_switch_dedup_payload(value: object) -> bool:
                 binding == "tambur-light-group"
                 and subtype not in {"on_down", "toggle_down", "off_up"}
             )
+            or (
+                binding == "tambur-mirror-left"
+                and subtype not in {"1_single", "1_double"}
+            )
+            or (
+                binding == "tambur-master-off"
+                and subtype not in {"2_single", "2_double"}
+            )
             or subtype == "toggle_b2_up" and disposition != "ignored"
             or disposition == "ignored" and subtype != "toggle_b2_up"
             or disposition == "deduplicated"
@@ -92,6 +117,10 @@ def valid_smart_switch_dedup_payload(value: object) -> bool:
                 and subtype in {"toggle_b2_down", "on_b2_down"}
                 or binding == "tambur-light-group"
                 and subtype in {"on_down", "toggle_down", "off_up"}
+                or binding == "tambur-mirror-left"
+                and subtype in {"1_single", "1_double"}
+                or binding == "tambur-master-off"
+                and subtype in {"2_single", "2_double"}
             )
         ):
             return False
@@ -122,7 +151,33 @@ def validate_exact_device_trigger(
 def _semantic_intent(binding: str, subtype: str) -> str:
     if binding == "shower-cabinet":
         return "upper_area" if subtype == "toggle_b2_up" else "toggle"
-    return {"on_down": "on", "toggle_down": "toggle", "off_up": "off"}[subtype]
+    if binding == "tambur-light-group":
+        return {"on_down": "on", "toggle_down": "toggle", "off_up": "off"}[
+            subtype
+        ]
+    if binding == "tambur-mirror-left":
+        if subtype not in {"1_single", "1_double"}:
+            raise KeyError(subtype)
+        return "toggle"
+    if binding == "tambur-master-off":
+        if subtype not in {"2_single", "2_double"}:
+            raise KeyError(subtype)
+        return "off"
+    raise KeyError(binding)
+
+
+def _binding_for_config(config: Mapping[str, object]) -> str:
+    device_id = config.get("device_id")
+    subtype = config.get("subtype")
+    if device_id == SHOWER_DEVICE_ID:
+        return "shower-cabinet"
+    if device_id == PASSTHROUGH_DEVICE_ID:
+        return "tambur-light-group"
+    if device_id == MARMITEK_DEVICE_ID and subtype in {"1_single", "1_double"}:
+        return "tambur-mirror-left"
+    if device_id == MARMITEK_DEVICE_ID and subtype in {"2_single", "2_double"}:
+        return "tambur-master-off"
+    raise ValueError("smart switch trigger binding is invalid")
 
 
 class HomeAssistantSmartSwitchDedupStore:
@@ -181,13 +236,18 @@ class SmartSwitchTriggerAdapter:
         self._readiness_check = readiness_check or (lambda: True)
         self._activation_latch = activation_latch
         if included_bindings is None:
-            self._configs = _ALL_CONFIGS
-        elif included_bindings == frozenset({"tambur-light-group"}):
-            self._configs = PASS_THROUGH_TRIGGER_CONFIGS
-        elif included_bindings == frozenset({"shower-cabinet"}):
-            self._configs = SHOWER_TRIGGER_CONFIGS
-        else:
+            included_bindings = _ALL_BINDINGS
+        if (
+            not isinstance(included_bindings, frozenset)
+            or not included_bindings
+            or not included_bindings <= _ALL_BINDINGS
+        ):
             raise ValueError("smart switch binding scope is invalid")
+        self._configs = tuple(
+            config
+            for config in _ALL_CONFIGS
+            if _binding_for_config(config) in included_bindings
+        )
         self._receipts: list[dict[str, object]] = []
         # Only receipts accepted by this live adapter generation may authorize
         # execution. Persisted receipts remain useful for deduplication after a
@@ -327,11 +387,7 @@ class SmartSwitchTriggerAdapter:
     def _trigger_info(config: Mapping[str, object], index: int) -> dict[str, object]:
         """Return the complete HA 2026.9 TriggerInfo boundary object."""
 
-        binding = (
-            "shower-cabinet"
-            if config["device_id"] == SHOWER_DEVICE_ID
-            else "tambur-light-group"
-        )
+        binding = _binding_for_config(config)
         return {
             "domain": "hausman_hub",
             "name": "managed-smart-switch-runtime",
@@ -375,11 +431,7 @@ class SmartSwitchTriggerAdapter:
                 except RuntimeError:
                     return False
             subtype = str(config["subtype"])
-            binding = (
-                "shower-cabinet"
-                if config["device_id"] == SHOWER_DEVICE_ID
-                else "tambur-light-group"
-            )
+            binding = _binding_for_config(config)
             now_ms = max(0, int(self._wall_clock() * 1000))
             active_receipts = [
                 item
@@ -448,11 +500,7 @@ class SmartSwitchTriggerAdapter:
                 if inspect.isawaitable(result):
                     await result
             return False
-        action = (
-            "toggle"
-            if binding == "shower-cabinet"
-            else {"on_down": "on", "off_up": "off", "toggle_down": "toggle"}[subtype]
-        )
+        action = _semantic_intent(binding, subtype)
         result = self._service.async_run_typed_intent(
             binding=binding,
             action=action,

@@ -475,7 +475,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     await scenario_control_policy.async_load()
     manual_light_off_protection.set_release_owned_block_seconds_provider(
-        lambda: scenario_control_policy.current.policy.manual_off_block_seconds
+        lambda: max(
+            600, scenario_control_policy.current.policy.manual_off_block_seconds
+        )
     )
     domain_data["scenario_control_policy_service"] = scenario_control_policy
     from .application.curtain_scale_confirmation import CurtainScaleConfirmation
@@ -689,7 +691,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
         ),
         activation_latch=activation_latch,
-        included_bindings=frozenset({"tambur-light-group"}),
+        included_bindings=frozenset(
+            {
+                "tambur-light-group",
+                "tambur-mirror-left",
+                "tambur-master-off",
+            }
+        ),
     )
     scenario_service.set_smart_switch_receipt_consumer(smart_switch_adapter)
 
@@ -821,6 +829,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
             scenario_service.set_manual_action_pre_admission(
                 register_tambur_manual_intent
+            )
+
+            async def register_tambur_manual_intents(
+                request_id: str,
+                actions: tuple[Mapping[str, object], ...],
+            ) -> None:
+                allowed_targets = {
+                    bindings["chandelier"],
+                    bindings["points"],
+                    bindings["mirror"],
+                }
+                if (
+                    not actions
+                    or any(item.get("targetId") not in allowed_targets for item in actions)
+                ):
+                    raise RuntimeError("Tambur manual fence scope is invalid")
+                await bridge.async_register_manual_intents(request_id, actions)
+
+            scenario_service.set_manual_action_batch_pre_admission(
+                register_tambur_manual_intents
             )
             presence_entities = {
                 entity_id: target_id

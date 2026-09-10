@@ -180,8 +180,8 @@ def test_manual_off_lifecycle_keeps_profile_blocked_until_timer_and_absence() ->
     asyncio.run(exercise())
 
 
-def test_release_owned_direct_off_is_durable_for_exactly_300_seconds() -> None:
-    """The fixed timer-only policy must neither release early nor linger."""
+def test_release_owned_direct_off_is_durable_for_600_seconds_and_absence() -> None:
+    """The direct-off policy requires both its fixed minimum and fresh absence."""
 
     async def exercise() -> None:
         now = datetime(2026, 9, 5, 12, tzinfo=timezone.utc)
@@ -190,10 +190,10 @@ def test_release_owned_direct_off_is_durable_for_exactly_300_seconds() -> None:
         await coordinator.async_load()
         sensors = {
             "binary_sensor.tambur_presence": SimpleNamespace(
-                state="off", last_updated=now, attributes={}
+                state="on", last_updated=now, attributes={}
             ),
             "binary_sensor.tambur_motion": SimpleNamespace(
-                state="off", last_updated=now, attributes={}
+                state="on", last_updated=now, attributes={}
             ),
         }
 
@@ -204,16 +204,31 @@ def test_release_owned_direct_off_is_durable_for_exactly_300_seconds() -> None:
             sensor_states=sensors,
         )
         assert receipt["operation"] == "direct_user_block_armed"
-        assert store.payload["protections"][0]["notBefore"] == "2026-09-05T12:05:00Z"
-        assert store.payload["protections"][0]["effectivePolicy"]["releaseMode"] == "timer_only"
+        assert store.payload["protections"][0]["notBefore"] == "2026-09-05T12:10:00Z"
+        assert (
+            store.payload["protections"][0]["effectivePolicy"]["releaseMode"]
+            == "timer_and_absence"
+        )
 
-        now += timedelta(seconds=299)
+        now += timedelta(seconds=599)
         assert not (
             await coordinator.async_decide_entity(
                 "light.tambur_chandelier", automatic=True, dry_run=False
             )
         ).allowed
         now += timedelta(seconds=1)
+        for sensor_id, previous in tuple(sensors.items()):
+            current = SimpleNamespace(state="off", last_updated=now, attributes={})
+            await coordinator.async_note_state_transition(
+                sensor_id, previous, current, None
+            )
+            sensors[sensor_id] = current
+        assert not (
+            await coordinator.async_decide_entity(
+                "switch.tambur_points", automatic=True, dry_run=False
+            )
+        ).allowed
+        now += timedelta(seconds=30)
         assert (
             await coordinator.async_decide_entity(
                 "switch.tambur_points", automatic=True, dry_run=False
@@ -230,14 +245,14 @@ def test_release_owned_direct_off_freezes_current_editable_policy_duration() -> 
         store = MemoryStore()
         coordinator = ManualLightOffProtectionCoordinator(store, now=lambda: now)
         await coordinator.async_load()
-        duration = 42
+        duration = 900
         coordinator.set_release_owned_block_seconds_provider(lambda: duration)
         sensors = {
             "binary_sensor.tambur_presence": SimpleNamespace(
-                state="on", last_updated=now, attributes={}
+                state="off", last_updated=now, attributes={}
             ),
             "binary_sensor.tambur_motion": SimpleNamespace(
-                state="unknown", last_updated=now, attributes={}
+                state="off", last_updated=now, attributes={}
             ),
         }
 
@@ -247,14 +262,21 @@ def test_release_owned_direct_off_freezes_current_editable_policy_duration() -> 
             presence_sensor_entity_ids=tuple(sensors),
             sensor_states=sensors,
         )
-        duration = 300
-        now += timedelta(seconds=41)
+        duration = 600
+        now += timedelta(seconds=899)
         assert not (
             await coordinator.async_decide_entity(
                 "light.tambur_chandelier", automatic=True, dry_run=False
             )
         ).allowed
         now += timedelta(seconds=1)
+        for sensor_id, previous in tuple(sensors.items()):
+            current = SimpleNamespace(state="off", last_updated=now, attributes={})
+            await coordinator.async_note_state_transition(
+                sensor_id, previous, current, None
+            )
+            sensors[sensor_id] = current
+        now += timedelta(seconds=30)
         assert (
             await coordinator.async_decide_entity(
                 "light.tambur_chandelier", automatic=True, dry_run=False
@@ -265,10 +287,10 @@ def test_release_owned_direct_off_freezes_current_editable_policy_duration() -> 
 
 
 @pytest.mark.parametrize("bad_state", ["on", "unknown", "unavailable"])
-def test_release_owned_direct_off_does_not_linger_on_sensor_state(
+def test_release_owned_direct_off_waits_for_fresh_absence_after_unsafe_sensor_state(
     bad_state: str,
 ) -> None:
-    """Presence evidence cannot extend the exact timer-only manual-off block."""
+    """Unsafe sensor evidence cannot release the timer-and-absence block."""
 
     async def exercise() -> None:
         now = datetime(2026, 9, 5, 12, tzinfo=timezone.utc)
@@ -288,7 +310,7 @@ def test_release_owned_direct_off_does_not_linger_on_sensor_state(
             presence_sensor_entity_ids=tuple(sensors),
             sensor_states=sensors,
         )
-        now += timedelta(seconds=120)
+        now += timedelta(seconds=600)
         unsafe = SimpleNamespace(
             state=bad_state,
             last_updated=(
@@ -299,11 +321,22 @@ def test_release_owned_direct_off_does_not_linger_on_sensor_state(
         await coordinator.async_note_state_transition(
             "binary_sensor.tambur_motion", sensors["binary_sensor.tambur_motion"], unsafe, None
         )
-        now += timedelta(seconds=200)
         decision = await coordinator.async_decide_entity(
             "light.tambur_chandelier", automatic=True, dry_run=False
         )
-        assert decision.allowed
+        assert not decision.allowed
+        for sensor_id, previous in tuple(sensors.items()):
+            current = SimpleNamespace(state="off", last_updated=now, attributes={})
+            await coordinator.async_note_state_transition(
+                sensor_id, previous, current, None
+            )
+            sensors[sensor_id] = current
+        now += timedelta(seconds=30)
+        assert (
+            await coordinator.async_decide_entity(
+                "light.tambur_chandelier", automatic=True, dry_run=False
+            )
+        ).allowed
 
     asyncio.run(exercise())
 
@@ -317,10 +350,10 @@ def test_release_owned_direct_off_does_not_linger_on_sensor_state(
         {"evidence_source": "restore"},
     ],
 )
-def test_release_owned_timer_ignores_untrusted_presence_evidence(
+def test_release_owned_timer_requires_trusted_presence_evidence(
     unsafe_attributes: dict[str, object],
 ) -> None:
-    """Untrusted sensor data cannot extend the timer-only direct-off block."""
+    """Untrusted sensor data cannot release the direct-off block."""
 
     async def exercise() -> None:
         now = datetime(2026, 9, 5, 12, tzinfo=timezone.utc)
@@ -340,7 +373,7 @@ def test_release_owned_timer_ignores_untrusted_presence_evidence(
             presence_sensor_entity_ids=tuple(sensors),
             sensor_states=sensors,
         )
-        now += timedelta(seconds=100)
+        now += timedelta(seconds=600)
         await coordinator.async_note_state_transition(
             "binary_sensor.tambur_motion",
             sensors["binary_sensor.tambur_motion"],
@@ -349,18 +382,28 @@ def test_release_owned_timer_ignores_untrusted_presence_evidence(
             ),
             None,
         )
-        now += timedelta(seconds=200)
-
         decision = await coordinator.async_decide_entity(
             "light.tambur_chandelier", automatic=True, dry_run=False
         )
-        assert decision.allowed
+        assert not decision.allowed
+        for sensor_id, previous in tuple(sensors.items()):
+            current = SimpleNamespace(state="off", last_changed=now, attributes={})
+            await coordinator.async_note_state_transition(
+                sensor_id, previous, current, None
+            )
+            sensors[sensor_id] = current
+        now += timedelta(seconds=30)
+        assert (
+            await coordinator.async_decide_entity(
+                "light.tambur_chandelier", automatic=True, dry_run=False
+            )
+        ).allowed
 
     asyncio.run(exercise())
 
 
 def test_release_owned_direct_off_survives_restart_and_same_receipt_is_idempotent() -> None:
-    """A restart or retry must not erase or extend the persisted block."""
+    """A restart or identical retry must not erase or extend the persisted block."""
 
     async def exercise() -> None:
         now = datetime(2026, 9, 5, 12, tzinfo=timezone.utc)
@@ -391,9 +434,13 @@ def test_release_owned_direct_off_survives_restart_and_same_receipt_is_idempoten
         assert duplicate == receipt
         assert store.payload["protections"][0]["startedAt"] == started_at
 
-        now += timedelta(seconds=299)
+        now += timedelta(seconds=599)
         restarted = ManualLightOffProtectionCoordinator(store, now=lambda: now)
         await restarted.async_load()
+        sensors = {
+            sensor_id: SimpleNamespace(state="off", last_updated=now, attributes={})
+            for sensor_id in sensors
+        }
         await restarted.async_restore_release_owned_sensor_evidence(sensors)
         assert not (
             await restarted.async_decide_entity(
@@ -401,7 +448,12 @@ def test_release_owned_direct_off_survives_restart_and_same_receipt_is_idempoten
             )
         ).allowed
         now += timedelta(seconds=1)
-        await restarted.async_restore_release_owned_sensor_evidence(sensors)
+        assert not (
+            await restarted.async_decide_entity(
+                "switch.tambur_points", automatic=True, dry_run=False
+            )
+        ).allowed
+        now += timedelta(seconds=29)
         assert (
             await restarted.async_decide_entity(
                 "switch.tambur_points", automatic=True, dry_run=False
@@ -411,7 +463,7 @@ def test_release_owned_direct_off_survives_restart_and_same_receipt_is_idempoten
     asyncio.run(exercise())
 
 
-def test_repeated_direct_off_with_new_receipt_does_not_extend_block() -> None:
+def test_repeated_direct_off_with_new_receipt_extends_block() -> None:
     async def exercise() -> None:
         now = datetime(2026, 9, 5, 12, tzinfo=timezone.utc)
         coordinator = ManualLightOffProtectionCoordinator(MemoryStore(), now=lambda: now)
@@ -428,7 +480,20 @@ def test_repeated_direct_off_with_new_receipt_does_not_extend_block() -> None:
         await coordinator.async_arm_release_owned_direct_off(request_id="switch.first", **arguments)
         now += timedelta(seconds=120)
         await coordinator.async_arm_release_owned_direct_off(request_id="switch.second", **arguments)
-        now += timedelta(seconds=180)
+        now += timedelta(seconds=480)
+        assert not (
+            await coordinator.async_decide_entity(
+                "light.tambur_chandelier", automatic=True, dry_run=False
+            )
+        ).allowed
+        now += timedelta(seconds=120)
+        for sensor_id, previous in tuple(sensors.items()):
+            current = SimpleNamespace(state="off", last_updated=now, attributes={})
+            await coordinator.async_note_state_transition(
+                sensor_id, previous, current, None
+            )
+            sensors[sensor_id] = current
+        now += timedelta(seconds=30)
         assert (
             await coordinator.async_decide_entity(
                 "light.tambur_chandelier", automatic=True, dry_run=False

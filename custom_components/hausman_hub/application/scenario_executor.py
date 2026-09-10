@@ -2692,6 +2692,14 @@ class ScenarioExecutor:
             return False
         device = self._catalog.device(action.target_id or "")
         allowed = device.action(action.action_id or "") if device is not None else None
+        if action.action_id == "set_brightness_percent":
+            try:
+                if _normalize_light_action_value(
+                    action.action_id, "brightness", action.value
+                ) == 0:
+                    return False
+            except ValueError:
+                pass
         return allowed is not None and allowed.service == "turn_on"
 
     def _effective_trace_state(
@@ -2906,13 +2914,28 @@ class ScenarioExecutor:
                 contextual_dangerous=is_contextually_dangerous,
             ) * 1000
         )
+        zero_brightness_off = False
+        if action.action_id == "set_brightness_percent":
+            try:
+                zero_brightness_off = (
+                    _normalize_light_action_value(
+                        action.action_id, "brightness", action.value
+                    )
+                    == 0
+                )
+            except ValueError:
+                pass
         dispatch_service = (
-            "turn_on"
+            "turn_off"
+            if zero_brightness_off
+            else "turn_on"
             if is_contextually_dangerous and action.action_id == "toggle"
             else allowed.service
         )
         confirmation_action_id = (
-            "turn_on"
+            "turn_off"
+            if zero_brightness_off
+            else "turn_on"
             if is_contextually_dangerous and action.action_id == "toggle"
             else action.action_id
         )
@@ -2936,7 +2959,7 @@ class ScenarioExecutor:
                 }
         if (
             automatic
-            and action.action_id == "turn_off"
+            and confirmation_action_id == "turn_off"
             and not automatic_light_off_authorized
             and self._light_priority.is_lighting_action(
                 action, self._catalog
@@ -2986,12 +3009,12 @@ class ScenarioExecutor:
                 device.entity_id,
                 powered_sources=powered_sources or {},
             )
-            if action.action_id == "turn_off"
+            if confirmation_action_id == "turn_off"
             else None
         )
         if dependency_error is not None:
             if (
-                action.action_id == "turn_off"
+                confirmation_action_id == "turn_off"
                 and dependency_error == "power_source_off"
             ):
                 receipt = {
@@ -3035,6 +3058,7 @@ class ScenarioExecutor:
             }
         service_data: dict[str, Any] = {"entity_id": device.entity_id}
         confirmation_value = action.value
+        range_validation_value = action.value
         adaptive_minimum: float | None = None
         if allowed.domain == "number" and action.value is None:
             return {
@@ -3071,8 +3095,12 @@ class ScenarioExecutor:
                 error = _number_range_error(device, normalized)
                 if error is not None:
                     return {**base, "status": "failed", "error": error}
-            service_data[param] = normalized
-            confirmation_value = normalized
+            range_validation_value = normalized
+            if zero_brightness_off:
+                confirmation_value = None
+            else:
+                service_data[param] = normalized
+                confirmation_value = normalized
 
         # A stale automatic light may be reasserted only after the durable
         # authority claim succeeds. Keep this check before power preparation so
@@ -3200,7 +3228,9 @@ class ScenarioExecutor:
                         "reason": decision.reason,
                         **({"planned": True} if dry_run else {}),
                     }
-        range_error = _range_error_for_action(device, current, action.action_id, confirmation_value)
+        range_error = _range_error_for_action(
+            device, current, action.action_id, range_validation_value
+        )
         if range_error is not None:
             return {**base, "status": "failed", "error": range_error}
         stale_automatic_turn_on = bool(
@@ -3323,6 +3353,7 @@ class ScenarioExecutor:
                     device.entity_id,
                     powered_sources=powered_sources or {},
                     dry_run=dry_run,
+                    reassert_auto_source=confirmation_action_id != "turn_off",
                     request_id=command_request_id
                     or str(base.get("correlation_id") or action.id),
                     dispatch_marker=(
@@ -3568,7 +3599,7 @@ class ScenarioExecutor:
                     )
                     manual_token = await begin(
                         action.target_id,
-                        action.action_id,
+                        confirmation_action_id,
                         self._catalog,
                         self._hass,
                     )
@@ -3921,6 +3952,7 @@ class ScenarioExecutor:
         *,
         powered_sources: Mapping[str, float],
         dry_run: bool,
+        reassert_auto_source: bool = True,
         request_id: str,
         dispatch_marker: Callable[[], None] | None = None,
         before_dispatch: Callable[[], Awaitable[None]] | None = None,
@@ -3965,6 +3997,7 @@ class ScenarioExecutor:
             source_entity_id,
             powered_sources=powered_sources,
             dry_run=dry_run,
+            reassert_auto_source=reassert_auto_source,
             request_id=request_id,
             dispatch_marker=dispatch_marker,
             before_dispatch=before_dispatch,
@@ -3983,7 +4016,13 @@ class ScenarioExecutor:
 
         loop = asyncio.get_running_loop()
         activated_at = powered_sources.get(source_entity_id)
-        if activated_at is not None:
+        if (
+            activated_at is not None
+            and (
+                dependency.policy != AUTO_TURN_ON_POLICY
+                or not reassert_auto_source
+            )
+        ):
             remaining = max(
                 0.0,
                 dependency.warmup_seconds - (loop.time() - activated_at),
@@ -4039,6 +4078,10 @@ class ScenarioExecutor:
             state == "on"
             and _power_state_is_fresh(source_state_object)
             and not _state_is_restored_or_cached(source_state_object)
+            and (
+                dependency.policy != AUTO_TURN_ON_POLICY
+                or not reassert_auto_source
+            )
         ):
             precondition["waitedSeconds"] = 0
             precondition["sourceEvidenceRevision"] = _state_revision(
@@ -4065,10 +4108,13 @@ class ScenarioExecutor:
                 not _power_state_is_fresh(source_state_object)
                 or _state_is_restored_or_cached(source_state_object)
             )
-            and dependency.policy != AUTO_TURN_ON_POLICY
+            and (
+                dependency.policy != AUTO_TURN_ON_POLICY
+                or not reassert_auto_source
+            )
         ):
             return "power_source_unavailable", precondition, upstream_sources
-        if dependency.policy != AUTO_TURN_ON_POLICY:
+        if dependency.policy != AUTO_TURN_ON_POLICY or not reassert_auto_source:
             return "power_source_off", precondition, upstream_sources
         if dry_run:
             precondition["sourceTurnedOn"] = True
@@ -4094,15 +4140,7 @@ class ScenarioExecutor:
             )
             source_turned_on = False
             source_command_sent_at: int | None = None
-            source_is_fresh = _power_state_is_fresh(source_state_object)
-            source_is_restored = _state_is_restored_or_cached(
-                source_state_object
-            )
-            if (
-                state != "on"
-                or not source_is_fresh
-                or source_is_restored
-            ):
+            if dependency.policy == AUTO_TURN_ON_POLICY:
                 if state in {None, "unknown", "unavailable"}:
                     return "power_source_unavailable", precondition, upstream_sources
                 if self._command_guard is None:
@@ -4134,8 +4172,12 @@ class ScenarioExecutor:
                     else None
                 )
                 try:
+                    if cancellation_event is not None and cancellation_event.is_set():
+                        return "dispatch_cancelled", precondition, upstream_sources
                     if before_dispatch is not None:
                         await before_dispatch()
+                    if cancellation_event is not None and cancellation_event.is_set():
+                        return "dispatch_cancelled", precondition, upstream_sources
                     if dispatch_marker is not None:
                         dispatch_marker()
                     await self._call_service(
