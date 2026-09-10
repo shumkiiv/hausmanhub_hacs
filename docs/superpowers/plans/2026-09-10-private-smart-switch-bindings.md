@@ -19,6 +19,9 @@
 - Preserve dedup receipt format, exact trigger validation, manual-action meanings and activation latch.
 - Android, public API, contracts, Node-RED schemas, other rooms and global migration are out of scope.
 - No live Home Assistant, Node-RED, publish, install or restart operation belongs to this plan.
+- After each narrow task run only tests that cover its changed code and direct
+  dependencies. A full suite always requires separate explicit owner approval,
+  including release readiness, installation and final acceptance.
 
 ---
 
@@ -268,10 +271,11 @@ private values into reports.
 
 - [ ] **Step 2: Run full verification**
 
-Run: `PYTHONDONTWRITEBYTECODE=1 /tmp/hausman-ci-6Ksvvz/venv/bin/python -m pytest -q`
+Run the focused model, adapter, startup and privacy tests selected by the
+files changed in Tasks 1-3, plus `git diff --check`.
 
-Expected: PASS. Then run `python3 tools/check_local_release.py`, required
-manifest/browser checks and `git diff --check`.
+Expected: PASS. Do not run `tools/check_local_release.py`, browser checks or
+the full suite without a separate explicit owner approval.
 
 - [ ] **Step 3: Commit task 4**
 
