@@ -4318,7 +4318,10 @@ class ScenarioService:
                 )
             direct_user_intent = "off" if cabinet_state == "on" else "on"
         elif binding == "tambur-light-group":
-            if self._trusted_typed_target_state("entity_b47991988cc6b9f3") != "on":
+            # A trusted power state is required. When it is off, the light's
+            # configured power dependency turns it on first, so the pass-through
+            # may enable the whole group instead of being blocked.
+            if self._trusted_typed_target_state("entity_b47991988cc6b9f3") is None:
                 return await self._async_record_typed_intent_skip(
                     scenario_id,
                     correlation_id,
