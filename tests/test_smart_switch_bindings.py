@@ -112,11 +112,78 @@ async def test_startup_constructs_tambur_triggers_from_only_local_synthetic_ids(
     )
 
     assert resolved is not None
-    assert len(resolved) == 7
-    assert {item.config["device_id"] for item in resolved} == {
-        "synthetic-passthrough-device",
-        "synthetic-mirror-device",
-    }
+    assert tuple((item.binding, dict(item.config)) for item in resolved) == (
+        (
+            "tambur-light-group",
+            {
+                "platform": "device",
+                "domain": "mqtt",
+                "type": "action",
+                "device_id": "synthetic-passthrough-device",
+                "subtype": "on_down",
+            },
+        ),
+        (
+            "tambur-light-group",
+            {
+                "platform": "device",
+                "domain": "mqtt",
+                "type": "action",
+                "device_id": "synthetic-passthrough-device",
+                "subtype": "toggle_down",
+            },
+        ),
+        (
+            "tambur-light-group",
+            {
+                "platform": "device",
+                "domain": "mqtt",
+                "type": "action",
+                "device_id": "synthetic-passthrough-device",
+                "subtype": "off_up",
+            },
+        ),
+        (
+            "tambur-mirror-left",
+            {
+                "platform": "device",
+                "domain": "mqtt",
+                "type": "action",
+                "device_id": "synthetic-mirror-device",
+                "subtype": "1_single",
+            },
+        ),
+        (
+            "tambur-mirror-left",
+            {
+                "platform": "device",
+                "domain": "mqtt",
+                "type": "action",
+                "device_id": "synthetic-mirror-device",
+                "subtype": "1_double",
+            },
+        ),
+        (
+            "tambur-master-off",
+            {
+                "platform": "device",
+                "domain": "mqtt",
+                "type": "action",
+                "device_id": "synthetic-mirror-device",
+                "subtype": "2_single",
+            },
+        ),
+        (
+            "tambur-master-off",
+            {
+                "platform": "device",
+                "domain": "mqtt",
+                "type": "action",
+                "device_id": "synthetic-mirror-device",
+                "subtype": "2_double",
+            },
+        ),
+    )
 
 
 @pytest.mark.parametrize(
