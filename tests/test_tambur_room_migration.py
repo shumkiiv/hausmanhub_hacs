@@ -24,6 +24,9 @@ from custom_components.hausman_hub.application.tambur_decision_runtime import (
 from custom_components.hausman_hub.application.native_automation_migration import (
     HomeAssistantNativeAutomationAdapter,
 )
+from custom_components.hausman_hub.application.smart_switch_bindings import (
+    bindings_from_payload,
+)
 from custom_components.hausman_hub.application.scenario_node_red import (
     NodeRedBackendError,
 )
@@ -69,6 +72,22 @@ class _Store:
     async def async_save(self, value: object) -> None:
         self.saves += 1
         self.value = copy.deepcopy(value)
+
+
+def _fixture_smart_switch_bindings():
+    bindings = bindings_from_payload(
+        {
+            "version": 1,
+            "revision": 1,
+            "devices": {
+                "shower": "synthetic-shower-device",
+                "passthrough": "synthetic-passthrough-device",
+                "marmitek": "synthetic-tambur-mirror-device",
+            },
+        }
+    )
+    assert bindings is not None
+    return bindings
 
 
 def test_missing_tambur_bindings_do_not_resolve_startup_triggers() -> None:
@@ -644,7 +663,10 @@ def test_real_scoped_service_and_native_adapter_migrate_only_tambur() -> None:
         hass, services = _native_hass(context_prefix="tambur", updated_hour=12)
         native_store = _MemoryNativeStore()
         native = TamburNativeAutomationMigration(
-            HomeAssistantNativeAutomationAdapter(hass), native_store
+            HomeAssistantNativeAutomationAdapter(
+                hass, _fixture_smart_switch_bindings()
+            ),
+            native_store,
         )
         room_store = _Store()
         migration = TamburRoomMigration(
@@ -784,7 +806,10 @@ def test_final_verification_failure_rolls_back_receipts_and_can_retry() -> None:
         hass, services = _native_hass(context_prefix="retry", updated_hour=12)
         native_store = _MemoryNativeStore()
         native = TamburNativeAutomationMigration(
-            HomeAssistantNativeAutomationAdapter(hass), native_store
+            HomeAssistantNativeAutomationAdapter(
+                hass, _fixture_smart_switch_bindings()
+            ),
+            native_store,
         )
         room_store = _Store()
         migration = TamburRoomMigration(

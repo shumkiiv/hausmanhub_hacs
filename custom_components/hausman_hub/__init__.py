@@ -44,7 +44,7 @@ async def _async_resolve_tambur_smart_switch_triggers(
     entry_id: str,
     *,
     store: object | None = None,
-) -> object | None:
+) -> tuple[object, object] | None:
     """Return a complete local Tambur scope or fail closed without logging IDs."""
 
     from .application.smart_switch_bindings import (
@@ -71,7 +71,7 @@ async def _async_resolve_tambur_smart_switch_triggers(
         or {item.binding for item in resolved} != _TAMBUR_SMART_SWITCH_BINDINGS
     ):
         return None
-    return resolved
+    return bindings, resolved
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -558,7 +558,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass, entry.entry_id
     )
     domain_data["smart_switch_bindings_store"] = smart_switch_bindings_store
-    resolved_tambur_triggers = await _async_resolve_tambur_smart_switch_triggers(
+    resolved_tambur_context = await _async_resolve_tambur_smart_switch_triggers(
         hass,
         entry.entry_id,
         store=smart_switch_bindings_store,
@@ -568,7 +568,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "reason": "tambur_room_only",
     }
     tambur_room_migration: TamburRoomMigration | None = None
-    if resolved_tambur_triggers is None:
+    resolved_tambur_triggers: object | None = None
+    if resolved_tambur_context is None:
         domain_data["tambur_room_migration"] = {
             "state": "blocked",
             "stage": "bindings_unavailable",
@@ -578,6 +579,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "reason": "bindings_unavailable",
         }
     else:
+        smart_switch_bindings, resolved_tambur_triggers = resolved_tambur_context
         migration_lock = asyncio.Lock()
         global_migration_store = HomeAssistantManagedSwitchMigrationStore(
             hass, entry.entry_id
@@ -587,7 +589,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             HomeAssistantTamburRoomMigrationStore(hass, entry.entry_id),
             global_receipt_store=global_migration_store,
             native_automation_migration=build_home_assistant_tambur_native_migration(
-                hass, entry.entry_id
+                hass, entry.entry_id, smart_switch_bindings
             ),
             migration_lock=migration_lock,
         )

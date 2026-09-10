@@ -24,6 +24,7 @@ from .scenario_node_red_decision import (
     TAMBUR_DECISION_TOPOLOGY,
     prepare_tambur_decision_bundle,
 )
+from .smart_switch_bindings import SmartSwitchBindings
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -889,9 +890,11 @@ class TamburRoomStartupCoordinator:
 
 
 def build_home_assistant_tambur_native_migration(
-    hass: HomeAssistant, entry_id: str
+    hass: HomeAssistant,
+    entry_id: str,
+    smart_switch_bindings: SmartSwitchBindings,
 ) -> TamburNativeAutomationMigration:
     return TamburNativeAutomationMigration(
-        HomeAssistantNativeAutomationAdapter(hass),
+        HomeAssistantNativeAutomationAdapter(hass, smart_switch_bindings),
         HomeAssistantTamburNativeMigrationStore(hass, entry_id),
     )

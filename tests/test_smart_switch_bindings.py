@@ -120,11 +120,13 @@ async def test_startup_constructs_tambur_triggers_from_only_local_synthetic_ids(
         async def async_load(self) -> object:
             return payload
 
-    resolved = await _async_resolve_tambur_smart_switch_triggers(
+    context = await _async_resolve_tambur_smart_switch_triggers(
         object(), "entry-a", store=Store()
     )
 
-    assert resolved is not None
+    assert context is not None
+    bindings, resolved = context
+    assert bindings.devices["marmitek"] == "synthetic-mirror-device"
     assert tuple((item.binding, dict(item.config)) for item in resolved) == (
         (
             "tambur-light-group",

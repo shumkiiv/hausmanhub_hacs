@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 from datetime import UTC, datetime
 import json
 from pathlib import Path
@@ -16,6 +17,9 @@ from custom_components.hausman_hub.application.native_automation_migration impor
     NativeAutomationMigration,
     NativeAutomationMigrationConflict,
     valid_native_automation_migration_payload,
+)
+from custom_components.hausman_hub.application.smart_switch_bindings import (
+    bindings_from_payload,
 )
 
 
@@ -192,8 +196,16 @@ def _fake_hass_from_native_fixture(
     state_overrides: dict[str, str] | None = None,
     context_prefix: str = "initial",
     updated_hour: int = 6,
+    mirror_device_id: str | None = None,
 ) -> tuple[object, _StrictServices]:
     fixture = _native_fixture_by_entity()
+    configs = {key: copy.deepcopy(item["definition"]) for key, item in fixture.items()}
+    mirror_entity = NATIVE_AUTOMATION_PRESERVE_ENTITY_IDS[
+        "hausman_tambur_mirror_switch_all_keys"
+    ]
+    if mirror_device_id is not None:
+        for trigger in configs[mirror_entity]["triggers"]:
+            trigger["device_id"] = mirror_device_id
     states = {
         entity_id: SimpleNamespace(
             state=(
@@ -210,11 +222,114 @@ def _fake_hass_from_native_fixture(
         for index, (entity_id, item) in enumerate(fixture.items())
     }
     services = _StrictServices(states)
-    data = {"automation": _AutomationComponent({key: item["definition"] for key, item in fixture.items()})}
+    data = {"automation": _AutomationComponent(configs)}
     hass = SimpleNamespace(
         states=SimpleNamespace(get=states.get), services=services, data=data
     )
     return hass, services
+
+
+def _synthetic_bindings(mirror_device_id: str):
+    bindings = bindings_from_payload(
+        {
+            "version": 1,
+            "revision": 1,
+            "devices": {
+                "shower": "synthetic-shower-device",
+                "passthrough": "synthetic-passthrough-device",
+                "marmitek": mirror_device_id,
+            },
+        }
+    )
+    assert bindings is not None
+    return bindings
+
+
+def _fixture_bindings():
+    return _synthetic_bindings("synthetic-tambur-mirror-device")
+
+
+@pytest.mark.parametrize(
+    "mirror_device_id",
+    ("synthetic-local-mirror-a", "synthetic-local-mirror-b"),
+)
+def test_binding_aware_snapshot_hashes_exact_synthetic_mirror_definition(
+    mirror_device_id: str,
+) -> None:
+    """Replacing both verified local trigger IDs reproduces the public hash."""
+
+    async def exercise() -> None:
+        hass, services = _fake_hass_from_native_fixture(
+            mirror_device_id=mirror_device_id
+        )
+        adapter = HomeAssistantNativeAutomationAdapter(
+            hass, _synthetic_bindings(mirror_device_id)
+        )
+
+        snapshot = await adapter.async_snapshot(
+            tuple(EXPECTED_NATIVE_AUTOMATIONS)
+        )
+
+        mirror_entity = NATIVE_AUTOMATION_PRESERVE_ENTITY_IDS[
+            "hausman_tambur_mirror_switch_all_keys"
+        ]
+        assert (
+            snapshot[mirror_entity]["definitionHash"]
+            == EXPECTED_NATIVE_AUTOMATIONS[mirror_entity]["definitionHash"]
+        )
+        assert services.calls == []
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    "drift",
+    (
+        "missing_bindings",
+        "first_trigger_mismatch",
+        "second_trigger_mismatch",
+        "extra_trigger",
+        "wrong_subtype",
+        "conflicting_aliases",
+    ),
+)
+def test_binding_aware_snapshot_rejects_mirror_drift_before_migration_action(
+    drift: str,
+) -> None:
+    """Any unverified mirror shape prevents all native migration commands."""
+
+    async def exercise() -> None:
+        mirror_device_id = "synthetic-local-mirror"
+        hass, services = _fake_hass_from_native_fixture(
+            mirror_device_id=mirror_device_id
+        )
+        mirror_entity = NATIVE_AUTOMATION_PRESERVE_ENTITY_IDS[
+            "hausman_tambur_mirror_switch_all_keys"
+        ]
+        definition = hass.data["automation"].configs[mirror_entity]
+        bindings = _synthetic_bindings(mirror_device_id)
+        if drift == "missing_bindings":
+            bindings = None
+        elif drift == "first_trigger_mismatch":
+            definition["triggers"][0]["device_id"] = "synthetic-other-device"
+        elif drift == "second_trigger_mismatch":
+            definition["triggers"][1]["device_id"] = "synthetic-other-device"
+        elif drift == "extra_trigger":
+            definition["triggers"].append(copy.deepcopy(definition["triggers"][0]))
+        elif drift == "wrong_subtype":
+            definition["triggers"][1]["subtype"] = "2_single"
+        elif drift == "conflicting_aliases":
+            definition["trigger"] = copy.deepcopy(definition["triggers"])
+        else:
+            raise AssertionError(f"unknown drift {drift}")
+
+        adapter = HomeAssistantNativeAutomationAdapter(hass, bindings)
+        with pytest.raises(NativeAutomationMigrationConflict, match="binding|definition"):
+            await NativeAutomationMigration(adapter, Store()).async_apply()
+
+        assert services.calls == []
+
+    asyncio.run(exercise())
 
 
 def test_completed_handover_accepts_fresh_ha_state_objects_after_restart() -> None:
@@ -222,7 +337,7 @@ def test_completed_handover_accepts_fresh_ha_state_objects_after_restart() -> No
         hass, services = _fake_hass_from_native_fixture()
         store = Store()
         migration = NativeAutomationMigration(
-            HomeAssistantNativeAutomationAdapter(hass), store
+            HomeAssistantNativeAutomationAdapter(hass, _fixture_bindings()), store
         )
         await migration.async_apply()
         stable_states = {
@@ -243,7 +358,10 @@ def test_completed_handover_accepts_fresh_ha_state_objects_after_restart() -> No
             for entity_id in stable_states
         )
         restarted = NativeAutomationMigration(
-            HomeAssistantNativeAutomationAdapter(restarted_hass), store
+            HomeAssistantNativeAutomationAdapter(
+                restarted_hass, _fixture_bindings()
+            ),
+            store,
         )
 
         assert await restarted.async_verify_completed() is True
@@ -260,7 +378,7 @@ def test_completed_handover_accepts_fresh_ha_state_objects_after_restart() -> No
 def test_ha_adapter_uses_exact_definition_identity_and_service_schemas() -> None:
     async def exercise() -> None:
         hass, services = _fake_hass_from_native_fixture()
-        adapter = HomeAssistantNativeAutomationAdapter(hass)
+        adapter = HomeAssistantNativeAutomationAdapter(hass, _fixture_bindings())
         entities = tuple(
             (*NATIVE_AUTOMATION_ENTITY_IDS.values(), *NATIVE_AUTOMATION_PRESERVE_ENTITY_IDS.values())
         )
@@ -295,7 +413,7 @@ def test_ha_adapter_rejects_definition_drift_before_any_service_call() -> None:
         hass, services = _fake_hass_from_native_fixture()
         first = next(iter(NATIVE_AUTOMATION_ENTITY_IDS.values()))
         hass.data["automation"].configs[first]["alias"] = "Чужая автоматизация"
-        adapter = HomeAssistantNativeAutomationAdapter(hass)
+        adapter = HomeAssistantNativeAutomationAdapter(hass, _fixture_bindings())
 
         with pytest.raises(NativeAutomationMigrationConflict, match="definition"):
             await adapter.async_snapshot(tuple(
@@ -346,7 +464,7 @@ def test_completed_handover_rejects_restart_semantic_drift(drift: str) -> None:
         hass, services = _fake_hass_from_native_fixture()
         store = Store()
         await NativeAutomationMigration(
-            HomeAssistantNativeAutomationAdapter(hass), store
+            HomeAssistantNativeAutomationAdapter(hass, _fixture_bindings()), store
         ).async_apply()
         calls_before_drift = len(services.calls)
         saves_before_drift = len(store.saved)
@@ -358,7 +476,7 @@ def test_completed_handover_rejects_restart_semantic_drift(drift: str) -> None:
             state = services.states[target]
             state.state = "off" if state.state == "on" else "on"
             assert not await NativeAutomationMigration(
-                HomeAssistantNativeAutomationAdapter(hass), store
+                HomeAssistantNativeAutomationAdapter(hass, _fixture_bindings()), store
             ).async_verify_completed()
         else:
             if drift == "automation_id":
@@ -375,12 +493,15 @@ def test_completed_handover_rejects_restart_semantic_drift(drift: str) -> None:
                 raise AssertionError(drift)
             with pytest.raises(NativeAutomationMigrationConflict):
                 await NativeAutomationMigration(
-                    HomeAssistantNativeAutomationAdapter(hass), store
+                    HomeAssistantNativeAutomationAdapter(
+                        hass, _fixture_bindings()
+                    ),
+                    store,
                 ).async_verify_completed()
 
         with pytest.raises(NativeAutomationMigrationConflict):
             await NativeAutomationMigration(
-                HomeAssistantNativeAutomationAdapter(hass), store
+                HomeAssistantNativeAutomationAdapter(hass, _fixture_bindings()), store
             ).async_apply()
         assert len(services.calls) == calls_before_drift
         assert len(store.saved) == saves_before_drift

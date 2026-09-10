@@ -26,6 +26,25 @@ from custom_components.hausman_hub.application.native_automation_migration impor
     NATIVE_AUTOMATION_ENTITY_IDS,
     NativeAutomationMigration,
 )
+from custom_components.hausman_hub.application.smart_switch_bindings import (
+    bindings_from_payload,
+)
+
+
+def _fixture_smart_switch_bindings():
+    bindings = bindings_from_payload(
+        {
+            "version": 1,
+            "revision": 1,
+            "devices": {
+                "shower": "synthetic-shower-device",
+                "passthrough": "synthetic-passthrough-device",
+                "marmitek": "synthetic-tambur-mirror-device",
+            },
+        }
+    )
+    assert bindings is not None
+    return bindings
 
 
 def test_full_manifest_uses_exact_verified_binding_ids() -> None:
@@ -601,7 +620,9 @@ async def test_actual_startup_and_restart_apply_the_exact_registry_disposition()
         context_prefix="initial", updated_hour=6
     )
     native_migration = NativeAutomationMigration(
-        HomeAssistantNativeAutomationAdapter(native_hass),
+        HomeAssistantNativeAutomationAdapter(
+            native_hass, _fixture_smart_switch_bindings()
+        ),
         native_receipt_store,
     )
     activations = 0
@@ -714,7 +735,9 @@ async def test_actual_startup_and_restart_apply_the_exact_registry_disposition()
             restarted_service,
             receipt_store,
             native_automation_migration=NativeAutomationMigration(
-                HomeAssistantNativeAutomationAdapter(restarted_native_hass),
+                HomeAssistantNativeAutomationAdapter(
+                    restarted_native_hass, _fixture_smart_switch_bindings()
+                ),
                 native_receipt_store,
             ),
         ),

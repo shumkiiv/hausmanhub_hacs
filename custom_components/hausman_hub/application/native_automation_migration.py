@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+import copy
 import hashlib
 import json
 from types import SimpleNamespace
 
 from .scenario_consolidation_inventory import NATIVE_AUTOMATIONS_TO_DISABLE
+from .smart_switch_bindings import SmartSwitchBindings
 
 
 NATIVE_AUTOMATION_ENTITY_IDS = {
@@ -99,6 +101,14 @@ EXPECTED_NATIVE_AUTOMATIONS = {
 _DISABLE_ENTITIES = tuple(NATIVE_AUTOMATION_ENTITY_IDS.values())
 _PRESERVE_ENTITIES = tuple(NATIVE_AUTOMATION_PRESERVE_ENTITY_IDS.values())
 _ALL_ENTITIES = _DISABLE_ENTITIES + _PRESERVE_ENTITIES
+_MIRROR_AUTOMATION_ENTITY_ID = NATIVE_AUTOMATION_PRESERVE_ENTITY_IDS[
+    "hausman_tambur_mirror_switch_all_keys"
+]
+_MIRROR_FIXTURE_DEVICE_ID = "synthetic-tambur-mirror-device"
+_MIRROR_TRIGGER_KEYS = frozenset(
+    {"platform", "domain", "device_id", "type", "subtype"}
+)
+_MIRROR_TRIGGER_SUBTYPES = ("1_single", "1_double")
 _EVIDENCE_KEYS = {
     "state",
     "automationId",
@@ -619,10 +629,66 @@ def _normalize_definition(value: object, *, top_level: bool = False) -> object:
     )
 
 
-def _definition_hash(value: object) -> str:
+def _canonical_native_definition(
+    entity_id: str,
+    value: object,
+    smart_switch_bindings: SmartSwitchBindings | None,
+) -> object:
+    normalized = _normalize_definition(value, top_level=True)
+    if entity_id != _MIRROR_AUTOMATION_ENTITY_ID:
+        return normalized
+    if not isinstance(smart_switch_bindings, SmartSwitchBindings):
+        raise NativeAutomationMigrationConflict(
+            "native automation mirror binding is unavailable"
+        )
+    devices = smart_switch_bindings.devices
+    device_id = devices.get("marmitek")
+    if (
+        set(devices) != {"shower", "passthrough", "marmitek"}
+        or not isinstance(device_id, str)
+        or not device_id
+        or not isinstance(normalized, Mapping)
+    ):
+        raise NativeAutomationMigrationConflict(
+            "native automation mirror binding is invalid"
+        )
+    triggers = normalized.get("trigger")
+    if not isinstance(triggers, list) or len(triggers) != len(_MIRROR_TRIGGER_SUBTYPES):
+        raise NativeAutomationMigrationConflict(
+            "native automation mirror definition is invalid"
+        )
+    for trigger, subtype in zip(triggers, _MIRROR_TRIGGER_SUBTYPES, strict=True):
+        if (
+            not isinstance(trigger, Mapping)
+            or set(trigger) != _MIRROR_TRIGGER_KEYS
+            or trigger.get("platform") != "device"
+            or trigger.get("domain") != "mqtt"
+            or trigger.get("type") != "action"
+            or trigger.get("subtype") != subtype
+            or trigger.get("device_id") != device_id
+        ):
+            raise NativeAutomationMigrationConflict(
+                "native automation mirror definition is invalid"
+            )
+    copied = copy.deepcopy(normalized)
+    assert isinstance(copied, dict)
+    copied["trigger"] = [
+        {**dict(trigger), "device_id": _MIRROR_FIXTURE_DEVICE_ID}
+        for trigger in triggers
+    ]
+    return copied
+
+
+def _definition_hash(
+    entity_id: str,
+    value: object,
+    smart_switch_bindings: SmartSwitchBindings | None,
+) -> str:
     try:
         payload = json.dumps(
-            _normalize_definition(value, top_level=True),
+            _canonical_native_definition(
+                entity_id, value, smart_switch_bindings
+            ),
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=False,
@@ -638,8 +704,11 @@ def _definition_hash(value: object) -> str:
 class HomeAssistantNativeAutomationAdapter:
     """Narrow runtime-object boundary for native automation CAS."""
 
-    def __init__(self, hass: object) -> None:
+    def __init__(
+        self, hass: object, smart_switch_bindings: SmartSwitchBindings | None = None
+    ) -> None:
         self._hass = hass
+        self._smart_switch_bindings = smart_switch_bindings
 
     def _automation_component(self) -> object:
         data = getattr(self._hass, "data", None)
@@ -702,7 +771,9 @@ class HomeAssistantNativeAutomationAdapter:
             attribute_id = (
                 attributes.get("id") if isinstance(attributes, Mapping) else None
             )
-            definition_hash = _definition_hash(raw_config)
+            definition_hash = _definition_hash(
+                entity_id, raw_config, self._smart_switch_bindings
+            )
             if (
                 value not in {"on", "off"}
                 or automation_id != expected["automationId"]
