@@ -88,6 +88,37 @@ async def test_incomplete_tambur_bindings_do_not_resolve_startup_triggers() -> N
     )
 
 
+@pytest.mark.asyncio
+async def test_startup_constructs_tambur_triggers_from_only_local_synthetic_ids() -> None:
+    """The public startup boundary exposes only IDs supplied by local bindings."""
+
+    payload = {
+        "version": 1,
+        "revision": 1,
+        "devices": {
+            "passthrough": "synthetic-passthrough-device",
+            "marmitek": "synthetic-mirror-device",
+        },
+    }
+
+    class Store:
+        recovered_previous = False
+
+        async def async_load(self) -> object:
+            return payload
+
+    resolved = await _async_resolve_tambur_smart_switch_triggers(
+        object(), "entry-a", store=Store()
+    )
+
+    assert resolved is not None
+    assert len(resolved) == 7
+    assert {item.config["device_id"] for item in resolved} == {
+        "synthetic-passthrough-device",
+        "synthetic-mirror-device",
+    }
+
+
 @pytest.mark.parametrize(
     "payload",
     [
