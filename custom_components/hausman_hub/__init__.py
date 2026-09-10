@@ -25,10 +25,50 @@ from .application.configuration import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+_TAMBUR_SMART_SWITCH_BINDINGS = frozenset(
+    {
+        "tambur-light-group",
+        "tambur-mirror-left",
+        "tambur-master-off",
+    }
+)
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
+
+
+async def _async_resolve_tambur_smart_switch_triggers(
+    hass: object,
+    entry_id: str,
+    *,
+    store: object | None = None,
+) -> object | None:
+    """Return a complete local Tambur scope or fail closed without logging IDs."""
+
+    from .application.smart_switch_bindings import (
+        HomeAssistantSmartSwitchBindingsStore,
+        resolve_trigger_bindings,
+        bindings_from_payload,
+    )
+
+    bindings_store = store or HomeAssistantSmartSwitchBindingsStore(hass, entry_id)
+    try:
+        payload = await bindings_store.async_load()
+        if getattr(bindings_store, "recovered_previous", False):
+            return None
+        bindings = bindings_from_payload(payload)
+        if bindings is None:
+            return None
+        resolved = resolve_trigger_bindings(bindings, _TAMBUR_SMART_SWITCH_BINDINGS)
+    except Exception:  # noqa: BLE001
+        return None
+    if (
+        len(resolved) != 7
+        or {item.binding for item in resolved} != _TAMBUR_SMART_SWITCH_BINDINGS
+    ):
+        return None
+    return resolved
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -509,24 +549,45 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         TamburRoomStartupCoordinator,
         build_home_assistant_tambur_native_migration,
     )
+    from .application.smart_switch_bindings import HomeAssistantSmartSwitchBindingsStore
 
-    migration_lock = asyncio.Lock()
-    global_migration_store = HomeAssistantManagedSwitchMigrationStore(
+    smart_switch_bindings_store = HomeAssistantSmartSwitchBindingsStore(
         hass, entry.entry_id
+    )
+    domain_data["smart_switch_bindings_store"] = smart_switch_bindings_store
+    resolved_tambur_triggers = await _async_resolve_tambur_smart_switch_triggers(
+        hass,
+        entry.entry_id,
+        store=smart_switch_bindings_store,
     )
     domain_data["managed_switch_migration"] = {
         "state": "deferred",
         "reason": "tambur_room_only",
     }
-    tambur_room_migration = TamburRoomMigration(
-        scenario_service,
-        HomeAssistantTamburRoomMigrationStore(hass, entry.entry_id),
-        global_receipt_store=global_migration_store,
-        native_automation_migration=build_home_assistant_tambur_native_migration(
+    tambur_room_migration: TamburRoomMigration | None = None
+    if resolved_tambur_triggers is None:
+        domain_data["tambur_room_migration"] = {
+            "state": "blocked",
+            "stage": "bindings_unavailable",
+        }
+        domain_data["smart_switch_runtime"] = {
+            "state": "unavailable",
+            "reason": "bindings_unavailable",
+        }
+    else:
+        migration_lock = asyncio.Lock()
+        global_migration_store = HomeAssistantManagedSwitchMigrationStore(
             hass, entry.entry_id
-        ),
-        migration_lock=migration_lock,
-    )
+        )
+        tambur_room_migration = TamburRoomMigration(
+            scenario_service,
+            HomeAssistantTamburRoomMigrationStore(hass, entry.entry_id),
+            global_receipt_store=global_migration_store,
+            native_automation_migration=build_home_assistant_tambur_native_migration(
+                hass, entry.entry_id
+            ),
+            migration_lock=migration_lock,
+        )
 
     sensor_states: dict[str, object] = {}
     for sensor_target_id in (
@@ -679,27 +740,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         SmartSwitchTriggerAdapter,
     )
     activation_latch = ActivationLatch()
-    smart_switch_adapter = SmartSwitchTriggerAdapter(
-        hass,
-        scenario_service,
-        state_store=HomeAssistantSmartSwitchDedupStore(hass, entry.entry_id),
-        readiness_check=lambda: bool(
-            manual_light_off_protection.ready_for_release_owned_switches
-            and all(
-                scenario_service.current_catalog().device(target_id) is not None
-                for target_id in TAMBUR_INPUT_TARGET_IDS
-            )
-        ),
-        activation_latch=activation_latch,
-        included_bindings=frozenset(
-            {
-                "tambur-light-group",
-                "tambur-mirror-left",
-                "tambur-master-off",
-            }
-        ),
-    )
-    scenario_service.set_smart_switch_receipt_consumer(smart_switch_adapter)
+    smart_switch_adapter: SmartSwitchTriggerAdapter | None = None
+    if resolved_tambur_triggers is not None:
+        smart_switch_adapter = SmartSwitchTriggerAdapter(
+            hass,
+            scenario_service,
+            state_store=HomeAssistantSmartSwitchDedupStore(hass, entry.entry_id),
+            readiness_check=lambda: bool(
+                manual_light_off_protection.ready_for_release_owned_switches
+                and all(
+                    scenario_service.current_catalog().device(target_id) is not None
+                    for target_id in TAMBUR_INPUT_TARGET_IDS
+                )
+            ),
+            activation_latch=activation_latch,
+            resolved_triggers=resolved_tambur_triggers,
+        )
+        scenario_service.set_smart_switch_receipt_consumer(smart_switch_adapter)
 
     tambur_runtime_holder: dict[str, object] = {}
 
@@ -713,10 +770,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 cancel_runtime()
             except Exception as error:  # noqa: BLE001
                 errors.append(error)
-        try:
-            smart_switch_adapter.async_unload()
-        except Exception as error:  # noqa: BLE001
-            errors.append(error)
+        if smart_switch_adapter is not None:
+            try:
+                smart_switch_adapter.async_unload()
+            except Exception as error:  # noqa: BLE001
+                errors.append(error)
         if errors:
             raise RuntimeError("Tambur runtime cleanup failed") from errors[0]
 
@@ -724,6 +782,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         """Prepare only the decision bridge and inputs for the migrated room."""
 
         try:
+            if smart_switch_adapter is None:
+                raise RuntimeError("Tambur smart-switch bindings are unavailable")
             if (
                 getattr(scope, "scenario_ids", None)
                 != ("system-tambur-adaptive-controller",)
@@ -929,14 +989,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "reason": status.get("stage", "binding"),
             }
 
-    tambur_room_startup = TamburRoomStartupCoordinator(
-        scenario_service,
-        tambur_room_migration,
-        _async_activate_tambur_runtime,
-        status_publisher=_publish_tambur_status,
-    )
-    entry.async_on_unload(tambur_room_startup.cancel)
-    await tambur_room_startup.async_start()
+    if tambur_room_migration is not None and smart_switch_adapter is not None:
+        tambur_room_startup = TamburRoomStartupCoordinator(
+            scenario_service,
+            tambur_room_migration,
+            _async_activate_tambur_runtime,
+            status_publisher=_publish_tambur_status,
+        )
+        entry.async_on_unload(tambur_room_startup.cancel)
+        await tambur_room_startup.async_start()
     entry.async_on_unload(scenario_service.start_catalog_warmup())
     from .manual_light_off_protection_events import (
         async_start_manual_light_off_protection_events,

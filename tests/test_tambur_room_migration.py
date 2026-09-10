@@ -17,6 +17,7 @@ from custom_components.hausman_hub.application.tambur_room_migration import (
     TamburRoomMigrationConflict,
     TamburRoomStartupCoordinator,
 )
+from custom_components.hausman_hub import _async_resolve_tambur_smart_switch_triggers
 from custom_components.hausman_hub.application.tambur_decision_runtime import (
     TamburDecisionRuntime,
 )
@@ -68,6 +69,27 @@ class _Store:
     async def async_save(self, value: object) -> None:
         self.saves += 1
         self.value = copy.deepcopy(value)
+
+
+def test_missing_tambur_bindings_do_not_resolve_startup_triggers() -> None:
+    """A missing local document cannot create a Tambur trigger scope."""
+
+    class BindingsStore:
+        recovered_previous = False
+
+        async def async_load(self) -> None:
+            return None
+
+    async def exercise() -> None:
+        resolved = await _async_resolve_tambur_smart_switch_triggers(
+            object(),
+            "entry-a",
+            store=BindingsStore(),
+        )
+
+        assert resolved is None
+
+    asyncio.run(exercise())
 
 
 class _ScopedService:

@@ -13,6 +13,7 @@ from custom_components.hausman_hub.application.smart_switch_bindings import (
     bindings_from_payload,
     resolve_trigger_bindings,
 )
+from custom_components.hausman_hub import _async_resolve_tambur_smart_switch_triggers
 
 
 def test_resolver_builds_only_fixed_triggers_for_synthetic_bindings() -> None:
@@ -60,6 +61,28 @@ def test_invalid_or_reused_profile_ids_do_not_resolve() -> None:
                 "revision": 1,
                 "devices": {"passthrough": "same", "marmitek": "same"},
             }
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_incomplete_tambur_bindings_do_not_resolve_startup_triggers() -> None:
+    """A saved partial profile remains inert until local preparation completes."""
+
+    class Store:
+        recovered_previous = False
+
+        async def async_load(self) -> object:
+            return {
+                "version": 1,
+                "revision": 1,
+                "devices": {"passthrough": "test-passthrough-device"},
+            }
+
+    assert (
+        await _async_resolve_tambur_smart_switch_triggers(
+            object(), "entry-a", store=Store()
         )
         is None
     )

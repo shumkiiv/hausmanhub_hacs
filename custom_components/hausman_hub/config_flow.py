@@ -9,6 +9,7 @@ accepted.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 import json
 import secrets
@@ -173,6 +174,7 @@ TEMPORARY_TEMPERATURE_CLEAR_CONFIRM_FIELD = "confirm_temporary_temperature_clear
 TEMPORARY_TEMPERATURE_RESULT_CLOSE_FIELD = "close_temporary_temperature_result"
 CLIMATE_REGISTRY_JSON_FIELD = "climate_registry_json"
 SCENARIO_CONTROL_POLICY_JSON_FIELD = "scenario_control_policy_json"
+SMART_SWITCH_BINDINGS_JSON_FIELD = "smart_switch_bindings_json"
 CURTAIN_SCALE_ACTION_FIELD = "curtain_scale_action"
 CLIMATE_REGISTRY_CONFIRM_FIELD = "confirm_registry_save"
 CLIMATE_REGISTRY_ACTION_FIELD = "climate_registry_action"
@@ -940,6 +942,19 @@ def _scenario_control_policy_json_schema(default: str) -> vol.Schema:
     )
 
 
+def _smart_switch_bindings_json_schema(default: str) -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(
+                SMART_SWITCH_BINDINGS_JSON_FIELD,
+                default=default,
+            ): TextSelector(
+                TextSelectorConfig(multiline=True, type=TextSelectorType.TEXT)
+            )
+        }
+    )
+
+
 def _curtain_scale_confirmation_schema(default: str) -> vol.Schema:
     return vol.Schema(
         {
@@ -1512,6 +1527,7 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
     _temporary_temperature_receipt: Mapping[str, Any] | None = None
     _curtain_scale_form_revision: int | None = None
     _curtain_scale_form_identity_digest: str | None = None
+    _smart_switch_bindings_save_lock = asyncio.Lock()
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Show one short menu instead of mixing unrelated settings."""
@@ -1536,6 +1552,7 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
             step_id="advanced_settings",
             menu_options=[
                 "scenario_controls",
+                "smart_switch_bindings",
                 "curtain_scale_confirmation",
                 "climate_registry",
                 "climate_connection",
@@ -1682,6 +1699,69 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="scenario_controls",
             data_schema=_scenario_control_policy_json_schema(default),
+            errors=errors,
+        )
+
+    async def async_step_smart_switch_bindings(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Save a locally prepared switch document without changing options."""
+
+        from .application.smart_switch_bindings import bindings_from_payload
+
+        store = self._smart_switch_bindings_store()
+        errors: dict[str, str] = {}
+        current = None
+        if store is None:
+            errors["base"] = "smart_switch_bindings_unavailable"
+        else:
+            try:
+                loaded = await store.async_load()
+                if getattr(store, "recovered_previous", False):
+                    raise RuntimeError("recovered binding document")
+                current = bindings_from_payload(loaded)
+                if loaded is not None and current is None:
+                    raise RuntimeError("invalid binding document")
+            except Exception:  # noqa: BLE001
+                errors["base"] = "smart_switch_bindings_unavailable"
+
+        if user_input is not None and store is not None and not errors:
+            raw = user_input.get(SMART_SWITCH_BINDINGS_JSON_FIELD)
+            try:
+                candidate = bindings_from_payload(
+                    json.loads(raw) if isinstance(raw, str) else None
+                )
+                if candidate is None:
+                    raise ValueError("invalid binding document")
+                async with self._smart_switch_bindings_save_lock:
+                    latest_payload = await store.async_load()
+                    if getattr(store, "recovered_previous", False):
+                        raise ValueError("recovered binding document")
+                    latest = bindings_from_payload(latest_payload)
+                    if latest_payload is not None and latest is None:
+                        raise ValueError("invalid binding document")
+                    latest_revision = latest.revision if latest is not None else 0
+                    if candidate.revision != latest_revision + 1:
+                        raise ValueError("stale binding document")
+                    await store.async_save(json.loads(raw))
+            except Exception:  # noqa: BLE001
+                errors[SMART_SWITCH_BINDINGS_JSON_FIELD] = "invalid_smart_switch_bindings"
+            else:
+                return self.async_abort(reason="smart_switch_bindings_saved")
+
+        default = json.dumps(
+            {
+                "version": 1,
+                "revision": (current.revision + 1) if current is not None else 1,
+                "devices": dict(current.devices) if current is not None else {},
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        return self.async_show_form(
+            step_id="smart_switch_bindings",
+            data_schema=_smart_switch_bindings_json_schema(default),
             errors=errors,
         )
 
@@ -4647,6 +4727,19 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
 
         service = domain_data.get("scenario_control_policy_service")
         return service if isinstance(service, ScenarioControlPolicyService) else None
+
+    def _smart_switch_bindings_store(self) -> Any | None:
+        hass = getattr(self, "hass", None)
+        domain_data = getattr(hass, "data", {}).get(DOMAIN)
+        if not isinstance(domain_data, Mapping):
+            return None
+        store = domain_data.get("smart_switch_bindings_store")
+        return (
+            store
+            if callable(getattr(store, "async_load", None))
+            and callable(getattr(store, "async_save", None))
+            else None
+        )
 
     def _curtain_scale_confirmation_service(self) -> Any | None:
         hass = getattr(self, "hass", None)

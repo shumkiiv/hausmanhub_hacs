@@ -10612,19 +10612,25 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         self.assertEqual(200, response.status)
 
-    def test_setup_keeps_global_and_switch_runtimes_closed_while_tambur_waits(self) -> None:
+    def test_missing_bindings_prevent_tambur_migration_and_subscription(self) -> None:
         from custom_components.hausman_hub.application.managed_switch_migration import (
             ManagedSwitchMigration,
         )
         from custom_components.hausman_hub.application.smart_switch_runtime import (
             SmartSwitchTriggerAdapter,
         )
+        from custom_components.hausman_hub.application.tambur_room_migration import (
+            TamburRoomStartupCoordinator,
+        )
 
         async def unexpected_global_migration(_migration: object) -> str:
             raise AssertionError("global migration must stay deferred in room mode")
 
-        async def unexpected_switch_attach(_adapter: object) -> None:
-            raise AssertionError("switches must stay closed before room migration")
+        def unexpected_adapter(*_args: object, **_kwargs: object) -> None:
+            raise AssertionError("missing bindings must not construct an adapter")
+
+        def unexpected_room_startup(*_args: object, **_kwargs: object) -> None:
+            raise AssertionError("missing bindings must not start room migration")
 
         hass = FakeHomeAssistant()
         entry = FakeEntry(
@@ -10645,8 +10651,13 @@ class LocalSummaryAccessTest(unittest.TestCase):
             ),
             patch.object(
                 SmartSwitchTriggerAdapter,
-                "async_start",
-                unexpected_switch_attach,
+                "__init__",
+                unexpected_adapter,
+            ),
+            patch.object(
+                TamburRoomStartupCoordinator,
+                "__init__",
+                unexpected_room_startup,
             ),
         ):
             self.assertTrue(asyncio.run(self.integration.async_setup_entry(hass, entry)))
@@ -10659,13 +10670,13 @@ class LocalSummaryAccessTest(unittest.TestCase):
             hass.data["hausman_hub"]["managed_switch_migration"],
         )
         self.assertEqual(
-            {"state": "waiting", "stage": "binding"},
+            {"state": "blocked", "stage": "bindings_unavailable"},
             hass.data["hausman_hub"]["tambur_room_migration"],
         )
         self.assertEqual(
             {
-                "state": "waiting",
-                "reason": "tambur_room_pending",
+                "state": "unavailable",
+                "reason": "bindings_unavailable",
             },
             hass.data["hausman_hub"]["smart_switch_runtime"],
         )
@@ -10705,13 +10716,13 @@ class LocalSummaryAccessTest(unittest.TestCase):
             hass.data["hausman_hub"]["managed_switch_migration"],
         )
         self.assertEqual(
-            {"state": "waiting", "stage": "binding"},
+            {"state": "blocked", "stage": "bindings_unavailable"},
             hass.data["hausman_hub"]["tambur_room_migration"],
         )
         self.assertEqual(
             {
-                "state": "waiting",
-                "reason": "tambur_room_pending",
+                "state": "unavailable",
+                "reason": "bindings_unavailable",
             },
             hass.data["hausman_hub"]["smart_switch_runtime"],
         )

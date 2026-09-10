@@ -180,6 +180,9 @@ class FakeConfigFlow:
     async def async_set_unique_id(self, unique_id: str) -> None:
         self.unique_id = unique_id
 
+    def async_abort(self, *, reason: str) -> dict[str, object]:
+        return {"type": "abort", "reason": reason}
+
     def _abort_if_unique_id_configured(self) -> None:
         self.unique_id_checked = True
 
@@ -207,6 +210,9 @@ class FakeOptionsFlow:
     """Minimal options-flow base with the config-entry property used by HausmanHub."""
 
     config_entry: FakeConfigEntry
+
+    def async_abort(self, *, reason: str) -> dict[str, object]:
+        return {"type": "abort", "reason": reason}
 
     def async_create_entry(self, *, title: str, data: dict[str, object]) -> dict[str, object]:
         return {"type": "create_entry", "title": title, "data": data}
@@ -443,6 +449,7 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [
                 "scenario_controls",
+                "smart_switch_bindings",
                 "curtain_scale_confirmation",
                 "climate_registry",
                 "climate_connection",
@@ -452,6 +459,58 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             ],
             result["menu_options"],
         )
+
+    async def test_prepare_smart_switch_bindings_saves_only_local_document(self) -> None:
+        """Preparation uses the local verified store, never options or services."""
+
+        class BindingsStore:
+            recovered_previous = False
+
+            def __init__(self) -> None:
+                self.payload = None
+                self.saves = 0
+
+            async def async_load(self):
+                return self.payload
+
+            async def async_save(self, payload):
+                self.payload = payload
+                self.saves += 1
+
+        store = BindingsStore()
+        flow = self.config_flow.HausmanHubOptionsFlow()
+        flow.config_entry = FakeConfigEntry({"mode": "read-only"}, {"kept": True})
+        services = SimpleNamespace(calls=[])
+        flow.hass = SimpleNamespace(
+            data={self.config_flow.DOMAIN: {"smart_switch_bindings_store": store}},
+            services=services,
+        )
+        payload = {
+            "version": 1,
+            "revision": 1,
+            "devices": {
+                "passthrough": "test-passthrough-device",
+                "marmitek": "test-marmitek-device",
+            },
+        }
+
+        saved = await flow.async_step_smart_switch_bindings(
+            {"smart_switch_bindings_json": json.dumps(payload)}
+        )
+        stale = await flow.async_step_smart_switch_bindings(
+            {"smart_switch_bindings_json": json.dumps(payload)}
+        )
+
+        self.assertEqual("abort", saved["type"])
+        self.assertEqual("smart_switch_bindings_saved", saved["reason"])
+        self.assertEqual(payload, store.payload)
+        self.assertEqual(1, store.saves)
+        self.assertEqual(
+            {"smart_switch_bindings_json": "invalid_smart_switch_bindings"},
+            stale["errors"],
+        )
+        self.assertEqual([], services.calls)
+        self.assertEqual({"kept": True}, flow.config_entry.options)
 
     async def test_office_scale_confirmation_uses_server_form_cas_only(self) -> None:
         from custom_components.hausman_hub.application.curtain_command_policy import (
