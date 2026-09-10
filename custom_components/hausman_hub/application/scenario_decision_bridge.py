@@ -1093,6 +1093,7 @@ class TamburHaObservationCoordinator:
         now_ms: Callable[[], int],
         timezone_name: str | None = None,
         sunset_provider: Callable[[str], object] | None = None,
+        sunrise_provider: Callable[[str], object] | None = None,
         track_state_changes: Callable[..., Callable[[], None]] | None = None,
         track_state_reports: Callable[..., Callable[[], None]] | None = None,
     ) -> None:
@@ -1121,6 +1122,7 @@ class TamburHaObservationCoordinator:
         self._freshness_deadline_provider = freshness_deadline_provider
         self._now_ms = now_ms
         self._sunset_provider = sunset_provider or self._ha_sunset_for_date
+        self._sunrise_provider = sunrise_provider or self._ha_sunrise_for_date
         self._track_changes = track_state_changes
         self._track_reports = track_state_reports
         self._running = False
@@ -1152,6 +1154,21 @@ class TamburHaObservationCoordinator:
 
             requested = date.fromisoformat(local_date)
             observed = get_astral_event_date(self._hass, SUN_EVENT_SUNSET, requested)
+        except (ImportError, RuntimeError, TypeError, ValueError):
+            return None
+        if not isinstance(observed, datetime):
+            return None
+        if observed.tzinfo is None:
+            observed = observed.replace(tzinfo=timezone.utc)
+        return int(observed.timestamp() * 1000)
+
+    def _ha_sunrise_for_date(self, local_date: str) -> int | None:
+        try:
+            from homeassistant.const import SUN_EVENT_SUNRISE
+            from homeassistant.helpers.sun import get_astral_event_date
+
+            requested = date.fromisoformat(local_date)
+            observed = get_astral_event_date(self._hass, SUN_EVENT_SUNRISE, requested)
         except (ImportError, RuntimeError, TypeError, ValueError):
             return None
         if not isinstance(observed, datetime):
@@ -1330,6 +1347,8 @@ class TamburHaObservationCoordinator:
         local_date = local.date().isoformat()
         sunset = await _maybe_await(self._sunset_provider(local_date))
         sunset_ms = sunset if type(sunset) is int and sunset >= 0 else None
+        sunrise = await _maybe_await(self._sunrise_provider(local_date))
+        sunrise_ms = sunrise if type(sunrise) is int and sunrise >= 0 else None
         observations = {
             target: await self._observation(target, entity, observation_epoch)
             for target, entity in self._target_entities.items()
@@ -1362,6 +1381,7 @@ class TamburHaObservationCoordinator:
                 "localDate": local_date,
                 "minutesOfDay": local.hour * 60 + local.minute,
                 "sunsetAtMs": sunset_ms,
+                "sunriseAtMs": sunrise_ms,
             },
             "bindings": copy.deepcopy(self._bindings),
             "settings": copy.deepcopy(self._settings),

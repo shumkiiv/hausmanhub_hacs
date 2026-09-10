@@ -466,10 +466,14 @@ async def test_auto_power_reasserts_fresh_on_and_waits_for_new_report() -> None:
         assert blocking
         entity_id = str(data["entity_id"])
         calls.append((entity_id, service))
-        states[entity_id] = _state("on", datetime.now(timezone.utc))
+        states[entity_id] = _state(
+            "on",
+            datetime.now(timezone.utc),
+            attributes={"brightness": 102} if entity_id == "light.test" else {},
+        )
 
     action = ScenarioDeviceAction(
-        "turn_on", "Включить", "light", "turn_on", frozenset()
+        "set_brightness_percent", "Яркость", "light", "turn_on", frozenset({"value"})
     )
     executor = ScenarioExecutor(
         SimpleNamespace(
@@ -499,7 +503,7 @@ async def test_auto_power_reasserts_fresh_on_and_waits_for_new_report() -> None:
     )
 
     receipt = await executor.async_execute_device_action(
-        "light-target", "turn_on"
+        "light-target", "set_brightness_percent", 40
     )
 
     assert receipt["confirmed"] is True

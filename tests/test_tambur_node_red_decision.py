@@ -126,6 +126,7 @@ def _request(
     *,
     now: int = NOW,
     sunset_minute: int | None = 18 * 60,
+    sunrise_minute: int | None = None,
     sensor_states: tuple[str, ...] = ("on",),
     event_kind: str = "sensor",
     timezone: str = "Asia/Omsk",
@@ -155,6 +156,7 @@ def _request(
             "localDate": "2027-01-15",
             "minutesOfDay": minute,
             "sunsetAtMs": None if sunset_minute is None else now + (sunset_minute - minute) * 60_000,
+            "sunriseAtMs": None if sunrise_minute is None else now + (sunrise_minute - minute) * 60_000,
         },
         "bindings": {
             "chandelier": CHANDELIER,
@@ -229,6 +231,9 @@ def _move_now(request: dict[str, object], now: int) -> None:
     sunset = request["clock"]["sunsetAtMs"]
     if sunset is not None:
         request["clock"]["sunsetAtMs"] = int(sunset) + delta
+    sunrise = request["clock"].get("sunriseAtMs")
+    if sunrise is not None:
+        request["clock"]["sunriseAtMs"] = int(sunrise) + delta
     request["issuedAtMs"] = now - 1_000
     request["expiresAtMs"] = now + 60_000
     request["event"]["observedAtMs"] = now
@@ -268,6 +273,113 @@ def _action_signature(decision: dict[str, object]) -> tuple[object, ...] | None:
     if action is None:
         return None
     return action["targetId"], action["actionId"], action.get("value")
+
+
+def _night_mirror_request(
+    minute: int,
+    *,
+    now: int = NOW,
+    sunrise_minute: int | None = 6 * 60,
+    sensor_states: tuple[str, ...] = ("on",),
+    event_kind: str = "sensor",
+) -> dict[str, object]:
+    request = _request(
+        minute,
+        now=now,
+        sunrise_minute=sunrise_minute,
+        sensor_states=sensor_states,
+        event_kind=event_kind,
+    )
+    if event_kind == "sensor":
+        request["event"]["targetId"] = SENSORS[0]
+    return request
+
+
+def test_night_mirror_uses_literal_start_and_actual_sunrise_boundary() -> None:
+    before = _night_mirror_request(119)
+    assert _action_signature(_decision(before)) is None
+
+    at_start = _night_mirror_request(120)
+    started = _decision(at_start)
+    assert _action_signature(started) == (MIRROR, "turn_on", None)
+    assert started["nextState"]["phase"] == "night"
+    assert started["nextState"]["phaseStartedAtMs"] == NOW
+    assert {item["id"] for item in started["wakeups"]} >= {"tambur.night_mirror_minimum"}
+
+    at_sunrise = _night_mirror_request(360)
+    assert _action_signature(_decision(at_sunrise)) is None
+
+
+def test_night_mirror_requires_fresh_sensor_event_and_trusted_future_sunrise() -> None:
+    cases = (
+        _night_mirror_request(120, event_kind="clock"),
+        _night_mirror_request(120, sunrise_minute=None),
+        _night_mirror_request(120, sunrise_minute=119),
+    )
+    for request in cases:
+        decision = _decision(request)
+        assert _action_signature(decision) is None
+        assert decision["reasonCode"] in {
+            "night_mirror_event_required",
+            "night_mirror_sunrise_unavailable",
+            "night_mirror_sunrise_elapsed",
+        }
+
+    stale = _night_mirror_request(120)
+    stale["observations"][SENSORS[0]]["fresh"] = False
+    stale["observations"][SENSORS[0]]["continuityEpoch"] = 0
+    assert _action_signature(_decision(stale)) is None
+
+
+def test_night_mirror_minimum_and_fresh_absence_are_preserved_after_sunrise() -> None:
+    started = _night_mirror_request(5 * 60 + 59, sunrise_minute=6 * 60)
+    first = _decision(started)
+    assert _action_signature(first) == (MIRROR, "turn_on", None)
+
+    waiting = _night_mirror_request(
+        6 * 60,
+        now=NOW + 60_000,
+        sunrise_minute=6 * 60,
+        sensor_states=("off",),
+    )
+    _set_light(waiting, MIRROR, "on", "automatic")
+    waiting["durable"] = {
+        **first["nextState"],
+        "revision": 10,
+        "pendingReceiptId": None,
+        "wakeups": first["wakeups"],
+    }
+    before_minimum = _decision(waiting)
+    assert _action_signature(before_minimum) is None
+    assert before_minimum["reasonCode"] == "night_mirror_minimum_waiting"
+
+    after_minimum = deepcopy(waiting)
+    _move_now(after_minimum, NOW + 11 * 60_000)
+    after_minimum["clock"]["minutesOfDay"] = 6 * 60 + 10
+    expired = _decision(after_minimum)
+    assert _action_signature(expired) == (MIRROR, "turn_off", None)
+
+
+def test_night_mirror_never_switches_off_with_fresh_presence_or_broken_continuity() -> None:
+    started = _night_mirror_request(2 * 60, sunrise_minute=6 * 60)
+    first = _decision(started)
+    for state, fresh in (("on", True), ("unknown", False)):
+        request = _night_mirror_request(
+            6 * 60 + 15,
+            now=NOW + 4 * 60 * 60_000,
+            sunrise_minute=6 * 60,
+            sensor_states=(state,),
+        )
+        _set_light(request, MIRROR, "on", "automatic")
+        request["observations"][SENSORS[0]]["fresh"] = fresh
+        request["observations"][SENSORS[0]]["continuityEpoch"] = 4 if fresh else 0
+        request["durable"] = {
+            **first["nextState"],
+            "revision": 10,
+            "pendingReceiptId": None,
+            "wakeups": first["wakeups"],
+        }
+        assert _action_signature(_decision(request)) is None
 
 
 def test_full_graph_has_real_stages_exact_sources_and_no_command_nodes() -> None:

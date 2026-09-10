@@ -32,7 +32,7 @@ VENDORED_CONTRACT_HASHES = {
     "custom_components/hausman_hub/contracts/v1/scenario-definition.schema.json": "60e93c0e3a970c684a9a95acd471ffd9664652e61fc5e29f5f21c7463285ea57",
     "custom_components/hausman_hub/contracts/v1/scenario-node-red-status.schema.json": "d1d219653a87c5d68834afd5bea6544924967d42a4053e6ea2269e0780766d6f",
     "custom_components/hausman_hub/contracts/v1/scenario-node-red-execution.schema.json": "1780fbeb06bc5777217e3a18059158354f28bce61cdf8aadab67e6a61ae1d597",
-    "custom_components/hausman_hub/contracts/v1/scenario-node-red-decision-input.schema.json": "009a8757807b6f8082835a048094fd15ad7bfca7b0946178def2db34ee1ffeff",
+    "custom_components/hausman_hub/contracts/v1/scenario-node-red-decision-input.schema.json": "9efea28afdcf42f91bc3a4fe3d14bd7471e3f3bb5e1cfc13b0e1398fc2d4dbc7",
     "custom_components/hausman_hub/contracts/v1/scenario-node-red-decision.schema.json": "95fc1356cd0cb2dc5a0fd5865c2db7cebf3ba433cb5b95b84889f118ef27ea75",
     "custom_components/hausman_hub/contracts/v1/fixtures/scenario-node-red-decision-day-input.json": "189b681b47ac91069e5485895e210aa66e3ba409d04e3d99cdcb5c72dc398f9e",
     "custom_components/hausman_hub/contracts/v1/fixtures/scenario-node-red-decision-day.json": "921603b308ff0ce2b73b3639c3c375145d80c8e2fd072cb12e4241c4b55f727e",
@@ -121,14 +121,14 @@ def test_external_contract_pin_is_explicit_and_canonical() -> None:
 
     assert pin == {
         "repository": "shumkiiv/hausmanhub-contracts",
-        "version": "0.65.3",
-        "commit": "dc0ba55",
+        "version": "0.65.4",
+        "commit": "3417cf966d6165c2d3574efc557f47900bba3821",
         "canonical": True,
         "role": "runtime-consumer",
     }
 
 
-def test_contract_0_65_3_vendored_files_match_canonical_hashes() -> None:
+def test_contract_0_65_4_vendored_files_match_canonical_hashes() -> None:
     for relative_path, expected_hash in VENDORED_CONTRACT_HASHES.items():
         payload = (REPOSITORY_ROOT / relative_path).read_bytes()
         assert hashlib.sha256(payload).hexdigest() == expected_hash, relative_path

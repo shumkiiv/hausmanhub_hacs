@@ -4,6 +4,11 @@ const q = t.q;
 const id = t.targets;
 const obs = target => q.observations[target];
 const auth = target => q.authority[target];
+const freshSensor = target => {
+  const item = obs(target);
+  return !!item && item.fresh === true && item.continuityEpoch === q.observationEpoch &&
+    item.state === 'on';
+};
 const addWakeup = (ident, kind, dueAtMs) => {
   if (Number.isSafeInteger(dueAtMs) && dueAtMs > t.now && !t.wakeups.some(item => item.id === ident))
     t.wakeups.push({id: ident, kind, dueAtMs});
@@ -69,7 +74,41 @@ const startOrContinueFade = reason => {
   return true;
 };
 
-if (!t.mirrorScheduled && t.automatic[id.mirror] && obs(id.mirror).state === 'on') {
+const freshNightMirrorEvent = q.event.kind === 'sensor' &&
+  q.bindings.presenceSensors.includes(q.event.targetId) &&
+  freshSensor(q.event.targetId);
+
+if (t.nightMirrorPlan) {
+  if (q.durable.pendingReceiptId !== null) {
+    t.reason = 'night_mirror_receipt_pending';
+  } else if (!t.automatic[id.mirror] || obs(id.mirror).state !== 'on') {
+    t.reason = t.protected[id.mirror] ? 'manual_authority_preserved' :
+      'night_mirror_confirmation_incomplete';
+  } else if (t.nightMirrorMinimumAt > t.now) {
+    t.reason = 'night_mirror_minimum_waiting';
+  } else if (!t.sensorReliable) {
+    t.reason = 'night_mirror_continuity_blocked';
+  } else if (t.present) {
+    t.reason = 'night_mirror_present';
+  } else if (t.absent) {
+    t.nextState.phase = 'idle';
+    t.nextState.phaseStartedAtMs = t.now;
+    decide('night_mirror_absence_off', id.mirror, 'turn_off');
+  }
+} else if (t.nightMirrorCandidateTime && freshNightMirrorEvent && !t.nightMirrorSunriseAvailable) {
+  t.reason = 'night_mirror_sunrise_unavailable';
+} else if (t.nightMirrorCandidateTime && freshNightMirrorEvent && !t.nightMirrorWindow) {
+  t.reason = 'night_mirror_sunrise_elapsed';
+} else if (t.nightMirrorWindow && !freshNightMirrorEvent) {
+  t.reason = 'night_mirror_event_required';
+} else if (t.nightMirrorWindow && t.protected[id.mirror]) {
+  t.reason = 'manual_authority_preserved';
+} else if (t.nightMirrorWindow && t.available[id.mirror] && obs(id.mirror).state === 'off') {
+  transition('night', 'night_mirror_on');
+  t.nextState.fadeReason = null;
+  addWakeup('tambur.night_mirror_minimum', 'mirror', t.now + 600000);
+  decide('night_mirror_on', id.mirror, 'turn_on');
+} else if (!t.mirrorScheduled && t.automatic[id.mirror] && obs(id.mirror).state === 'on') {
   decide('mirror_schedule_off', id.mirror, 'turn_off');
 } else if (t.mirrorScheduled && t.nightTransitionHandled) {
   if (t.reason === 'no_action_required') t.reason = 'mirror_handover_not_retried';

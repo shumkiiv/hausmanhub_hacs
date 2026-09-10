@@ -1574,7 +1574,9 @@ class TamburHaObservationCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.report_callbacks.append(callback)
         return lambda: self.unsubscribed.append("report")
 
-    def _coordinator(self, deadline_provider) -> TamburHaObservationCoordinator:
+    def _coordinator(
+        self, deadline_provider, *, sunrise_provider=None
+    ) -> TamburHaObservationCoordinator:
         return TamburHaObservationCoordinator(
             self.hass,
             bindings={
@@ -1593,10 +1595,26 @@ class TamburHaObservationCoordinatorTests(unittest.IsolatedAsyncioTestCase):
             sunset_provider=lambda local_date: NOW + 20_000_000
             if local_date == "2027-01-15"
             else None,
+            sunrise_provider=sunrise_provider,
             now_ms=lambda: NOW,
             track_state_changes=self._track_change,
             track_state_reports=self._track_report,
         )
+
+    async def test_snapshot_includes_only_the_actual_ha_sunrise_for_its_local_date(self) -> None:
+        coordinator = self._coordinator(
+            lambda _target, _entity, reported: reported + 60_000,
+            sunrise_provider=lambda local_date: NOW + 12_000
+            if local_date == "2027-01-15"
+            else None,
+        )
+        coordinator.start()
+
+        snapshot = await coordinator.async_snapshot_source(
+            SCENARIO_ID, event(), observation_epoch=1
+        )
+
+        self.assertEqual(NOW + 12_000, snapshot["clock"]["sunriseAtMs"])
 
     async def test_old_ha_state_is_not_fresh_until_actual_state_event_in_current_epoch(self) -> None:
         coordinator = self._coordinator(

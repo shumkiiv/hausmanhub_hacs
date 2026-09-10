@@ -14,12 +14,29 @@ if (holdDeadlines.length) addWakeup('tambur.hold', 'hold', Math.min(...holdDeadl
 
 const activeNightFade = q.durable.fadeReason === 'night' &&
   Number.isSafeInteger(q.durable.fadeStartedAtMs);
+t.nightMirrorMinimumWakeup = q.durable.wakeups.find(item =>
+  item.id === 'tambur.night_mirror_minimum' && item.kind === 'mirror' &&
+  Number.isSafeInteger(item.dueAtMs));
+t.nightMirrorPlan = q.durable.phase === 'night' && q.durable.fadeReason === null &&
+  Number.isSafeInteger(q.durable.phaseStartedAtMs) && !!t.nightMirrorMinimumWakeup;
+t.nightMirrorMinimumAt = t.nightMirrorPlan ? t.nightMirrorMinimumWakeup.dueAtMs : null;
 t.nightTransitionHandled = q.durable.phase === 'night' && q.durable.fadeReason === null &&
   Number.isSafeInteger(q.durable.phaseStartedAtMs) && t.mirrorScheduled &&
   t.now >= q.durable.phaseStartedAtMs && t.now - q.durable.phaseStartedAtMs < t.mirrorWindowMs;
 t.nightFadeCancelled = activeNightFade && t.confirmedArrival;
 
-if (t.nightFadeCancelled) {
+if (t.nightMirrorPlan) {
+  t.nextState = {
+    phase: 'night', phaseStartedAtMs: q.durable.phaseStartedAtMs,
+    absenceSinceMs: null, absenceEpoch: null, fadeStartPercent: null,
+    fadeStartedAtMs: null, fadeReason: null,
+  };
+  if (t.nightMirrorMinimumAt > t.now)
+    addWakeup('tambur.night_mirror_minimum', 'mirror', t.nightMirrorMinimumAt);
+  t.waitReason = t.sensorReliable && t.present ? 'night_mirror_present' :
+    t.nightMirrorMinimumAt > t.now ? 'night_mirror_minimum_waiting' :
+    t.sensorReliable ? 'night_mirror_absence_confirmed' : 'night_mirror_continuity_blocked';
+} else if (t.nightFadeCancelled) {
   t.nextState = {
     phase: 'night', phaseStartedAtMs: t.now, absenceSinceMs: null,
     absenceEpoch: null, fadeStartPercent: null, fadeStartedAtMs: null, fadeReason: null,
