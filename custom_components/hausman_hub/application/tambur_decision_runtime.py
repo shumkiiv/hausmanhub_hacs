@@ -10,6 +10,14 @@ import time
 
 from .scenario_node_red_decision import TAMBUR_DECISION_SCENARIO_ID
 
+try:  # Home Assistant is unavailable in framework-independent tests.
+    from homeassistant.core import callback as _ha_callback
+except ModuleNotFoundError:  # pragma: no cover - exercised by the test shim
+
+    def _ha_callback(func: Callable[..., None]) -> Callable[..., None]:
+        setattr(func, "_hass_callback", True)
+        return func
+
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_RECEIPT_CHAIN = 8
@@ -124,6 +132,7 @@ class TamburDecisionRuntime:
             )
         )
 
+    @_ha_callback
     def _state_event(self, event: object) -> None:
         if not self._running or not self._activated:
             return

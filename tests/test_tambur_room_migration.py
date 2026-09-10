@@ -1435,3 +1435,10 @@ def test_decision_runtime_subscribes_only_three_presence_inputs_and_stays_closed
         assert observations.stops == 1
 
     asyncio.run(exercise())
+
+
+def test_state_event_runs_on_the_event_loop() -> None:
+    # Home Assistant runs a plain synchronous state listener in an executor
+    # thread and rejects ``hass.async_create_task`` there. Marking the listener
+    # as a callback keeps every sensor event on the event loop.
+    assert getattr(TamburDecisionRuntime._state_event, "_hass_callback", False) is True
