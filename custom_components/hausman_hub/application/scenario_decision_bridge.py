@@ -1386,6 +1386,13 @@ class TamburHaObservationCoordinator:
                 else:
                     reason = "fresh"
                     fresh = True
+        if reason == "freshness_deadline_expired" and target_id in self._light_targets:
+            fallback = self._last_known_light_observation(
+                target_id, current_state, state_value, observation_epoch
+            )
+            if fallback is not None:
+                self._reasons[target_id] = str(fallback.pop("_reason"))
+                return fallback
         self._reasons[target_id] = reason
         attributes = recorded.get("attributes", {}) if recorded is not None else {}
         result: dict[str, object] = {

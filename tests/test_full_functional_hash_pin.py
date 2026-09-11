@@ -211,5 +211,5 @@ def test_provenance_is_repeatable_without_git_head() -> None:
     first = release_pin.provenance()
     second = release_pin.provenance()
     assert first == second
-    assert first["version"] == "1.52.248"
+    assert first["version"] == "1.52.249"
     assert len(first["content_digest"]) == 64

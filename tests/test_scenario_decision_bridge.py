@@ -1801,10 +1801,10 @@ class TamburHaObservationCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(snapshot["observations"][CHAND]["fresh"])
         self.assertEqual("state_unavailable", coordinator.freshness_reason(CHAND))
 
-    async def test_past_or_invalid_deadline_never_becomes_fresh(self) -> None:
-        for returned, reason in (
-            (NOW - 1, "freshness_deadline_expired"),
-            ("bad", "freshness_deadline_invalid"),
+    async def test_past_light_deadline_falls_back_but_invalid_stays_closed(self) -> None:
+        for returned, expected_fresh, expected_reason in (
+            (NOW - 1, True, "last_known_light_state"),
+            ("bad", False, "freshness_deadline_invalid"),
         ):
             with self.subTest(returned=returned):
                 coordinator = self._coordinator(lambda *_args, value=returned: value)
@@ -1828,8 +1828,12 @@ class TamburHaObservationCoordinatorTests(unittest.IsolatedAsyncioTestCase):
                 snapshot = await coordinator.async_snapshot_source(
                     SCENARIO_ID, event(), observation_epoch=1
                 )
-                self.assertFalse(snapshot["observations"][CHAND]["fresh"])
-                self.assertEqual(reason, coordinator.freshness_reason(CHAND))
+                self.assertEqual(
+                    expected_fresh, snapshot["observations"][CHAND]["fresh"]
+                )
+                self.assertEqual(
+                    expected_reason, coordinator.freshness_reason(CHAND)
+                )
 
     async def test_deadline_provider_failure_is_reported_and_fails_closed(self) -> None:
         def unavailable_deadline(*_args: object) -> int:
