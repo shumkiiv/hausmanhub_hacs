@@ -5305,7 +5305,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(100, len(self.hass.http.views))
+        self.assertEqual(106, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -11007,7 +11007,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(99, len(closed_hass.http.views))
+        self.assertEqual(105, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -11025,6 +11025,12 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/tablet-profile",
                 "/api/hausman_hub/v1/tablet-power-status",
                 "/api/hausman_hub/v1/room-settings",
+                "/api/hausman_hub/v1/rooms/{room_id}/lighting/config",
+                "/api/hausman_hub/v1/rooms/{room_id}/lighting/status",
+                "/api/hausman_hub/v1/rooms/{room_id}/lighting/templates",
+                "/api/hausman_hub/v1/rooms/{room_id}/lighting/templates/apply",
+                "/api/hausman_hub/v1/rooms/{room_id}/lighting/live-tests",
+                "/api/hausman_hub/v1/rooms/{room_id}/lighting/live-tests/{correlation_id}",
                 "/api/hausman_hub/v1/home",
                 "/api/hausman_hub/v1/climate/runtime",
                 "/api/hausman_hub/v1/climate/actions",

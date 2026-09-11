@@ -37,6 +37,7 @@ CLIMATE_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-climate-overview.js")
 LIGHTING_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-lighting.js")
 LIGHT_PROTECTION_JS = PANEL_JS.with_name("hausman-hub-light-protection.js")
 ROOMS_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-rooms.js")
+ROOM_LIGHTING_JS = PANEL_JS.with_name("hausman-hub-room-lighting.js")
 MEDIA_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-media-overview.js")
 SECURITY_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-security-overview.js")
 DEVICES_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-devices-overview.js")
@@ -465,6 +466,11 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
         fs.readFileSync({str(ROOMS_OVERVIEW_JS)!r}, "utf8")
           .replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(ROOMS_OVERVIEW_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(ROOM_LIGHTING_JS)!r}, "utf8")
+          .replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(ROOM_LIGHTING_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(MEDIA_OVERVIEW_JS)!r}, "utf8")
