@@ -11,6 +11,7 @@ import asyncio
 from datetime import datetime, time, timezone
 import logging
 from types import SimpleNamespace
+import threading
 
 from custom_components.hausman_hub.application.room_lighting_ha_executor import (
     RoomLightingHaExecutor,
@@ -904,3 +905,80 @@ async def test_device_trigger_attaches_for_each_room() -> None:
         }
     finally:
         await runtime.stop()
+
+
+async def test_registered_event_callbacks_are_ha_callbacks() -> None:
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    captured: dict[str, object] = {}
+
+    def track_state_changes(h, entities, callback):
+        captured["state"] = callback
+        return lambda: None
+
+    def track_interval(h, callback, interval):
+        captured["clock"] = callback
+        return lambda: None
+
+    def listen_bus(h, event_type, callback):
+        captured["service"] = callback
+        return lambda: None
+
+    runtime = RoomLightingRuntime(
+        hass,
+        _ConfigService(config_from_payload(_config_payload())),
+        RoomLightingShadowService(_MemoryShadowStore()),
+        commands_enabled=False,
+        executor=_SpyExecutor(),
+        now_ms=lambda: _NOW_MS,
+        track_state_changes=track_state_changes,
+        track_interval=track_interval,
+        listen_bus=listen_bus,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        # HA runs a callback on the event loop only when it carries this marker;
+        # otherwise it is dispatched to an executor thread.
+        for name in ("state", "clock", "service"):
+            callback = captured[name]
+            assert getattr(callback, "_hass_callback", False) is True, name
+    finally:
+        await runtime.stop()
+
+
+async def test_create_task_from_worker_thread_uses_the_event_loop() -> None:
+    loop = asyncio.get_running_loop()
+    recorded: list[object] = []
+
+    class _LoopHass:
+        def __init__(self) -> None:
+            self.loop = loop
+
+        def async_create_task(self, coroutine):
+            # Home Assistant refuses an off-loop call; emulate that strictness.
+            if asyncio.get_running_loop() is not self.loop:
+                raise RuntimeError("not on the event loop")
+            task = asyncio.ensure_future(coroutine)
+            recorded.append(task)
+            return task
+
+    runtime = RoomLightingRuntime(
+        _LoopHass(),
+        _ConfigService(config_from_payload(_config_payload())),
+        RoomLightingShadowService(_MemoryShadowStore()),
+        commands_enabled=False,
+        executor=_SpyExecutor(),
+        now_ms=lambda: _NOW_MS,
+        track_state_changes=lambda h, e, c: (lambda: None),
+        track_interval=lambda h, c, i: (lambda: None),
+        listen_bus=lambda h, e, c: (lambda: None),
+    )
+
+    thread = threading.Thread(
+        target=lambda: runtime._create_task(asyncio.sleep(0))
+    )
+    thread.start()
+    thread.join()
+    await asyncio.sleep(0.05)
+    assert len(recorded) == 1
+    await asyncio.gather(*recorded)

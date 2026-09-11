@@ -46,6 +46,15 @@ from .room_lighting_ha_state import RoomLightingHaStateProvider
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
+try:  # Home Assistant is unavailable in framework-independent tests.
+    from homeassistant.core import callback as _ha_callback
+except ModuleNotFoundError:  # pragma: no cover - exercised by the test shim
+
+    def _ha_callback(func: Callable[..., None]) -> Callable[..., None]:
+        setattr(func, "_hass_callback", True)
+        return func
+
+
 _LOGGER = logging.getLogger(__name__)
 
 EVENT_CALL_SERVICE = "call_service"
@@ -420,6 +429,7 @@ class RoomLightingRuntime:
 
     # -- events ------------------------------------------------------------
 
+    @_ha_callback
     def _state_event(self, event: object) -> None:
         if not self._running:
             return
@@ -434,11 +444,13 @@ class RoomLightingRuntime:
             return
         self._create_task(self.async_process(sorted(rooms)))
 
+    @_ha_callback
     def _clock_event(self, _now: object) -> None:
         if not self._running:
             return
         self._create_task(self.async_process())
 
+    @_ha_callback
     def _service_event(self, event: object) -> None:
         if not self._running:
             return
@@ -879,10 +891,46 @@ class RoomLightingRuntime:
         if self._hass is None:
             return
         create = getattr(self._hass, "async_create_task", None)
+        loop = getattr(self._hass, "loop", None)
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+        # A callback normally runs on the Home Assistant event loop. If a caller
+        # ever reaches here from an executor thread, hop back before creating the
+        # task instead of calling hass.async_create_task off-loop.
+        if loop is not None and running_loop is not loop:
+            schedule = getattr(loop, "call_soon_threadsafe", None)
+            if callable(schedule) and callable(create):
+                try:
+                    schedule(create, coroutine)
+                    return
+                except Exception:  # noqa: BLE001 - never crash a callback
+                    _LOGGER.warning("room lighting task scheduling failed")
+                    _discard_coroutine(coroutine)
+                    return
         if callable(create):
-            create(coroutine)
-        else:
+            try:
+                create(coroutine)
+                return
+            except Exception:  # noqa: BLE001 - never crash a callback
+                _LOGGER.warning("room lighting task scheduling failed")
+                _discard_coroutine(coroutine)
+                return
+        try:
             asyncio.ensure_future(coroutine)  # type: ignore[arg-type]
+        except Exception:  # noqa: BLE001 - never crash a callback
+            _LOGGER.warning("room lighting task scheduling failed")
+            _discard_coroutine(coroutine)
+
+
+def _discard_coroutine(coroutine: object) -> None:
+    close = getattr(coroutine, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:  # noqa: BLE001 - best effort cleanup
+            pass
 
 
 def _entity_ids(service_data: object) -> tuple[str, ...]:
