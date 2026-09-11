@@ -1181,6 +1181,21 @@ class TamburHaObservationCoordinator:
         self._entity_targets = {
             entity: target for target, entity in self._target_entities.items()
         }
+        self._light_targets = frozenset(
+            str(self._bindings[name])
+            for name in ("chandelier", "points", "mirror")
+            if isinstance(self._bindings.get(name), str)
+        )
+        self._chandelier_target = (
+            str(self._bindings["chandelier"])
+            if isinstance(self._bindings.get("chandelier"), str)
+            else None
+        )
+        self._power_entity = (
+            entity_id_provider(str(self._bindings["power"]))
+            if isinstance(self._bindings.get("power"), str)
+            else None
+        )
 
     def _ha_sunset_for_date(self, local_date: str) -> int | None:
         try:
@@ -1329,6 +1344,9 @@ class TamburHaObservationCoordinator:
         recorded = self._observed.get(target_id)
         current_state = getattr(getattr(self._hass, "states", None), "get", lambda _id: None)(entity_id)
         state_value = str(getattr(current_state, "state", "unknown"))
+        effective = self._effective_chandelier_state(target_id, current_state)
+        if effective is not None:
+            state_value = effective
         revision = int(recorded["revision"]) if recorded is not None else 0
         observed_at = int(recorded["reportedAtMs"] or 0) if recorded is not None else 0
         reason = "continuity_not_observed"
@@ -1336,6 +1354,12 @@ class TamburHaObservationCoordinator:
         if not self._running:
             reason = "continuity_broken"
         elif recorded is None or recorded.get("continuityGeneration") != self._continuity_generation:
+            fallback = self._last_known_light_observation(
+                target_id, current_state, state_value, observation_epoch
+            )
+            if fallback is not None:
+                self._reasons[target_id] = str(fallback.pop("_reason"))
+                return fallback
             reason = "continuity_not_observed"
         elif str(recorded.get("state")) in _UNAVAILABLE_STATES or state_value in _UNAVAILABLE_STATES:
             reason = f"state_{state_value if state_value in _UNAVAILABLE_STATES else recorded['state']}"
@@ -1370,6 +1394,81 @@ class TamburHaObservationCoordinator:
             "observedAtMs": observed_at,
             "fresh": fresh,
             "continuityEpoch": observation_epoch if fresh else 0,
+        }
+        if isinstance(attributes, Mapping):
+            brightness = attributes.get("brightness")
+            if type(brightness) is int and 0 <= brightness <= 255:
+                result["brightnessPercent"] = round(brightness * 100 / 255)
+            kelvin = attributes.get("color_temp_kelvin")
+            if type(kelvin) is int and 1500 <= kelvin <= 10000:
+                result["colorTemperatureKelvin"] = kelvin
+        return result
+
+    def _effective_chandelier_state(
+        self, target_id: str, current_state: object | None
+    ) -> str | None:
+        """Report an unpowered chandelier as off so profiles can enable power."""
+
+        if target_id != self._chandelier_target or self._power_entity is None:
+            return None
+        reported = str(getattr(current_state, "state", "unknown")).strip().casefold()
+        if reported != "on":
+            return None
+        power = getattr(getattr(self._hass, "states", None), "get", lambda _id: None)(
+            self._power_entity
+        )
+        value = str(getattr(power, "state", "unknown")).strip().casefold()
+        if value != "off":
+            return None
+        attributes = getattr(power, "attributes", None)
+        if isinstance(attributes, Mapping) and (
+            attributes.get("restored") is True
+            or attributes.get("cached") is True
+            or attributes.get("assumed_state") is True
+        ):
+            return None
+        return "off"
+
+    def _last_known_light_observation(
+        self,
+        target_id: str,
+        current_state: object | None,
+        state_value: str,
+        observation_epoch: int,
+    ) -> dict[str, object] | None:
+        """Trust the last known light state when the relay only reports on change."""
+
+        if target_id not in self._light_targets:
+            return None
+        value = state_value.strip().casefold()
+        if value not in {"on", "off"}:
+            return None
+        attributes = getattr(current_state, "attributes", None)
+        if isinstance(attributes, Mapping) and (
+            attributes.get("restored") is True
+            or attributes.get("cached") is True
+            or attributes.get("assumed_state") is True
+        ):
+            return None
+        observed = (
+            getattr(current_state, "last_reported", None)
+            or getattr(current_state, "last_updated", None)
+            or getattr(current_state, "last_changed", None)
+        )
+        if isinstance(observed, datetime):
+            if observed.tzinfo is None:
+                observed = observed.replace(tzinfo=timezone.utc)
+            observed_at = int(observed.timestamp() * 1000)
+        else:
+            observed_at = self._now_ms()
+        revision = observed_at if observed_at > 0 else self._now_ms()
+        result: dict[str, object] = {
+            "state": value,
+            "revision": revision,
+            "observedAtMs": observed_at,
+            "fresh": True,
+            "continuityEpoch": observation_epoch,
+            "_reason": "last_known_light_state",
         }
         if isinstance(attributes, Mapping):
             brightness = attributes.get("brightness")

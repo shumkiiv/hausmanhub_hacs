@@ -1537,6 +1537,46 @@ class ScenarioControlCoordinator:
                     )
                 return
 
+            manual_claims = self._manual_claims(
+                (
+                    SHOWER_MAIN_TARGET_ID,
+                    SHOWER_EXTRA_TARGET_ID,
+                    SHOWER_CABINET_TARGET_ID,
+                )
+            )
+            if manual_claims:
+                record = self._record_for_scenario(SHOWER_SCENARIO_ID)
+                assert record is not None
+                started = record.get("manualAbsenceStartedAtMs")
+                release_seconds = (
+                    self._policy_service.current.policy.manual_release_seconds
+                )
+                if type(started) is not int:
+                    started = self._now_ms()
+                    await self._set_zone_transition(
+                        SHOWER_SCENARIO_ID,
+                        "manual_release_pending",
+                        evidence=evidence,
+                        manual_absence_started_at_ms=started,
+                        deadline_ms=started + release_seconds * 1000,
+                        clear_sequence=True,
+                    )
+                    self._schedule_zone_due(SHOWER_SCENARIO_ID)
+                    return
+                if self._now_ms() < started + release_seconds * 1000:
+                    self._schedule_zone_due(SHOWER_SCENARIO_ID)
+                    return
+                await self._light_priority.async_release_manual_claims(
+                    manual_claims
+                )
+                await self._set_zone_transition(
+                    SHOWER_SCENARIO_ID,
+                    "manual_release_completed",
+                    evidence=evidence,
+                    clear_absence=True,
+                    clear_sequence=True,
+                    clear_manual_absence=True,
+                )
             owned_lights = tuple(
                 target for target in (SHOWER_MAIN_TARGET_ID, SHOWER_EXTRA_TARGET_ID, SHOWER_CABINET_TARGET_ID)
                 if self._target_state(target) == "on" and self._is_room_owned(SHOWER_SCENARIO_ID, target)

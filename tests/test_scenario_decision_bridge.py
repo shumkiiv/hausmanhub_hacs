@@ -1594,6 +1594,7 @@ class TamburHaObservationCoordinatorTests(unittest.IsolatedAsyncioTestCase):
             CHAND: "light.chandelier",
             POINTS: "switch.points",
             MIRROR: "switch.mirror",
+            POWER: "switch.power",
             SENSOR: "binary_sensor.presence",
         }
 
@@ -1683,7 +1684,7 @@ class TamburHaObservationCoordinatorTests(unittest.IsolatedAsyncioTestCase):
             snapshot["authority"][MIRROR]["confirmedStateRevision"],
         )
 
-    async def test_old_ha_state_is_not_fresh_until_actual_state_event_in_current_epoch(self) -> None:
+    async def test_last_known_light_state_is_trusted_but_sensors_are_not(self) -> None:
         coordinator = self._coordinator(
             lambda _target, _entity, reported: reported + 60_000
         )
@@ -1691,8 +1692,14 @@ class TamburHaObservationCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         before = await coordinator.async_snapshot_source(
             SCENARIO_ID, event(), observation_epoch=1
         )
-        self.assertFalse(before["observations"][CHAND]["fresh"])
-        self.assertEqual("continuity_not_observed", coordinator.freshness_reason(CHAND))
+        self.assertTrue(before["observations"][CHAND]["fresh"])
+        self.assertEqual(
+            "last_known_light_state", coordinator.freshness_reason(CHAND)
+        )
+        self.assertFalse(before["observations"][SENSOR]["fresh"])
+        self.assertEqual(
+            "continuity_not_observed", coordinator.freshness_reason(SENSOR)
+        )
 
         stamp = datetime.fromtimestamp(NOW / 1000, timezone.utc)
         state = SimpleNamespace(
@@ -1717,6 +1724,47 @@ class TamburHaObservationCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(NOW, after["observations"][CHAND]["observedAtMs"])
         stop()
         self.assertEqual(["change", "report"], self.unsubscribed)
+
+    async def test_unpowered_chandelier_is_reported_as_off(self) -> None:
+        coordinator = self._coordinator(
+            lambda _target, _entity, reported: reported + 60_000
+        )
+        coordinator.start()
+        stamp = datetime.fromtimestamp(NOW / 1000, timezone.utc)
+        self.hass.states.values["light.chandelier"] = SimpleNamespace(
+            entity_id="light.chandelier",
+            state="on",
+            attributes={"brightness": 128},
+            last_changed=stamp,
+            last_updated=stamp,
+            last_reported=stamp,
+        )
+        self.hass.states.values["switch.power"] = SimpleNamespace(
+            entity_id="switch.power",
+            state="off",
+            attributes={},
+            last_changed=stamp,
+            last_updated=stamp,
+            last_reported=stamp,
+        )
+        snapshot = await coordinator.async_snapshot_source(
+            SCENARIO_ID, event(), observation_epoch=1
+        )
+        self.assertEqual("off", snapshot["observations"][CHAND]["state"])
+        self.assertTrue(snapshot["observations"][CHAND]["fresh"])
+
+        self.hass.states.values["switch.power"] = SimpleNamespace(
+            entity_id="switch.power",
+            state="on",
+            attributes={},
+            last_changed=stamp,
+            last_updated=stamp,
+            last_reported=stamp,
+        )
+        snapshot = await coordinator.async_snapshot_source(
+            SCENARIO_ID, event(ident="presence.3"), observation_epoch=1
+        )
+        self.assertEqual("on", snapshot["observations"][CHAND]["state"])
 
     async def test_missing_deadline_and_unavailable_event_fail_closed_with_distinct_reasons(self) -> None:
         coordinator = self._coordinator(lambda *_args: None)
