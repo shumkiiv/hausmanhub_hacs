@@ -1186,6 +1186,11 @@ class TamburHaObservationCoordinator:
             for name in ("chandelier", "points", "mirror")
             if isinstance(self._bindings.get(name), str)
         )
+        self._presence_targets = frozenset(
+            str(item)
+            for item in (self._bindings.get("presenceSensors") or [])
+            if isinstance(item, str)
+        )
         self._chandelier_target = (
             str(self._bindings["chandelier"])
             if isinstance(self._bindings.get("chandelier"), str)
@@ -1354,8 +1359,14 @@ class TamburHaObservationCoordinator:
         if not self._running:
             reason = "continuity_broken"
         elif recorded is None or recorded.get("continuityGeneration") != self._continuity_generation:
-            fallback = self._last_known_light_observation(
-                target_id, current_state, state_value, observation_epoch
+            fallback = self._last_known_observation(
+                target_id,
+                current_state,
+                state_value,
+                observation_epoch,
+                allow=self._light_targets,
+                only_on=False,
+                reason="last_known_light_state",
             )
             if fallback is not None:
                 self._reasons[target_id] = str(fallback.pop("_reason"))
@@ -1387,8 +1398,27 @@ class TamburHaObservationCoordinator:
                     reason = "fresh"
                     fresh = True
         if reason == "freshness_deadline_expired" and target_id in self._light_targets:
-            fallback = self._last_known_light_observation(
-                target_id, current_state, state_value, observation_epoch
+            fallback = self._last_known_observation(
+                target_id,
+                current_state,
+                state_value,
+                observation_epoch,
+                allow=self._light_targets,
+                only_on=False,
+                reason="last_known_light_state",
+            )
+            if fallback is not None:
+                self._reasons[target_id] = str(fallback.pop("_reason"))
+                return fallback
+        if not fresh and target_id in self._presence_targets:
+            fallback = self._last_known_observation(
+                target_id,
+                current_state,
+                state_value,
+                observation_epoch,
+                allow=self._presence_targets,
+                only_on=True,
+                reason="last_known_presence_on",
             )
             if fallback is not None:
                 self._reasons[target_id] = str(fallback.pop("_reason"))
@@ -1436,19 +1466,25 @@ class TamburHaObservationCoordinator:
             return None
         return "off"
 
-    def _last_known_light_observation(
+    def _last_known_observation(
         self,
         target_id: str,
         current_state: object | None,
         state_value: str,
         observation_epoch: int,
+        *,
+        allow: frozenset[str],
+        only_on: bool,
+        reason: str,
     ) -> dict[str, object] | None:
-        """Trust the last known light state when the relay only reports on change."""
+        """Trust the last known state when a device only reports on change."""
 
-        if target_id not in self._light_targets:
+        if target_id not in allow:
             return None
         value = state_value.strip().casefold()
         if value not in {"on", "off"}:
+            return None
+        if only_on and value != "on":
             return None
         attributes = getattr(current_state, "attributes", None)
         if isinstance(attributes, Mapping) and (
@@ -1475,7 +1511,7 @@ class TamburHaObservationCoordinator:
             "observedAtMs": observed_at,
             "fresh": True,
             "continuityEpoch": observation_epoch,
-            "_reason": "last_known_light_state",
+            "_reason": reason,
         }
         if isinstance(attributes, Mapping):
             brightness = attributes.get("brightness")

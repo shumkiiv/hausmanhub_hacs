@@ -1725,6 +1725,37 @@ class TamburHaObservationCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         stop()
         self.assertEqual(["change", "report"], self.unsubscribed)
 
+    async def test_stale_presence_on_is_trusted_but_stale_off_is_not(self) -> None:
+        coordinator = self._coordinator(
+            lambda _target, _entity, reported: reported + 60_000
+        )
+        coordinator.start()
+        stamp = datetime.fromtimestamp((NOW - 10_000_000) / 1000, timezone.utc)
+        self.hass.states.values["binary_sensor.presence"] = SimpleNamespace(
+            entity_id="binary_sensor.presence",
+            state="on",
+            attributes={},
+            last_changed=stamp,
+            last_updated=stamp,
+            last_reported=stamp,
+        )
+        snapshot = await coordinator.async_snapshot_source(
+            SCENARIO_ID, event(), observation_epoch=1
+        )
+        self.assertTrue(snapshot["observations"][SENSOR]["fresh"])
+        self.assertEqual(
+            "last_known_presence_on", coordinator.freshness_reason(SENSOR)
+        )
+
+        self.hass.states.values["binary_sensor.presence"].state = "off"
+        snapshot = await coordinator.async_snapshot_source(
+            SCENARIO_ID, event(ident="presence.2"), observation_epoch=1
+        )
+        self.assertFalse(snapshot["observations"][SENSOR]["fresh"])
+        self.assertEqual(
+            "continuity_not_observed", coordinator.freshness_reason(SENSOR)
+        )
+
     async def test_unpowered_chandelier_is_reported_as_off(self) -> None:
         coordinator = self._coordinator(
             lambda _target, _entity, reported: reported + 60_000
