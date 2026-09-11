@@ -771,6 +771,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         scenario_service.set_smart_switch_receipt_consumer(smart_switch_adapter)
 
+    # Generic managed-scenario engine for every room except the separately
+    # migrated Tambur runtime. Without this the coordinator listener and the
+    # state/time trigger subscriptions are never armed, so showers, corridors,
+    # storage, bathroom, office, curtains and away scenarios silently stop.
+    _tambur_scenario_id = "system-tambur-adaptive-controller"
+    scenario_control_coordinator.set_externally_managed_scenarios(
+        frozenset({_tambur_scenario_id})
+    )
+    if getattr(hass, "bus", None) is not None:
+        await scenario_control_coordinator.async_start(entry, activation_latch)
+        await async_start_scenario_schedule(
+            hass,
+            entry,
+            scenario_service,
+            activation_latch,
+            scenario_control_coordinator.owned_scenario_ids | {_tambur_scenario_id},
+            curtain_protection,
+        )
+        from .scenario_events import async_start_scenario_events
+
+        await async_start_scenario_events(
+            hass,
+            entry,
+            scenario_service,
+            scenario_command_contexts,
+            activation_latch,
+            scenario_control_coordinator.owned_scenario_ids | {_tambur_scenario_id},
+        )
+
     tambur_runtime_holder: dict[str, object] = {}
 
     def _cleanup_tambur_runtime() -> None:
@@ -976,6 +1005,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         def _commit_tambur_runtime() -> None:
             activation_latch.open()
+            scenario_control_coordinator.activate()
             runtime.activate()
             domain_data["smart_switch_runtime"] = {
                 "state": "ready",

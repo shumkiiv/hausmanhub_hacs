@@ -341,6 +341,18 @@ def test_coordinator_owns_all_seven_completed_runtime_controllers() -> None:
     )
 
 
+def test_coordinator_excludes_the_externally_managed_tambur_runtime() -> None:
+    coordinator = object.__new__(ScenarioControlCoordinator)
+    coordinator.set_externally_managed_scenarios(
+        frozenset({"system-tambur-adaptive-controller"})
+    )
+    owned = coordinator.owned_scenario_ids
+    assert "system-tambur-adaptive-controller" not in owned
+    assert SHOWER_SCENARIO_ID in owned
+    assert "system-small-corridor-light-controller" in owned
+    assert len(owned) == 6
+
+
 def test_room_runtime_and_tool_sources_are_exact_manifest_bytes() -> None:
     manifest = {item.scenario_id: item for item in FULL_MIGRATION_MANIFEST}
     for scenario_id, file_name in ROOM_SOURCES.items():

@@ -358,6 +358,17 @@ class ScenarioControlCoordinator:
         self._schedule_unsubs: list[Callable[[], None]] = []
         self._activation_latch: object | None = None
         self._started = False
+        self._externally_managed_scenarios: frozenset[str] = frozenset()
+
+    def set_externally_managed_scenarios(self, scenario_ids: frozenset[str]) -> None:
+        """Exclude scenarios owned by another runtime (for example Tambur)."""
+
+        self._externally_managed_scenarios = frozenset(scenario_ids)
+
+    def _tambur_external(self) -> bool:
+        return TAMBUR_SCENARIO_ID in getattr(
+            self, "_externally_managed_scenarios", frozenset()
+        )
 
     @property
     def owned_scenario_ids(self) -> frozenset[str]:
@@ -373,7 +384,7 @@ class ScenarioControlCoordinator:
                 BATHROOM_SCENARIO_ID,
                 OFFICE_SCENARIO_ID,
             }
-        )
+        ) - getattr(self, "_externally_managed_scenarios", frozenset())
 
     async def async_load(self) -> None:
         document = self._policy_service.current
@@ -472,7 +483,7 @@ class ScenarioControlCoordinator:
             entity_id = data.get("entity_id") if isinstance(data, Mapping) else None
             if entity_id in self._storage_entity_ids():
                 await self.async_handle_storage_change()
-            if entity_id in self._tambur_entity_ids():
+            if entity_id in self._tambur_entity_ids() and not self._tambur_external():
                 await self.async_handle_tambur_change(
                     trigger_entity_id=entity_id,
                     old_state=data.get("old_state"),
@@ -511,10 +522,11 @@ class ScenarioControlCoordinator:
                     await self.async_reconcile_storage_exhaust_due()
                 else:
                     self._schedule_exhaust_due()
-            await self.async_handle_tambur_change(
-                recovery=True,
-                allow_activation=False,
-            )
+            if not self._tambur_external():
+                await self.async_handle_tambur_change(
+                    recovery=True,
+                    allow_activation=False,
+                )
             await self.async_handle_small_corridor_change(
                 recovery=True,
                 allow_activation=False,
@@ -2754,7 +2766,7 @@ class ScenarioControlCoordinator:
 
         async with self._decision_lock:
             policy = self._policy_service.current.policy
-            if clock in {policy.evening_latest, "23:00"}:
+            if clock in {policy.evening_latest, "23:00"} and not self._tambur_external():
                 if (
                     self._target_state(TAMBUR_MIRROR_TARGET_ID) == "off"
                     and not self._manual_claims((TAMBUR_MIRROR_TARGET_ID,))
@@ -2767,7 +2779,7 @@ class ScenarioControlCoordinator:
                     )
                 if clock == policy.evening_latest:
                     await self._start_tambur_evening_cap_if_owned()
-            if clock == policy.tambur_main_off:
+            if clock == policy.tambur_main_off and not self._tambur_external():
                 self._cancel_zone_task(TAMBUR_SCENARIO_ID)
                 if not self._manual_claims(
                     (TAMBUR_CHANDELIER_TARGET_ID, TAMBUR_POINTS_TARGET_ID)
@@ -2785,7 +2797,7 @@ class ScenarioControlCoordinator:
                         SMALL_CORRIDOR_SCENARIO_ID,
                         (SMALL_CORRIDOR_CHANDELIER_TARGET_ID, SMALL_CORRIDOR_RELAY_TARGET_ID),
                     )
-            if clock == "10:00":
+            if clock == "10:00" and not self._tambur_external():
                 mirror_entity = self._target_entity_id(TAMBUR_MIRROR_TARGET_ID)
                 if (
                     mirror_entity is not None
@@ -2798,7 +2810,7 @@ class ScenarioControlCoordinator:
                         "turn_off",
                         None,
                     )
-            if clock in {"09:00", "10:00"}:
+            if clock in {"09:00", "10:00"} and not self._tambur_external():
                 await self._async_handle_tambur_change(
                     recovery=True,
                     allow_activation=False,
