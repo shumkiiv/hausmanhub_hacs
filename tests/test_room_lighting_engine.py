@@ -86,6 +86,7 @@ def _schedule_night() -> dict[str, object]:
             "colorTemperature": None,
             "fade": True,
             "mode": "night_light",
+            "minOnSeconds": 600,
         },
     }
 
@@ -520,7 +521,6 @@ def test_policy_from_config_uses_dimming_and_protection() -> None:
     policy = EnginePolicy.from_config(config)
     assert policy.fade_seconds == 20
     assert policy.absence_seconds_before_night == 600
-    assert policy.night_min_seconds == 600
 
 
 def test_schedule_entry_does_not_affect_other_targets() -> None:
@@ -636,3 +636,106 @@ def test_schedule_off_uses_schedule_reason() -> None:
     assert main is not None
     assert main.commands
     assert main.commands[0].reason is DecisionReason.SCHEDULE
+
+
+def _schedule_always() -> dict[str, object]:
+    return {
+        "id": "sch_mirror_always",
+        "title": "Зеркало всегда",
+        "when": {
+            "daysOfWeek": "all",
+            "holiday": False,
+            "anchor": {"kind": "fixed", "time": "23:00", "offsetMinutes": 0},
+        },
+        "targets": {"lightTargets": ["light_mirror"], "groupIds": [], "roles": []},
+        "how": {
+            "brightness": 10,
+            "colorTemperature": None,
+            "fade": True,
+            "mode": "always",
+            "minOnSeconds": 0,
+        },
+    }
+
+
+def _schedule_mirror_off() -> dict[str, object]:
+    return {
+        "id": "sch_mirror_off",
+        "title": "Зеркало выключить",
+        "when": {
+            "daysOfWeek": "all",
+            "holiday": False,
+            "anchor": {"kind": "fixed", "time": "23:30", "offsetMinutes": 0},
+        },
+        "targets": {"lightTargets": ["light_mirror"], "groupIds": [], "roles": []},
+        "how": {
+            "brightness": 0,
+            "colorTemperature": None,
+            "fade": False,
+            "mode": "off",
+            "minOnSeconds": 0,
+        },
+    }
+
+
+def test_always_mode_turns_on_and_next_off_entry_turns_off() -> None:
+    on_now = _at(23, 15)
+    on_decision = evaluate_room_lighting(
+        _config(schedule=[_schedule_always(), _schedule_mirror_off()]),
+        _ctx(on_now, lights=(_light("light_mirror", SensorState.OFF, on_now - 1000),)),
+    )
+    mirror_on = decision_target(on_decision, "light_mirror")
+    assert mirror_on is not None
+    assert mirror_on.commands[0].action is LightAction.TURN_ON
+    assert mirror_on.commands[0].reason is DecisionReason.SCHEDULE
+
+    off_now = _at(23, 45)
+    off_decision = evaluate_room_lighting(
+        _config(schedule=[_schedule_always(), _schedule_mirror_off()]),
+        _ctx(
+            off_now,
+            lights=(
+                _light("light_mirror", SensorState.ON, off_now - 1000, brightness=10, color=2700),
+            ),
+            ownership=(_auto("light_mirror", off_now - 1000),),
+        ),
+    )
+    mirror_off = decision_target(off_decision, "light_mirror")
+    assert mirror_off is not None
+    assert mirror_off.commands
+    assert mirror_off.commands[0].reason is DecisionReason.SCHEDULE
+
+
+def test_night_light_min_on_seconds_holds_then_turns_off() -> None:
+    now = _at(2, 5)
+    lights = (_light("light_mirror", SensorState.ON, now - 1000, brightness=10),)
+
+    hold = evaluate_room_lighting(
+        _config(schedule=[_schedule_night()]),
+        _ctx(
+            now,
+            presence=SensorState.OFF,
+            presence_at=now - 800_000,
+            lights=lights,
+            ownership=(_auto("light_mirror", now - 100_000),),
+        ),
+    )
+    hold_mirror = decision_target(hold, "light_mirror")
+    assert hold_mirror is not None
+    assert hold_mirror.commands == ()
+    assert any(skip.reason is SkipReason.NIGHT_MINIMUM for skip in hold_mirror.skips)
+
+    due = evaluate_room_lighting(
+        _config(schedule=[_schedule_night()]),
+        _ctx(
+            now,
+            presence=SensorState.OFF,
+            presence_at=now - 800_000,
+            lights=lights,
+            ownership=(_auto("light_mirror", now - 700_000),),
+        ),
+    )
+    due_mirror = decision_target(due, "light_mirror")
+    assert due_mirror is not None
+    assert due_mirror.commands
+    assert due_mirror.commands[0].reason is DecisionReason.DIMMING

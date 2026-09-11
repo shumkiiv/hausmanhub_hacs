@@ -473,6 +473,7 @@ class ScheduleHow:
     color_temperature: int | None
     fade: bool = True
     mode: ScheduleMode = ScheduleMode.ON_PRESENCE
+    min_on_seconds: int = 0
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -488,6 +489,12 @@ class ScheduleHow:
         _flag(self.fade, "schedule fade flag")
         object.__setattr__(
             self, "mode", _enum(self.mode, ScheduleMode, "schedule mode")
+        )
+        _integer(
+            self.min_on_seconds,
+            "schedule minimum on seconds",
+            minimum=0,
+            maximum=86400,
         )
 
 
@@ -963,6 +970,7 @@ def _schedule_to_payload(entry: ScheduleEntry) -> dict[str, object]:
             "colorTemperature": entry.how.color_temperature,
             "fade": entry.how.fade,
             "mode": entry.how.mode.value,
+            "minOnSeconds": entry.how.min_on_seconds,
         },
     }
     if entry.when.anchor.time is not None:
@@ -1138,6 +1146,7 @@ def _schedule_from_payload(payload: object) -> ScheduleEntry:
             color_temperature=how.get("colorTemperature"),
             fade=how.get("fade", True),
             mode=how.get("mode", ScheduleMode.ON_PRESENCE),
+            min_on_seconds=how.get("minOnSeconds", 0),
         ),
     )
 

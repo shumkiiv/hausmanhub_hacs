@@ -345,3 +345,17 @@ def test_resolve_anchor_time_uses_passed_sun_and_timezone() -> None:
     assert sunrise == datetime(2026, 9, 11, 5, 30, tzinfo=tz)
     assert sunset == datetime(2026, 9, 11, 18, 30, tzinfo=tz)
     assert fixed == datetime(2026, 9, 11, 23, 0, tzinfo=tz)
+
+
+def test_min_on_seconds_round_trip_and_bounds() -> None:
+    payload = _payload()
+    payload["schedule"][0]["how"]["minOnSeconds"] = 600  # type: ignore[index]
+    config = config_from_payload(payload)
+    assert config.schedule[0].how.min_on_seconds == 600
+    assert config.to_dict()["schedule"][0]["how"]["minOnSeconds"] == 600  # type: ignore[index]
+
+    for bad in (-1, 86401):
+        invalid = _payload()
+        invalid["schedule"][0]["how"]["minOnSeconds"] = bad  # type: ignore[index]
+        with pytest.raises(RoomLightingViolation):
+            config_from_payload(invalid)

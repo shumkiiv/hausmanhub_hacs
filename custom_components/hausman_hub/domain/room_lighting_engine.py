@@ -13,7 +13,6 @@ from datetime import datetime, time as dt_time, timedelta, tzinfo
 from enum import StrEnum
 
 from .room_lighting import (
-    LightRole,
     RoomLightingConfig,
     ScheduleEntry,
     ScheduleMode,
@@ -33,6 +32,9 @@ from .room_lighting_ownership import (
 MODE_SHADOW = "shadow"
 
 _DAY_CODES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+# Remaining hardcoded boundary: before 23:00 the absence threshold is the
+# longer one. Moving it into the schedule is a later step.
+_EVENING_ABSENCE_BOUNDARY = dt_time(23, 0)
 
 
 class LightAction(StrEnum):
@@ -48,7 +50,6 @@ class DecisionReason(StrEnum):
     LUX = "lux"
     DIMMING = "dimming"
     NIGHT_LIGHT = "night_light"
-    MIRROR_WINDOW = "mirror_window"
     AWAY_RETURN = "away_return"
     RESTORE = "restore"
 
@@ -175,12 +176,8 @@ class EnginePolicy:
     absence_seconds_before_night: int = 600
     absence_seconds_after_night: int = 180
     fade_seconds: int = 20
-    night_min_seconds: int = 600
     sensor_freshness_seconds: int = 300
     staleness_seconds: int = 86400
-    mirror_window_start: dt_time = dt_time(23, 0)
-    mirror_window_end: dt_time = dt_time(1, 0)
-    night_window_start: dt_time = dt_time(2, 0)
 
     @classmethod
     def from_config(cls, config: RoomLightingConfig) -> "EnginePolicy":
@@ -194,7 +191,6 @@ class EnginePolicy:
                 absence_seconds_before_night=max(
                     policy.absence_seconds_before_night, minimum
                 ),
-                night_min_seconds=max(policy.night_min_seconds, minimum),
             )
         return policy
 
@@ -377,32 +373,18 @@ def _evaluate_target(
         if not released:
             return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_OWNERSHIP))
 
-    night_window = _in_window(now_time, policy.night_window_start, context.sunrise)
-    mirror_window = _in_window(
-        now_time, policy.mirror_window_start, policy.mirror_window_end
-    )
-    role = target.role  # type: ignore[attr-defined]
-
     want_on = False
     reason = DecisionReason.SCHEDULE
     presence_required = False
-    has_auto_source = False
-    if role is LightRole.MIRROR and mirror_window:
-        want_on, reason = True, DecisionReason.MIRROR_WINDOW
-        has_auto_source = True
-    elif role in {LightRole.NIGHT, LightRole.MIRROR} and night_window and presence is SensorState.ON:
-        want_on, reason = True, DecisionReason.NIGHT_LIGHT
-        presence_required = True
-        has_auto_source = True
-    elif schedule_entry is not None:
-        has_auto_source = True
+    has_auto_source = schedule_entry is not None
+    if schedule_entry is not None:
         mode = schedule_entry.how.mode
         if mode is ScheduleMode.OFF:
             want_on, reason = False, DecisionReason.SCHEDULE
         elif mode is ScheduleMode.ALWAYS:
             want_on, reason = True, DecisionReason.SCHEDULE
         elif mode is ScheduleMode.NIGHT_LIGHT:
-            want_on = night_window and presence is SensorState.ON
+            want_on = presence is SensorState.ON
             reason = DecisionReason.NIGHT_LIGHT
             presence_required = True
         else:
@@ -532,10 +514,13 @@ def _evaluate_target(
             extra_skips=skips,
         )
     auto_record = latest_ownership(context.ownership, target_id)
+    min_on_seconds = schedule_entry.how.min_on_seconds if schedule_entry is not None else 0
     if (
-        night_window
+        schedule_entry is not None
+        and schedule_entry.how.mode is ScheduleMode.NIGHT_LIGHT
+        and min_on_seconds > 0
         and auto_record is not None
-        and context.now - auto_record.at < policy.night_min_seconds * 1000
+        and context.now - auto_record.at < min_on_seconds * 1000
     ):
         return _unchanged(
             target_id,
@@ -545,7 +530,7 @@ def _evaluate_target(
 
     threshold = (
         policy.absence_seconds_after_night
-        if now_time >= policy.mirror_window_start
+        if now_time >= _EVENING_ABSENCE_BOUNDARY
         else policy.absence_seconds_before_night
     )
     absence_due = (
@@ -823,9 +808,3 @@ def _day_matches(days: object, day: object, holiday: bool) -> bool:
             return weekday >= 5
         return True
     return _DAY_CODES[weekday] in days  # type: ignore[operator]
-
-
-def _in_window(current: dt_time, start: dt_time, end: dt_time) -> bool:
-    if start <= end:
-        return start <= current <= end
-    return current >= start or current <= end
