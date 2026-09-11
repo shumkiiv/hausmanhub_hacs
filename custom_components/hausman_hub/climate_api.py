@@ -1836,6 +1836,8 @@ class AwaySettingsView(_ClimateView):
             refresh = getattr(runtime, "async_refresh", None)
             if callable(refresh):
                 await refresh()
+            result = dict(result)
+            result["status"] = self._runtime_status()
         except AwaySettingsServiceViolation as error:
             return self.json_message(
                 (

@@ -55,6 +55,8 @@ class AwayRuntime:
         self._track = track_state_changes
         self._unsubscribers: list[Callable[[], None]] = []
         self._tasks: set[asyncio.Task[object]] = set()
+        self._timers: set[asyncio.Task[object]] = set()
+        self._generation = 0
         self._running = False
         self._away_active = False
         self._last_transition_ms: int | None = None
@@ -106,6 +108,8 @@ class AwayRuntime:
 
         if not self._running:
             return
+        self._generation += 1
+        self._cancel_timers()
         for unsubscribe in self._unsubscribers:
             unsubscribe()
         self._unsubscribers.clear()
@@ -125,12 +129,19 @@ class AwayRuntime:
         """Release subscriptions and cancel pending work without a new loop."""
 
         self._running = False
+        self._generation += 1
         for unsubscribe in self._unsubscribers:
             unsubscribe()
         self._unsubscribers.clear()
+        self._cancel_timers()
         for task in tuple(self._tasks):
             task.cancel()
         self._tasks.clear()
+
+    def _cancel_timers(self) -> None:
+        for task in tuple(self._timers):
+            task.cancel()
+        self._timers.clear()
 
     def _handle_event(self, event: object) -> None:
         if not self._running:
@@ -160,23 +171,35 @@ class AwayRuntime:
         delay = max(item.for_seconds for item in settings.triggers)
         if delay > 0:
             self._last_reason = "waiting_delay"
-            self._schedule_delayed(settings, delay)
+            self._schedule_delayed(delay)
             return
         self._away_active = True
         self._last_reason = "trigger_active"
         self._schedule(settings.away_actions, "away")
 
-    def _schedule_delayed(self, settings: AwaySettings, delay: int) -> None:
+    def _schedule_delayed(self, delay: int) -> None:
+        if self._timers:
+            return
+
+        generation = self._generation
+
         async def runner() -> None:
             await asyncio.sleep(delay)
-            if not self._running or self._away_active:
+            if (
+                not self._running
+                or generation != self._generation
+                or self._away_active
+            ):
+                return
+            settings = self._settings_provider()
+            if not settings.active:
                 return
             if self._compute_away_active(settings):
                 self._away_active = True
                 self._last_reason = "delay_elapsed"
                 await self._run(settings.away_actions, "away")
 
-        self._spawn(runner())
+        self._spawn(runner(), timer=True)
 
     def _schedule(self, actions: tuple[AwayAction, ...], kind: str) -> None:
         if not actions:
@@ -188,10 +211,14 @@ class AwayRuntime:
 
         self._spawn(runner())
 
-    def _spawn(self, coro: Awaitable[object]) -> None:
-        task = asyncio.get_event_loop().create_task(coro)
+    def _spawn(self, coro: Awaitable[object], *, timer: bool = False) -> None:
+        task = asyncio.get_running_loop().create_task(coro)
         self._tasks.add(task)  # type: ignore[arg-type]
+        if timer:
+            self._timers.add(task)  # type: ignore[arg-type]
         task.add_done_callback(self._tasks.discard)  # type: ignore[union-attr]
+        if timer:
+            task.add_done_callback(self._timers.discard)  # type: ignore[union-attr]
 
     async def _run(self, actions: tuple[AwayAction, ...], kind: str) -> None:
         async with self._execution_lock:

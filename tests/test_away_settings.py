@@ -66,6 +66,8 @@ def test_validate_away_settings_accepts_canonical_document() -> None:
     [
         {"triggers": [{"entityId": "Bad Entity", "activeState": "on"}], "awayActions": [], "returnActions": []},
         {"triggers": [{"entityId": "lock.a", "activeState": "nonsense"}], "awayActions": [], "returnActions": []},
+        {"triggers": [{"entityId": "lock.a", "activeState": ["on"]}], "awayActions": [], "returnActions": []},
+        {"triggers": [], "awayActions": [{"targetId": "entity_a", "actionId": []}], "returnActions": []},
         {"triggers": [], "awayActions": [{"targetId": "entity_a", "actionId": "turn_on", "value": 5}], "returnActions": []},
         {"triggers": [], "awayActions": [{"targetId": "entity_a", "actionId": "set_brightness_percent", "value": 200}], "returnActions": []},
         {"triggers": [], "awayActions": [{"targetId": "entity_a", "actionId": "turn_on"}, {"targetId": "entity_a", "actionId": "turn_off"}], "returnActions": []},
@@ -233,6 +235,35 @@ async def test_runtime_does_not_fabricate_return_on_unreliable_trigger() -> None
         callback(SimpleNamespace(data={"entity_id": "binary_sensor.a100_away_zaniatost"}))
     await _drain()
     assert runtime.status["awayActive"] is True
+    assert harness.calls == []
+    await runtime.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_refresh_cancels_pending_away_timer_and_uses_current_settings() -> None:
+    harness = RuntimeHarness()
+    document = {
+        "triggers": [{"entityId": "lock.aqara_smart_lock_a100", "activeState": "locked", "forSeconds": 1}],
+        "awayActions": [{"targetId": "entity_71859313239a14e4", "actionId": "turn_off"}],
+        "returnActions": [],
+    }
+    state = {"settings": validate_away_settings(document)}
+    harness.states = {"lock.aqara_smart_lock_a100": _state("locked")}
+    runtime = harness.runtime(lambda: state["settings"])
+    # Start with a home state so that the first activation schedules the delay.
+    harness.states["lock.aqara_smart_lock_a100"] = _state("unlocked")
+    await runtime.async_start()
+    harness.states["lock.aqara_smart_lock_a100"] = _state("locked")
+    for callback in harness.callbacks:
+        callback(SimpleNamespace(data={"entity_id": "lock.aqara_smart_lock_a100"}))
+    await _drain()
+    assert runtime.status["awayActive"] is False
+
+    # Disabling the mode must cancel the pending timer and never run stale actions.
+    state["settings"] = validate_away_settings({"triggers": [], "awayActions": [], "returnActions": []})
+    await runtime.async_refresh()
+    await asyncio.sleep(1.2)
+    assert runtime.status["awayActive"] is False
     assert harness.calls == []
     await runtime.async_stop()
 

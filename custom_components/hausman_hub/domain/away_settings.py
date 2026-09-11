@@ -55,7 +55,7 @@ class AwayTrigger:
 
     def __post_init__(self) -> None:
         _entity_id(self.entity_id, "trigger entity")
-        if self.active_state not in TRIGGER_ACTIVE_STATES:
+        if not isinstance(self.active_state, str) or self.active_state not in TRIGGER_ACTIVE_STATES:
             raise AwaySettingsViolation("away trigger active state is invalid")
         if (
             type(self.for_seconds) is not int
@@ -77,7 +77,7 @@ class AwayAction:
     def __post_init__(self) -> None:
         if not isinstance(self.target_id, str) or not self.target_id or len(self.target_id) > 128:
             raise AwaySettingsViolation("away action target is invalid")
-        if self.action_id not in AWAY_ACTIONS:
+        if not isinstance(self.action_id, str) or self.action_id not in AWAY_ACTIONS:
             raise AwaySettingsViolation("away action id is invalid")
         if self.action_id in {"turn_on", "turn_off"}:
             if self.value is not None:
