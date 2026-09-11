@@ -1,5 +1,24 @@
 # HausmanHub AI Context
 
+## Шаг 2 освещения комнат: домен и хранение без команд, 2026-09-11
+
+- В ветке `codex/room-lighting-integration` (от `origin/main`, `951184b`)
+  добавлены доменная модель, versioned Store и командонезависимый CRUD-сервис
+  освещения комнаты по контракту `hausman-hub-room-lighting-config` v1.
+- `domain/room_lighting.py`: строгая валидация полной модели (`devices`,
+  динамическое `schedule`, `switchBindings`, `illumination` с fail-closed lux,
+  `dimming`, `manualOffProtection`, `awayBehavior`, `autoAdopt`), round-trip
+  `to_dict`/`from_dict`, forward-compat для неизвестных полей и чистый
+  резолвер якорей sunrise/sunset/fixed с часовым поясом дома как параметром.
+- `application/room_lighting_storage.py`: HA Store
+  `hausman_hub.room_lighting.{entry_id}` версии 1, атомарная запись,
+  повреждённый payload безопасно отдаёт пусто/None и логирует, миграция
+  версии — заглушка без удаления данных.
+- `application/room_lighting_service.py`: `get`/`put`/`list`/`apply-template`;
+  сервер поднимает `version` при изменении. Физических команд нет.
+- Проверки: `tests/test_room_lighting_domain.py` и
+  `tests/test_room_lighting_storage.py` — 25 PASS; полный набор не запускался.
+
 ## Выпущена и установлена кнопка возврата устройств в климатический контур, 1.52.238, 2026-09-09
 
 - В климатической панели добавлена кнопка «Вернуть устройства в климат.
