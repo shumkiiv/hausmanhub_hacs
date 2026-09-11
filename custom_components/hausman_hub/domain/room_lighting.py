@@ -37,6 +37,8 @@ _LUX_SENSOR = re.compile(r"^sensor\.[a-z0-9_]+$")
 _LIGHT_ENTITY = re.compile(r"^light\.[a-z0-9_]+$")
 _SWITCH_ENTITY = re.compile(r"^switch\.[a-z0-9_]+$")
 _WIRELESS_ENTITY = re.compile(r"^(?:sensor|event|binary_sensor)\.[a-z0-9_]+$")
+_HA_DEVICE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_DEVICE_TRIGGER_SUBTYPE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$")
 
 _DAY_PRESETS = frozenset({"weekdays", "weekend", "all"})
 _WEEKDAYS = frozenset({"mon", "tue", "wed", "thu", "fri", "sat", "sun"})
@@ -323,6 +325,8 @@ class WirelessSwitch:
     buttons: tuple[Button, ...]
     press_types: tuple[PressType, ...]
     entity_id: str | None = None
+    device_id: str | None = None
+    trigger_subtypes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _stable_id(self.id, "wireless switch id")
@@ -332,6 +336,11 @@ class WirelessSwitch:
             or _WIRELESS_ENTITY.fullmatch(self.entity_id) is None
         ):
             raise RoomLightingViolation("wireless switch entity id is invalid")
+        if self.device_id is not None and (
+            not isinstance(self.device_id, str)
+            or _HA_DEVICE_ID.fullmatch(self.device_id) is None
+        ):
+            raise RoomLightingViolation("wireless switch device id is invalid")
         if not isinstance(self.buttons, tuple) or not self.buttons:
             raise RoomLightingViolation("wireless switch must declare confirmed buttons")
         normalized_buttons = tuple(_enum(button, Button, "wireless switch button") for button in self.buttons)
@@ -348,6 +357,23 @@ class WirelessSwitch:
         if len(normalized_presses) != len(set(normalized_presses)):
             raise RoomLightingViolation("wireless switch press types are invalid")
         object.__setattr__(self, "press_types", normalized_presses)
+        if not isinstance(self.trigger_subtypes, tuple):
+            raise RoomLightingViolation("wireless switch trigger subtypes are invalid")
+        normalized_subtypes: list[str] = []
+        for subtype in self.trigger_subtypes:
+            if (
+                not isinstance(subtype, str)
+                or _DEVICE_TRIGGER_SUBTYPE.fullmatch(subtype) is None
+            ):
+                raise RoomLightingViolation(
+                    "wireless switch trigger subtype is invalid"
+                )
+            normalized_subtypes.append(subtype)
+        if len(normalized_subtypes) != len(set(normalized_subtypes)):
+            raise RoomLightingViolation("wireless switch trigger subtypes are invalid")
+        if len(normalized_subtypes) > 16:
+            raise RoomLightingViolation("wireless switch trigger subtypes exceed the bound")
+        object.__setattr__(self, "trigger_subtypes", tuple(normalized_subtypes))
 
 
 @dataclass(frozen=True, slots=True)
@@ -521,20 +547,39 @@ class ScheduleEntry:
 @dataclass(frozen=True, slots=True)
 class SwitchBinding:
     switch_id: str
-    button: Button
-    press_type: PressType
     action: SwitchAction
     targets: Targets = field(default_factory=Targets)
+    button: Button | None = None
+    press_type: PressType | None = None
+    trigger_subtype: str | None = None
 
     def __post_init__(self) -> None:
         _stable_id(self.switch_id, "binding switch id")
-        object.__setattr__(self, "button", _enum(self.button, Button, "binding button"))
-        object.__setattr__(
-            self, "press_type", _enum(self.press_type, PressType, "binding press type")
-        )
         object.__setattr__(self, "action", _enum(self.action, SwitchAction, "binding action"))
         if not isinstance(self.targets, Targets):
             raise RoomLightingViolation("binding requires a targets block")
+        if self.button is not None:
+            object.__setattr__(
+                self, "button", _enum(self.button, Button, "binding button")
+            )
+        if self.press_type is not None:
+            object.__setattr__(
+                self, "press_type", _enum(self.press_type, PressType, "binding press type")
+            )
+        if self.trigger_subtype is not None and (
+            not isinstance(self.trigger_subtype, str)
+            or _DEVICE_TRIGGER_SUBTYPE.fullmatch(self.trigger_subtype) is None
+        ):
+            raise RoomLightingViolation("binding trigger subtype is invalid")
+        if self.trigger_subtype is not None:
+            if self.button is not None or self.press_type is not None:
+                raise RoomLightingViolation(
+                    "binding cannot combine a trigger subtype with button/pressType"
+                )
+        elif self.button is None or self.press_type is None:
+            raise RoomLightingViolation(
+                "binding requires either button+pressType or a trigger subtype"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -818,11 +863,21 @@ class RoomLightingConfig:
                     f"switch binding references an unknown wireless switch: {binding.switch_id}"
                 )
             else:
-                if binding.button not in wireless.buttons:
+                if binding.trigger_subtype is not None and (
+                    binding.trigger_subtype not in wireless.trigger_subtypes
+                ):
+                    violations.append(
+                        "switch binding uses an unconfirmed trigger subtype: "
+                        f"{binding.trigger_subtype}"
+                    )
+                if binding.button is not None and binding.button not in wireless.buttons:
                     violations.append(
                         f"switch binding uses an unconfirmed button: {binding.button.value}"
                     )
-                if binding.press_type not in wireless.press_types:
+                if (
+                    binding.press_type is not None
+                    and binding.press_type not in wireless.press_types
+                ):
                     violations.append(
                         f"switch binding uses an unconfirmed press type: {binding.press_type.value}"
                     )
@@ -942,19 +997,27 @@ def _devices_to_payload(devices: Devices) -> dict[str, object]:
             )
         ),
         "wireless_switches": [
-            _device_entity(
-                {
-                    "id": item.id,
-                    "name": item.name,
-                    "buttons": [button.value for button in item.buttons],
-                    "pressTypes": [press.value for press in item.press_types],
-                },
-                item.entity_id,
-            )
+            _wireless_switch_to_payload(item)
             for item in devices.wireless_switches
         ],
         "selectAll": devices.select_all,
     }
+
+
+def _wireless_switch_to_payload(item: WirelessSwitch) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "id": item.id,
+        "name": item.name,
+        "buttons": [button.value for button in item.buttons],
+        "pressTypes": [press.value for press in item.press_types],
+    }
+    if item.entity_id is not None:
+        payload["entityId"] = item.entity_id
+    if item.device_id is not None:
+        payload["deviceId"] = item.device_id
+    if item.trigger_subtypes:
+        payload["triggerSubtypes"] = list(item.trigger_subtypes)
+    return payload
 
 
 def _targets_to_payload(targets: Targets) -> dict[str, object]:
@@ -997,13 +1060,18 @@ def _schedule_to_payload(entry: ScheduleEntry) -> dict[str, object]:
 
 
 def _binding_to_payload(binding: SwitchBinding) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "switchId": binding.switch_id,
-        "button": binding.button.value,
-        "pressType": binding.press_type.value,
         "action": binding.action.value,
         "targets": _targets_to_payload(binding.targets),
     }
+    if binding.button is not None:
+        payload["button"] = binding.button.value
+    if binding.press_type is not None:
+        payload["pressType"] = binding.press_type.value
+    if binding.trigger_subtype is not None:
+        payload["triggerSubtype"] = binding.trigger_subtype
+    return payload
 
 
 def _illumination_to_payload(illumination: Illumination) -> dict[str, object]:
@@ -1101,10 +1169,17 @@ def _wireless_switch_from_payload(payload: object) -> WirelessSwitch:
         _require(data, "pressTypes", "wireless switch press types"),
         "wireless switch press types",
     )
+    trigger_subtypes = data.get("triggerSubtypes")
+    if trigger_subtypes is None:
+        trigger_subtypes = []
+    if not isinstance(trigger_subtypes, (list, tuple)):
+        raise RoomLightingViolation("wireless switch trigger subtypes must be a list")
     return WirelessSwitch(
         id=_require(data, "id", "wireless switch id"),
         name=_require(data, "name", "wireless switch name"),
         entity_id=data.get("entityId"),
+        device_id=data.get("deviceId"),
+        trigger_subtypes=tuple(trigger_subtypes),
         buttons=tuple(_enum(item, Button, "wireless switch button") for item in buttons),
         press_types=tuple(_enum(item, PressType, "wireless switch press type") for item in presses),
     )
@@ -1171,8 +1246,9 @@ def _binding_from_payload(payload: object) -> SwitchBinding:
     data = _as_dict(payload, "switch binding")
     return SwitchBinding(
         switch_id=_require(data, "switchId", "binding switch id"),
-        button=_require(data, "button", "binding button"),
-        press_type=_require(data, "pressType", "binding press type"),
+        button=data.get("button"),
+        press_type=data.get("pressType"),
+        trigger_subtype=data.get("triggerSubtype"),
         action=_require(data, "action", "binding action"),
         targets=_targets_from_payload(data.get("targets")),
     )

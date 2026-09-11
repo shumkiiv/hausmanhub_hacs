@@ -1,4 +1,4 @@
-@import url("./hausman-hub-room-lighting.css?v=1.52.254");
+@import url("./hausman-hub-room-lighting.css?v=1.52.255");
 .rooms-canon-page { display:grid; gap:20px; }
 .rooms-canon-hero { position:relative; min-height:250px; overflow:hidden; border:1px solid var(--hmh-border); border-radius:var(--hmh-radius-section); background:linear-gradient(90deg,rgba(6,13,19,.94),rgba(6,13,19,.46)),url("./assets/dashboard-hero-living-room-day.png") center/cover; box-shadow:0 14px 36px rgba(0,0,0,.18); color:#f7f9fc; }
 .rooms-canon-hero-copy { display:flex; align-items:center; gap:18px; padding:32px; }

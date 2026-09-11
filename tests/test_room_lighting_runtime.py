@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, time, timezone
+import logging
 from types import SimpleNamespace
 
 from custom_components.hausman_hub.application.room_lighting_ha_executor import (
@@ -283,6 +284,28 @@ class _SpyExecutor:
         return {"confirmed": self.confirmed, "state_after": {"state": "on"}}
 
 
+class _FakeDeviceAutomationApi:
+    """Mimic the HA mqtt device-automation platform API boundary."""
+
+    def __init__(self) -> None:
+        self.attached: list[tuple[dict[str, object], object, dict[str, object]]] = []
+        self.unsubscribed = 0
+
+    async def async_attach_trigger(
+        self,
+        hass: object,
+        config: dict[str, object],
+        action: object,
+        trigger_info: dict[str, object],
+    ) -> object:
+        del hass
+        self.attached.append((dict(config), action, dict(trigger_info)))
+        return self._unsubscribe
+
+    def _unsubscribe(self) -> None:
+        self.unsubscribed += 1
+
+
 def _event(domain: str, service: str, entity_id: str) -> SimpleNamespace:
     return SimpleNamespace(
         data={
@@ -293,6 +316,33 @@ def _event(domain: str, service: str, entity_id: str) -> SimpleNamespace:
     )
 
 
+def _trigger_config_payload(*, action: str = "turn_on") -> dict[str, object]:
+    payload = _config_payload()
+    payload["devices"]["wireless_switches"].append(  # type: ignore[index]
+        {
+            "id": "sw_mirror",
+            "name": "Зеркало",
+            "deviceId": "device_demo_mirror",
+            "triggerSubtypes": ["1_single", "2_single"],
+            "buttons": ["left", "right"],
+            "pressTypes": ["single", "double"],
+        }
+    )
+    payload["switchBindings"].append(  # type: ignore[index]
+        {
+            "switchId": "sw_mirror",
+            "triggerSubtype": "1_single",
+            "action": action,
+            "targets": {
+                "lightTargets": ["light_main"],
+                "groupIds": [],
+                "roles": [],
+            },
+        }
+    )
+    return payload
+
+
 def _make_runtime(
     hass: _FakeHass,
     *,
@@ -301,6 +351,7 @@ def _make_runtime(
     ownership_store: object | None = None,
     now_ms: object | None = None,
     payload: dict[str, object] | None = None,
+    device_automation_api: object | None = None,
 ) -> RoomLightingRuntime:
     shadow = RoomLightingShadowService(_MemoryShadowStore())
     service = _ConfigService(
@@ -317,6 +368,7 @@ def _make_runtime(
         track_state_changes=lambda hass, entities, callback: (lambda: None),
         track_interval=lambda hass, callback, interval: (lambda: None),
         listen_bus=lambda hass, event_type, callback: (lambda: None),
+        device_automation_api=device_automation_api,
     )
 
 
@@ -639,5 +691,216 @@ async def test_restart_sets_unobserved_and_keeps_persisted_auto_on() -> None:
         context = await runtime.async_context_for(runtime.configs()[0])
         assert context.unobserved_since == _NOW_MS
         assert executor.calls == []
+    finally:
+        await runtime.stop()
+
+
+async def test_device_trigger_shadow_logs_intent_without_commands(caplog) -> None:
+    caplog.set_level(
+        logging.INFO,
+        logger="custom_components.hausman_hub.application.room_lighting_runtime",
+    )
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    api = _FakeDeviceAutomationApi()
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=False,
+        executor=executor,
+        payload=_trigger_config_payload(),
+        device_automation_api=api,
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        assert len(api.attached) == 1
+        trigger_config, action, trigger_info = api.attached[0]
+        assert trigger_config == {
+            "platform": "device",
+            "device_id": "device_demo_mirror",
+            "domain": "mqtt",
+            "type": "action",
+            "subtype": "1_single",
+        }
+        assert trigger_info["domain"] == "hausman_hub"
+        assert trigger_info["name"] == "managed-room-lighting-runtime"
+        assert str(trigger_info["trigger_data"]["id"]).startswith("room-lighting-")  # type: ignore[index]
+        await action({}, None)  # type: ignore[operator]
+        assert executor.calls == []
+        ownership = runtime._ownership.snapshots_for({"light_main"})  # type: ignore[attr-defined]
+        assert ownership
+        assert ownership[-1].source is OwnershipSource.MANUAL
+        assert "device trigger" in caplog.text
+    finally:
+        await runtime.stop()
+    assert api.unsubscribed == 1
+
+
+async def test_device_trigger_dispatches_manual_action_when_enabled() -> None:
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    api = _FakeDeviceAutomationApi()
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=True,
+        executor=executor,
+        payload=_trigger_config_payload(action="turn_on"),
+        device_automation_api=api,
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        _, action, _ = api.attached[0]
+        await action({}, None)  # type: ignore[operator]
+        assert len(executor.calls) == 1
+        assert executor.calls[0].action is LightAction.TURN_ON
+        ownership = runtime._ownership.snapshots_for({"light_main"})  # type: ignore[attr-defined]
+        assert ownership[-1].source is OwnershipSource.MANUAL
+    finally:
+        await runtime.stop()
+
+
+async def test_device_trigger_duplicate_event_does_not_toggle_twice() -> None:
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    api = _FakeDeviceAutomationApi()
+    executor = _SpyExecutor()
+    clock = _Clock(_NOW_MS)
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=True,
+        executor=executor,
+        now_ms=clock,
+        payload=_trigger_config_payload(action="turn_on"),
+        device_automation_api=api,
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        _, action, _ = api.attached[0]
+        await action({}, None)  # type: ignore[operator]
+        await action({}, None)  # repeated MQTT delivery inside the window
+        assert len(executor.calls) == 1
+        clock.value = _NOW_MS + 3_000
+        await action({}, None)  # a new press outside the window is delivered
+        assert len(executor.calls) == 2
+    finally:
+        await runtime.stop()
+
+
+async def test_device_trigger_shadow_toggle_off_marks_manual_off() -> None:
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "on", last_changed=_NOW_DT)
+    api = _FakeDeviceAutomationApi()
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=False,
+        executor=executor,
+        payload=_trigger_config_payload(action="toggle"),
+        device_automation_api=api,
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        _, action, _ = api.attached[0]
+        await action({}, None)  # type: ignore[operator]
+        assert executor.calls == []
+        assert (
+            runtime._ownership.last_manual_off_at({"light_main"})  # type: ignore[attr-defined]
+            is not None
+        )
+    finally:
+        await runtime.stop()
+
+
+async def test_device_trigger_attaches_after_running() -> None:
+    class _ImmediateApi(_FakeDeviceAutomationApi):
+        async def async_attach_trigger(self, hass, config, action, trigger_info):
+            self.attached.append((dict(config), action, dict(trigger_info)))
+            await action({}, None)
+            return self._unsubscribe
+
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    api = _ImmediateApi()
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=True,
+        executor=executor,
+        payload=_trigger_config_payload(action="turn_on"),
+        device_automation_api=api,
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        # The press fired during attach, so the running guard was already open.
+        assert len(executor.calls) == 1
+    finally:
+        await runtime.stop()
+
+
+async def test_device_trigger_platform_unavailable_logs_warning(caplog) -> None:
+    caplog.set_level(
+        logging.WARNING,
+        logger="custom_components.hausman_hub.application.room_lighting_runtime",
+    )
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=False,
+        payload=_trigger_config_payload(),
+        device_automation_api=None,
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        assert runtime.running is True
+        assert "device triggers are disabled" in caplog.text
+    finally:
+        await runtime.stop()
+
+
+async def test_device_trigger_attaches_for_each_room() -> None:
+    first = config_from_payload(_trigger_config_payload())
+    second_payload = _trigger_config_payload()
+    second_payload["roomId"] = "room_demo_second"
+    second = config_from_payload(second_payload)
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    api = _FakeDeviceAutomationApi()
+    runtime = RoomLightingRuntime(
+        hass,
+        _ConfigService(first, second),
+        RoomLightingShadowService(_MemoryShadowStore()),
+        commands_enabled=False,
+        executor=_SpyExecutor(),
+        now_ms=lambda: _NOW_MS,
+        track_state_changes=lambda hass, entities, callback: (lambda: None),
+        track_interval=lambda hass, callback, interval: (lambda: None),
+        listen_bus=lambda hass, event_type, callback: (lambda: None),
+        device_automation_api=api,
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        # The same physical device in two rooms must be attached twice.
+        assert len(api.attached) == 2
+        ids = {str(spec[2]["trigger_data"]["id"]) for spec in api.attached}  # type: ignore[index]
+        assert ids == {
+            "room-lighting-room_demo_entry-sw_mirror-1_single",
+            "room-lighting-room_demo_second-sw_mirror-1_single",
+        }
     finally:
         await runtime.stop()

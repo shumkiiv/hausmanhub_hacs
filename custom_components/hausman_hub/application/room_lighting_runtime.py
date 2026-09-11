@@ -19,8 +19,16 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
-from ..domain.room_lighting import RoomLightingConfig, SensorKind
+from ..domain.room_lighting import (
+    RoomLightingConfig,
+    SensorKind,
+    SwitchAction,
+    SwitchBinding,
+)
 from ..domain.room_lighting_engine import (
+    DecisionReason,
+    LightAction,
+    PlannedCommand,
     ProtectionSnapshot,
     RoomLightingDecision,
     RoomLightingContext,
@@ -44,6 +52,9 @@ EVENT_CALL_SERVICE = "call_service"
 DEFAULT_INTERVAL_SECONDS = 60
 MAX_OWNERSHIP_RECORDS = 500
 OWNERSHIP_STORAGE_VERSION = 1
+DEVICE_TRIGGER_DEDUP_MS = 2_000
+_DEVICE_TRIGGER_PLATFORM = "mqtt"
+_DEVICE_TRIGGER_INFO_NAME = "managed-room-lighting-runtime"
 _TARGET_DOMAINS = frozenset({"light", "switch"})
 _MANUAL_OFF_SERVICES = frozenset({"turn_off", "toggle"})
 _PRESENCE_KINDS = frozenset({SensorKind.PRESENCE, SensorKind.MOTION})
@@ -242,6 +253,7 @@ class RoomLightingRuntime:
         track_state_changes: Callable[..., Callable[[], None]] | None = None,
         track_interval: Callable[..., Callable[[], None]] | None = None,
         listen_bus: Callable[..., Callable[[], None]] | None = None,
+        device_automation_api: object | None = None,
         interval_seconds: int = DEFAULT_INTERVAL_SECONDS,
     ) -> None:
         self._hass = hass
@@ -266,6 +278,8 @@ class RoomLightingRuntime:
         self._track_state_changes = track_state_changes
         self._track_interval = track_interval
         self._listen_bus = listen_bus
+        self._device_automation_api = device_automation_api
+        self._device_trigger_seen: dict[tuple[str, str, str], int] = {}
         self._interval_seconds = max(1, int(interval_seconds))
         self._configs: dict[str, RoomLightingConfig] = {}
         self._rooms_by_entity: EntityRooms = {}
@@ -344,6 +358,12 @@ class RoomLightingRuntime:
         except Exception:
             self.cancel()
             raise
+        # Attach after running so a press during the startup window is not
+        # dropped by the running guard.
+        try:
+            await self._attach_device_triggers(hass)
+        except Exception:  # noqa: BLE001 - a trigger API failure must not unload
+            _LOGGER.warning("room lighting device trigger attach failed")
         return self.cancel
 
     def cancel(self) -> None:
@@ -368,20 +388,17 @@ class RoomLightingRuntime:
         self.cancel()
 
     def _load_trackers(self) -> None:
-        if self._track_state_changes is not None and self._track_interval is not None:
-            if self._listen_bus is None:
-                self._listen_bus = _listen_service_events
-            return
-        import homeassistant.helpers.event as event_helpers  # noqa: PLC0415
+        if self._track_state_changes is None or self._track_interval is None:
+            import homeassistant.helpers.event as event_helpers  # noqa: PLC0415
 
-        if self._track_state_changes is None:
-            self._track_state_changes = getattr(
-                event_helpers, "async_track_state_change_event", None
-            )
-        if self._track_interval is None:
-            self._track_interval = getattr(
-                event_helpers, "async_track_time_interval", None
-            )
+            if self._track_state_changes is None:
+                self._track_state_changes = getattr(
+                    event_helpers, "async_track_state_change_event", None
+                )
+            if self._track_interval is None:
+                self._track_interval = getattr(
+                    event_helpers, "async_track_time_interval", None
+                )
         if self._listen_bus is None:
             self._listen_bus = _listen_service_events
 
@@ -453,6 +470,224 @@ class RoomLightingRuntime:
                 )
                 self._absence.pop(self._room_by_target.get(target_id), None)
             self._schedule_ownership_save()
+
+    # -- device triggers ---------------------------------------------------
+
+    async def _ensure_device_automation_api(
+        self, hass: HomeAssistant
+    ) -> object | None:
+        if self._device_automation_api is not None:
+            return self._device_automation_api
+        try:
+            from homeassistant.components.device_automation import (  # noqa: PLC0415
+                DeviceAutomationType,
+                async_get_device_automation_platform,
+            )
+        except Exception:  # noqa: BLE001 - the platform API is optional
+            _LOGGER.warning(
+                "room lighting device triggers are disabled: "
+                "Home Assistant device automation API is unavailable"
+            )
+            return None
+        try:
+            api = await async_get_device_automation_platform(
+                hass, _DEVICE_TRIGGER_PLATFORM, DeviceAutomationType.TRIGGER
+            )
+        except Exception:  # noqa: BLE001 - the mqtt platform may not be loaded
+            _LOGGER.warning(
+                "room lighting device triggers are disabled: "
+                "the mqtt trigger platform is unavailable"
+            )
+            return None
+        if api is None:
+            _LOGGER.warning(
+                "room lighting device triggers are disabled: "
+                "the mqtt trigger platform is missing"
+            )
+            return None
+        self._device_automation_api = api
+        return api
+
+    async def _attach_device_triggers(self, hass: HomeAssistant) -> None:
+        """Attach MQTT device triggers for switches that have no button entity."""
+
+        specs = self._device_trigger_specs()
+        if not specs:
+            return
+        api = await self._ensure_device_automation_api(hass)
+        attach = (
+            getattr(api, "async_attach_trigger", None) if api is not None else None
+        )
+        if not callable(attach):
+            _LOGGER.warning(
+                "room lighting device triggers are not attached: "
+                "the device automation trigger API is unavailable"
+            )
+            return
+        for spec in specs:
+            try:
+                cleanup = await attach(
+                    hass,
+                    spec["config"],
+                    spec["action"],
+                    spec["trigger_info"],
+                )
+            except Exception:  # noqa: BLE001 - one bad trigger must not unload
+                _LOGGER.warning(
+                    "room lighting device trigger attach failed for %s",
+                    spec["key"],
+                )
+                continue
+            if callable(cleanup):
+                self._unsubscribers.append(cleanup)
+
+    def _device_trigger_specs(self) -> list[dict[str, object]]:
+        specs: list[dict[str, object]] = []
+        attached: set[tuple[str, str, str]] = set()
+        index = 0
+        for config in self._configs.values():
+            bound_subtypes: dict[str, set[str]] = {}
+            for binding in config.switch_bindings:
+                if binding.trigger_subtype is not None:
+                    bound_subtypes.setdefault(binding.switch_id, set()).add(
+                        binding.trigger_subtype
+                    )
+            for switch in config.devices.wireless_switches:
+                if switch.device_id is None:
+                    continue
+                for subtype in switch.trigger_subtypes:
+                    if subtype not in bound_subtypes.get(switch.id, set()):
+                        continue
+                    key = (config.room_id, switch.device_id, subtype)
+                    if key in attached:
+                        continue
+                    attached.add(key)
+                    specs.append(
+                        {
+                            "key": key,
+                            "config": {
+                                "platform": "device",
+                                "device_id": switch.device_id,
+                                "domain": _DEVICE_TRIGGER_PLATFORM,
+                                "type": "action",
+                                "subtype": subtype,
+                            },
+                            "trigger_info": {
+                                "domain": "hausman_hub",
+                                "name": _DEVICE_TRIGGER_INFO_NAME,
+                                "variables": {},
+                                "trigger_data": {
+                                    "id": (
+                                        f"room-lighting-{config.room_id}-"
+                                        f"{switch.id}-{subtype}"
+                                    ),
+                                    "idx": str(index),
+                                    "alias": None,
+                                },
+                            },
+                            "action": self._device_trigger_action(
+                                config, switch.device_id, switch.id, subtype
+                            ),
+                        }
+                    )
+                    index += 1
+        return specs
+
+    def _device_trigger_action(
+        self,
+        config: RoomLightingConfig,
+        device_id: str,
+        switch_id: str,
+        subtype: str,
+    ) -> Callable[..., object]:
+        async def _action(
+            run_variables: object | None = None,
+            context: object | None = None,
+        ) -> None:
+            del run_variables, context
+            await self._handle_device_trigger(
+                config, device_id, switch_id, subtype
+            )
+
+        return _action
+
+    async def _handle_device_trigger(
+        self,
+        config: RoomLightingConfig,
+        device_id: str,
+        switch_id: str,
+        subtype: str,
+    ) -> None:
+        if not self._running:
+            return
+        bindings = [
+            binding
+            for binding in config.switch_bindings
+            if binding.switch_id == switch_id
+            and binding.trigger_subtype == subtype
+        ]
+        if not bindings:
+            return
+        moment = self._now_ms()
+        dedup_key = (config.room_id, device_id, subtype)
+        seen = self._device_trigger_seen.get(dedup_key)
+        if seen is not None and moment - seen < DEVICE_TRIGGER_DEDUP_MS:
+            _LOGGER.info(
+                "room lighting device trigger %s/%s ignored as duplicate",
+                device_id,
+                subtype,
+            )
+            return
+        self._device_trigger_seen[dedup_key] = moment
+        enabled = self._room_commands_enabled(config.room_id)
+        for binding in bindings:
+            target_ids = _binding_target_ids(config, binding)
+            _LOGGER.info(
+                "room lighting device trigger %s/%s -> %s targets=%s commands_enabled=%s",
+                device_id,
+                subtype,
+                binding.action.value,
+                ",".join(target_ids),
+                enabled,
+            )
+            # A press is a manual intent regardless of the command flag.
+            for target_id in target_ids:
+                target = config.devices.target(target_id)
+                self._ownership.record_manual(
+                    target_id,
+                    moment,
+                    confirmed=True,
+                    turned_off=_binding_turns_off(self._hass, target, binding),
+                )
+                self._absence.pop(config.room_id, None)
+            self._schedule_ownership_save()
+            if not enabled or not self._running:
+                continue
+            await self._execute_binding(config, binding, target_ids)
+
+    async def _execute_binding(
+        self,
+        config: RoomLightingConfig,
+        binding: SwitchBinding,
+        target_ids: Sequence[str],
+    ) -> None:
+        if self._hass is None:
+            return
+        for target_id in target_ids:
+            if not self._running:
+                return
+            target = config.devices.target(target_id)
+            if target is None or target.entity_id is None:
+                continue
+            command = _binding_command(self._hass, target, binding)
+            if command is None:
+                continue
+            try:
+                await self._executor.execute(  # type: ignore[attr-defined]
+                    self._hass, command
+                )
+            except Exception:  # noqa: BLE001 - a failed press is not a crash
+                _LOGGER.warning("room lighting binding command failed")
 
     # -- evaluation --------------------------------------------------------
 
@@ -665,6 +900,88 @@ def _receipt_confirmed(receipt: object) -> bool:
     if isinstance(receipt, Mapping):
         return bool(receipt.get("confirmed"))
     return bool(getattr(receipt, "confirmed", False))
+
+
+def _binding_target_ids(
+    config: RoomLightingConfig, binding: SwitchBinding
+) -> tuple[str, ...]:
+    """Expand one binding's targets to concrete target ids."""
+
+    targets = binding.targets
+    if (
+        not targets.light_targets
+        and not targets.group_ids
+        and not targets.roles
+    ):
+        return tuple(target.id for target in config.devices.light_targets)
+    selected = set(targets.light_targets)
+    for target in config.devices.light_targets:
+        if target.group_id is not None and target.group_id in targets.group_ids:
+            selected.add(target.id)
+        if target.role is not None and target.role in targets.roles:
+            selected.add(target.id)
+    return tuple(sorted(selected))
+
+
+def _binding_turns_off(
+    hass: HomeAssistant | None,
+    target: object | None,
+    binding: SwitchBinding,
+) -> bool:
+    """Whether this binding intends to turn the target off right now."""
+
+    if binding.action is SwitchAction.TURN_OFF:
+        return True
+    if binding.action is not SwitchAction.TOGGLE or target is None:
+        return False
+    entity_id = getattr(target, "entity_id", None)
+    state = (
+        hass.states.get(entity_id)
+        if hass is not None and isinstance(entity_id, str)
+        else None
+    )
+    # A toggle on an already on target is a manual-off intent, even in shadow.
+    return state is not None and str(getattr(state, "state", "")).lower() == "on"
+
+
+def _binding_command(
+    hass: HomeAssistant,
+    target: object,
+    binding: SwitchBinding,
+) -> PlannedCommand | None:
+    """Translate one confirmed switch binding into a planned target command."""
+
+    target_id = target.id  # type: ignore[attr-defined]
+    action = binding.action
+    if action is SwitchAction.TURN_ON:
+        return PlannedCommand(
+            target_id, LightAction.TURN_ON, reason=DecisionReason.PRESENCE
+        )
+    if action is SwitchAction.TURN_OFF:
+        return PlannedCommand(
+            target_id, LightAction.TURN_OFF, reason=DecisionReason.SCHEDULE
+        )
+    if action is SwitchAction.SET_MAX:
+        if getattr(target, "brightness", False):
+            return PlannedCommand(
+                target_id,
+                LightAction.SET_BRIGHTNESS,
+                brightness=100,
+                reason=DecisionReason.PRESENCE,
+            )
+        return PlannedCommand(
+            target_id, LightAction.TURN_ON, reason=DecisionReason.PRESENCE
+        )
+    if action is SwitchAction.TOGGLE:
+        entity_id = getattr(target, "entity_id", None)
+        state = hass.states.get(entity_id) if isinstance(entity_id, str) else None
+        is_on = state is not None and str(getattr(state, "state", "")).lower() == "on"
+        return PlannedCommand(
+            target_id,
+            LightAction.TURN_OFF if is_on else LightAction.TURN_ON,
+            reason=DecisionReason.PRESENCE,
+        )
+    return None
 
 
 def _listen_service_events(

@@ -294,6 +294,88 @@ def test_unconfirmed_press_type_is_rejected() -> None:
     assert any("unconfirmed press type" in item for item in violations)
 
 
+def test_device_trigger_switch_and_binding_round_trip() -> None:
+    payload = _payload()
+    payload["devices"]["wireless_switches"].append(  # type: ignore[index]
+        {
+            "id": "sw_demo_mirror",
+            "name": "Зеркало (device trigger)",
+            "deviceId": "device_demo_mirror",
+            "triggerSubtypes": ["1_single", "1_double"],
+            "buttons": ["left", "right"],
+            "pressTypes": ["single", "double"],
+        }
+    )
+    payload["switchBindings"].append(  # type: ignore[index]
+        {
+            "switchId": "sw_demo_mirror",
+            "triggerSubtype": "1_single",
+            "action": "toggle",
+            "targets": {
+                "lightTargets": ["light_demo_main"],
+                "groupIds": [],
+                "roles": [],
+            },
+        }
+    )
+
+    config = config_from_payload(payload)
+    device = config.devices.wireless_switch("sw_demo_mirror")
+    assert device is not None
+    assert device.device_id == "device_demo_mirror"
+    assert device.trigger_subtypes == ("1_single", "1_double")
+    binding = config.switch_bindings[-1]
+    assert binding.trigger_subtype == "1_single"
+    assert binding.button is None
+    assert binding.press_type is None
+
+    encoded = config.to_dict()
+    assert config_from_payload(encoded).to_dict() == encoded
+    assert encoded["switchBindings"][-1]["triggerSubtype"] == "1_single"  # type: ignore[index]
+    assert (
+        encoded["devices"]["wireless_switches"][-1]["deviceId"]  # type: ignore[index]
+        == "device_demo_mirror"
+    )
+
+
+def test_binding_without_button_or_trigger_is_rejected() -> None:
+    payload = _payload()
+    del payload["switchBindings"][0]["button"]  # type: ignore[index]
+    del payload["switchBindings"][0]["pressType"]  # type: ignore[index]
+    with pytest.raises(RoomLightingViolation):
+        config_from_payload(payload)
+
+
+def test_mixed_binding_is_rejected() -> None:
+    payload = _payload()
+    payload["devices"]["wireless_switches"][0]["triggerSubtypes"] = ["1_single"]  # type: ignore[index]
+    payload["switchBindings"][0]["triggerSubtype"] = "1_single"  # type: ignore[index]
+    with pytest.raises(RoomLightingViolation):
+        config_from_payload(payload)
+
+
+def test_unconfirmed_trigger_subtype_is_rejected() -> None:
+    payload = _payload()
+    payload["devices"]["wireless_switches"][0]["triggerSubtypes"] = ["1_single"]  # type: ignore[index]
+    binding = payload["switchBindings"][0]  # type: ignore[index]
+    binding.pop("button", None)
+    binding.pop("pressType", None)
+    binding["triggerSubtype"] = "2_single"
+    violations = room_lighting_violations(payload)
+    assert any("unconfirmed trigger subtype" in item for item in violations)
+
+
+def test_malformed_trigger_subtype_is_rejected() -> None:
+    payload = _payload()
+    payload["devices"]["wireless_switches"][0]["triggerSubtypes"] = ["1_single"]  # type: ignore[index]
+    binding = payload["switchBindings"][0]  # type: ignore[index]
+    binding.pop("button", None)
+    binding.pop("pressType", None)
+    binding["triggerSubtype"] = "bad subtype"
+    with pytest.raises(RoomLightingViolation):
+        config_from_payload(payload)
+
+
 def test_unknown_optional_fields_are_ignored() -> None:
     payload = _payload()
     payload["futureTopLevel"] = {"anything": True}
