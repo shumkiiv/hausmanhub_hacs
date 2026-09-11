@@ -50,6 +50,7 @@ INVENTORY_DUPLICATES_JS = PANEL_JS.with_name("hausman-hub-inventory-duplicates.j
 DEVICE_PROPERTY_NAMES_JS = PANEL_JS.with_name("hausman-hub-device-property-names.js")
 DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
 POWER_LINKS_JS = PANEL_JS.with_name("hausman-hub-power-links.js")
+AWAY_SETTINGS_JS = PANEL_JS.with_name("hausman-hub-away-settings.js")
 AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
 FIRST_RUN_DRAFT_JS = PANEL_JS.with_name("hausman-hub-first-run-draft.js")
 NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-navigation.js")
@@ -618,6 +619,10 @@ def panel_script(
         {{ filename: {str(POWER_LINKS_JS)!r} }}
       );
       vm.runInThisContext(
+        fs.readFileSync({str(AWAY_SETTINGS_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(AWAY_SETTINGS_JS)!r} }}
+      );
+      vm.runInThisContext(
         fs.readFileSync({str(AREA_BINDING_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(AREA_BINDING_JS)!r} }}
       );
@@ -982,6 +987,91 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }}
         if (!textOf(panel._shell.settings).includes("После команды источник остаётся включённым")) {{
           throw new Error("safe source behavior is not explained");
+        }}
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_away_settings_editor_saves_triggers_and_action_lists(self) -> None:
+        path = "hausman_hub/v1/admin/away-settings"
+        initial = {
+            "contract": {"name": "hausman-hub-away-settings", "version": 1},
+            "revision": 0,
+            "updatedAt": "2026-09-11T00:00:00Z",
+            "settings": {"triggers": [], "awayActions": [], "returnActions": []},
+            "status": {"awayActive": False, "triggerCount": 0, "reason": "not_configured"},
+        }
+        saved = initial | {
+            "revision": 1,
+            "settings": {
+                "triggers": [
+                    {"entityId": "lock.example_a100", "activeState": "locked", "forSeconds": 3},
+                ],
+                "awayActions": [
+                    {"targetId": "entity_light", "actionId": "turn_off"},
+                ],
+                "returnActions": [],
+            },
+        }
+        script = panel_script(
+            GET_PATHS | {path: initial},
+            {path: saved},
+            f"""
+        panel._scenarios.catalog = {{ devices: [
+          {{ target_id: "entity_light", entity_id: "light.example_ceiling",
+             name: "Люстра тамбур", actions: [{{ action_id: "turn_off", label: "Выключить" }}] }},
+          {{ target_id: "entity_lock", entity_id: "lock.example_a100",
+             name: "Умный замок", actions: [] }},
+        ] }};
+        panel._activateSection("settings");
+        panel._activateSettingsView("away");
+        await tick();
+
+        const addTrigger = findAll(panel._shell.settings, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Добавить триггер")[0];
+        if (!addTrigger) throw new Error("away trigger add action is missing");
+        addTrigger.fire("click");
+        let selects = findAll(panel._shell.settings, (node) => node.tagName === "SELECT");
+        selects[0].value = "lock.example_a100";
+        selects[0].fire("change");
+        selects = findAll(panel._shell.settings, (node) => node.tagName === "SELECT");
+        selects[1].value = "locked";
+        selects[1].fire("change");
+        const wait = findAll(panel._shell.settings, (node) =>
+          node.tagName === "INPUT" && node.type === "number")[0];
+        wait.value = "3";
+        wait.fire("input");
+
+        const addAway = findAll(panel._shell.settings, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Добавить устройство")[0];
+        if (!addAway) throw new Error("away action add action is missing");
+        addAway.fire("click");
+        selects = findAll(panel._shell.settings, (node) => node.tagName === "SELECT");
+        selects[2].value = "entity_light";
+        selects[2].fire("change");
+        selects = findAll(panel._shell.settings, (node) => node.tagName === "SELECT");
+        selects[3].value = "turn_off";
+        selects[3].fire("change");
+
+        const save = findAll(panel._shell.settings, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Сохранить настройки")[0];
+        if (!save) throw new Error("away save action is missing");
+        save.fire("click");
+        await tick();
+
+        const write = calls.find((item) => item.method === "PUT" && item.path === {path!r});
+        if (!write || write.payload.expectedRevision !== 0) {{
+          throw new Error("away save revision is missing: " + JSON.stringify(write));
+        }}
+        const settings = write.payload.settings;
+        if (settings.triggers[0].entityId !== "lock.example_a100"
+          || settings.triggers[0].activeState !== "locked"
+          || settings.triggers[0].forSeconds !== 3
+          || settings.awayActions[0].targetId !== "entity_light"
+          || settings.awayActions[0].actionId !== "turn_off"
+          || settings.returnActions.length !== 0) {{
+          throw new Error("away payload mismatch: " + JSON.stringify(write.payload));
         }}
             """,
         )

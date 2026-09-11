@@ -19,7 +19,7 @@ EXPECTED_BLOCKED_EXTERNAL_IMAGES = {
     "https://www.zigbee2mqtt.io/images/devices/TS0505B_1.png",
 }
 KNOWN_FRONTEND_ASSET_NAMES = (
-    "area-binding", "buttons", "catalog", "climate-overview", "climate-side", "command-feedback", "control-channel", "correlation",
+    "area-binding", "away-settings", "buttons", "catalog", "climate-overview", "climate-side", "command-feedback", "control-channel", "correlation",
     "device-actions", "device-bindings", "device-card", "device-controls", "device-discovery", "device-features", "device-inventory",
     "device-maintenance", "device-property-names", "devices-overview", "diagnostics", "energy-chart", "energy-meter", "energy",
     "error-taxonomy", "feedback", "first-run-draft", "harness-intents", "hero-room-navigation", "home-sections", "intercom",

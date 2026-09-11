@@ -159,6 +159,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .device_power_dependency_storage import (
         HomeAssistantDevicePowerDependencyStore,
     )
+    from .application.away_settings import AwaySettingsService
+    from .away_settings_storage import HomeAssistantAwaySettingsStore
     from .application.energy_meter import EnergyMeterService
     from .application.energy_meters import EnergyMetersService
     from .energy_meter_storage import HomeAssistantEnergyMeterStore
@@ -201,6 +203,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await async_migrate_obsolete_small_corridor_power_source(
         device_power_dependency_service
     )
+    away_settings_service = AwaySettingsService(
+        HomeAssistantAwaySettingsStore(hass, entry.entry_id),
+        entity_id_validator=lambda entity_id: hass.states.get(entity_id) is not None,
+    )
+    await away_settings_service.async_load()
     energy_meter_service = EnergyMeterService(
         HomeAssistantEnergyMeterStore(hass, entry.entry_id),
         local_today=lambda: dt_util.now().date(),
@@ -225,6 +232,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     domain_data["device_power_dependency_service"] = (
         device_power_dependency_service
     )
+    domain_data["away_settings_service"] = away_settings_service
     domain_data["energy_meter_service"] = energy_meter_service
     domain_data["energy_meters_service"] = energy_meters_service
     domain_data["energy_anomaly_tracker"] = energy_anomaly_tracker
@@ -1022,6 +1030,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .error_taxonomy import async_preload_error_policies
 
     await async_preload_error_policies(hass)
+    from .application.away_runtime import AwayRuntime
+
+    async def _run_away_actions(
+        actions: tuple[object, ...], correlation_id: str
+    ) -> object:
+        batch = [
+            {
+                "targetId": item.target_id,
+                "actionId": item.action_id,
+                **({"value": item.value} if item.value is not None else {}),
+            }
+            for item in actions
+        ]
+        return await scenario_service.async_execute_device_action_batch(
+            batch,
+            correlation_id=correlation_id,
+            request_ids=tuple(
+                f"{correlation_id}.{index + 1}" for index in range(len(batch))
+            ),
+        )
+
+    away_runtime = AwayRuntime(
+        settings_provider=lambda: away_settings_service.settings,
+        state_provider=lambda entity_id: hass.states.get(entity_id),
+        action_runner=_run_away_actions,  # type: ignore[arg-type]
+        now_ms=lambda: int(dt_util.utcnow().timestamp() * 1000),
+        hass=hass,
+    )
+    domain_data["away_runtime"] = away_runtime
+    await away_runtime.async_start()
+    entry.async_on_unload(away_runtime.stop)
     register_climate_api(
         hass,
         climate_runtime,

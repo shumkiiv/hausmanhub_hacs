@@ -101,6 +101,10 @@ from .application.device_power_dependencies import (
     DevicePowerDependencyService,
     DevicePowerDependencyServiceViolation,
 )
+from .application.away_settings import (
+    AwaySettingsService,
+    AwaySettingsServiceViolation,
+)
 from .application.energy_history import (
     ENERGY_HISTORY_MAX_WINDOW_DAYS,
     resolve_energy_history_window,
@@ -224,6 +228,7 @@ ADMIN_ENERGY_SETTINGS_PATH = "/api/hausman_hub/v1/admin/energy-settings"
 ADMIN_DEVICE_POWER_DEPENDENCIES_PATH = (
     "/api/hausman_hub/v1/admin/device-power-dependencies"
 )
+ADMIN_AWAY_SETTINGS_PATH = "/api/hausman_hub/v1/admin/away-settings"
 ADMIN_RESET_PATH = "/api/hausman_hub/v1/admin/reset"
 NO_STORE_HEADERS = {"Cache-Control": "no-store"}
 MAX_ACTION_BODY_BYTES = 16 * 1024
@@ -286,6 +291,7 @@ def register_climate_api(
             EnergySettingsView(hass),
             ClimateSeasonSettingsView(hass),
             DevicePowerDependenciesView(hass),
+            AwaySettingsView(hass),
             ClimateHomeView(hass),
             ClimateRuntimeView(hass),
             ClimateActionView(hass),
@@ -1771,6 +1777,78 @@ class DevicePowerDependenciesView(_ClimateView):
         except ValueError:
             return self.json_message(
                 "Зависимости питания заполнены неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+
+class AwaySettingsView(_ClimateView):
+    """Read or atomically replace the configurable away/return settings."""
+
+    url = ADMIN_AWAY_SETTINGS_PATH
+    name = "api:hausman_hub:away_settings"
+
+    def _service(self) -> AwaySettingsService | None:
+        if self._runtime() is None:
+            return None
+        service = self._hass.data.get(DOMAIN, {}).get("away_settings_service")
+        return service if isinstance(service, AwaySettingsService) else None
+
+    def _runtime_status(self) -> dict[str, object]:
+        runtime = self._hass.data.get(DOMAIN, {}).get("away_runtime")
+        status = getattr(runtime, "status", None)
+        return status if isinstance(status, dict) else {}
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, self.url):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        service = self._service()
+        if service is None:
+            return self._unavailable()
+        document = dict(service.document)
+        document["status"] = self._runtime_status()
+        return self.json(document, headers=NO_STORE_HEADERS)
+
+    async def put(self, request: Any) -> Any:
+        if not _is_exact_request(request, self.url):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        service = self._service()
+        if service is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(request, maximum_bytes=MAX_ACTION_BODY_BYTES)
+            if not isinstance(payload, Mapping) or set(payload) != {
+                "expectedRevision",
+                "settings",
+            }:
+                raise AwaySettingsServiceViolation(
+                    "away settings body is invalid"
+                )
+            result = await service.async_replace(
+                payload["expectedRevision"], payload["settings"]
+            )
+            runtime = self._hass.data.get(DOMAIN, {}).get("away_runtime")
+            refresh = getattr(runtime, "async_refresh", None)
+            if callable(refresh):
+                await refresh()
+        except AwaySettingsServiceViolation as error:
+            return self.json_message(
+                (
+                    "Настройки уже изменились на другом клиенте. Обновите данные."
+                    if error.stale
+                    else "Настройки режима «Вне дома» заполнены неверно."
+                ),
+                HTTPStatus.CONFLICT if error.stale else HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except ValueError:
+            return self.json_message(
+                "Настройки режима «Вне дома» заполнены неверно.",
                 HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
             )

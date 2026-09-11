@@ -1,0 +1,16 @@
+.away-intro { display:grid; gap:10px; }
+.away-safety-note { padding:12px 14px; border:1px solid color-mix(in srgb, var(--warning-color,#ff9800) 36%, transparent); border-radius:12px; background:color-mix(in srgb, var(--warning-color,#ff9800) 10%, transparent); font-size:14px; line-height:1.45; }
+.away-list { display:grid; gap:14px; }
+.away-list-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.away-list-heading > div { display:grid; gap:4px; }
+.away-list-heading small { color:var(--secondary-text-color,#727272); }
+.away-row { display:grid; grid-template-columns:minmax(220px,1.4fr) minmax(160px,1fr) minmax(120px,.7fr) auto; gap:12px; align-items:end; padding:12px; border:1px solid var(--divider-color,#ddd); border-radius:12px; }
+.away-row select, .away-row input { width:100%; }
+.away-remove { align-self:end; }
+.away-empty { margin:0; padding:14px; border:1px dashed var(--divider-color,#ddd); border-radius:12px; text-align:center; }
+.away-status { display:grid; gap:6px; }
+.away-save-status { margin:0; font-size:14px; font-weight:600; }
+@media (max-width: 900px) {
+  .away-row { grid-template-columns:1fr; }
+  .away-list-heading { align-items:stretch; flex-direction:column; }
+}
