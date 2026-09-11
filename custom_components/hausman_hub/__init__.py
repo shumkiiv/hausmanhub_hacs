@@ -1111,6 +1111,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .room_lighting_api import register_room_lighting_api
 
     register_room_lighting_api(hass, entry.entry_id)
+    from .application.room_lighting_runtime import (
+        HomeAssistantRoomLightingOwnershipStore,
+        RoomLightingRuntime,
+    )
+    from .application.room_lighting_shadow import (
+        HomeAssistantRoomLightingShadowStore,
+        RoomLightingShadowService,
+    )
+    from .room_lighting_api import (
+        DATA_ROOM_LIGHTING_RUNTIME,
+        DATA_ROOM_LIGHTING_SERVICE,
+    )
+
+    room_lighting_service = domain_data.get(DATA_ROOM_LIGHTING_SERVICE)
+    if room_lighting_service is not None:
+        room_lighting_shadow = RoomLightingShadowService(
+            HomeAssistantRoomLightingShadowStore(hass, entry.entry_id)
+        )
+        room_lighting_runtime = RoomLightingRuntime(
+            hass,
+            room_lighting_service,
+            room_lighting_shadow,
+            ownership_store=HomeAssistantRoomLightingOwnershipStore(
+                hass, entry.entry_id
+            ),
+        )
+        domain_data[DATA_ROOM_LIGHTING_RUNTIME] = room_lighting_runtime
+        await room_lighting_runtime.start(hass, entry.entry_id)
+        entry.async_on_unload(room_lighting_runtime.cancel)
     from .realtime_api import register_event_stream
 
     register_event_stream(hass, entry.entry_id)

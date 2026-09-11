@@ -11,6 +11,8 @@ import asyncio
 from collections.abc import Callable, Mapping
 from datetime import time as dt_time, timezone
 from http import HTTPStatus
+import inspect
+import logging
 import re
 import time
 from typing import TYPE_CHECKING, Any
@@ -61,6 +63,7 @@ from .error_taxonomy import api_error_payload, api_error_status
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
+_LOGGER = logging.getLogger(__name__)
 
 ROOM_LIGHTING_BASE = "/api/hausman_hub/v1/rooms/{room_id}/lighting"
 ROOM_LIGHTING_CONFIG_PATH = f"{ROOM_LIGHTING_BASE}/config"
@@ -78,6 +81,7 @@ DATA_ROOM_LIGHTING_LIVE_TESTS = "room_lighting_live_tests"
 DATA_ROOM_LIGHTING_EXECUTOR = "room_lighting_live_test_executor"
 DATA_ROOM_LIGHTING_CONTEXT = "room_lighting_status_context_provider"
 DATA_ROOM_LIGHTING_LIVE_CONTEXT = "room_lighting_live_test_context_provider"
+DATA_ROOM_LIGHTING_RUNTIME = "room_lighting_runtime"
 
 _ROOM_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _CORRELATION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -117,6 +121,13 @@ def clear_room_lighting_api(hass: HomeAssistant) -> None:
     data = hass.data.get(DOMAIN)
     if data is None:
         return
+    runtime = data.pop(DATA_ROOM_LIGHTING_RUNTIME, None)
+    cancel = getattr(runtime, "cancel", None)
+    if callable(cancel):
+        try:
+            cancel()
+        except Exception:  # noqa: BLE001 - cleanup must be best effort
+            _LOGGER.warning("room lighting runtime cleanup failed")
     data.pop(DATA_ROOM_LIGHTING_SERVICE, None)
     data.pop(DATA_ROOM_LIGHTING_LIVE_TESTS, None)
 
@@ -252,9 +263,17 @@ class RoomLightingStatusView(_RoomLightingView):
         config = await service.async_get_config(room_id)
         if config is None:
             return self._error("not_found")
-        context = _status_context(self._data(), config)
+        data = self._data()
+        context = await _status_context(data, config)
+        runtime = data.get(DATA_ROOM_LIGHTING_RUNTIME)
+        fresh = runtime is not None and bool(getattr(runtime, "running", False))
         return self.json(
-            _status_payload(config, context),
+            _status_payload(
+                config,
+                context,
+                fresh=fresh,
+                phase=_status_phase(config, context) if fresh else "unknown",
+            ),
             headers=NO_STORE_HEADERS,
         )
 
@@ -511,12 +530,32 @@ def _request_document(
     }
 
 
-def _status_context(
+async def _status_context(
     data: Mapping[str, object], config: RoomLightingConfig
 ) -> RoomLightingContext:
+    """Prefer the live runtime context, then a test provider, then a stub."""
+
+    runtime = data.get(DATA_ROOM_LIGHTING_RUNTIME)
+    builder = getattr(runtime, "async_context_for", None) if runtime is not None else None
+    if callable(builder):
+        try:
+            context = await builder(config)
+        except Exception:  # noqa: BLE001 - a broken read must not break status
+            _LOGGER.warning("room lighting runtime context failed; using the stub")
+        else:
+            if isinstance(context, RoomLightingContext):
+                return context
     provider = data.get(DATA_ROOM_LIGHTING_CONTEXT)
     if callable(provider):
-        return provider(config)  # type: ignore[no-any-return]
+        value = provider(config)
+        if inspect.isawaitable(value):
+            value = await value
+        if isinstance(value, RoomLightingContext):
+            return value
+    return _stub_context(config)
+
+
+def _stub_context(config: RoomLightingConfig) -> RoomLightingContext:
     now_ms = int(time.time() * 1000)
     return RoomLightingContext(
         now=now_ms,
@@ -543,8 +582,24 @@ def _status_context(
     )
 
 
-def _status_payload(
+def _status_phase(
     config: RoomLightingConfig, context: RoomLightingContext
+) -> str:
+    if context.protection.active:
+        return "manual_protection"
+    if any(
+        light.state is SensorState.ON for light in context.lights
+    ):
+        return "active"
+    return "idle"
+
+
+def _status_payload(
+    config: RoomLightingConfig,
+    context: RoomLightingContext,
+    *,
+    fresh: bool = False,
+    phase: str = "unknown",
 ) -> dict[str, object]:
     evaluate_room_lighting(config, context)
     target = config.devices.light_targets[0] if config.devices.light_targets else None
@@ -632,8 +687,8 @@ def _status_payload(
         "contract": {"name": "hausman-hub-room-lighting-status", "version": 1},
         "generated_at": int(time.time()),
         "roomId": config.room_id,
-        "fresh": False,
-        "phase": "unknown",
+        "fresh": bool(fresh),
+        "phase": phase,
         "active_schedule": (
             None
             if active is None

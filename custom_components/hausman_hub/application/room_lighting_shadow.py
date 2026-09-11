@@ -8,7 +8,9 @@ construction.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import logging
+import time
 from typing import TYPE_CHECKING, Protocol
 
 from ..domain.room_lighting import RoomLightingConfig
@@ -25,6 +27,9 @@ _LOGGER = logging.getLogger(__name__)
 
 ROOM_LIGHTING_SHADOW_VERSION = 1
 MAX_JOURNAL_ENTRIES = 200
+# State events can arrive in bursts; coalesce storage writes instead of
+# rewriting the whole bounded journal on every evaluation.
+DEFAULT_SAVE_INTERVAL_SECONDS = 1.0
 
 
 class RoomLightingShadowStore(Protocol):
@@ -45,12 +50,17 @@ class RoomLightingShadowService:
         store: RoomLightingShadowStore,
         *,
         executor: object | None = None,
+        save_interval_seconds: float = DEFAULT_SAVE_INTERVAL_SECONDS,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._store = store
         # Kept only so callers can pass the future executor; it is never invoked.
         self._executor = executor
         self._entries: list[dict[str, object]] = []
         self._loaded = False
+        self._save_interval = max(0.0, float(save_interval_seconds))
+        self._clock = clock
+        self._last_save_at: float | None = None
 
     @property
     def commands_enabled_flag(self) -> bool:
@@ -72,6 +82,7 @@ class RoomLightingShadowService:
                 _LOGGER.warning("room lighting shadow journal is damaged; starting empty")
             self._entries = []
         self._loaded = True
+        self._last_save_at = None
 
     async def async_evaluate(
         self,
@@ -81,14 +92,31 @@ class RoomLightingShadowService:
         """Compute one shadow decision, journal it and return it."""
 
         decision = evaluate_room_lighting(config, context)
+        await self.async_record(decision, commands_enabled=False)
+        return decision
+
+    async def async_record(
+        self,
+        decision: RoomLightingDecision,
+        *,
+        commands_enabled: bool = False,
+    ) -> None:
+        """Journal an already computed decision with the honest command flag.
+
+        The shadow service still never executes anything; the flag only
+        describes whether the enclosing runtime was allowed to dispatch.
+        """
+
+        enabled = bool(commands_enabled)
+        mode = "live" if enabled else "shadow"
         if not self._loaded:
             await self.async_load()
         self._entries.append(
             {
                 "at": decision.evaluated_at,
                 "roomId": decision.room_id,
-                "mode": decision.mode,
-                "commandsEnabled": False,
+                "mode": mode,
+                "commandsEnabled": enabled,
                 "commands": [
                     {
                         "targetId": command.target_id,
@@ -110,15 +138,38 @@ class RoomLightingShadowService:
             }
         )
         self._entries = self._entries[-MAX_JOURNAL_ENTRIES:]
-        await self._store.async_save(
-            {
-                "version": ROOM_LIGHTING_SHADOW_VERSION,
-                "mode": "shadow",
-                "commandsEnabled": False,
-                "entries": self._entries,
-            }
-        )
-        return decision
+        await self._save_if_due(enabled)
+
+    async def async_flush(self) -> None:
+        """Force a write, for example before shutdown."""
+
+        if not self._loaded:
+            await self.async_load()
+        await self._store.async_save(self._document())
+        self._last_save_at = self._clock()
+
+    async def _save_if_due(self, enabled: bool) -> None:
+        now = self._clock()
+        if (
+            self._last_save_at is not None
+            and now - self._last_save_at < self._save_interval
+        ):
+            return
+        await self._store.async_save(self._document(enabled))
+        self._last_save_at = now
+
+    def _document(self, commands_enabled: bool | None = None) -> dict[str, object]:
+        if commands_enabled is None:
+            entry = self._entries[-1] if self._entries else None
+            enabled = bool(entry.get("commandsEnabled")) if entry else False
+        else:
+            enabled = bool(commands_enabled)
+        return {
+            "version": ROOM_LIGHTING_SHADOW_VERSION,
+            "mode": "live" if enabled else "shadow",
+            "commandsEnabled": enabled,
+            "entries": self._entries,
+        }
 
     def journal_payload(self) -> dict[str, object]:
         return {

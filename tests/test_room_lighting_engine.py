@@ -166,6 +166,45 @@ def _config(schedule: list[dict[str, object]] | None = None, illumination: dict[
     return config_from_payload(payload)
 
 
+def _peer_config():
+    """Two interchangeable targets in one group commanded by one entry."""
+
+    payload = _config().to_dict()
+    payload["devices"]["light_targets"].append(
+        {
+            "id": "light_main_2",
+            "name": "Люстра 2",
+            "kind": "light",
+            "entityId": "light.demo_main_2",
+            "role": "main",
+            "groupId": "grp_main",
+            "brightness": True,
+            "color_temperature": False,
+            "autoAdoptOverride": None,
+        }
+    )
+    payload["schedule"] = [
+        {
+            "id": "sch_group",
+            "title": "Группа",
+            "when": {
+                "daysOfWeek": "all",
+                "holiday": False,
+                "anchor": {"kind": "fixed", "time": "09:00", "offsetMinutes": 0},
+            },
+            "targets": {"lightTargets": [], "groupIds": ["grp_main"], "roles": []},
+            "how": {
+                "brightness": 60,
+                "colorTemperature": None,
+                "fade": True,
+                "mode": "on_presence",
+                "minOnSeconds": 0,
+            },
+        }
+    ]
+    return config_from_payload(payload)
+
+
 def _presence(state: SensorState, at: int) -> SensorSnapshot:
     return SensorSnapshot(
         sensor_id="sensor_demo_presence",
@@ -271,6 +310,44 @@ def test_auto_owned_on_light_is_idempotent() -> None:
         assert main is not None
         assert main.commands == ()
         assert main.skips[0].reason is SkipReason.IDEMPOTENT
+
+
+def test_color_temperature_round_trip_is_idempotent() -> None:
+    now = _at(10, 0)
+    # 3000 K -> mired -> 3003 K is the real round trip; ±50 K must not loop.
+    context = _ctx(
+        now,
+        lights=(
+            _light("light_main", SensorState.ON, now - 1000, brightness=81, color=3003),
+        ),
+        ownership=(_auto("light_main", now - 1000),),
+    )
+    decision = evaluate_room_lighting(_config(), context)
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.commands == ()
+    assert main.skips[0].reason is SkipReason.IDEMPOTENT
+
+
+def test_manual_peer_in_group_blocks_sibling_auto_on() -> None:
+    now = _at(10, 0)
+    decision = evaluate_room_lighting(
+        _peer_config(),
+        _ctx(
+            now,
+            lights=(
+                _light("light_main", SensorState.ON, now - 1000, brightness=60),
+                _light("light_main_2", SensorState.OFF, now - 1000),
+            ),
+        ),
+    )
+    main = decision_target(decision, "light_main")
+    sibling = decision_target(decision, "light_main_2")
+    assert main is not None and sibling is not None
+    assert main.commands == ()
+    assert main.skips[0].reason is SkipReason.MANUAL_OWNERSHIP
+    assert sibling.commands == ()
+    assert sibling.skips[0].reason is SkipReason.MANUAL_PEER
 
 
 def test_manual_protection_blocks_auto_on_until_release() -> None:
@@ -406,6 +483,28 @@ def test_restart_unobserved_period_is_not_absence() -> None:
             presence=SensorState.OFF,
             presence_at=now - 900_000,
             lights=(_light("light_main", SensorState.ON, now - 1000, brightness=40),),
+            ownership=(_auto("light_main", now - 60_000),),
+            unobserved_since=now - 30_000,
+        ),
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.commands == ()
+    assert any(skip.reason is SkipReason.UNOBSERVED for skip in main.skips)
+
+
+def test_restart_unobserved_blocks_auto_owned_adjustment() -> None:
+    now = _at(12, 0)
+    # The light was auto-owned before the restart and still reads a different
+    # brightness, but the unobserved gap means the ownership is not proven
+    # fresh: the adjust branch must not dispatch SET_BRIGHTNESS.
+    decision = evaluate_room_lighting(
+        _config(),
+        _ctx(
+            now,
+            presence=SensorState.ON,
+            presence_at=now,
+            lights=(_light("light_main", SensorState.ON, now - 1000, brightness=30),),
             ownership=(_auto("light_main", now - 60_000),),
             unobserved_since=now - 30_000,
         ),

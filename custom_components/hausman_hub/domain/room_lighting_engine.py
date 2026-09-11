@@ -56,6 +56,7 @@ class DecisionReason(StrEnum):
 
 class SkipReason(StrEnum):
     MANUAL_OWNERSHIP = "manual_ownership"
+    MANUAL_PEER = "manual_peer"
     MANUAL_PROTECTION = "manual_protection"
     SENSOR_UNKNOWN = "sensor_unknown"
     SENSOR_STALE = "sensor_stale"
@@ -66,6 +67,13 @@ class SkipReason(StrEnum):
     NO_SCHEDULE = "no_schedule"
     UNOBSERVED = "unobserved"
     NO_AUTO_OWNERSHIP = "no_auto_ownership"
+
+
+# A colour temperature round trip is Kelvin -> mired -> Kelvin and rounds to
+# the nearest mired, so a desired 3000 K can read back as 3003 K. The engine
+# must not chase that difference forever.
+BRIGHTNESS_TOLERANCE = 2
+COLOR_TEMPERATURE_TOLERANCE_KELVIN = 50
 
 
 class RoomLightingEngineViolation(ValueError):
@@ -296,9 +304,22 @@ def evaluate_room_lighting(
     now_time = datetime.fromtimestamp(now / 1000, context.timezone).time()
     presence = _presence_state(context, policy)
     absence_proven, absence_since, absence_stale = _absence_evidence(context, policy)
+    # A manual light owns the whole interchangeable source. If a person already
+    # turned on one target of a group or schedule entry, automation must not
+    # turn on a sibling source; it only observes until manual ownership clears.
+    manual_targets = {
+        target.id
+        for target in config.devices.light_targets
+        if resolve_manual_ownership(
+            context.ownership,
+            target.id,
+            light_on=_light_on(context, target.id),
+        )
+    }
 
     targets: list[TargetDecision] = []
     for target in config.devices.light_targets:
+        schedule_entry = _active_schedule_entry(config, context, target)
         targets.append(
             _evaluate_target(
                 target,
@@ -310,7 +331,10 @@ def evaluate_room_lighting(
                 absence_proven=absence_proven,
                 absence_since=absence_since,
                 absence_stale=absence_stale,
-                schedule_entry=_active_schedule_entry(config, context, target),
+                schedule_entry=schedule_entry,
+                manual_peer_blocked=_has_manual_peer(
+                    config, target, schedule_entry, manual_targets
+                ),
             )
         )
     return RoomLightingDecision(
@@ -320,6 +344,37 @@ def evaluate_room_lighting(
         targets=tuple(targets),
         commands_enabled=False,
     )
+
+
+def _light_on(context: RoomLightingContext, target_id: str) -> bool:
+    light = context.light(target_id)
+    return light is not None and light.state is SensorState.ON
+
+
+def _has_manual_peer(
+    config: RoomLightingConfig,
+    target: object,
+    schedule_entry: ScheduleEntry | None,
+    manual_targets: set[str],
+) -> bool:
+    """Whether a manually owned sibling blocks this target's automatic branch."""
+
+    for other in config.devices.light_targets:
+        if other.id == target.id or other.id not in manual_targets:
+            continue
+        if (
+            target.group_id is not None  # type: ignore[attr-defined]
+            and other.group_id == target.group_id  # type: ignore[attr-defined]
+        ):
+            return True
+        if (
+            target.role is not None  # type: ignore[attr-defined]
+            and other.role == target.role  # type: ignore[attr-defined]
+        ):
+            return True
+        if schedule_entry is not None and _entry_targets_target(schedule_entry, other):
+            return True
+    return False
 
 
 def decision_target(
@@ -343,6 +398,7 @@ def _evaluate_target(
     absence_since: int | None,
     absence_stale: bool,
     schedule_entry: ScheduleEntry | None,
+    manual_peer_blocked: bool = False,
 ) -> TargetDecision:
     target_id = target.id  # type: ignore[attr-defined]
     light = context.light(target_id)
@@ -350,7 +406,22 @@ def _evaluate_target(
     light_brightness = light.brightness if light is not None else None
     light_color = light.color_temperature if light is not None else None
 
+    # A person already owns an interchangeable source of this profile. Leave
+    # this target untouched instead of fighting the manual choice.
+    if manual_peer_blocked:
+        return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_PEER))
+
     manual = resolve_manual_ownership(context.ownership, target_id, light_on=light_on)
+    # Absence that releases manual protection is historical: it is proven by a
+    # completed stable absence, not by the presence event that starts a new
+    # automatic turn-on. Prefer the protection snapshot so the same evidence
+    # drives both the manual release and the protection gate.
+    effective_absence = context.protection.absence_confirmed or absence_proven
+    effective_absence_since = (
+        context.protection.absence_since
+        if context.protection.absence_since is not None
+        else absence_since
+    )
     if manual:
         released = (
             not light_on
@@ -361,17 +432,25 @@ def _evaluate_target(
                 now=context.now,
                 minimum_interval_seconds=context.protection.minimum_interval_seconds,
                 stable_absence_seconds=context.protection.stable_absence_seconds,
-                absence_confirmed=context.protection.absence_confirmed
-                or absence_proven,
-                absence_since=(
-                    context.protection.absence_since
-                    if context.protection.absence_since is not None
-                    else absence_since
-                ),
+                absence_confirmed=effective_absence,
+                absence_since=effective_absence_since,
             )
         )
         if not released:
             return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_OWNERSHIP))
+
+    # Both the adjust and the turn-off path must prove that automation owned the
+    # light before the unobserved gap. A pre-restart AUTO record with a stale
+    # read-back is not enough to command or turn off an already-on light.
+    restored_auto = False
+    if light_on:
+        restored_auto = restore_after_restart(
+            context.ownership,
+            target_id,
+            light_state=light.state if light is not None else SensorState.UNKNOWN,
+            light_last_changed=light.last_changed if light is not None else None,
+            unobserved_since=context.unobserved_since,
+        )
 
     want_on = False
     reason = DecisionReason.SCHEDULE
@@ -429,8 +508,8 @@ def _evaluate_target(
     if want_on:
         if context.protection.blocks_auto_on(
             now=context.now,
-            absence_proven=absence_proven,
-            absence_since=absence_since,
+            absence_proven=effective_absence,
+            absence_since=effective_absence_since,
         ):
             return _unchanged(
                 target_id,
@@ -438,6 +517,12 @@ def _evaluate_target(
                 extra_skips=skips,
             )
         if light_on:
+            if context.unobserved_since is not None and not restored_auto:
+                return _unchanged(
+                    target_id,
+                    Skip(target_id, SkipReason.UNOBSERVED),
+                    extra_skips=skips,
+                )
             if not has_proven_auto_ownership(context.ownership, target_id):
                 return _unchanged(
                     target_id,
@@ -494,13 +579,7 @@ def _evaluate_target(
             Skip(target_id, SkipReason.IDEMPOTENT),
             extra_skips=skips,
         )
-    restored = restore_after_restart(
-        context.ownership,
-        target_id,
-        light_state=light.state if light is not None else SensorState.UNKNOWN,
-        light_last_changed=light.last_changed if light is not None else None,
-        unobserved_since=context.unobserved_since,
-    )
+    restored = restored_auto
     if context.unobserved_since is not None and not restored:
         return _unchanged(
             target_id,
@@ -586,7 +665,11 @@ def _adjust_commands(
     reason: DecisionReason,
 ) -> list[PlannedCommand]:
     commands: list[PlannedCommand] = []
-    if target.brightness and brightness is not None and brightness != light_brightness:  # type: ignore[attr-defined]
+    if (
+        target.brightness  # type: ignore[attr-defined]
+        and brightness is not None
+        and not _within_tolerance(brightness, light_brightness, BRIGHTNESS_TOLERANCE)
+    ):
         commands.append(
             PlannedCommand(
                 target_id,
@@ -595,7 +678,13 @@ def _adjust_commands(
                 reason=reason,
             )
         )
-    if target.color_temperature and color is not None and color != light_color:  # type: ignore[attr-defined]
+    if (
+        target.color_temperature  # type: ignore[attr-defined]
+        and color is not None
+        and not _within_tolerance(
+            color, light_color, COLOR_TEMPERATURE_TOLERANCE_KELVIN
+        )
+    ):
         commands.append(
             PlannedCommand(
                 target_id,
@@ -605,6 +694,16 @@ def _adjust_commands(
             )
         )
     return commands
+
+
+def _within_tolerance(
+    desired: int, actual: int | None, tolerance: int
+) -> bool:
+    """Whether the observed value is close enough that no command is needed."""
+
+    if actual is None:
+        return False
+    return abs(int(desired) - int(actual)) <= tolerance
 
 
 def _turn_off_command(
@@ -697,7 +796,12 @@ def _absence_evidence(
         if context.now - sensor.last_changed > policy.staleness_seconds * 1000:
             return (False, None, True)
         off_times.append(sensor.last_changed)
-    return (True, max(off_times), False)
+    absence_since = max(off_times)
+    # An unobserved interval is not absence: a restart makes the confirmed
+    # absence window start anew instead of inheriting a stale OFF timestamp.
+    if context.unobserved_since is not None:
+        absence_since = max(absence_since, context.unobserved_since)
+    return (True, absence_since, False)
 
 
 def _is_fresh(sensor: SensorSnapshot, context: RoomLightingContext, policy: EnginePolicy) -> bool:
