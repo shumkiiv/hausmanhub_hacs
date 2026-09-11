@@ -732,7 +732,7 @@ async def test_shower_unknown_humidity_never_authorizes_owned_fan_off() -> None:
 
 
 @pytest.mark.asyncio
-async def test_failed_shower_action_is_not_retried_after_evidence_change_or_restart() -> None:
+async def test_failed_shower_action_retries_only_when_evidence_changes() -> None:
     now = [datetime(2026, 9, 7, 12, tzinfo=ZoneInfo("Asia/Omsk"))]
     clock = [0]
     store = MemoryStore()
@@ -747,7 +747,7 @@ async def test_failed_shower_action_is_not_retried_after_evidence_change_or_rest
     await coordinator.async_handle_shower_change()
     states.set(f"test.{SHOWER_HUMIDITY_TARGET_ID}", "61")
     await coordinator.async_handle_shower_change()
-    assert len(service.actions) == 1
+    assert len(service.actions) == 2
     assert coordinator.payload["shower"]["transition"] == "light_action_failed"
 
     restarted, restarted_service, _states, _priority, _ = await make_room_coordinator(
@@ -759,6 +759,29 @@ async def test_failed_shower_action_is_not_retried_after_evidence_change_or_rest
     await restarted.async_handle_shower_change(recovery=True)
     await restarted.async_reconcile_zone_due(SHOWER_SCENARIO_ID)
     assert restarted_service.actions == []
+
+
+@pytest.mark.asyncio
+async def test_failed_shower_dispatch_recovers_on_new_presence_entry() -> None:
+    now = [datetime(2026, 9, 7, 12, tzinfo=ZoneInfo("Asia/Omsk"))]
+    clock = [0]
+    coordinator, service, states, _priority, _ = await make_room_coordinator(
+        now=now,
+        clock=clock,
+        overrides={SHOWER_PRESENCE_TARGET_ID: "on", SHOWER_HUMIDITY_TARGET_ID: "45"},
+    )
+    service.uncertain = True
+    await coordinator.async_handle_shower_change()
+    assert len(service.actions) == 1
+    assert coordinator.payload["shower"]["transition"] == "light_action_failed"
+
+    service.uncertain = False
+    states.set(f"test.{SHOWER_PRESENCE_TARGET_ID}", "off")
+    await coordinator.async_handle_shower_change()
+    states.set(f"test.{SHOWER_PRESENCE_TARGET_ID}", "on")
+    await coordinator.async_handle_shower_change()
+    assert len(service.actions) >= 2
+    assert coordinator.payload["shower"]["transition"] != "light_action_failed"
 
 
 @pytest.mark.asyncio
@@ -927,7 +950,7 @@ async def test_bathroom_day_off_is_restart_safe_and_requires_owned_fan() -> None
 
 
 @pytest.mark.asyncio
-async def test_failed_bathroom_immediate_off_is_not_retried_after_evidence_change_or_restart() -> None:
+async def test_failed_bathroom_off_retries_only_when_evidence_changes() -> None:
     now = [datetime(2026, 9, 7, 23, tzinfo=ZoneInfo("Asia/Omsk"))]
     clock = [0]
     store = MemoryStore()
@@ -945,6 +968,7 @@ async def test_failed_bathroom_immediate_off_is_not_retried_after_evidence_chang
     await coordinator.async_handle_bathroom_change()
     assert service.actions == [
         (BATHROOM_SCENARIO_ID, BATHROOM_FAN_TARGET_ID, "turn_on", None),
+        (BATHROOM_SCENARIO_ID, BATHROOM_FAN_TARGET_ID, "turn_off", None),
         (BATHROOM_SCENARIO_ID, BATHROOM_FAN_TARGET_ID, "turn_off", None),
     ]
     assert coordinator.payload["bathroom"]["transition"] == "light_action_failed"

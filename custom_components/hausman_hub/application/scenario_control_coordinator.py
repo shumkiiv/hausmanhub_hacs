@@ -1473,7 +1473,7 @@ class ScenarioControlCoordinator:
             )
             fan = self._target_state(SHOWER_FAN_TARGET_ID)
             evidence = self._room_evidence(presence, humidity, lights, fan)
-            if self._room_dispatch_failed(self._shower):
+            if self._failed_dispatch_blocks(self._shower, evidence, recovery=recovery):
                 return
             if humidity is not None and humidity > 55 and fan == "off" and allow_activation:
                 if not await self._run_zone_action(
@@ -1607,14 +1607,13 @@ class ScenarioControlCoordinator:
     ) -> None:
         """Select one toilet light profile and manage its independent fan."""
 
-        del recovery
         async with self._decision_lock:
             motion = self._combined_target_state(TOILET_MOTION_TARGET_IDS)
             main = self._target_state(TOILET_MAIN_TARGET_ID)
             night = self._target_state(TOILET_NIGHT_TARGET_ID)
             fan = self._target_state(TOILET_FAN_TARGET_ID)
             evidence = self._room_evidence(motion, self._target_state(TOILET_AWAY_TARGET_ID), (main, night), fan)
-            if self._room_dispatch_failed(self._toilet):
+            if self._failed_dispatch_blocks(self._toilet, evidence, recovery=recovery):
                 return
             if motion == "unknown":
                 if self._toilet_fan_window() and "on" in {main, night} and fan == "off" and allow_activation:
@@ -1693,13 +1692,12 @@ class ScenarioControlCoordinator:
     ) -> None:
         """Control only the bathroom fan from two light inputs and humidity."""
 
-        del recovery
         async with self._decision_lock:
             light1, light2 = (self._target_state(target) for target in BATHROOM_LIGHT_TARGET_IDS)
             humidity = self._target_numeric_state(BATHROOM_HUMIDITY_TARGET_ID)
             fan = self._target_state(BATHROOM_FAN_TARGET_ID)
             evidence = self._room_evidence(light1, light2, humidity, fan)
-            if self._room_dispatch_failed(self._bathroom):
+            if self._failed_dispatch_blocks(self._bathroom, evidence, recovery=recovery):
                 return
             band = self._bathroom_band()
             should_on = (
@@ -1767,7 +1765,7 @@ class ScenarioControlCoordinator:
             sun = self._target_state(SUN_TARGET_ID)
             profile = self._office_profile(lux, sun)
             evidence = self._room_evidence(light, relay, lux, sun)
-            if self._room_dispatch_failed(self._office):
+            if self._failed_dispatch_blocks(self._office, evidence, recovery=recovery):
                 return
             if light != "on" or relay != "on" or profile is None:
                 await self._room_hold(
@@ -2049,6 +2047,24 @@ class ScenarioControlCoordinator:
         """Never repeat a room command whose physical outcome is uncertain."""
 
         return str(record.get("transition", "")).endswith("failed")
+
+    def _failed_dispatch_blocks(
+        self,
+        record: Mapping[str, object],
+        evidence: Mapping[str, object],
+        *,
+        recovery: bool,
+    ) -> bool:
+        """Keep a failed room blocked while its evidence is unchanged.
+
+        A transient source failure must not disable a room forever: a new event
+        that produced different evidence re-arms one attempt, while restart
+        recovery and byte-identical evidence stay fail-closed.
+        """
+
+        if not self._room_dispatch_failed(record):
+            return False
+        return recovery or self._failed_with_same_evidence(record, evidence)
 
     def _target_state_revision(self, target_id: str) -> str | None:
         state = self._target_state_object(target_id)
