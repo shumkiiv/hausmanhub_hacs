@@ -52,13 +52,19 @@ class OwnershipSnapshot:
 def latest_ownership(
     records: Sequence[OwnershipSnapshot], target_id: str
 ) -> OwnershipSnapshot | None:
-    """Return the newest record for one target, if any."""
+    """Return the newest record for one target, deterministically.
+
+    A manual record wins a timestamp tie so a manual intervention is never
+    lost behind an equally old automatic record.
+    """
 
     latest: OwnershipSnapshot | None = None
     for record in records:
         if record.target_id != target_id:
             continue
-        if latest is None or record.at >= latest.at:
+        if latest is None or record.at > latest.at:
+            latest = record
+        elif record.at == latest.at and record.source is OwnershipSource.MANUAL:
             latest = record
     return latest
 
@@ -106,6 +112,36 @@ def resolve_manual_ownership(
     ):
         return True
     return False
+
+
+def release_expired_manual(
+    records: Sequence[OwnershipSnapshot],
+    target_id: str,
+    *,
+    now: int,
+    minimum_interval_seconds: int,
+    stable_absence_seconds: int,
+    absence_confirmed: bool,
+    absence_since: int | None,
+) -> bool:
+    """Whether an expired manual-off protection releases manual ownership.
+
+    The transition only fires when the newest record is a confirmed manual
+    action, the minimum interval elapsed and a stable absence was already
+    confirmed during the protection window. It is a pure predicate: the caller
+    still requires a new event before turning light on.
+    """
+
+    latest = latest_ownership(records, target_id)
+    if latest is None or latest.source is not OwnershipSource.MANUAL:
+        return False
+    if not latest.confirmed:
+        return False
+    if now - latest.at < minimum_interval_seconds * 1000:
+        return False
+    if not absence_confirmed or absence_since is None:
+        return False
+    return now - absence_since >= stable_absence_seconds * 1000
 
 
 def restore_after_restart(

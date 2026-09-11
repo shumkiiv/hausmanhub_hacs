@@ -13,11 +13,16 @@
   ручной защите, авто-выключение только при доказанном владении, учёт
   ненаблюдаемого периода, fail-closed люкс, идемпотентность, монотонное
   гашение, ночная подсветка 02:00–рассвет (мин. 10 мин) и зеркало 23:00–01:00
-  через `EnginePolicy`; приоритет: ручное > безопасные команды > защита >
+  через `EnginePolicy`; фактический приоритет: ручное > защита >
   расписание > люкс > присутствие > гашение.
+- Расписание применяется к цели только если она входит в `targets` активной
+  записи (lightTargets/groupId/role). Свежесть отсутствия отделена от
+  порогов 600/180 с: непрерывный off дольше порога остаётся отсутствием до
+  отдельного `staleness_seconds`, а unknown/unavailable/новый ON прерывают.
 - `domain/room_lighting_ownership.py`: журнал владения и чистые правила
   `has_proven_auto_ownership`, `manual_intervention_after`,
-  `restore_after_restart`, `observed_absence` (только непрерывные свежие off;
+  `restore_after_restart`, `release_expired_manual` (снятие истёкшей ручной
+  защиты), `observed_absence` (только непрерывные свежие off;
   unknown/unavailable/stale прерывает).
 - `application/room_lighting_shadow.py`: теневой сервис с ограниченным
   журналом решений, fail-closed загрузкой и `commands_enabled=False`; executor

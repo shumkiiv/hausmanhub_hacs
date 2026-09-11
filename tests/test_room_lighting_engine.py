@@ -347,7 +347,7 @@ def test_absence_before_night_waits_600_seconds() -> None:
     early_main = decision_target(early, "light_main")
     assert early_main is not None
     assert early_main.commands == ()
-    assert any(skip.reason is SkipReason.UNOBSERVED for skip in early_main.skips)
+    assert any(skip.reason is SkipReason.ABSENCE_UNPROVEN for skip in early_main.skips)
 
     due = evaluate_room_lighting(
         _config(),
@@ -521,3 +521,118 @@ def test_policy_from_config_uses_dimming_and_protection() -> None:
     assert policy.fade_seconds == 20
     assert policy.absence_seconds_before_night == 600
     assert policy.night_min_seconds == 600
+
+
+def test_schedule_entry_does_not_affect_other_targets() -> None:
+    now = _at(3, 0)
+    decision = evaluate_room_lighting(
+        _config(schedule=[_schedule_night()]),
+        _ctx(now, lights=(_light("light_main", SensorState.OFF, now - 1000), _light("light_mirror", SensorState.OFF, now - 1000))),
+    )
+    main = decision_target(decision, "light_main")
+    mirror = decision_target(decision, "light_mirror")
+    assert main is not None
+    assert mirror is not None
+    assert main.commands == ()
+    assert any(skip.reason is SkipReason.NO_SCHEDULE for skip in main.skips)
+    assert mirror.commands[0].action is LightAction.TURN_ON
+    assert mirror.commands[0].reason is DecisionReason.NIGHT_LIGHT
+
+
+def test_long_absence_still_dims_past_600_seconds() -> None:
+    now = _at(12, 0)
+    for elapsed_ms in (601_000, 900_000, 3_600_000):
+        decision = evaluate_room_lighting(
+            _config(),
+            _ctx(
+                now,
+                presence=SensorState.OFF,
+                presence_at=now - elapsed_ms,
+                lights=(_light("light_main", SensorState.ON, now - 1000, brightness=40),),
+                ownership=(_auto("light_main", now - 1000),),
+            ),
+        )
+        main = decision_target(decision, "light_main")
+        assert main is not None
+        assert main.commands, f"absence {elapsed_ms} not due"
+        assert main.commands[0].reason is DecisionReason.DIMMING
+
+
+def test_unknown_sensor_breaks_absence() -> None:
+    now = _at(12, 0)
+    decision = evaluate_room_lighting(
+        _config(),
+        _ctx(
+            now,
+            presence=SensorState.UNKNOWN,
+            lights=(_light("light_main", SensorState.ON, now - 1000, brightness=40),),
+            ownership=(_auto("light_main", now - 1000),),
+        ),
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.commands == ()
+    assert any(skip.reason is SkipReason.SENSOR_UNKNOWN for skip in main.skips)
+
+
+def test_stale_beyond_staleness_reports_sensor_stale() -> None:
+    now = _at(12, 0)
+    stale_at = now - (EnginePolicy().staleness_seconds + 1) * 1000
+    decision = evaluate_room_lighting(
+        _config(),
+        _ctx(
+            now,
+            presence=SensorState.OFF,
+            presence_at=stale_at,
+            lights=(_light("light_main", SensorState.ON, now - 1000, brightness=40),),
+            ownership=(_auto("light_main", now - 1000),),
+        ),
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.commands == ()
+    assert any(skip.reason is SkipReason.SENSOR_STALE for skip in main.skips)
+
+
+def test_manual_off_release_then_new_presence_turns_on() -> None:
+    now = _at(10, 0)
+    protection = ProtectionSnapshot(
+        active=False,
+        minimum_interval_seconds=600,
+        stable_absence_seconds=30,
+        absence_confirmed=True,
+        absence_since=now - 40_000,
+    )
+    decision = evaluate_room_lighting(
+        _config(),
+        _ctx(
+            now,
+            presence=SensorState.ON,
+            lights=(_light("light_main", SensorState.OFF, now - 1000),),
+            ownership=(
+                OwnershipSnapshot("light_main", OwnershipSource.MANUAL, True, now - 700_000),
+            ),
+            protection=protection,
+        ),
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.commands
+    assert main.commands[0].action is LightAction.TURN_ON
+
+
+def test_schedule_off_uses_schedule_reason() -> None:
+    now = _at(23, 30)
+    decision = evaluate_room_lighting(
+        _config(schedule=[_schedule_day(), _schedule_off()]),
+        _ctx(
+            now,
+            presence=SensorState.ON,
+            lights=(_light("light_main", SensorState.ON, now - 1000, brightness=60),),
+            ownership=(_auto("light_main", now - 1000),),
+        ),
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.commands
+    assert main.commands[0].reason is DecisionReason.SCHEDULE

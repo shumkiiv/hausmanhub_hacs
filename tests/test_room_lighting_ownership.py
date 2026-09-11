@@ -10,6 +10,7 @@ from custom_components.hausman_hub.domain.room_lighting_ownership import (
     latest_ownership,
     manual_intervention_after,
     observed_absence,
+    release_expired_manual,
     resolve_manual_ownership,
     restore_after_restart,
 )
@@ -141,3 +142,53 @@ def test_observed_absence_requires_continuous_fresh_off() -> None:
         freshness_ms=2_000,
     ) is None
     assert observed_absence([], now=now, freshness_ms=2_000) is None
+
+
+def test_latest_ownership_tie_prefers_manual() -> None:
+    records = [
+        _record(OwnershipSource.AUTO, 100),
+        _record(OwnershipSource.MANUAL, 100),
+    ]
+    latest = latest_ownership(records, "light_main")
+    assert latest is not None
+    assert latest.source is OwnershipSource.MANUAL
+
+
+def test_release_expired_manual_requires_timer_and_stable_absence() -> None:
+    records = [_record(OwnershipSource.MANUAL, 1_000)]
+    assert release_expired_manual(
+        records,
+        "light_main",
+        now=700_000,
+        minimum_interval_seconds=600,
+        stable_absence_seconds=30,
+        absence_confirmed=True,
+        absence_since=650_000,
+    )
+    assert not release_expired_manual(
+        records,
+        "light_main",
+        now=500_000,
+        minimum_interval_seconds=600,
+        stable_absence_seconds=30,
+        absence_confirmed=True,
+        absence_since=470_000,
+    )
+    assert not release_expired_manual(
+        records,
+        "light_main",
+        now=700_000,
+        minimum_interval_seconds=600,
+        stable_absence_seconds=30,
+        absence_confirmed=False,
+        absence_since=650_000,
+    )
+    assert not release_expired_manual(
+        [_record(OwnershipSource.AUTO, 1_000)],
+        "light_main",
+        now=700_000,
+        minimum_interval_seconds=600,
+        stable_absence_seconds=30,
+        absence_confirmed=True,
+        absence_since=650_000,
+    )
