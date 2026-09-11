@@ -1,4 +1,4 @@
-import { canonicalRoomMdiIcon } from "./hausman-hub-room-icons.js?v=1.52.253";
+import { canonicalRoomMdiIcon } from "./hausman-hub-room-icons.js?v=1.52.254";
 
 /** Render room purpose selection backed by the Home Assistant Area Registry. */
 export function renderSettingsRooms(panel, container, deps) {
