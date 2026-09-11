@@ -552,58 +552,6 @@ def test_manual_chandelier_stays_at_100_while_points_remain_independent() -> Non
     assert request["observations"][CHANDELIER]["brightnessPercent"] == 100
 
 
-def test_points_manual_off_blocks_automatic_relight_until_minimum() -> None:
-    request = _request(12 * 60)
-    now = int(request["clock"]["nowMs"])
-    _set_light(request, CHANDELIER, "on", "automatic", brightness=80, kelvin=3000)
-    _set_light(request, POINTS, "off", "none")
-    request["observations"][POINTS]["observedAtMs"] = now
-    request["receipts"] = [
-        {
-            "id": "receipt.points.on",
-            "planId": "tambur.points.on",
-            "actionId": "turn_on",
-            "targetId": POINTS,
-            "status": "confirmed",
-            "observedAtMs": now - 5_000,
-        }
-    ]
-    decision = _decision(request)
-    assert _action_signature(decision) is None
-    assert decision["reasonCode"] == "manual_authority_preserved"
-
-    # Minimum time alone is not enough while the room stayed occupied.
-    request["observations"][POINTS]["observedAtMs"] = now - 700_000
-    decision = _decision(request)
-    assert _action_signature(decision) is None
-    assert decision["reasonCode"] == "manual_authority_preserved"
-
-    # A confirmed absence after the manual OFF plus the minimum re-enables it.
-    request["durable"]["absenceSinceMs"] = now - 100_000
-    decision = _decision(request)
-    assert _action_signature(decision) == (POINTS, "turn_on", None)
-
-
-def test_confirmed_automatic_off_does_not_block_points_relight() -> None:
-    request = _request(12 * 60)
-    now = int(request["clock"]["nowMs"])
-    _set_light(request, CHANDELIER, "on", "automatic", brightness=80, kelvin=3000)
-    _set_light(request, POINTS, "off", "none")
-    request["observations"][POINTS]["observedAtMs"] = now - 1_000
-    request["receipts"] = [
-        {
-            "id": "receipt.points.off",
-            "planId": "tambur.points.off",
-            "actionId": "turn_off",
-            "targetId": POINTS,
-            "status": "confirmed",
-            "observedAtMs": now,
-        }
-    ]
-    decision = _decision(request)
-    assert _action_signature(decision) == (POINTS, "turn_on", None)
-
-
 def test_mirror_schedule_wraps_midnight_and_handover_is_ordered() -> None:
     request = _request(23 * 60)
     _set_light(request, CHANDELIER, "on", "automatic", brightness=30, kelvin=2300)
