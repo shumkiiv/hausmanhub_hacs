@@ -66,6 +66,15 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value ?? null));
 }
 
+function nextFreeId(items, prefix) {
+  const used = new Set((Array.isArray(items) ? items : [])
+    .map((item) => item && item.id)
+    .filter(Boolean));
+  let index = 1;
+  while (used.has(`${prefix}_${index}`)) index += 1;
+  return `${prefix}_${index}`;
+}
+
 function lightingState(panel, roomId) {
   if (!panel._roomLighting) panel._roomLighting = { byRoom: {} };
   if (!panel._roomLighting.byRoom) panel._roomLighting.byRoom = {};
@@ -150,8 +159,16 @@ async function applyTemplate(panel, roomId, templateId) {
       templateId,
       keepDevices: true,
     });
-    store.draft = clone(config);
+    const stored = await panel._hass.callApi("GET", lightingApi(roomId, "/config")).catch(() => null);
+    const draft = clone(config);
+    if (stored) {
+      draft.version = stored.version;
+      draft.updatedAt = stored.updatedAt;
+    }
+    store.config = stored;
+    store.draft = draft;
     store.templateBaseline = clone(config);
+    store.loaded = true;
     store.notice = "Шаблон применён. Проверьте и сохраните изменения.";
   } catch (error) {
     store.error = lightingErrorMessage(error);
@@ -355,7 +372,13 @@ function renderDevices(panel, roomId, store, deps) {
   devices.light_targets = devices.light_targets || [];
   devices.wireless_switches = devices.wireless_switches || [];
   devices.selectAll = Boolean(devices.selectAll);
+  if (typeof draft.autoAdopt !== "boolean") draft.autoAdopt = true;
 
+  block.appendChild(checkInput(deps, "Автоматически подхватывать новые устройства", draft.autoAdopt, (checked) => {
+    draft.autoAdopt = checked;
+    markDirty(store);
+    panel._render();
+  }));
   block.appendChild(checkInput(deps, "Все устройства комнаты", devices.selectAll, (checked) => {
     devices.selectAll = checked;
     markDirty(store);
@@ -379,7 +402,7 @@ function renderDevices(panel, roomId, store, deps) {
     ]));
   });
   block.appendChild(button(deps, "Добавить датчик", () => {
-    devices.sensors.push({ id: `sensor_${devices.sensors.length + 1}`, name: "Датчик", kind: "presence", entityId: "", autoAdoptOverride: null });
+    devices.sensors.push({ id: nextFreeId(devices.sensors, "sensor"), name: "Датчик", kind: "presence", autoAdoptOverride: null });
     markDirty(store);
     panel._render();
   }));
@@ -406,8 +429,8 @@ function renderDevices(panel, roomId, store, deps) {
   });
   block.appendChild(button(deps, "Добавить цель света", () => {
     devices.light_targets.push({
-      id: `light_${devices.light_targets.length + 1}`, name: "Свет", kind: "light",
-      entityId: "", role: "other", groupId: null, brightness: true, color_temperature: false,
+      id: nextFreeId(devices.light_targets, "light"), name: "Свет", kind: "light",
+      role: "other", groupId: null, brightness: true, color_temperature: false,
       autoAdoptOverride: null,
     });
     markDirty(store);
@@ -428,7 +451,11 @@ function renderDevices(panel, roomId, store, deps) {
     ]));
   } else {
     block.appendChild(button(deps, "Добавить выключатель питания", () => {
-      devices.power_switch = { id: "switch_power", name: "Питание", entityId: "", autoAdoptOverride: null };
+      devices.power_switch = {
+        id: nextFreeId([...devices.sensors, ...devices.light_targets, ...devices.wireless_switches], "switch_power"),
+        name: "Питание",
+        autoAdoptOverride: null,
+      };
       markDirty(store);
       panel._render();
     }));
@@ -447,7 +474,7 @@ function renderDevices(panel, roomId, store, deps) {
     ]));
   });
   block.appendChild(button(deps, "Добавить беспроводной выключатель", () => {
-    devices.wireless_switches.push({ id: `sw_${devices.wireless_switches.length + 1}`, name: "Выключатель", entityId: "", buttons: ["left"], pressTypes: ["single"] });
+    devices.wireless_switches.push({ id: nextFreeId(devices.wireless_switches, "sw"), name: "Выключатель", buttons: ["left"], pressTypes: ["single"] });
     markDirty(store);
     panel._render();
   }));
@@ -497,7 +524,7 @@ function renderSchedule(panel, roomId, store, deps) {
   });
   block.appendChild(button(deps, "Добавить запись", () => {
     draft.schedule.push({
-      id: `sch_${draft.schedule.length + 1}`, title: "Запись",
+      id: nextFreeId(draft.schedule, "sch"), title: "Запись",
       when: { daysOfWeek: "all", holiday: false, anchor: { kind: "fixed", time: "09:00", offsetMinutes: 0 } },
       targets: { lightTargets: [], groupIds: [], roles: [] },
       how: { brightness: 50, colorTemperature: 3000, fade: true, mode: "on_presence", minOnSeconds: 0 },
