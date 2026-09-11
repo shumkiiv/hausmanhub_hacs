@@ -1,5 +1,25 @@
 # HausmanHub AI Context
 
+## Шаг 4 освещения комнат: серверный live-тест ~30 с, 2026-09-11
+
+- В ветке `codex/room-lighting-integration` (сверху Шага 3, `d0c1609`)
+  добавлен bounded live-тест комнаты: `safe` только считает план движком и
+  никогда не вызывает executor, `real` отправляет план через переданный
+  executor и фиксирует receipts. У прогона один `correlationId`, есть отмена
+  через `cancel_event`.
+- `application/room_lighting_live_test.py`: `build_stages(config)` строит
+  сжатую последовательность ~30 с с русскими заголовками, комментариями и
+  описанием действия; покрыты разбор устройств, снимок состояния,
+  присутствие, режимы расписания (on_presence/always/night_light с
+  `minOnSeconds`/off), коррекция по люксу, плавное гашение, ручная защита,
+  `away_room_off` и возврат состояния.
+- `RoomLightingLiveTestRunner.run(...)` пишет `LiveTestTrace` со стадиями,
+  желаемым состоянием, планом/квитанциями, итогом completed/cancelled и
+  `commands_sent` (в safe = 0). Реальный HA-слой, HTTP API и UI отложены на
+  следующий шаг; executor — подключаемая заглушка.
+- Проверки: `tests/test_room_lighting_live_test.py` и весь набор комнатного
+  освещения — 66 PASS; полный набор не запускался.
+
 ## Шаг 3 освещения комнат: расчётный движок и тень без команд, 2026-09-11
 
 - В ветке `codex/room-lighting-integration` (сверху Шага 2, `6c441d7`)
