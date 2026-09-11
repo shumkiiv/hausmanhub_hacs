@@ -12,6 +12,7 @@ from pathlib import Path
 import sys
 import unittest
 
+import pytest
 from jsonschema import Draft202012Validator
 
 from tests.test_local_summary_access import (
@@ -33,7 +34,7 @@ _CONTRACT_DIR = Path(
 def _validate(schema_name: str, payload: object) -> None:
     path = _CONTRACT_DIR / schema_name
     if not path.is_file():
-        return
+        pytest.skip(f"room lighting contract schema is not available: {schema_name}")
     schema = json.loads(path.read_text(encoding="utf-8"))
     Draft202012Validator(schema).validate(payload)
 
@@ -491,6 +492,116 @@ class RoomLightingApiTest(unittest.TestCase):
             request.match_info = {"room_id": room_id}
             response = await self.config_view.get(request)
             self.assertEqual(403, response.status)
+
+        asyncio.run(flow())
+
+    def test_config_omits_absent_entity_id(self) -> None:
+        async def flow() -> None:
+            room_id = "room_demo_entry"
+            payload = _config_payload(room_id)
+            payload["devices"]["sensors"] = []
+            payload["devices"]["light_targets"][0].pop("entityId")
+            put = await self.config_view.put(
+                _json_request(self._config_path(room_id), payload, room_id=room_id)
+            )
+            self.assertEqual(200, put.status)
+            _validate("room-lighting-config.schema.json", put.payload)
+            self.assertNotIn("entityId", put.payload["devices"]["light_targets"][0])
+
+            got = await self.config_view.get(
+                _request(self._config_path(room_id), room_id=room_id)
+            )
+            _validate("room-lighting-config.schema.json", got.payload)
+            self.assertNotIn("entityId", got.payload["devices"]["light_targets"][0])
+
+        asyncio.run(flow())
+
+    def test_status_sensor_state_enum_and_since_seconds(self) -> None:
+        from datetime import datetime, time as dt_time, timezone
+
+        from custom_components.hausman_hub.domain.room_lighting import SensorKind
+        from custom_components.hausman_hub.domain.room_lighting_engine import (
+            LightSnapshot,
+            ProtectionSnapshot,
+            RoomLightingContext,
+            SensorSnapshot,
+        )
+        from custom_components.hausman_hub.domain.room_lighting_ownership import (
+            SensorState,
+        )
+
+        async def flow() -> None:
+            room_id = "room_demo_entry"
+            now_ms = int(datetime(2026, 9, 11, 10, 0, tzinfo=timezone.utc).timestamp() * 1000)
+            payload = _config_payload(room_id)
+            payload["devices"]["sensors"].append(
+                {
+                    "id": "sensor_demo_lux",
+                    "name": "Освещённость",
+                    "kind": "illuminance",
+                    "entityId": "sensor.demo_lux",
+                    "autoAdoptOverride": None,
+                }
+            )
+            payload["illumination"] = {
+                "sensor": "sensor.demo_lux",
+                "calibration": {"offset": 0, "multiplier": 1},
+                "hysteresis": 5,
+                "minLux": 0,
+                "maxLux": 20000,
+                "thresholds": [],
+                "failClosed": True,
+            }
+            await self.config_view.put(
+                _json_request(self._config_path(room_id), payload, room_id=room_id)
+            )
+            status_path = self.api.ROOM_LIGHTING_STATUS_PATH.format(room_id=room_id)
+
+            def provider(lux_healthy: bool, state: SensorState):
+                def factory(_config):
+                    return RoomLightingContext(
+                        now=now_ms,
+                        timezone=timezone.utc,
+                        sunrise=dt_time(7, 0),
+                        sunset=dt_time(19, 0),
+                        sensors=(
+                            SensorSnapshot(
+                                "sensor_demo_lux",
+                                SensorKind.ILLUMINANCE,
+                                state,
+                                now_ms,
+                                lux=120.0,
+                                lux_healthy=lux_healthy,
+                            ),
+                        ),
+                        lights=(LightSnapshot("light_main", SensorState.OFF, now_ms),),
+                        protection=ProtectionSnapshot(
+                            active=True,
+                            started_at=now_ms,
+                            minimum_interval_seconds=600,
+                        ),
+                    )
+
+                return factory
+
+            self.hass.data["hausman_hub"][
+                self.api.DATA_ROOM_LIGHTING_CONTEXT
+            ] = provider(True, SensorState.OFF)
+            response = await self.status_view.get(
+                _request(status_path, room_id=room_id)
+            )
+            _validate("room-lighting-status.schema.json", response.payload)
+            self.assertEqual("ok", response.payload["illumination"]["sensorState"])
+            self.assertEqual(
+                now_ms // 1000, response.payload["manual_protection"]["since"]
+            )
+
+            self.hass.data["hausman_hub"][
+                self.api.DATA_ROOM_LIGHTING_CONTEXT
+            ] = provider(False, SensorState.OFF)
+            stale = await self.status_view.get(_request(status_path, room_id=room_id))
+            _validate("room-lighting-status.schema.json", stale.payload)
+            self.assertEqual("stale", stale.payload["illumination"]["sensorState"])
 
         asyncio.run(flow())
 

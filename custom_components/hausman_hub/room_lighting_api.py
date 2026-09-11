@@ -594,19 +594,19 @@ def _status_payload(
             "failClosed": True,
         }
     else:
-        healthy = (
-            illuminance.state is SensorState.ON
-            and illuminance.lux_healthy
-            and illuminance.lux is not None
-        )
+        if illuminance.state is SensorState.UNAVAILABLE:
+            sensor_state = "unavailable"
+        elif illuminance.state is SensorState.UNKNOWN:
+            sensor_state = "unknown"
+        elif not illuminance.lux_healthy:
+            sensor_state = "stale"
+        else:
+            sensor_state = "ok"
+        healthy = sensor_state == "ok" and illuminance.lux is not None
         illumination = {
             "healthy": healthy,
             "lux": illuminance.lux,
-            "sensorState": (
-                "ok"
-                if illuminance.state is SensorState.ON
-                else illuminance.state.value
-            ),
+            "sensorState": sensor_state,
             "failClosed": not healthy,
         }
     if context.protection.active:
@@ -614,7 +614,11 @@ def _status_payload(
             "active": True,
             "remaining_seconds": max(1, context.protection.minimum_interval_seconds),
             "reason": "manual_off",
-            "since": context.protection.started_at,
+            "since": (
+                None
+                if context.protection.started_at is None
+                else int(context.protection.started_at) // 1000
+            ),
             "minimum_interval_seconds": context.protection.minimum_interval_seconds,
         }
     else:

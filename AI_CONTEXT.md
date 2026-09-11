@@ -15,7 +15,11 @@
 - Ошибка валидации — `invalid_request` с читаемым русским `message` без
   `details.violations`. Время — секунды. PUT сериализован локом, ревизия — по
   `version`. `keepDevices` учитывается, `correlationId` опционален.
-- Проверки: комнатные тесты — 75 PASS; полный набор не запускался.
+- Повторное ревью: в payload конфига `entityId` опускается, если значения нет
+  (не `null`); `illumination.sensorState` строго из enum
+  (`ok|unknown|unavailable|stale|missing`); `manual_protection.since` — в
+  секундах; валидация схем в API-тестах падает/skip заметно.
+- Проверки: комнатные тесты — 77 PASS; полный набор не запускался.
 
 ## Шаг 5a освещения комнат: HTTP API (только safe), 2026-09-11
 

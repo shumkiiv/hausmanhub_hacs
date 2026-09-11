@@ -891,50 +891,66 @@ class RoomLightingConfig:
         return payload
 
 
+def _device_entity(payload: dict[str, object], entity_id: str | None) -> dict[str, object]:
+    """Add entityId only when present; the contract rejects an explicit null."""
+
+    if entity_id is not None:
+        payload["entityId"] = entity_id
+    return payload
+
+
 def _devices_to_payload(devices: Devices) -> dict[str, object]:
     return {
         "sensors": [
-            {
-                "id": item.id,
-                "name": item.name,
-                "kind": item.kind.value,
-                "entityId": item.entity_id,
-                "autoAdoptOverride": item.auto_adopt_override,
-            }
+            _device_entity(
+                {
+                    "id": item.id,
+                    "name": item.name,
+                    "kind": item.kind.value,
+                    "autoAdoptOverride": item.auto_adopt_override,
+                },
+                item.entity_id,
+            )
             for item in devices.sensors
         ],
         "light_targets": [
-            {
-                "id": item.id,
-                "name": item.name,
-                "kind": item.kind.value,
-                "entityId": item.entity_id,
-                "role": item.role.value if item.role is not None else None,
-                "groupId": item.group_id,
-                "brightness": item.brightness,
-                "color_temperature": item.color_temperature,
-                "autoAdoptOverride": item.auto_adopt_override,
-            }
+            _device_entity(
+                {
+                    "id": item.id,
+                    "name": item.name,
+                    "kind": item.kind.value,
+                    "role": item.role.value if item.role is not None else None,
+                    "groupId": item.group_id,
+                    "brightness": item.brightness,
+                    "color_temperature": item.color_temperature,
+                    "autoAdoptOverride": item.auto_adopt_override,
+                },
+                item.entity_id,
+            )
             for item in devices.light_targets
         ],
         "power_switch": (
             None
             if devices.power_switch is None
-            else {
-                "id": devices.power_switch.id,
-                "name": devices.power_switch.name,
-                "entityId": devices.power_switch.entity_id,
-                "autoAdoptOverride": devices.power_switch.auto_adopt_override,
-            }
+            else _device_entity(
+                {
+                    "id": devices.power_switch.id,
+                    "name": devices.power_switch.name,
+                    "autoAdoptOverride": devices.power_switch.auto_adopt_override,
+                },
+                devices.power_switch.entity_id,
+            )
         ),
         "wireless_switches": [
-            {
-                "id": item.id,
-                "name": item.name,
-                "entityId": item.entity_id,
-                "buttons": [button.value for button in item.buttons],
-                "pressTypes": [press.value for press in item.press_types],
-            }
+            _device_entity(
+                {
+                    "id": item.id,
+                    "name": item.name,
+                    "buttons": [button.value for button in item.buttons],
+                    "pressTypes": [press.value for press in item.press_types],
+                },
+                item.entity_id,
+            )
             for item in devices.wireless_switches
         ],
         "selectAll": devices.select_all,
