@@ -1,5 +1,25 @@
 # HausmanHub AI Context
 
+## Шаг 5a освещения комнат: HTTP API (только safe), 2026-09-11
+
+- В ветке `codex/room-lighting-integration` (сверху Шага 4, `a9130ce`)
+  добавлен `room_lighting_api.py` с эндпоинтами контракта под
+  `/api/hausman_hub/v1/rooms/{room_id}/lighting`: чтение/запись config,
+  статус, каталог и применение шаблона, запуск/результат/отмена live-теста.
+- Ошибки — через `error_taxonomy`: `invalid_request` (400, список нарушений
+  в `details.violations`), `forbidden` (403), `not_found` (404),
+  `revision_conflict`/`capability_unavailable` (409), `unavailable` (503).
+- Запись конфигурации валидируется доменом, поднимает `version` через
+  `RoomLightingService` и поддерживает revision conflict.
+- Live-тест по умолчанию `safe` и не вызывает executor; `real` без
+  подключённого executor возвращает `capability_unavailable`. Физических
+  команд нет.
+- Роуты регистрируются в `__init__.py` (`register_room_lighting_api` /
+  `clear_room_lighting_api`).
+- Проверки: `tests/test_room_lighting_api.py` и
+  `tests/test_room_lighting_live_test.py` — 15 PASS; полный набор не
+  запускался.
+
 ## Шаг 4 освещения комнат: серверный live-тест ~30 с, 2026-09-11
 
 - В ветке `codex/room-lighting-integration` (сверху Шага 3, `d0c1609`)
