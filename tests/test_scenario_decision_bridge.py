@@ -1797,6 +1797,51 @@ class TamburHaObservationCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual("on", snapshot["observations"][CHAND]["state"])
 
+    async def test_unpowered_chandelier_after_report_stays_available_as_off(self) -> None:
+        coordinator = self._coordinator(
+            lambda _target, _entity, reported: reported + 60_000
+        )
+        coordinator.start()
+        stamp = datetime.fromtimestamp(NOW / 1000, timezone.utc)
+        chandelier = SimpleNamespace(
+            entity_id="light.chandelier",
+            state="on",
+            attributes={"brightness": 128},
+            last_changed=stamp,
+            last_updated=stamp,
+            last_reported=stamp,
+        )
+        self.hass.states.values["light.chandelier"] = chandelier
+        self.hass.states.values["switch.power"] = SimpleNamespace(
+            entity_id="switch.power",
+            state="on",
+            attributes={},
+            last_changed=stamp,
+            last_updated=stamp,
+            last_reported=stamp,
+        )
+        self.report_callbacks[0](
+            SimpleNamespace(
+                data={
+                    "entity_id": "light.chandelier",
+                    "new_state": chandelier,
+                    "last_reported": stamp,
+                },
+                time_fired=stamp,
+            )
+        )
+        self.hass.states.values["switch.power"].state = "off"
+
+        snapshot = await coordinator.async_snapshot_source(
+            SCENARIO_ID, event(ident="presence.4"), observation_epoch=1
+        )
+
+        self.assertEqual("off", snapshot["observations"][CHAND]["state"])
+        self.assertTrue(snapshot["observations"][CHAND]["fresh"])
+        self.assertEqual(
+            "last_known_light_state", coordinator.freshness_reason(CHAND)
+        )
+
     async def test_missing_deadline_and_unavailable_event_fail_closed_with_distinct_reasons(self) -> None:
         coordinator = self._coordinator(lambda *_args: None)
         coordinator.start()
@@ -1940,8 +1985,8 @@ class TamburHaObservationCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         coordinator.start()
         stamp = datetime.fromtimestamp(NOW / 1000, timezone.utc)
         observed = SimpleNamespace(
-            entity_id="light.chandelier",
-            state="off",
+            entity_id="binary_sensor.presence",
+            state="on",
             attributes={},
             last_changed=stamp,
             last_updated=stamp,
@@ -1950,19 +1995,19 @@ class TamburHaObservationCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.report_callbacks[0](
             SimpleNamespace(
                 data={
-                    "entity_id": "light.chandelier",
+                    "entity_id": "binary_sensor.presence",
                     "new_state": observed,
                     "last_reported": stamp,
                 },
                 time_fired=stamp,
             )
         )
-        self.hass.states.values["light.chandelier"] = copy.copy(observed)
-        self.hass.states.values["light.chandelier"].state = "on"
+        self.hass.states.values["binary_sensor.presence"] = copy.copy(observed)
+        self.hass.states.values["binary_sensor.presence"].state = "off"
 
         snapshot = await coordinator.async_snapshot_source(
             SCENARIO_ID, event(), observation_epoch=1
         )
 
-        self.assertFalse(snapshot["observations"][CHAND]["fresh"])
-        self.assertEqual("continuity_broken", coordinator.freshness_reason(CHAND))
+        self.assertFalse(snapshot["observations"][SENSOR]["fresh"])
+        self.assertEqual("continuity_broken", coordinator.freshness_reason(SENSOR))

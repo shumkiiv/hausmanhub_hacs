@@ -1397,7 +1397,10 @@ class TamburHaObservationCoordinator:
                 else:
                     reason = "fresh"
                     fresh = True
-        if reason == "freshness_deadline_expired" and target_id in self._light_targets:
+        if self._running and target_id in self._light_targets and reason in {
+            "freshness_deadline_expired",
+            "continuity_broken",
+        }:
             fallback = self._last_known_observation(
                 target_id,
                 current_state,
@@ -1410,7 +1413,7 @@ class TamburHaObservationCoordinator:
             if fallback is not None:
                 self._reasons[target_id] = str(fallback.pop("_reason"))
                 return fallback
-        if not fresh and target_id in self._presence_targets:
+        if self._running and not fresh and target_id in self._presence_targets:
             fallback = self._last_known_observation(
                 target_id,
                 current_state,
