@@ -1,0 +1,756 @@
+"""Deterministic room lighting engine.
+
+Pure calculation: the engine only transforms (configuration + time + sensors +
+lux + ownership + protection) into a desired state and a command plan. It never
+imports Home Assistant and never sends a command; shadow mode keeps execution
+disabled.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field, replace
+from datetime import datetime, time as dt_time, timedelta, tzinfo
+from enum import StrEnum
+
+from .room_lighting import (
+    LightRole,
+    RoomLightingConfig,
+    ScheduleEntry,
+    ScheduleMode,
+    SensorKind,
+    resolve_anchor_time,
+)
+from .room_lighting_ownership import (
+    OwnershipSnapshot,
+    SensorState,
+    has_proven_auto_ownership,
+    latest_ownership,
+    observed_absence,
+    resolve_manual_ownership,
+    restore_after_restart,
+)
+
+MODE_SHADOW = "shadow"
+
+_DAY_CODES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+
+class LightAction(StrEnum):
+    TURN_ON = "turn_on"
+    TURN_OFF = "turn_off"
+    SET_BRIGHTNESS = "set_brightness"
+    SET_COLOR_TEMPERATURE = "set_color_temperature"
+
+
+class DecisionReason(StrEnum):
+    SCHEDULE = "schedule"
+    PRESENCE = "presence"
+    LUX = "lux"
+    DIMMING = "dimming"
+    NIGHT_LIGHT = "night_light"
+    MIRROR_WINDOW = "mirror_window"
+    AWAY_RETURN = "away_return"
+    RESTORE = "restore"
+    SAFE_COMMAND = "safe_command"
+
+
+class SkipReason(StrEnum):
+    MANUAL_OWNERSHIP = "manual_ownership"
+    MANUAL_PROTECTION = "manual_protection"
+    SENSOR_UNKNOWN = "sensor_unknown"
+    SENSOR_STALE = "sensor_stale"
+    LUX_FAIL_CLOSED = "lux_fail_closed"
+    IDEMPOTENT = "idempotent"
+    NO_SCHEDULE = "no_schedule"
+    UNOBSERVED = "unobserved"
+    NO_AUTO_OWNERSHIP = "no_auto_ownership"
+
+
+class RoomLightingEngineViolation(ValueError):
+    """Engine input is malformed."""
+
+
+@dataclass(frozen=True, slots=True)
+class SensorSnapshot:
+    sensor_id: str
+    kind: SensorKind
+    state: SensorState
+    last_changed: int
+    lux: float | None = None
+    lux_healthy: bool = True
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.sensor_id, str) or not self.sensor_id:
+            raise RoomLightingEngineViolation("sensor id is required")
+        if not isinstance(self.kind, SensorKind):
+            raise RoomLightingEngineViolation("sensor kind is invalid")
+        if not isinstance(self.state, SensorState):
+            raise RoomLightingEngineViolation("sensor state is invalid")
+        if type(self.last_changed) is not int or self.last_changed < 0:
+            raise RoomLightingEngineViolation("sensor timestamp is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class LightSnapshot:
+    target_id: str
+    state: SensorState
+    last_changed: int
+    brightness: int | None = None
+    color_temperature: int | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.target_id, str) or not self.target_id:
+            raise RoomLightingEngineViolation("light target id is required")
+        if not isinstance(self.state, SensorState):
+            raise RoomLightingEngineViolation("light state is invalid")
+        if type(self.last_changed) is not int or self.last_changed < 0:
+            raise RoomLightingEngineViolation("light timestamp is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class ProtectionSnapshot:
+    active: bool = False
+    started_at: int | None = None
+    minimum_interval_seconds: int = 600
+    stable_absence_seconds: int = 30
+    release_mode: str = "timer_and_absence"
+    reason: str = "none"
+
+    def blocks_auto_on(
+        self,
+        *,
+        now: int,
+        absence_proven: bool,
+        absence_since: int | None,
+    ) -> bool:
+        if not self.active:
+            return False
+        timer_ok = (
+            self.started_at is not None
+            and now - self.started_at >= self.minimum_interval_seconds * 1000
+        )
+        absence_ok = (
+            absence_proven
+            and absence_since is not None
+            and now - absence_since >= self.stable_absence_seconds * 1000
+        )
+        if self.release_mode == "timer_only":
+            return not timer_ok
+        if self.release_mode == "absence_only":
+            return not absence_ok
+        return not (timer_ok and absence_ok)
+
+
+@dataclass(frozen=True, slots=True)
+class RoomLightingContext:
+    now: int
+    timezone: tzinfo
+    sunrise: dt_time
+    sunset: dt_time
+    sensors: tuple[SensorSnapshot, ...] = ()
+    lights: tuple[LightSnapshot, ...] = ()
+    ownership: tuple[OwnershipSnapshot, ...] = ()
+    protection: ProtectionSnapshot = field(default_factory=ProtectionSnapshot)
+    holiday: bool = False
+    unobserved_since: int | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.now) is not int or self.now < 0:
+            raise RoomLightingEngineViolation("context time is invalid")
+        if not isinstance(self.timezone, tzinfo):
+            raise RoomLightingEngineViolation("context timezone is required")
+
+    def light(self, target_id: str) -> LightSnapshot | None:
+        for item in self.lights:
+            if item.target_id == target_id:
+                return item
+        return None
+
+
+@dataclass(frozen=True, slots=True)
+class EnginePolicy:
+    absence_seconds_before_night: int = 600
+    absence_seconds_after_night: int = 180
+    fade_seconds: int = 20
+    night_min_seconds: int = 600
+    sensor_freshness_seconds: int = 300
+    mirror_window_start: dt_time = dt_time(23, 0)
+    mirror_window_end: dt_time = dt_time(1, 0)
+    night_window_start: dt_time = dt_time(2, 0)
+
+    @classmethod
+    def from_config(cls, config: RoomLightingConfig) -> "EnginePolicy":
+        policy = cls()
+        if config.dimming.enabled and config.dimming.fade_seconds > 0:
+            policy = replace(policy, fade_seconds=config.dimming.fade_seconds)
+        if config.manual_off_protection.enabled:
+            minimum = config.manual_off_protection.minimum_interval_seconds
+            policy = replace(
+                policy,
+                absence_seconds_before_night=max(
+                    policy.absence_seconds_before_night, minimum
+                ),
+                night_min_seconds=max(policy.night_min_seconds, minimum),
+            )
+        return policy
+
+
+@dataclass(frozen=True, slots=True)
+class PlannedCommand:
+    target_id: str
+    action: LightAction
+    brightness: int | None = None
+    color_temperature: int | None = None
+    reason: DecisionReason = DecisionReason.SCHEDULE
+    fade_seconds: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class Skip:
+    target_id: str
+    reason: SkipReason
+    detail: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class TargetDecision:
+    target_id: str
+    desired_state: str
+    desired_brightness: int | None
+    desired_color_temperature: int | None
+    commands: tuple[PlannedCommand, ...] = ()
+    skips: tuple[Skip, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class RoomLightingDecision:
+    room_id: str
+    evaluated_at: int
+    mode: str
+    targets: tuple[TargetDecision, ...]
+    commands_enabled: bool = False
+
+    @property
+    def commands(self) -> tuple[PlannedCommand, ...]:
+        return tuple(
+            command for target in self.targets for command in target.commands
+        )
+
+    @property
+    def skips(self) -> tuple[Skip, ...]:
+        return tuple(skip for target in self.targets for skip in target.skips)
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "roomId": self.room_id,
+            "evaluatedAt": self.evaluated_at,
+            "mode": self.mode,
+            "commandsEnabled": self.commands_enabled,
+            "targets": [
+                {
+                    "targetId": target.target_id,
+                    "desiredState": target.desired_state,
+                    "desiredBrightness": target.desired_brightness,
+                    "desiredColorTemperature": target.desired_color_temperature,
+                    "commands": [
+                        {
+                            "targetId": command.target_id,
+                            "action": command.action.value,
+                            "brightness": command.brightness,
+                            "colorTemperature": command.color_temperature,
+                            "reason": command.reason.value,
+                            "fadeSeconds": command.fade_seconds,
+                        }
+                        for command in target.commands
+                    ],
+                    "skips": [
+                        {
+                            "targetId": skip.target_id,
+                            "reason": skip.reason.value,
+                            "detail": skip.detail,
+                        }
+                        for skip in target.skips
+                    ],
+                }
+                for target in self.targets
+            ],
+        }
+
+
+def evaluate_room_lighting(
+    config: RoomLightingConfig,
+    context: RoomLightingContext,
+    *,
+    policy: EnginePolicy | None = None,
+    mode: str = MODE_SHADOW,
+) -> RoomLightingDecision:
+    """Compute the desired state and command plan without any side effect."""
+
+    if not isinstance(config, RoomLightingConfig):
+        raise RoomLightingEngineViolation("validated room lighting config is required")
+    if not isinstance(context, RoomLightingContext):
+        raise RoomLightingEngineViolation("validated room lighting context is required")
+    policy = policy or EnginePolicy.from_config(config)
+
+    now = context.now
+    now_time = datetime.fromtimestamp(now / 1000, context.timezone).time()
+    presence = _presence_state(context, policy)
+    absence_proven, absence_since = _absence_evidence(context, policy)
+    schedule_entry = _active_schedule_entry(config, context)
+
+    targets: list[TargetDecision] = []
+    for target in config.devices.light_targets:
+        targets.append(
+            _evaluate_target(
+                target,
+                config=config,
+                context=context,
+                policy=policy,
+                now_time=now_time,
+                presence=presence,
+                absence_proven=absence_proven,
+                absence_since=absence_since,
+                schedule_entry=schedule_entry,
+            )
+        )
+    return RoomLightingDecision(
+        room_id=config.room_id,
+        evaluated_at=now,
+        mode=mode,
+        targets=tuple(targets),
+        commands_enabled=False,
+    )
+
+
+def decision_target(
+    decision: RoomLightingDecision, target_id: str
+) -> TargetDecision | None:
+    for target in decision.targets:
+        if target.target_id == target_id:
+            return target
+    return None
+
+
+def _evaluate_target(
+    target: object,
+    *,
+    config: RoomLightingConfig,
+    context: RoomLightingContext,
+    policy: EnginePolicy,
+    now_time: dt_time,
+    presence: SensorState,
+    absence_proven: bool,
+    absence_since: int | None,
+    schedule_entry: ScheduleEntry | None,
+) -> TargetDecision:
+    target_id = target.id  # type: ignore[attr-defined]
+    light = context.light(target_id)
+    light_on = light is not None and light.state is SensorState.ON
+    light_brightness = light.brightness if light is not None else None
+    light_color = light.color_temperature if light is not None else None
+
+    if resolve_manual_ownership(context.ownership, target_id, light_on=light_on):
+        return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_OWNERSHIP))
+
+    night_window = _in_window(now_time, policy.night_window_start, context.sunrise)
+    mirror_window = _in_window(
+        now_time, policy.mirror_window_start, policy.mirror_window_end
+    )
+    role = target.role  # type: ignore[attr-defined]
+
+    want_on = False
+    reason = DecisionReason.SCHEDULE
+    presence_required = False
+    if role is LightRole.MIRROR and mirror_window:
+        want_on, reason = True, DecisionReason.MIRROR_WINDOW
+    elif role in {LightRole.NIGHT, LightRole.MIRROR} and night_window and presence is SensorState.ON:
+        want_on, reason = True, DecisionReason.NIGHT_LIGHT
+        presence_required = True
+    elif schedule_entry is not None:
+        mode = schedule_entry.how.mode
+        if mode is ScheduleMode.OFF:
+            want_on, reason = False, DecisionReason.SCHEDULE
+        elif mode is ScheduleMode.ALWAYS:
+            want_on, reason = True, DecisionReason.SCHEDULE
+        elif mode is ScheduleMode.NIGHT_LIGHT:
+            want_on = night_window and presence is SensorState.ON
+            reason = DecisionReason.NIGHT_LIGHT
+            presence_required = True
+        else:
+            want_on = presence is SensorState.ON
+            reason = DecisionReason.PRESENCE
+            presence_required = True
+    else:
+        return _unchanged(target_id, Skip(target_id, SkipReason.NO_SCHEDULE))
+
+    brightness = schedule_entry.how.brightness if schedule_entry is not None else None
+    color = schedule_entry.how.color_temperature if schedule_entry is not None else None
+    lux_fail = False
+    if want_on and config.illumination is not None:
+        lux, lux_fail = _lux_value(context, config, policy)
+        if not lux_fail and lux is not None:
+            brightness, color = _apply_lux(brightness, color, config, target, lux)
+            reason = DecisionReason.LUX
+
+    if not target.brightness:  # type: ignore[attr-defined]
+        brightness = None
+    if not target.color_temperature:  # type: ignore[attr-defined]
+        color = None
+
+    skips: list[Skip] = []
+    if lux_fail:
+        skips.append(Skip(target_id, SkipReason.LUX_FAIL_CLOSED))
+    if context.unobserved_since is not None and not light_on:
+        skips.append(Skip(target_id, SkipReason.UNOBSERVED))
+
+    if presence_required and presence is SensorState.UNKNOWN:
+        return _unchanged(
+            target_id,
+            Skip(target_id, SkipReason.SENSOR_UNKNOWN),
+            extra_skips=skips,
+        )
+
+    if want_on:
+        if context.protection.blocks_auto_on(
+            now=context.now,
+            absence_proven=absence_proven,
+            absence_since=absence_since,
+        ):
+            return _unchanged(
+                target_id,
+                Skip(target_id, SkipReason.MANUAL_PROTECTION),
+                extra_skips=skips,
+            )
+        if light_on:
+            if not has_proven_auto_ownership(context.ownership, target_id):
+                return _unchanged(
+                    target_id,
+                    Skip(target_id, SkipReason.MANUAL_OWNERSHIP),
+                    extra_skips=skips,
+                )
+            commands = _adjust_commands(target, target_id, brightness, color, light_brightness, light_color, reason)
+            if not commands:
+                return _unchanged(
+                    target_id,
+                    Skip(target_id, SkipReason.IDEMPOTENT),
+                    extra_skips=skips,
+                )
+            return TargetDecision(
+                target_id=target_id,
+                desired_state="on",
+                desired_brightness=brightness,
+                desired_color_temperature=color,
+                commands=tuple(commands),
+                skips=tuple(skips),
+            )
+        commands = [PlannedCommand(target_id, LightAction.TURN_ON, reason=reason)]
+        if target.brightness and brightness is not None:  # type: ignore[attr-defined]
+            commands.append(
+                PlannedCommand(
+                    target_id,
+                    LightAction.SET_BRIGHTNESS,
+                    brightness=brightness,
+                    reason=reason,
+                )
+            )
+        if target.color_temperature and color is not None:  # type: ignore[attr-defined]
+            commands.append(
+                PlannedCommand(
+                    target_id,
+                    LightAction.SET_COLOR_TEMPERATURE,
+                    color_temperature=color,
+                    reason=reason,
+                )
+            )
+        return TargetDecision(
+            target_id=target_id,
+            desired_state="on",
+            desired_brightness=brightness,
+            desired_color_temperature=color,
+            commands=tuple(commands),
+            skips=tuple(skips),
+        )
+
+    # Desired off.
+    if not light_on:
+        return _unchanged(
+            target_id,
+            Skip(target_id, SkipReason.IDEMPOTENT),
+            extra_skips=skips,
+        )
+    restored = restore_after_restart(
+        context.ownership,
+        target_id,
+        light_state=light.state if light is not None else SensorState.UNKNOWN,
+        light_last_changed=light.last_changed if light is not None else None,
+        unobserved_since=context.unobserved_since,
+    )
+    if context.unobserved_since is not None and not restored:
+        return _unchanged(
+            target_id,
+            Skip(target_id, SkipReason.UNOBSERVED),
+            extra_skips=skips,
+        )
+    if not has_proven_auto_ownership(context.ownership, target_id):
+        return _unchanged(
+            target_id,
+            Skip(target_id, SkipReason.NO_AUTO_OWNERSHIP),
+            extra_skips=skips,
+        )
+    auto_record = latest_ownership(context.ownership, target_id)
+    if (
+        night_window
+        and auto_record is not None
+        and context.now - auto_record.at < policy.night_min_seconds * 1000
+    ):
+        return _unchanged(
+            target_id,
+            Skip(target_id, SkipReason.IDEMPOTENT),
+            extra_skips=skips,
+        )
+
+    threshold = (
+        policy.absence_seconds_after_night
+        if now_time >= policy.mirror_window_start
+        else policy.absence_seconds_before_night
+    )
+    absence_due = (
+        absence_proven
+        and absence_since is not None
+        and context.now - absence_since >= threshold * 1000
+    )
+    schedule_off = schedule_entry is not None and schedule_entry.how.mode is ScheduleMode.OFF
+    if absence_due or schedule_off:
+        command = _turn_off_command(config, target, target_id, light_brightness)
+        return TargetDecision(
+            target_id=target_id,
+            desired_state="off",
+            desired_brightness=None,
+            desired_color_temperature=None,
+            commands=(command,),
+            skips=tuple(skips),
+        )
+    return _unchanged(
+        target_id,
+        Skip(target_id, SkipReason.UNOBSERVED),
+        extra_skips=skips,
+    )
+
+
+def _adjust_commands(
+    target: object,
+    target_id: str,
+    brightness: int | None,
+    color: int | None,
+    light_brightness: int | None,
+    light_color: int | None,
+    reason: DecisionReason,
+) -> list[PlannedCommand]:
+    commands: list[PlannedCommand] = []
+    if target.brightness and brightness is not None and brightness != light_brightness:  # type: ignore[attr-defined]
+        commands.append(
+            PlannedCommand(
+                target_id,
+                LightAction.SET_BRIGHTNESS,
+                brightness=brightness,
+                reason=reason,
+            )
+        )
+    if target.color_temperature and color is not None and color != light_color:  # type: ignore[attr-defined]
+        commands.append(
+            PlannedCommand(
+                target_id,
+                LightAction.SET_COLOR_TEMPERATURE,
+                color_temperature=color,
+                reason=reason,
+            )
+        )
+    return commands
+
+
+def _turn_off_command(
+    config: RoomLightingConfig,
+    target: object,
+    target_id: str,
+    light_brightness: int | None,
+) -> PlannedCommand:
+    if config.dimming.enabled and config.dimming.on_absence and target.brightness:  # type: ignore[attr-defined]
+        target_percent = config.dimming.target_percent
+        current = light_brightness if light_brightness is not None else 100
+        # Monotonic fade: a step may only lower brightness.
+        if target_percent < current:
+            return PlannedCommand(
+                target_id,
+                LightAction.SET_BRIGHTNESS,
+                brightness=target_percent,
+                reason=DecisionReason.DIMMING,
+                fade_seconds=config.dimming.fade_seconds,
+            )
+    return PlannedCommand(
+        target_id,
+        LightAction.TURN_OFF,
+        reason=DecisionReason.DIMMING,
+        fade_seconds=config.dimming.fade_seconds,
+    )
+
+
+def _unchanged(
+    target_id: str,
+    skip: Skip,
+    *,
+    extra_skips: list[Skip] | None = None,
+) -> TargetDecision:
+    skips = [skip]
+    if extra_skips:
+        skips.extend(item for item in extra_skips if item != skip)
+    return TargetDecision(
+        target_id=target_id,
+        desired_state="unchanged",
+        desired_brightness=None,
+        desired_color_temperature=None,
+        skips=tuple(skips),
+    )
+
+
+def _presence_state(context: RoomLightingContext, policy: EnginePolicy) -> SensorState:
+    relevant = [
+        sensor
+        for sensor in context.sensors
+        if sensor.kind in {SensorKind.PRESENCE, SensorKind.MOTION}
+    ]
+    if not relevant:
+        return SensorState.UNKNOWN
+    if any(
+        sensor.state is SensorState.ON and _is_fresh(sensor, context, policy)
+        for sensor in relevant
+    ):
+        return SensorState.ON
+    if all(sensor.state is SensorState.OFF for sensor in relevant):
+        return SensorState.OFF
+    return SensorState.UNKNOWN
+
+
+def _absence_evidence(
+    context: RoomLightingContext, policy: EnginePolicy
+) -> tuple[bool, int | None]:
+    relevant = [
+        sensor
+        for sensor in context.sensors
+        if sensor.kind in {SensorKind.PRESENCE, SensorKind.MOTION}
+    ]
+    if not relevant:
+        return (False, None)
+    # Absence accumulates while a fresh-enough off reading persists, so the
+    # freshness window must cover the configured absence thresholds.
+    freshness_ms = (
+        max(
+            policy.absence_seconds_before_night,
+            policy.absence_seconds_after_night,
+        )
+        * 1000
+    )
+    absence = observed_absence(
+        [(sensor.state, sensor.last_changed) for sensor in relevant],
+        now=context.now,
+        freshness_ms=freshness_ms,
+    )
+    if absence is not True:
+        return (False, None)
+    return (True, max(sensor.last_changed for sensor in relevant))
+
+
+def _is_fresh(sensor: SensorSnapshot, context: RoomLightingContext, policy: EnginePolicy) -> bool:
+    if sensor.state in {SensorState.UNKNOWN, SensorState.UNAVAILABLE}:
+        return False
+    return context.now - sensor.last_changed <= policy.sensor_freshness_seconds * 1000
+
+
+def _lux_value(
+    context: RoomLightingContext,
+    config: RoomLightingConfig,
+    policy: EnginePolicy,
+) -> tuple[float | None, bool]:
+    illumination = config.illumination
+    if illumination is None:
+        return (None, False)
+    configured_ids = {
+        sensor.id
+        for sensor in config.devices.sensors
+        if sensor.kind is SensorKind.ILLUMINANCE
+        and sensor.entity_id == illumination.sensor
+    }
+    if not configured_ids:
+        return (None, True)
+    for sensor in context.sensors:
+        if sensor.kind is SensorKind.ILLUMINANCE and sensor.sensor_id in configured_ids:
+            fresh = _is_fresh(sensor, context, policy)
+            if not fresh or not sensor.lux_healthy or sensor.lux is None:
+                return (None, True)
+            return (sensor.lux, False)
+    return (None, True)
+
+
+def _apply_lux(
+    brightness: int | None,
+    color: int | None,
+    config: RoomLightingConfig,
+    target: object,
+    lux: float,
+) -> tuple[int | None, int | None]:
+    illumination = config.illumination
+    if illumination is None or not illumination.thresholds:
+        return brightness, color
+    matched = None
+    for threshold in sorted(illumination.thresholds, key=lambda item: item.lux):
+        if float(threshold.lux) <= float(lux):
+            matched = threshold
+    if matched is None:
+        return brightness, color
+    if target.brightness and matched.brightness is not None:  # type: ignore[attr-defined]
+        brightness = matched.brightness
+    if target.color_temperature and matched.color_temperature is not None:  # type: ignore[attr-defined]
+        color = matched.color_temperature
+    return brightness, color
+
+
+def _active_schedule_entry(
+    config: RoomLightingConfig, context: RoomLightingContext
+) -> ScheduleEntry | None:
+    local_now = datetime.fromtimestamp(context.now / 1000, context.timezone)
+    best: ScheduleEntry | None = None
+    best_time: datetime | None = None
+    for entry in config.schedule:
+        for day_offset in (0, -1):
+            day = local_now.date() + timedelta(days=day_offset)
+            if not _day_matches(entry.when.days_of_week, day, context.holiday):
+                continue
+            resolved = resolve_anchor_time(
+                entry.when.anchor,
+                day=day,
+                sunrise=context.sunrise,
+                sunset=context.sunset,
+                home_timezone=context.timezone,
+            )
+            if resolved > local_now:
+                continue
+            if best_time is None or resolved > best_time:
+                best, best_time = entry, resolved
+    return best
+
+
+def _day_matches(days: object, day: object, holiday: bool) -> bool:
+    del holiday
+    weekday = day.weekday()  # type: ignore[attr-defined]
+    if isinstance(days, str):
+        if days == "weekdays":
+            return weekday < 5
+        if days == "weekend":
+            return weekday >= 5
+        return True
+    return _DAY_CODES[weekday] in days  # type: ignore[operator]
+
+
+def _in_window(current: dt_time, start: dt_time, end: dt_time) -> bool:
+    if start <= end:
+        return start <= current <= end
+    return current >= start or current <= end

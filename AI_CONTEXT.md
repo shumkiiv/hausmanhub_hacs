@@ -1,5 +1,31 @@
 # HausmanHub AI Context
 
+## Шаг 3 освещения комнат: расчётный движок и тень без команд, 2026-09-11
+
+- В ветке `codex/room-lighting-integration` (сверху Шага 2, `6c441d7`)
+  добавлен детерминированный расчётный движок и теневой режим освещения
+  комнаты. Команд приборам нет: `commands_enabled=False`, executor не
+  вызывается.
+- `domain/room_lighting_engine.py`: чистая функция `evaluate_room_lighting`
+  по (конфигурация + время/рассвет/закат + датчики + люкс + владение +
+  защита) строит желаемое состояние и план команд с причинами и пропусками.
+  Встроены ручное владение до события датчика, запрет авто-включения при
+  ручной защите, авто-выключение только при доказанном владении, учёт
+  ненаблюдаемого периода, fail-closed люкс, идемпотентность, монотонное
+  гашение, ночная подсветка 02:00–рассвет (мин. 10 мин) и зеркало 23:00–01:00
+  через `EnginePolicy`; приоритет: ручное > безопасные команды > защита >
+  расписание > люкс > присутствие > гашение.
+- `domain/room_lighting_ownership.py`: журнал владения и чистые правила
+  `has_proven_auto_ownership`, `manual_intervention_after`,
+  `restore_after_restart`, `observed_absence` (только непрерывные свежие off;
+  unknown/unavailable/stale прерывает).
+- `application/room_lighting_shadow.py`: теневой сервис с ограниченным
+  журналом решений, fail-closed загрузкой и `commands_enabled=False`; executor
+  сохраняется, но не вызывается.
+- Проверки: `tests/test_room_lighting_engine.py`,
+  `tests/test_room_lighting_ownership.py`, `tests/test_room_lighting_shadow.py`
+  — 24 PASS; полный набор не запускался.
+
 ## Шаг 2 освещения комнат: домен и хранение без команд, 2026-09-11
 
 - В ветке `codex/room-lighting-integration` (от `origin/main`, `951184b`)
