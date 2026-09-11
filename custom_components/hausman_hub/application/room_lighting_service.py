@@ -42,23 +42,37 @@ _OVERLAY_KEYS = frozenset(
 )
 
 
-def _template_payload() -> dict[str, object]:
+def _template_document() -> dict[str, object]:
+    """Return the built-in day-profile document matching the template schema."""
+
     return {
         "contract": {
-            "name": ROOM_LIGHTING_CONFIG_NAME,
-            "version": ROOM_LIGHTING_CONFIG_VERSION,
+            "name": "hausman-hub-room-lighting-template",
+            "version": 1,
         },
-        "roomId": "room_demo_template",
-        "name": "Суточный профиль освещения",
-        "version": 1,
+        "id": DEFAULT_TEMPLATE_ID,
+        "title": "Суточный профиль освещения",
+        "description": (
+            "Базовый суточный профиль: включение по присутствию, вечерний "
+            "сценарий и ночная подсветка."
+        ),
+        "category": "day_profile",
         "devices": {
-            "sensors": [],
+            "sensors": [
+                {
+                    "id": "sensor_demo_presence",
+                    "name": "Датчик присутствия",
+                    "kind": "presence",
+                    "entityId": "binary_sensor.demo_presence",
+                    "autoAdoptOverride": None,
+                }
+            ],
             "light_targets": [
                 {
                     "id": "light_demo_main",
                     "name": "Основной свет",
                     "kind": "light",
-                    "entityId": None,
+                    "entityId": "light.demo_main",
                     "role": "main",
                     "groupId": "grp_demo_main",
                     "brightness": True,
@@ -66,7 +80,12 @@ def _template_payload() -> dict[str, object]:
                     "autoAdoptOverride": None,
                 }
             ],
-            "power_switch": None,
+            "power_switch": {
+                "id": "switch_demo_power",
+                "name": "Питание света",
+                "entityId": "switch.demo_power",
+                "autoAdoptOverride": None,
+            },
             "wireless_switches": [],
             "selectAll": False,
         },
@@ -89,6 +108,7 @@ def _template_payload() -> dict[str, object]:
                     "colorTemperature": 4000,
                     "fade": True,
                     "mode": "on_presence",
+                    "minOnSeconds": 0,
                 },
             },
             {
@@ -109,15 +129,36 @@ def _template_payload() -> dict[str, object]:
                     "colorTemperature": 3000,
                     "fade": True,
                     "mode": "on_presence",
+                    "minOnSeconds": 0,
+                },
+            },
+            {
+                "id": "sch_night",
+                "title": "Ночная подсветка",
+                "when": {
+                    "daysOfWeek": "all",
+                    "holiday": False,
+                    "anchor": {"kind": "fixed", "time": "02:00", "offsetMinutes": 0},
+                },
+                "targets": {
+                    "lightTargets": ["light_demo_main"],
+                    "groupIds": [],
+                    "roles": [],
+                },
+                "how": {
+                    "brightness": 10,
+                    "colorTemperature": 2700,
+                    "fade": True,
+                    "mode": "night_light",
+                    "minOnSeconds": 600,
                 },
             },
         ],
         "switchBindings": [],
-        "illumination": None,
         "dimming": {
             "enabled": True,
             "onAbsence": True,
-            "fadeSeconds": 5,
+            "fadeSeconds": 20,
             "targetPercent": 0,
         },
         "manualOffProtection": {
@@ -132,14 +173,11 @@ def _template_payload() -> dict[str, object]:
             "return": {"restore": "by_current_conditions"},
         },
         "autoAdopt": True,
-        "templateId": None,
-        "overrides": {},
-        "updatedAt": 0,
     }
 
 
 ROOM_LIGHTING_TEMPLATES: dict[str, dict[str, object]] = {
-    DEFAULT_TEMPLATE_ID: _template_payload(),
+    DEFAULT_TEMPLATE_ID: _template_document(),
 }
 
 
@@ -170,7 +208,7 @@ class RoomLightingService:
         stored = replace(
             config,
             version=version,
-            updated_at=max(_now_ms(), existing.updated_at + 1 if existing else 0),
+            updated_at=max(_now_seconds(), existing.updated_at + 1 if existing else 0),
         )
         await self._store.async_upsert(stored)  # type: ignore[attr-defined]
         return stored
@@ -185,25 +223,33 @@ class RoomLightingService:
         *,
         room_id: str | None = None,
         name: str | None = None,
+        keep_devices: bool = False,
     ) -> RoomLightingConfig:
-        """Build a new configuration from a ready template and overrides."""
+        """Build a valid configuration from a ready template and overrides."""
 
         template = ROOM_LIGHTING_TEMPLATES.get(template_id)
         if template is None:
             raise RoomLightingViolation(f"unknown room lighting template: {template_id}")
         payload = deepcopy(template)
+        payload["contract"] = {
+            "name": ROOM_LIGHTING_CONFIG_NAME,
+            "version": ROOM_LIGHTING_CONFIG_VERSION,
+        }
+        payload["roomId"] = room_id or "room_demo_template"
+        payload["name"] = name or str(template["title"])
+        payload["version"] = 1
+        payload["updatedAt"] = _now_seconds()
         payload["templateId"] = template_id
-        if room_id is not None:
-            payload["roomId"] = room_id
-        if name is not None:
-            payload["name"] = name
         if overrides is not None:
             if not isinstance(overrides, Mapping):
                 raise RoomLightingViolation("template overrides must be a mapping")
             for key, value in overrides.items():
                 if key in _OVERLAY_KEYS:
                     payload[key] = deepcopy(value)
-        payload["updatedAt"] = _now_ms()
+        if keep_devices and room_id is not None:
+            stored = await self._store.async_get(room_id)  # type: ignore[attr-defined]
+            if stored is not None:
+                payload["devices"] = stored.to_dict()["devices"]
         return config_from_payload(payload)
 
 
@@ -217,5 +263,5 @@ def _changed(existing: RoomLightingConfig, candidate: RoomLightingConfig) -> boo
     return comparable(existing) != comparable(candidate)
 
 
-def _now_ms() -> int:
-    return int(time.time() * 1000)
+def _now_seconds() -> int:
+    return int(time.time())

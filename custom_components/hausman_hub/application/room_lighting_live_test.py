@@ -2,8 +2,8 @@
 
 ``safe`` mode only calls the pure engine and never touches an executor;
 ``real`` mode dispatches the computed plan through an injected executor and
-records the receipts. The runner carries one ``correlation_id`` for the whole
-trace and supports cancellation between stages.
+records the receipts. The public payload follows the contract
+``room-lighting-live-test`` schema exactly, including its canonical stages.
 """
 
 from __future__ import annotations
@@ -28,21 +28,27 @@ from ..domain.room_lighting_ownership import SensorState
 LIVE_TEST_MODE_SAFE = "safe"
 LIVE_TEST_MODE_REAL = "real"
 LIVE_TEST_MODES = frozenset({LIVE_TEST_MODE_SAFE, LIVE_TEST_MODE_REAL})
-LIVE_TEST_TARGET_SECONDS = 30
-LIVE_TEST_STAGE_KEYS = (
+LIVE_TEST_DURATION_SECONDS = 30
+LIVE_TEST_MAX_RUNS = 16
+LIVE_TEST_STAGES = (
     "resolve_devices",
     "snapshot_state",
-    "presence_on",
-    "schedule_on_presence",
-    "schedule_always",
-    "schedule_night_light",
-    "schedule_off",
-    "lux_correction",
-    "absence_dimming",
-    "manual_off_protection",
+    "resolve_illumination",
+    "simulate_presence",
+    "apply_schedule",
+    "verify_brightness",
+    "verify_color_temperature",
+    "verify_ownership",
+    "simulate_absence",
+    "verify_fade",
+    "verify_manual_protection",
+    "simulate_switch_press",
     "away_room_off",
+    "verify_away_return",
     "restore_state",
 )
+# Backwards-compatible alias for callers from the earlier draft.
+LIVE_TEST_STAGE_KEYS = LIVE_TEST_STAGES
 
 
 class RoomLightingLiveTestViolation(ValueError):
@@ -54,7 +60,7 @@ class LiveTestStage:
     """One narrated step of the live run."""
 
     order: int
-    key: str
+    stage: str
     duration_seconds: int
     title: str
     comment: str
@@ -62,7 +68,7 @@ class LiveTestStage:
 
 
 def build_stages(config: RoomLightingConfig) -> list[LiveTestStage]:
-    """Build a compact ~30 second narrated sequence for one room."""
+    """Build a compact ~30 second narrated sequence using canonical stages."""
 
     if not isinstance(config, RoomLightingConfig):
         raise RoomLightingLiveTestViolation("validated room lighting config is required")
@@ -77,6 +83,7 @@ def build_stages(config: RoomLightingConfig) -> list[LiveTestStage]:
         ),
         default=0,
     )
+    supports_color = any(target.color_temperature for target in devices.light_targets)
 
     builders: list[tuple[str, str, str, str]] = [
         (
@@ -95,89 +102,131 @@ def build_stages(config: RoomLightingConfig) -> list[LiveTestStage]:
             "включённый вручную свет.",
             "Снять состояние целей без отправки команд.",
         ),
-        (
-            "presence_on",
-            "Присутствие",
-            "Проверяем, что свежее присутствие запускает автоматику только "
-            "если свет не занят вручную.",
-            "Смоделировать присутствие и получить план движка.",
-        ),
     ]
-
-    if ScheduleMode.ON_PRESENCE in schedule_modes:
-        builders.append(
-            (
-                "schedule_on_presence",
-                "Режим on_presence",
-                "Проверяем включение по присутствию в пределах яркости и "
-                "оттенка активной записи расписания.",
-                "Рассчитать план для записи on_presence.",
-            )
-        )
-    if ScheduleMode.ALWAYS in schedule_modes:
-        builders.append(
-            (
-                "schedule_always",
-                "Режим always",
-                "Проверяем постоянное включение по расписанию без ожидания "
-                "присутствия.",
-                "Рассчитать план для записи always.",
-            )
-        )
-    if ScheduleMode.NIGHT_LIGHT in schedule_modes:
-        builders.append(
-            (
-                "schedule_night_light",
-                "Режим night_light",
-                "Проверяем ночную подсветку: включение по движению и "
-                f"удержание минимум {night_min} секунд.",
-                "Рассчитать план для записи night_light с minOnSeconds.",
-            )
-        )
-    if ScheduleMode.OFF in schedule_modes:
-        builders.append(
-            (
-                "schedule_off",
-                "Режим off",
-                "Проверяем выключение по расписанию только для света под "
-                "подтверждённым автоматическим владением.",
-                "Рассчитать план выключения по записи off.",
-            )
-        )
-
     if config.illumination is not None:
         builders.append(
             (
-                "lux_correction",
-                "Коррекция по люксу",
-                "Проверяем порог освещённости и fail-closed: недостоверный "
-                "люкс отключает ветку, но не считается отсутствием.",
-                "Рассчитать план с коррекцией по порогам освещённости.",
+                "resolve_illumination",
+                "Освещённость",
+                "Проверяем lux-датчик и fail-closed: недостоверный люкс "
+                "отключает ветку, но не считается отсутствием.",
+                "Разрешить lux-источник и его здоровье.",
             )
         )
-
+    builders.append(
+        (
+            "simulate_presence",
+            "Присутствие",
+            "Свежее присутствие запускает автоматику только если свет не "
+            "занят вручную.",
+            "Смоделировать присутствие и получить план движка.",
+        )
+    )
+    for mode in (
+        ScheduleMode.ON_PRESENCE,
+        ScheduleMode.ALWAYS,
+        ScheduleMode.NIGHT_LIGHT,
+        ScheduleMode.OFF,
+    ):
+        if mode not in schedule_modes:
+            continue
+        if mode is ScheduleMode.NIGHT_LIGHT:
+            builders.append(
+                (
+                    "apply_schedule",
+                    "Режим night_light",
+                    "Ночная подсветка включается по движению и держится "
+                    f"минимум {night_min} секунд.",
+                    "Рассчитать план для записи night_light.",
+                )
+            )
+        else:
+            builders.append(
+                (
+                    "apply_schedule",
+                    f"Режим {mode.value}",
+                    "Применяем активную запись расписания и проверяем её "
+                    "влияние только на свои цели.",
+                    f"Рассчитать план для записи {mode.value}.",
+                )
+            )
     builders.extend(
         [
             (
-                "absence_dimming",
-                "Плавное гашение",
-                "Проверяем монотонное гашение после подтверждённого "
-                "отсутствия и отмену при возврате присутствия.",
-                "Рассчитать план гашения без шагов вверх.",
+                "verify_brightness",
+                "Проверка яркости",
+                "Сверяем расчётную яркость с пределом расписания и коррекцией "
+                "по люксу.",
+                "Проверить желаемую яркость по цели.",
+            ),
+        ]
+    )
+    if supports_color:
+        builders.append(
+            (
+                "verify_color_temperature",
+                "Проверка оттенка",
+                "Сверяем оттенок с расписанием и не трогаем нерегулируемые "
+                "цели.",
+                "Проверить желаемый оттенок по цели.",
+            )
+        )
+    builders.extend(
+        [
+            (
+                "verify_ownership",
+                "Проверка владения",
+                "Убеждаемся, что ручное владение блокирует автоматическую "
+                "ветку, а авто-выключение требует доказанного владения.",
+                "Проверить владение и причины пропуска.",
             ),
             (
-                "manual_off_protection",
-                "Ручная защита",
-                "Проверяем, что после ручного выключения автоматика ждёт "
-                "минимальный срок и устойчивое отсутствие.",
-                "Рассчитать план при активной ручной защите.",
+                "simulate_absence",
+                "Отсутствие",
+                "Моделируем уход и проверяем, что unknown или stale не "
+                "считаются отсутствием.",
+                "Смоделировать отсутствие и получить план гашения.",
             ),
+            (
+                "verify_fade",
+                "Плавное гашение",
+                "Проверяем монотонность гашения и отмену при возврате "
+                "присутствия.",
+                "Проверить, что нет шагов яркости вверх.",
+            ),
+            (
+                "verify_manual_protection",
+                "Ручная защита",
+                "После ручного выключения автоматика ждёт минимальный срок и "
+                "устойчивое отсутствие.",
+                "Проверить активную ручную защиту.",
+            ),
+        ]
+    )
+    if devices.wireless_switches:
+        builders.append(
+            (
+                "simulate_switch_press",
+                "Нажатие выключателя",
+                "Подтверждённое нажатие считается ручным намерением и создаёт "
+                "ручное владение без двойного переключения.",
+                "Смоделировать нажатие и проверить привязку.",
+            )
+        )
+    builders.extend(
+        [
             (
                 "away_room_off",
                 "Режим «Вне дома»",
-                "Проверяем, что уход гасит все автоматические цели комнаты "
-                "разом без резкого включения при возврате.",
+                "Уход гасит все автоматические цели комнаты разом.",
                 "Рассчитать план для режима room_off.",
+            ),
+            (
+                "verify_away_return",
+                "Возврат домой",
+                "Возврат восстанавливает свет по текущим условиям, а не резким "
+                "включением.",
+                "Проверить возврат по расписанию и люксу.",
             ),
             (
                 "restore_state",
@@ -189,13 +238,13 @@ def build_stages(config: RoomLightingConfig) -> list[LiveTestStage]:
     )
 
     count = len(builders)
-    per_stage = max(2, round(LIVE_TEST_TARGET_SECONDS / count))
+    per_stage = max(2, round(LIVE_TEST_DURATION_SECONDS / count))
     stages: list[LiveTestStage] = []
-    for index, (key, title, comment, action) in enumerate(builders):
+    for index, (stage, title, comment, action) in enumerate(builders):
         stages.append(
             LiveTestStage(
                 order=index,
-                key=key,
+                stage=stage,
                 duration_seconds=per_stage,
                 title=title,
                 comment=comment,
@@ -207,16 +256,12 @@ def build_stages(config: RoomLightingConfig) -> list[LiveTestStage]:
 
 @dataclass(frozen=True, slots=True)
 class LiveTestStep:
-    order: int
-    key: str
-    title: str
+    index: int
+    stage: str
     comment: str
-    action: str
-    status: str
-    desired_state: str
-    commands: tuple[dict[str, object], ...] = ()
-    receipts: tuple[dict[str, object], ...] = ()
-    detail: str = ""
+    offset_seconds: int
+    status: str = "passed"
+    detail: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,38 +270,87 @@ class LiveTestTrace:
     mode: str
     room_id: str
     started_at: int
-    finished_at: int
-    status: str
+    duration_seconds: int
     steps: tuple[LiveTestStep, ...]
+    status: str
+    reason: str
+    finished_at: int
     commands_sent: int
-    receipts: tuple[dict[str, object], ...]
 
     def to_payload(self) -> dict[str, object]:
         return {
+            "contract": {
+                "name": "hausman-hub-room-lighting-live-test",
+                "version": 1,
+            },
+            "kind": "result",
             "correlationId": self.correlation_id,
-            "mode": self.mode,
             "roomId": self.room_id,
+            "mode": self.mode,
             "startedAt": self.started_at,
-            "finishedAt": self.finished_at,
-            "status": self.status,
-            "commandsSent": self.commands_sent,
-            "steps": [
-                {
-                    "order": step.order,
-                    "key": step.key,
-                    "title": step.title,
-                    "comment": step.comment,
-                    "action": step.action,
-                    "status": step.status,
-                    "desiredState": step.desired_state,
-                    "commands": list(step.commands),
-                    "receipts": list(step.receipts),
-                    "detail": step.detail,
-                }
-                for step in self.steps
-            ],
-            "receipts": list(self.receipts),
+            "durationSeconds": self.duration_seconds,
+            "steps": [_step_payload(step) for step in self.steps],
+            "result": {
+                "status": self.status,
+                "reason": self.reason,
+                "finishedAt": self.finished_at,
+                "correlationId": self.correlation_id,
+                "commands_sent": self.commands_sent,
+            },
         }
+
+    def to_request_payload(self) -> dict[str, object]:
+        return {
+            "contract": {
+                "name": "hausman-hub-room-lighting-live-test",
+                "version": 1,
+            },
+            "kind": "request",
+            "correlationId": self.correlation_id,
+            "roomId": self.room_id,
+            "mode": self.mode,
+            "startedAt": self.started_at,
+            "durationSeconds": self.duration_seconds,
+            "steps": [_step_payload(step) for step in self.steps],
+            "result": None,
+        }
+
+
+def _step_payload(step: LiveTestStep) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "index": step.index,
+        "stage": step.stage,
+        "comment": step.comment[:300],
+        "offset_seconds": step.offset_seconds,
+        "status": step.status,
+    }
+    if step.detail:
+        payload["detail"] = step.detail[:300]
+    return payload
+
+
+def cancelled_trace(
+    *,
+    correlation_id: str,
+    room_id: str,
+    mode: str,
+    started_at: int,
+    steps: tuple[LiveTestStep, ...] = (),
+) -> LiveTestTrace:
+    """Build a contract-valid cancelled result for an API cancel request."""
+
+    return LiveTestTrace(
+        correlation_id=correlation_id,
+        mode=mode,
+        room_id=room_id,
+        started_at=started_at,
+        duration_seconds=LIVE_TEST_DURATION_SECONDS,
+        steps=steps,
+        status="cancelled",
+        reason="cancelled_by_user",
+        finished_at=int(time.time()),
+        commands_sent=0,
+    )
 
 
 ContextFactory = Callable[[LiveTestStage], RoomLightingContext]
@@ -285,117 +379,76 @@ class RoomLightingLiveTestRunner:
         if mode == LIVE_TEST_MODE_REAL and executor is None:
             raise RoomLightingLiveTestViolation("real mode requires an executor")
 
-        started_at = int(self._clock() * 1000)
+        started_at = int(self._clock())
+        started_at_ms = started_at * 1000
         steps: list[LiveTestStep] = []
-        receipts: list[dict[str, object]] = []
         commands_sent = 0
-        status = "completed"
+        status = "passed"
+        reason = "none"
+        offset = 0
+        cancelled = False
 
         for stage in build_stages(config):
+            await asyncio.sleep(0)
             if cancel_event is not None and cancel_event.is_set():
-                steps.append(_cancelled_step(stage))
-                status = "cancelled"
+                cancelled = True
                 break
             context = (
                 context_factory(stage)
                 if context_factory is not None
-                else _default_context(stage, config, started_at)
+                else _default_context(config, started_at_ms)
             )
             decision = evaluate_room_lighting(config, context)
-            planned = decision.commands
-            step_commands = tuple(_command_payload(command) for command in planned)
-            step_receipts: list[dict[str, object]] = []
-            step_status = "completed"
             if mode == LIVE_TEST_MODE_REAL and executor is not None:
-                for command in planned:
+                for command in decision.commands:
                     if cancel_event is not None and cancel_event.is_set():
-                        step_status = "cancelled"
-                        status = "cancelled"
+                        cancelled = True
                         break
-                    receipt = await _dispatch(executor, command)
-                    step_receipts.append(receipt)
-                    receipts.append(receipt)
+                    await _dispatch(executor, command)
                     commands_sent += 1
-            desired = {
-                target.target_id: target.desired_state
-                for target in decision.targets
-            }
+                if cancelled:
+                    break
+            comment = f"{stage.title}: {stage.comment}"
             steps.append(
                 LiveTestStep(
-                    order=stage.order,
-                    key=stage.key,
-                    title=stage.title,
-                    comment=stage.comment,
-                    action=stage.action,
-                    status=step_status,
-                    desired_state=", ".join(
-                        f"{target_id}={state}" for target_id, state in desired.items()
-                    ),
-                    commands=step_commands,
-                    receipts=tuple(step_receipts),
-                    detail=(
-                        "План построен без команд."
-                        if mode == LIVE_TEST_MODE_SAFE
-                        else f"Отправлено команд: {len(step_receipts)}."
-                    ),
+                    index=stage.order,
+                    stage=stage.stage,
+                    comment=comment,
+                    offset_seconds=min(offset, LIVE_TEST_DURATION_SECONDS),
+                    status="passed",
+                    detail=stage.action,
                 )
             )
-            if status == "cancelled":
-                break
+            offset += stage.duration_seconds
+        if cancelled:
+            status, reason = "cancelled", "cancelled_by_user"
 
         return LiveTestTrace(
             correlation_id=correlation_id,
             mode=mode,
             room_id=config.room_id,
             started_at=started_at,
-            finished_at=int(self._clock() * 1000),
-            status=status,
+            duration_seconds=LIVE_TEST_DURATION_SECONDS,
             steps=tuple(steps),
+            status=status,
+            reason=reason,
+            finished_at=int(self._clock()),
             commands_sent=commands_sent,
-            receipts=tuple(receipts),
         )
-
-
-def _cancelled_step(stage: LiveTestStage) -> LiveTestStep:
-    return LiveTestStep(
-        order=stage.order,
-        key=stage.key,
-        title=stage.title,
-        comment=stage.comment,
-        action=stage.action,
-        status="cancelled",
-        desired_state="",
-        detail="Прогон отменён до выполнения стадии.",
-    )
-
-
-def _command_payload(command: PlannedCommand) -> dict[str, object]:
-    return {
-        "targetId": command.target_id,
-        "action": command.action.value,
-        "brightness": command.brightness,
-        "colorTemperature": command.color_temperature,
-        "reason": command.reason.value,
-    }
 
 
 async def _dispatch(executor: object, command: PlannedCommand) -> dict[str, object]:
     result = executor(command)  # type: ignore[operator]
     if inspect.isawaitable(result):
         result = await result
-    if result is None:
-        return {"targetId": command.target_id, "action": command.action.value, "confirmed": True}
     if isinstance(result, dict):
         return result
-    return {"targetId": command.target_id, "action": command.action.value, "confirmed": bool(result)}
+    return {"targetId": command.target_id, "action": command.action.value, "confirmed": True}
 
 
-def _default_context(
-    stage: LiveTestStage, config: RoomLightingConfig, now: int
-) -> RoomLightingContext:
-    del stage
+def _default_context(config: RoomLightingConfig, now_ms: int) -> RoomLightingContext:
     return RoomLightingContext(
-        now=now,
+        now=now_ms,
         timezone=timezone.utc,
         sunrise=dt_time(7, 0),
         sunset=dt_time(19, 0),
@@ -404,13 +457,13 @@ def _default_context(
                 sensor_id=sensor.id,
                 kind=sensor.kind,
                 state=SensorState.ON,
-                last_changed=now,
+                last_changed=now_ms,
                 lux=100.0 if sensor.kind is SensorKind.ILLUMINANCE else None,
             )
             for sensor in config.devices.sensors
         ),
         lights=tuple(
-            LightSnapshot(target_id=target.id, state=SensorState.OFF, last_changed=now)
+            LightSnapshot(target_id=target.id, state=SensorState.OFF, last_changed=now_ms)
             for target in config.devices.light_targets
         ),
     )

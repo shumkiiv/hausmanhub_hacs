@@ -1,5 +1,22 @@
 # HausmanHub AI Context
 
+## Шаг 5a-fix освещения комнат: ответы API по контракту, 2026-09-11
+
+- Ответы комнатного API приведены к схемам контракта:
+  `room-lighting-config`, `room-lighting-status`, `room-lighting-template`,
+  `room-lighting-live-test`.
+- Live-test: POST запускает фоновую задачу и сразу отдаёт `kind: request`
+  (202), GET — актуальный trace, cancel — `result` со статусом `cancelled`.
+  Стадии приведены к 15 каноническим enum-значениям схемы; реестр прогонов
+  ограничен 16 записями.
+- `status` больше не содержит `commandsEnabled`/`shadowDecision`,
+  `active_schedule` отдаётся как `when`/`how`; шаблоны — полные документы;
+  `templates/apply` возвращает валидный config без `entityId: null`.
+- Ошибка валидации — `invalid_request` с читаемым русским `message` без
+  `details.violations`. Время — секунды. PUT сериализован локом, ревизия — по
+  `version`. `keepDevices` учитывается, `correlationId` опционален.
+- Проверки: комнатные тесты — 75 PASS; полный набор не запускался.
+
 ## Шаг 5a освещения комнат: HTTP API (только safe), 2026-09-11
 
 - В ветке `codex/room-lighting-integration` (сверху Шага 4, `a9130ce`)

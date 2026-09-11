@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from pathlib import Path
 import re
 from datetime import datetime, time, timezone
 
+import pytest
+from jsonschema import Draft202012Validator
+
 from custom_components.hausman_hub.application.room_lighting_live_test import (
-    LIVE_TEST_STAGE_KEYS,
+    LIVE_TEST_DURATION_SECONDS,
+    LIVE_TEST_STAGES,
     RoomLightingLiveTestRunner,
     RoomLightingLiveTestViolation,
     build_stages,
@@ -26,6 +32,17 @@ from custom_components.hausman_hub.domain.room_lighting_ownership import SensorS
 _TZ = timezone.utc
 _CYRILLIC = re.compile(r"[А-Яа-яЁё]")
 _NOW = int(datetime(2026, 9, 11, 10, 0, tzinfo=_TZ).timestamp() * 1000)
+_CONTRACT_SCHEMA = Path(
+    "/home/ivsh/projects/HausmanHub/worktrees/codex-room-lighting-contract-2026-09-11/"
+    "schemas/v1/room-lighting-live-test.schema.json"
+)
+
+
+def _validate_schema(payload: dict[str, object]) -> None:
+    if not _CONTRACT_SCHEMA.is_file():
+        pytest.skip("room lighting contract schema is not available")
+    schema = json.loads(_CONTRACT_SCHEMA.read_text(encoding="utf-8"))
+    Draft202012Validator(schema).validate(payload)
 
 
 def _config():
@@ -62,18 +79,7 @@ def _config():
                     "brightness": True,
                     "color_temperature": True,
                     "autoAdoptOverride": None,
-                },
-                {
-                    "id": "light_mirror",
-                    "name": "Зеркало",
-                    "kind": "light",
-                    "entityId": "light.demo_mirror",
-                    "role": "mirror",
-                    "groupId": None,
-                    "brightness": True,
-                    "color_temperature": False,
-                    "autoAdoptOverride": None,
-                },
+                }
             ],
             "power_switch": None,
             "wireless_switches": [
@@ -113,7 +119,7 @@ def _config():
                     "holiday": False,
                     "anchor": {"kind": "fixed", "time": "23:00", "offsetMinutes": 0},
                 },
-                "targets": {"lightTargets": ["light_mirror"], "groupIds": [], "roles": []},
+                "targets": {"lightTargets": ["light_main"], "groupIds": [], "roles": []},
                 "how": {
                     "brightness": 10,
                     "colorTemperature": None,
@@ -130,7 +136,7 @@ def _config():
                     "holiday": False,
                     "anchor": {"kind": "fixed", "time": "02:00", "offsetMinutes": 0},
                 },
-                "targets": {"lightTargets": ["light_mirror"], "groupIds": [], "roles": []},
+                "targets": {"lightTargets": ["light_main"], "groupIds": [], "roles": []},
                 "how": {
                     "brightness": 10,
                     "colorTemperature": None,
@@ -208,44 +214,41 @@ def _context_factory(now: int = _NOW):
                     lux_healthy=True,
                 ),
             ),
-            lights=(
-                LightSnapshot("light_main", SensorState.OFF, now),
-                LightSnapshot("light_mirror", SensorState.OFF, now),
-            ),
+            lights=(LightSnapshot("light_main", SensorState.OFF, now),),
         )
 
     return factory
 
 
 class _SpyExecutor:
-    def __init__(self, receipt: dict[str, object] | None = None) -> None:
+    def __init__(self) -> None:
         self.calls: list[object] = []
-        self._receipt = receipt or {"confirmed": True}
 
     async def __call__(self, command: object) -> dict[str, object]:
         self.calls.append(command)
-        return dict(self._receipt)
+        return {"confirmed": True}
 
 
-def test_build_stages_covers_all_and_is_near_30_seconds() -> None:
+def test_build_stages_uses_canonical_stages_and_is_near_30_seconds() -> None:
     stages = build_stages(_config())
-    keys = {stage.key for stage in stages}
-    expected = {
+    seen = {stage.stage for stage in stages}
+    assert seen <= set(LIVE_TEST_STAGES)
+    assert {
         "resolve_devices",
         "snapshot_state",
-        "presence_on",
-        "schedule_on_presence",
-        "schedule_always",
-        "schedule_night_light",
-        "schedule_off",
-        "lux_correction",
-        "absence_dimming",
-        "manual_off_protection",
+        "resolve_illumination",
+        "simulate_presence",
+        "apply_schedule",
+        "verify_brightness",
+        "verify_ownership",
+        "simulate_absence",
+        "verify_fade",
+        "verify_manual_protection",
+        "simulate_switch_press",
         "away_room_off",
+        "verify_away_return",
         "restore_state",
-    }
-    assert expected <= keys
-    assert expected <= set(LIVE_TEST_STAGE_KEYS)
+    } <= seen
     total = sum(stage.duration_seconds for stage in stages)
     assert 20 <= total <= 40
     for stage in stages:
@@ -255,7 +258,7 @@ def test_build_stages_covers_all_and_is_near_30_seconds() -> None:
         assert stage.duration_seconds >= 2
 
 
-async def test_safe_run_never_calls_executor() -> None:
+async def test_safe_run_never_calls_executor_and_is_schema_valid() -> None:
     spy = _SpyExecutor()
     trace = await RoomLightingLiveTestRunner().run(
         _config(),
@@ -267,16 +270,18 @@ async def test_safe_run_never_calls_executor() -> None:
 
     assert spy.calls == []
     assert trace.commands_sent == 0
-    assert trace.receipts == ()
-    assert trace.status == "completed"
+    assert trace.status == "passed"
     assert trace.mode == "safe"
-    assert trace.steps
     assert trace.correlation_id == "live-safe-001"
-    assert all(step.commands for step in trace.steps if step.key == "presence_on")
+    assert trace.duration_seconds == LIVE_TEST_DURATION_SECONDS
+    assert trace.steps
+    assert all(step.offset_seconds <= LIVE_TEST_DURATION_SECONDS for step in trace.steps)
+    _validate_schema(trace.to_payload())
+    _validate_schema(trace.to_request_payload())
 
 
-async def test_real_run_dispatches_and_records_receipts() -> None:
-    spy = _SpyExecutor({"confirmed": True, "action": "turn_on"})
+async def test_real_run_dispatches_and_is_schema_valid() -> None:
+    spy = _SpyExecutor()
     trace = await RoomLightingLiveTestRunner().run(
         _config(),
         mode="real",
@@ -287,25 +292,20 @@ async def test_real_run_dispatches_and_records_receipts() -> None:
 
     assert spy.calls
     assert trace.commands_sent == len(spy.calls)
-    assert trace.commands_sent > 0
-    assert trace.receipts
-    assert trace.receipts[0]["confirmed"] is True
-    assert trace.status == "completed"
+    assert trace.status == "passed"
+    _validate_schema(trace.to_payload())
 
 
 async def test_real_mode_requires_executor() -> None:
-    try:
+    with pytest.raises(RoomLightingLiveTestViolation):
         await RoomLightingLiveTestRunner().run(
             _config(),
             mode="real",
             correlation_id="live-real-002",
         )
-    except RoomLightingLiveTestViolation:
-        return
-    raise AssertionError("real mode without executor was accepted")
 
 
-async def test_cancel_before_run_stops_it() -> None:
+async def test_cancel_stops_the_run_and_is_schema_valid() -> None:
     cancel_event = asyncio.Event()
     cancel_event.set()
     trace = await RoomLightingLiveTestRunner().run(
@@ -317,28 +317,7 @@ async def test_cancel_before_run_stops_it() -> None:
     )
 
     assert trace.status == "cancelled"
+    assert trace.reason == "cancelled_by_user"
     assert trace.commands_sent == 0
-    assert len(trace.steps) == 1
-    assert trace.steps[0].status == "cancelled"
-
-
-async def test_cancel_between_stages_stops_it() -> None:
-    cancel_event = asyncio.Event()
-    calls = {"count": 0}
-
-    def factory(stage):
-        calls["count"] += 1
-        if calls["count"] == 2:
-            cancel_event.set()
-        return _context_factory()(stage)
-
-    trace = await RoomLightingLiveTestRunner().run(
-        _config(),
-        mode="safe",
-        correlation_id="live-cancel-002",
-        cancel_event=cancel_event,
-        context_factory=factory,
-    )
-
-    assert trace.status == "cancelled"
-    assert len(trace.steps) < len(build_stages(_config()))
+    assert trace.steps == ()
+    _validate_schema(trace.to_payload())

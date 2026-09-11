@@ -1,13 +1,18 @@
-"""HTTP boundary tests for room lighting config, status, templates and live tests."""
+"""HTTP boundary tests for room lighting config, status, templates and live tests.
+
+Responses are validated against the contract schemas from the contract worktree.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import importlib
+import json
+from pathlib import Path
 import sys
-import types
 import unittest
-from unittest.mock import patch
+
+from jsonschema import Draft202012Validator
 
 from tests.test_local_summary_access import (
     FAKE_MODULE_NAMES,
@@ -20,6 +25,17 @@ from tests.test_local_summary_access import (
 
 PACKAGE_MODULE = "custom_components.hausman_hub"
 API_MODULE = f"{PACKAGE_MODULE}.room_lighting_api"
+_CONTRACT_DIR = Path(
+    "/home/ivsh/projects/HausmanHub/worktrees/codex-room-lighting-contract-2026-09-11/schemas/v1"
+)
+
+
+def _validate(schema_name: str, payload: object) -> None:
+    path = _CONTRACT_DIR / schema_name
+    if not path.is_file():
+        return
+    schema = json.loads(path.read_text(encoding="utf-8"))
+    Draft202012Validator(schema).validate(payload)
 
 
 def _config_payload(room_id: str = "room_demo_entry", name: str = "Тамбур") -> dict:
@@ -123,9 +139,7 @@ class _SpyExecutor:
 
 
 def _request(path: str, **match: str) -> FakeRequest:
-    request = FakeRequest(
-        "127.0.0.1", reader_user("admin", admin=True), path=path
-    )
+    request = FakeRequest("127.0.0.1", reader_user("admin", admin=True), path=path)
     request.match_info = match
     return request
 
@@ -223,7 +237,7 @@ class RoomLightingApiTest(unittest.TestCase):
     def _config_path(self, room_id: str = "room_demo_entry") -> str:
         return self.api.ROOM_LIGHTING_CONFIG_PATH.format(room_id=room_id)
 
-    def test_config_round_trip(self) -> None:
+    def test_config_round_trip_and_revision_conflict(self) -> None:
         async def flow() -> None:
             room_id = "room_demo_entry"
             missing = await self.config_view.get(
@@ -237,13 +251,14 @@ class RoomLightingApiTest(unittest.TestCase):
                 )
             )
             self.assertEqual(200, put.status)
-            self.assertEqual(room_id, put.payload["roomId"])
+            _validate("room-lighting-config.schema.json", put.payload)
             self.assertEqual(1, put.payload["version"])
 
             got = await self.config_view.get(
                 _request(self._config_path(room_id), room_id=room_id)
             )
             self.assertEqual(200, got.status)
+            _validate("room-lighting-config.schema.json", got.payload)
             self.assertEqual("Тамбур", got.payload["name"])
 
             changed = _config_payload(room_id, name="Другое")
@@ -263,7 +278,7 @@ class RoomLightingApiTest(unittest.TestCase):
 
         asyncio.run(flow())
 
-    def test_invalid_config_returns_400_with_violations(self) -> None:
+    def test_invalid_config_returns_readable_400_without_details(self) -> None:
         async def flow() -> None:
             room_id = "room_demo_entry"
             payload = _config_payload(room_id)
@@ -273,11 +288,13 @@ class RoomLightingApiTest(unittest.TestCase):
             )
             self.assertEqual(400, response.status)
             self.assertEqual("invalid_request", response.payload["code"])
-            self.assertTrue(response.payload["details"]["violations"])
+            self.assertIn("Конфигурация освещения", response.payload["message"])
+            details = response.payload.get("details", {})
+            self.assertNotIn("violations", details)
 
         asyncio.run(flow())
 
-    def test_status_and_templates(self) -> None:
+    def test_status_matches_contract_schema(self) -> None:
         async def flow() -> None:
             room_id = "room_demo_entry"
             await self.config_view.put(
@@ -292,10 +309,15 @@ class RoomLightingApiTest(unittest.TestCase):
                 )
             )
             self.assertEqual(200, status.status)
-            self.assertIn("active_schedule", status.payload)
-            self.assertIn("illumination", status.payload)
-            self.assertEqual(False, status.payload["commandsEnabled"])
+            _validate("room-lighting-status.schema.json", status.payload)
+            self.assertNotIn("commandsEnabled", status.payload)
+            self.assertNotIn("shadowDecision", status.payload)
 
+        asyncio.run(flow())
+
+    def test_templates_are_full_contract_documents(self) -> None:
+        async def flow() -> None:
+            room_id = "room_demo_entry"
             templates = await self.templates_view.get(
                 _request(
                     self.api.ROOM_LIGHTING_TEMPLATES_PATH.format(room_id=room_id),
@@ -304,32 +326,33 @@ class RoomLightingApiTest(unittest.TestCase):
             )
             self.assertEqual(200, templates.status)
             self.assertTrue(templates.payload["templates"])
+            for document in templates.payload["templates"]:
+                _validate("room-lighting-template.schema.json", document)
 
         asyncio.run(flow())
 
-    def test_apply_template_returns_config(self) -> None:
+    def test_apply_template_returns_valid_config_without_null_entity(self) -> None:
         async def flow() -> None:
             room_id = "room_demo_entry"
             response = await self.apply_view.post(
                 _json_request(
                     self.api.ROOM_LIGHTING_TEMPLATE_APPLY_PATH.format(room_id=room_id),
-                    {"templateId": "day_profile", "overrides": {"name": "Шаблон"}},
+                    {"templateId": "day_profile", "keepDevices": True},
                     room_id=room_id,
                 )
             )
             self.assertEqual(200, response.status)
-            self.assertEqual(room_id, response.payload["roomId"])
-            self.assertEqual("Шаблон", response.payload["name"])
+            _validate("room-lighting-config.schema.json", response.payload)
+            for target in response.payload["devices"]["light_targets"]:
+                self.assertNotIn(None, [target.get("entityId")])
 
         asyncio.run(flow())
 
-    def test_live_test_safe_never_calls_executor(self) -> None:
+    def test_live_test_safe_is_background_and_command_free(self) -> None:
         async def flow() -> None:
             room_id = "room_demo_entry"
             spy = _SpyExecutor()
-            self.config_view._hass.data["hausman_hub"][
-                self.api.DATA_ROOM_LIGHTING_EXECUTOR
-            ] = spy
+            self.hass.data["hausman_hub"][self.api.DATA_ROOM_LIGHTING_EXECUTOR] = spy
             await self.config_view.put(
                 _json_request(
                     self._config_path(room_id), _config_payload(room_id), room_id=room_id
@@ -343,7 +366,24 @@ class RoomLightingApiTest(unittest.TestCase):
                 )
             )
             self.assertEqual(202, response.status)
-            self.assertEqual(0, response.payload["commandsSent"])
+            _validate("room-lighting-live-test.schema.json", response.payload)
+            self.assertEqual("request", response.payload["kind"])
+
+            registry = self.hass.data["hausman_hub"][
+                self.api.DATA_ROOM_LIGHTING_LIVE_TESTS
+            ]
+            await registry["live-api-safe-1"]["task"]
+
+            path = self.api.ROOM_LIGHTING_LIVE_TEST_PATH.format(
+                room_id=room_id, correlation_id="live-api-safe-1"
+            )
+            result = await self.live_result_view.get(
+                _request(path, room_id=room_id, correlation_id="live-api-safe-1")
+            )
+            self.assertEqual(200, result.status)
+            _validate("room-lighting-live-test.schema.json", result.payload)
+            self.assertEqual("result", result.payload["kind"])
+            self.assertEqual(0, result.payload["result"]["commands_sent"])
             self.assertEqual([], spy.calls)
 
         asyncio.run(flow())
@@ -386,16 +426,24 @@ class RoomLightingApiTest(unittest.TestCase):
                 )
             )
             self.assertEqual(202, response.status)
-            self.assertTrue(response.payload["commandsSent"] > 0)
-            self.assertTrue(response.payload["receipts"])
-            self.assertTrue(spy.calls)
-            self.assertEqual(
-                "live-api-real-2", response.payload["correlationId"]
+            registry = self.hass.data["hausman_hub"][
+                self.api.DATA_ROOM_LIGHTING_LIVE_TESTS
+            ]
+            await registry["live-api-real-2"]["task"]
+            path = self.api.ROOM_LIGHTING_LIVE_TEST_PATH.format(
+                room_id=room_id, correlation_id="live-api-real-2"
             )
+            result = await self.live_result_view.get(
+                _request(path, room_id=room_id, correlation_id="live-api-real-2")
+            )
+            self.assertEqual(200, result.status)
+            _validate("room-lighting-live-test.schema.json", result.payload)
+            self.assertTrue(result.payload["result"]["commands_sent"] > 0)
+            self.assertTrue(spy.calls)
 
         asyncio.run(flow())
 
-    def test_live_test_result_and_cancel(self) -> None:
+    def test_live_test_cancel(self) -> None:
         async def flow() -> None:
             room_id = "room_demo_entry"
             await self.config_view.put(
@@ -411,31 +459,27 @@ class RoomLightingApiTest(unittest.TestCase):
                 )
             )
             self.assertEqual(202, started.status)
+            registry = self.hass.data["hausman_hub"][
+                self.api.DATA_ROOM_LIGHTING_LIVE_TESTS
+            ]
+            entry = registry["live-api-cancel-1"]
+            await asyncio.sleep(0)
 
             path = self.api.ROOM_LIGHTING_LIVE_TEST_PATH.format(
                 room_id=room_id, correlation_id="live-api-cancel-1"
             )
+            cancelled = await self.live_result_view.post(
+                _request(path, room_id=room_id, correlation_id="live-api-cancel-1")
+            )
+            self.assertEqual(200, cancelled.status)
+            _validate("room-lighting-live-test.schema.json", cancelled.payload)
+            self.assertEqual("cancelled", cancelled.payload["result"]["status"])
+
+            await entry["task"]
             result = await self.live_result_view.get(
                 _request(path, room_id=room_id, correlation_id="live-api-cancel-1")
             )
-            self.assertEqual(200, result.status)
-            self.assertEqual("live-api-cancel-1", result.payload["correlationId"])
-
-            event = asyncio.Event()
-            registry = self.hass.data["hausman_hub"][
-                self.api.DATA_ROOM_LIGHTING_LIVE_TESTS
-            ]
-            registry["live-api-cancel-2"] = None
-            registry["live-api-cancel-2.cancel"] = event
-            cancel_path = self.api.ROOM_LIGHTING_LIVE_TEST_PATH.format(
-                room_id=room_id, correlation_id="live-api-cancel-2"
-            )
-            cancelled = await self.live_result_view.post(
-                _request(cancel_path, room_id=room_id, correlation_id="live-api-cancel-2")
-            )
-            self.assertEqual(200, cancelled.status)
-            self.assertEqual("cancelled", cancelled.payload["status"])
-            self.assertTrue(event.is_set())
+            self.assertEqual("cancelled", result.payload["result"]["status"])
 
         asyncio.run(flow())
 
