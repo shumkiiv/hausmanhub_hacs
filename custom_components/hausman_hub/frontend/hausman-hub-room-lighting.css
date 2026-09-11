@@ -1,0 +1,189 @@
+/* Room lighting editor block inside the room card. */
+
+.room-lighting-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+}
+
+.rle-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rle-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.rle-heading h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.rle-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  opacity: 0.75;
+}
+
+.rle-error {
+  margin: 0;
+  font-size: 13px;
+  color: var(--error-color, #b3261e);
+}
+
+.rle-notice {
+  margin: 0;
+  font-size: 13px;
+  color: var(--success-color, #1b5e20);
+}
+
+.rle-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+  border-radius: 12px;
+  background: var(--card-background-color, rgba(255, 255, 255, 0.6));
+}
+
+.rle-block h4 {
+  margin: 0;
+}
+
+.rle-block h5 {
+  margin: 6px 0 0;
+  font-size: 13px;
+  opacity: 0.85;
+}
+
+.rle-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.rle-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+}
+
+.rle-field-label {
+  opacity: 0.75;
+}
+
+.rle-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.2));
+  background: var(--card-background-color, #fff);
+  color: inherit;
+  font: inherit;
+}
+
+.rle-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.rle-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.rle-button {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.2));
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.rle-button.is-primary {
+  background: var(--primary-color, #03a9f4);
+  border-color: var(--primary-color, #03a9f4);
+  color: #fff;
+}
+
+.rle-button.is-danger {
+  color: var(--error-color, #b3261e);
+  border-color: var(--error-color, #b3261e);
+}
+
+.rle-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.rle-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px dashed var(--divider-color, rgba(0, 0, 0, 0.2));
+}
+
+.rle-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rle-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rle-live-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.rle-live-step {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+
+.rle-live-step small {
+  opacity: 0.7;
+}
+
+.rle-live-status {
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.rle-live-step.is-passed .rle-live-status {
+  color: var(--success-color, #1b5e20);
+}
+
+.rle-live-step.is-failed .rle-live-status {
+  color: var(--error-color, #b3261e);
+}
