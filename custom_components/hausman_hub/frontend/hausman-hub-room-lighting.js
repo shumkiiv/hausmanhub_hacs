@@ -3,7 +3,7 @@
  * hausman_hub/v1 rooms/{room_id}/lighting API. Server validation wins: the
  * panel only mirrors the server response and never invents its own rules. */
 
-import { apiErrorMessage } from "./hausman-hub-error-taxonomy.js?v=1.52.259";
+import { apiErrorMessage } from "./hausman-hub-error-taxonomy.js?v=1.52.260";
 
 const TEMPLATE_ROLES = [
   ["main", "Основной"],
