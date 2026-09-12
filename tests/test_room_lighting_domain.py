@@ -499,3 +499,26 @@ def test_timers_absence_seconds_round_trips() -> None:
     encoded = config.to_dict()
     assert encoded["timers"] == {"absence_seconds": 300, "turn_off_seconds": 300}  # type: ignore[index]
     assert config_from_payload(encoded).to_dict() == encoded
+
+
+def test_auto_control_defaults_true_and_round_trips() -> None:
+    payload = _payload()
+    config = config_from_payload(payload)
+    assert config.devices.light_targets[0].auto_control is True
+    encoded = config.to_dict()
+    assert encoded["devices"]["light_targets"][0]["autoControl"] is True  # type: ignore[index]
+    assert config_from_payload(encoded).to_dict() == encoded
+
+    payload["devices"]["light_targets"][0]["autoControl"] = False  # type: ignore[index]
+    manual = config_from_payload(payload)
+    assert manual.devices.light_targets[0].auto_control is False
+    encoded = manual.to_dict()
+    assert encoded["devices"]["light_targets"][0]["autoControl"] is False  # type: ignore[index]
+    assert config_from_payload(encoded).to_dict() == encoded
+
+
+def test_auto_control_must_be_boolean() -> None:
+    payload = _payload()
+    payload["devices"]["light_targets"][0]["autoControl"] = "yes"  # type: ignore[index]
+    with pytest.raises(RoomLightingViolation):
+        config_from_payload(payload)

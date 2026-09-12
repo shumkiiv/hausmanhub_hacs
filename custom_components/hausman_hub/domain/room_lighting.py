@@ -275,6 +275,7 @@ class LightTarget:
     group_id: str | None = None
     auto_adopt_override: bool | None = None
     color_temp_inverted: bool = False
+    auto_control: bool = True
 
     def __post_init__(self) -> None:
         _stable_id(self.id, "light target id")
@@ -283,6 +284,7 @@ class LightTarget:
         _flag(self.brightness, "light target brightness flag")
         _flag(self.color_temperature, "light target colour temperature flag")
         _flag(self.color_temp_inverted, "light target colour temperature inversion flag")
+        _flag(self.auto_control, "light target automatic control flag")
         if self.kind is LightKind.SWITCH and (self.brightness or self.color_temperature):
             raise RoomLightingViolation(
                 "an unregulated switch target cannot expose brightness or colour temperature"
@@ -984,6 +986,7 @@ def _devices_to_payload(devices: Devices) -> dict[str, object]:
                     "brightness": item.brightness,
                     "color_temperature": item.color_temperature,
                     "colorTempInverted": item.color_temp_inverted,
+                    "autoControl": item.auto_control,
                     "autoAdoptOverride": item.auto_adopt_override,
                 },
                 item.entity_id,
@@ -1154,6 +1157,7 @@ def _light_target_from_payload(payload: object) -> LightTarget:
         ),
         auto_adopt_override=data.get("autoAdoptOverride"),
         color_temp_inverted=data.get("colorTempInverted", False),
+        auto_control=data.get("autoControl", True),
     )
 
 

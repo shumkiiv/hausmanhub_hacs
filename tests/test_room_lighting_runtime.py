@@ -20,6 +20,7 @@ from custom_components.hausman_hub.application.room_lighting_ha_state import (
     build_context,
 )
 from custom_components.hausman_hub.application.room_lighting_runtime import (
+    AWAY_ENTITY_ID,
     RoomLightingRuntime,
 )
 from custom_components.hausman_hub.application.room_lighting_shadow import (
@@ -1149,3 +1150,104 @@ async def test_inverted_target_observation_is_logical_and_idempotent() -> None:
     assert LightAction.SET_COLOR_TEMPERATURE not in [
         command.action for command in main.commands
     ]
+
+
+def _away_runtime(
+    hass: _FakeHass,
+    *,
+    commands_enabled: bool,
+    executor: object,
+    captured: dict[str, object],
+) -> RoomLightingRuntime:
+    payload = _config_payload(commands_enabled=commands_enabled)
+    payload["awayBehavior"] = {
+        "mode": "room_off",
+        "return": {"restore": "by_current_conditions"},
+    }
+
+    def track_state_changes(h, entities, callback):
+        if AWAY_ENTITY_ID in entities:
+            captured["away"] = callback
+        else:
+            captured["room"] = callback
+        return lambda: None
+
+    return RoomLightingRuntime(
+        hass,
+        _ConfigService(config_from_payload(payload)),
+        RoomLightingShadowService(_MemoryShadowStore()),
+        executor=executor,
+        now_ms=lambda: _NOW_MS,
+        track_state_changes=track_state_changes,
+        track_interval=lambda h, c, i: (lambda: None),
+        listen_bus=lambda h, e, c: (lambda: None),
+        away_debounce_seconds=0,
+    )
+
+
+async def test_away_source_turns_context_away_and_switches_off_light() -> None:
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "on", {"brightness": 153}, last_changed=_NOW_DT)
+    hass.states.set(AWAY_ENTITY_ID, "off", last_changed=_NOW_DT)
+    captured: dict[str, object] = {}
+    executor = _SpyExecutor()
+    runtime = _away_runtime(
+        hass, commands_enabled=True, executor=executor, captured=captured
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        assert runtime.away is False
+        before = await runtime.async_context_for(runtime.configs()[0])
+        assert before.away is False
+
+        # The Matter A100 Away source turns on: the runtime debounces, marks
+        # the room context away and switches the automatic light off.
+        hass.states.set(AWAY_ENTITY_ID, "on", last_changed=_NOW_DT)
+        captured["away"](SimpleNamespace(data={"entity_id": AWAY_ENTITY_ID}))  # type: ignore[operator]
+        await asyncio.gather(*hass.tasks)
+
+        assert runtime.away is True
+        during = await runtime.async_context_for(runtime.configs()[0])
+        assert during.away is True
+        assert any(
+            command.action is LightAction.TURN_OFF
+            and command.target_id == "light_main"
+            for command in executor.calls
+        )
+
+        # Return home: the source clears and the normal evaluation resumes.
+        executor.calls.clear()
+        hass.states.set(AWAY_ENTITY_ID, "off", last_changed=_NOW_DT)
+        captured["away"](SimpleNamespace(data={"entity_id": AWAY_ENTITY_ID}))  # type: ignore[operator]
+        await asyncio.gather(*hass.tasks)
+
+        assert runtime.away is False
+        home = await runtime.async_context_for(runtime.configs()[0])
+        assert home.away is False
+    finally:
+        await runtime.stop()
+
+
+async def test_away_in_shadow_only_journals_without_commands() -> None:
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "on", {"brightness": 153}, last_changed=_NOW_DT)
+    hass.states.set(AWAY_ENTITY_ID, "off", last_changed=_NOW_DT)
+    captured: dict[str, object] = {}
+    executor = _SpyExecutor()
+    runtime = _away_runtime(
+        hass, commands_enabled=False, executor=executor, captured=captured
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        hass.states.set(AWAY_ENTITY_ID, "on", last_changed=_NOW_DT)
+        captured["away"](SimpleNamespace(data={"entity_id": AWAY_ENTITY_ID}))  # type: ignore[operator]
+        await asyncio.gather(*hass.tasks)
+
+        assert runtime.away is True
+        assert executor.calls == []
+    finally:
+        await runtime.stop()

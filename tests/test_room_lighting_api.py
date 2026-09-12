@@ -353,6 +353,52 @@ class RoomLightingApiTest(unittest.TestCase):
 
         asyncio.run(flow())
 
+    def test_status_away_uses_runtime_flag(self) -> None:
+        from datetime import datetime, timezone
+
+        now = int(datetime(2026, 9, 11, 10, 0, tzinfo=timezone.utc).timestamp() * 1000)
+
+        class _Runtime:
+            running = True
+            away = True
+
+            async def async_context_for(self, config):
+                return RoomLightingApiTest._context(now)
+
+        async def flow() -> None:
+            room_id = "room_demo_entry"
+            await self.config_view.put(
+                _json_request(
+                    self._config_path(room_id), _config_payload(room_id), room_id=room_id
+                )
+            )
+            self.hass.data["hausman_hub"][
+                self.api.DATA_ROOM_LIGHTING_RUNTIME
+            ] = _Runtime()
+            status = await self.status_view.get(
+                _request(
+                    self.api.ROOM_LIGHTING_STATUS_PATH.format(room_id=room_id),
+                    room_id=room_id,
+                )
+            )
+            self.assertEqual(200, status.status)
+            self.assertTrue(status.payload["away"])
+
+            # Without a running runtime the config fallback applies.
+            self.hass.data["hausman_hub"].pop(
+                self.api.DATA_ROOM_LIGHTING_RUNTIME, None
+            )
+            fallback = await self.status_view.get(
+                _request(
+                    self.api.ROOM_LIGHTING_STATUS_PATH.format(room_id=room_id),
+                    room_id=room_id,
+                )
+            )
+            self.assertEqual(200, fallback.status)
+            self.assertFalse(fallback.payload["away"])
+
+        asyncio.run(flow())
+
     def test_templates_are_full_contract_documents(self) -> None:
         async def flow() -> None:
             room_id = "room_demo_entry"

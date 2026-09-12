@@ -13,6 +13,7 @@ from datetime import datetime, time as dt_time, timedelta, tzinfo
 from enum import StrEnum
 
 from .room_lighting import (
+    AwayMode,
     RoomLightingConfig,
     ScheduleEntry,
     ScheduleMode,
@@ -55,12 +56,14 @@ class DecisionReason(StrEnum):
     LUX = "lux"
     DIMMING = "dimming"
     NIGHT_LIGHT = "night_light"
+    AWAY = "away"
     AWAY_RETURN = "away_return"
     RESTORE = "restore"
 
 
 class SkipReason(StrEnum):
     MANUAL_OWNERSHIP = "manual_ownership"
+    MANUAL_MODE = "manual_mode"
     MANUAL_PEER = "manual_peer"
     MANUAL_PROTECTION = "manual_protection"
     SENSOR_UNKNOWN = "sensor_unknown"
@@ -170,12 +173,15 @@ class RoomLightingContext:
     protection: ProtectionSnapshot = field(default_factory=ProtectionSnapshot)
     holiday: bool = False
     unobserved_since: int | None = None
+    away: bool = False
 
     def __post_init__(self) -> None:
         if type(self.now) is not int or self.now < 0:
             raise RoomLightingEngineViolation("context time is invalid")
         if not isinstance(self.timezone, tzinfo):
             raise RoomLightingEngineViolation("context timezone is required")
+        if type(self.away) is not bool:
+            raise RoomLightingEngineViolation("context away flag is invalid")
 
     def light(self, target_id: str) -> LightSnapshot | None:
         for item in self.lights:
@@ -317,7 +323,15 @@ def evaluate_room_lighting(
     policy: EnginePolicy | None = None,
     mode: str = MODE_SHADOW,
 ) -> RoomLightingDecision:
-    """Compute the desired state and command plan without any side effect."""
+    """Compute the desired state and command plan without any side effect.
+
+    ``autoControl=false`` targets stay manual-only: the engine never commands
+    them and only reports ``manual_mode``. When the context is away and the
+    room uses ``room_off``, every automatic target is switched off (reason
+    ``away``) without requiring proven automatic ownership, because the
+    deliberate departure is the evidence; nothing is turned on. On return
+    (``away=False``) the normal schedule/presence evaluation simply resumes.
+    """
 
     if not isinstance(config, RoomLightingConfig):
         raise RoomLightingEngineViolation("validated room lighting config is required")
@@ -335,7 +349,8 @@ def evaluate_room_lighting(
     manual_targets = {
         target.id
         for target in config.devices.light_targets
-        if resolve_manual_ownership(
+        if (not target.auto_control and _light_on(context, target.id))
+        or resolve_manual_ownership(
             context.ownership,
             target.id,
             light_on=_light_on(context, target.id),
@@ -430,6 +445,39 @@ def _evaluate_target(
     light_on = light is not None and light.state is SensorState.ON
     light_brightness = light.brightness if light is not None else None
     light_color = light.color_temperature if light is not None else None
+
+    # ``autoControl=false`` is a manual-only target: the engine never commands
+    # it and never publishes a desired state for it. It is journaled only as a
+    # skip so the decision still shows why the target stayed untouched.
+    if not target.auto_control:  # type: ignore[attr-defined]
+        return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_MODE))
+
+    # Away is a deliberate "nobody is home" safe-off. It outranks schedule,
+    # presence, lux, protection and manual ownership: every automatic target is
+    # switched off. This is the one path that intentionally commands an
+    # automatic target without proven automatic ownership, because the
+    # departure itself is the evidence. Away never turns anything on and never
+    # touches manual-only (``autoControl=false``) targets, which have already
+    # returned above.
+    if context.away and config.away_behavior.mode is AwayMode.ROOM_OFF:
+        if not light_on:
+            return _unchanged(target_id, Skip(target_id, SkipReason.IDEMPOTENT))
+        return TargetDecision(
+            target_id=target_id,
+            desired_state="off",
+            desired_brightness=None,
+            desired_color_temperature=None,
+            commands=(
+                PlannedCommand(
+                    target_id,
+                    LightAction.TURN_OFF,
+                    reason=DecisionReason.AWAY,
+                    fade_seconds=(
+                        config.dimming.fade_seconds if config.dimming.enabled else 0
+                    ),
+                ),
+            ),
+        )
 
     # A person already owns an interchangeable source of this profile. Leave
     # this target untouched instead of fighting the manual choice.

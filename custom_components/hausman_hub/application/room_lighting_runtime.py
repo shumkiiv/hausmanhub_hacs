@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import replace
 from datetime import timedelta
 import logging
 import time
@@ -62,6 +63,12 @@ DEFAULT_INTERVAL_SECONDS = 60
 MAX_OWNERSHIP_RECORDS = 500
 OWNERSHIP_STORAGE_VERSION = 1
 DEVICE_TRIGGER_DEDUP_MS = 2_000
+# Matter device "A100 Away" from the Aqara A100 lock: on = nobody is home.
+# This is the same source the legacy ``system-away-turn-off`` scenario used.
+AWAY_ENTITY_ID = "binary_sensor.a100_away_zaniatost"
+# The legacy scenario only treated "away" as active after the sensor stayed on
+# for three seconds, which filters a short unlock blip.
+AWAY_ON_DEBOUNCE_SECONDS = 3.0
 _DEVICE_TRIGGER_PLATFORM = "mqtt"
 _DEVICE_TRIGGER_INFO_NAME = "managed-room-lighting-runtime"
 _TARGET_DOMAINS = frozenset({"light", "switch"})
@@ -262,6 +269,7 @@ class RoomLightingRuntime:
         listen_bus: Callable[..., Callable[[], None]] | None = None,
         device_automation_api: object | None = None,
         interval_seconds: int = DEFAULT_INTERVAL_SECONDS,
+        away_debounce_seconds: float = AWAY_ON_DEBOUNCE_SECONDS,
     ) -> None:
         self._hass = hass
         self._service = service
@@ -295,12 +303,21 @@ class RoomLightingRuntime:
         self._lock = asyncio.Lock()
         self._save_lock = asyncio.Lock()
         self._running = False
+        self._away = False
+        self._away_generation = 0
+        self._away_debounce_seconds = max(0.0, float(away_debounce_seconds))
 
     # -- lifecycle ---------------------------------------------------------
 
     @property
     def running(self) -> bool:
         return self._running
+
+    @property
+    def away(self) -> bool:
+        """Runtime-wide away state fed from the A100 Away sensor."""
+
+        return self._away
 
     def _room_commands_enabled(self, config: RoomLightingConfig) -> bool:
         """Physical commands are a per-room, persisted opt-in (default shadow)."""
@@ -314,6 +331,8 @@ class RoomLightingRuntime:
             raise RuntimeError("room lighting runtime is already active")
         self._hass = hass
         self._load_trackers()
+        self._away_generation += 1
+        self._away = self._current_away_state(hass)
         # The gap starts at start: an unobserved interval is never counted as
         # absence and cannot restore pre-restart automatic ownership.
         self._unobserved_since = self._now_ms()
@@ -334,6 +353,12 @@ class RoomLightingRuntime:
             if entities and self._track_state_changes is not None:
                 self._unsubscribers.append(
                     self._track_state_changes(hass, entities, self._state_event)
+                )
+            if self._track_state_changes is not None:
+                self._unsubscribers.append(
+                    self._track_state_changes(
+                        hass, (AWAY_ENTITY_ID,), self._away_event
+                    )
                 )
             if self._track_interval is not None:
                 self._unsubscribers.append(
@@ -367,6 +392,8 @@ class RoomLightingRuntime:
     def cancel(self) -> None:
         if not self._running and not self._unsubscribers:
             return
+        # Invalidate any pending away-on debounce so it cannot fire after stop.
+        self._away_generation += 1
         if (
             self._ownership_store is not None
             and self._ownership.dirty
@@ -402,16 +429,24 @@ class RoomLightingRuntime:
 
     # -- public read model -------------------------------------------------
 
+    async def _build_context(
+        self, config: RoomLightingConfig, now: int | None = None
+    ) -> RoomLightingContext:
+        """Build the real context and stamp the runtime-wide away flag on it."""
+
+        if self._hass is None:
+            raise RuntimeError("room lighting runtime has no Home Assistant")
+        context = await self._state_provider.build_context(
+            self._hass, config, self._now_ms() if now is None else now
+        )
+        return replace(context, away=self._away)
+
     async def async_context_for(
         self, config: RoomLightingConfig
     ) -> RoomLightingContext:
         """Build the real context for the status endpoint and the engine."""
 
-        if self._hass is None:
-            raise RuntimeError("room lighting runtime has no Home Assistant")
-        return await self._state_provider.build_context(
-            self._hass, config, self._now_ms()
-        )
+        return await self._build_context(config)
 
     def configs(self) -> tuple[RoomLightingConfig, ...]:
         return tuple(self._configs.values())
@@ -432,6 +467,50 @@ class RoomLightingRuntime:
         if not rooms:
             return
         self._create_task(self.async_process(sorted(rooms)))
+
+    @staticmethod
+    def _current_away_state(hass: HomeAssistant) -> bool:
+        state = hass.states.get(AWAY_ENTITY_ID)
+        return str(getattr(state, "state", "")).lower() == "on"
+
+    @_ha_callback
+    def _away_event(self, event: object) -> None:
+        """Track the A100 Away source with a debounce on the on-edge."""
+
+        del event
+        if not self._running or self._hass is None:
+            return
+        if self._current_away_state(self._hass):
+            self._arm_away()
+        else:
+            self._release_away()
+
+    def _arm_away(self) -> None:
+        if self._away:
+            return
+        self._away_generation += 1
+        generation = self._away_generation
+        self._create_task(self._async_away_after_debounce(generation))
+
+    def _release_away(self) -> None:
+        # A pending on-edge debounce must not fire after the source cleared.
+        self._away_generation += 1
+        if not self._away:
+            return
+        self._away = False
+        self._create_task(self.async_process())
+
+    async def _async_away_after_debounce(self, generation: int) -> None:
+        if self._away_debounce_seconds > 0:
+            await asyncio.sleep(self._away_debounce_seconds)
+        if not self._running or generation != self._away_generation:
+            return
+        if self._hass is None or not self._current_away_state(self._hass):
+            return
+        if self._away:
+            return
+        self._away = True
+        await self.async_process()
 
     @_ha_callback
     def _clock_event(self, _now: object) -> None:
@@ -717,9 +796,7 @@ class RoomLightingRuntime:
         moment = self._now_ms()
         # A single broken room must never crash setup or stop the other rooms.
         try:
-            context = await self._state_provider.build_context(
-                self._hass, config, moment
-            )
+            context = await self._build_context(config, moment)
             self._observe_absence(config, context)
             decision = evaluate_room_lighting(config, context)
         except Exception:  # noqa: BLE001 - isolation per room is deliberate
@@ -1037,6 +1114,8 @@ __all__ = [
     "HomeAssistantRoomLightingOwnershipStore",
     "RoomLightingOwnershipJournal",
     "RoomLightingRuntime",
+    "AWAY_ENTITY_ID",
+    "AWAY_ON_DEBOUNCE_SECONDS",
     "DEFAULT_INTERVAL_SECONDS",
     "OWNERSHIP_STORAGE_VERSION",
 ]

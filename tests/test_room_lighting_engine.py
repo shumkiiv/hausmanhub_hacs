@@ -95,6 +95,8 @@ def _config(
     schedule: list[dict[str, object]] | None = None,
     illumination: dict[str, object] | None = None,
     timers: dict[str, object] | None = None,
+    away_mode: str = "none",
+    auto_control: dict[str, bool] | None = None,
 ):
     payload: dict[str, object] = {
         "contract": {"name": "hausman-hub-room-lighting-config", "version": 1},
@@ -167,6 +169,15 @@ def _config(
         "updatedAt": 1,
         "overrides": {},
         "timers": timers,
+    }
+    if auto_control:
+        targets = payload["devices"]["light_targets"]  # type: ignore[index]
+        for target in targets:
+            if target["id"] in auto_control:
+                target["autoControl"] = auto_control[target["id"]]
+    payload["awayBehavior"] = {
+        "mode": away_mode,
+        "return": {"restore": "by_current_conditions"},
     }
     return config_from_payload(payload)
 
@@ -249,6 +260,7 @@ def _ctx(
     protection: ProtectionSnapshot | None = None,
     sensors: tuple[SensorSnapshot, ...] = (),
     unobserved_since: int | None = None,
+    away: bool = False,
 ) -> RoomLightingContext:
     return RoomLightingContext(
         now=now,
@@ -260,6 +272,7 @@ def _ctx(
         ownership=ownership,
         protection=protection or ProtectionSnapshot(),
         unobserved_since=unobserved_since,
+        away=away,
     )
 
 
@@ -704,6 +717,111 @@ def test_legacy_timer_default_keeps_day_and_night_thresholds() -> None:
     assert night_main is not None
     assert night_main.commands
     assert night_main.commands[0].reason is DecisionReason.DIMMING
+
+
+def test_manual_only_target_is_never_touched() -> None:
+    now = _at(10, 0)
+    config = _config(auto_control={"light_main": False})
+
+    # Presence on and the light off: ordinary automation would turn it on, but
+    # a manual-only target must stay untouched and only be journaled.
+    off = evaluate_room_lighting(
+        config,
+        _ctx(
+            now,
+            presence=SensorState.ON,
+            lights=(_light("light_main", SensorState.OFF, now - 1000),),
+        ),
+    )
+    main_off = decision_target(off, "light_main")
+    assert main_off is not None
+    assert main_off.commands == ()
+    assert main_off.desired_state == "unchanged"
+    assert any(skip.reason is SkipReason.MANUAL_MODE for skip in main_off.skips)
+
+    # An on manual-only target is never switched off by absence either.
+    on = evaluate_room_lighting(
+        config,
+        _ctx(
+            now,
+            presence=SensorState.OFF,
+            presence_at=now - 3_600_000,
+            lights=(_light("light_main", SensorState.ON, now - 1000),),
+            ownership=(_auto("light_main", now - 1000),),
+        ),
+    )
+    main_on = decision_target(on, "light_main")
+    assert main_on is not None
+    assert main_on.commands == ()
+    assert any(skip.reason is SkipReason.MANUAL_MODE for skip in main_on.skips)
+
+
+def test_away_room_off_turns_off_only_automatic_targets() -> None:
+    now = _at(10, 0)
+    config = _config(away_mode="room_off", auto_control={"light_mirror": False})
+    decision = evaluate_room_lighting(
+        config,
+        _ctx(
+            now,
+            away=True,
+            presence=SensorState.OFF,
+            presence_at=now - 3_600_000,
+            lights=(
+                _light("light_main", SensorState.ON, now - 1000, brightness=40),
+                _light("light_mirror", SensorState.ON, now - 1000, brightness=40),
+            ),
+        ),
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.desired_state == "off"
+    assert [command.action for command in main.commands] == [LightAction.TURN_OFF]
+    assert main.commands[0].reason is DecisionReason.AWAY
+
+    # The manual-only mirror is not touched even during away.
+    mirror = decision_target(decision, "light_mirror")
+    assert mirror is not None
+    assert mirror.commands == ()
+    assert any(skip.reason is SkipReason.MANUAL_MODE for skip in mirror.skips)
+
+
+def test_away_off_is_idempotent_when_automatic_target_already_off() -> None:
+    now = _at(10, 0)
+    config = _config(away_mode="room_off")
+    decision = evaluate_room_lighting(
+        config,
+        _ctx(
+            now,
+            away=True,
+            lights=(_light("light_main", SensorState.OFF, now - 1000),),
+        ),
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.commands == ()
+    assert any(skip.reason is SkipReason.IDEMPOTENT for skip in main.skips)
+
+
+def test_away_return_resumes_normal_evaluation() -> None:
+    now = _at(10, 0)
+    config = _config(away_mode="room_off")
+    decision = evaluate_room_lighting(
+        config,
+        _ctx(
+            now,
+            away=False,
+            presence=SensorState.ON,
+            lights=(_light("light_main", SensorState.OFF, now - 1000),),
+        ),
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert [command.action for command in main.commands] == [
+        LightAction.TURN_ON,
+        LightAction.SET_BRIGHTNESS,
+        LightAction.SET_COLOR_TEMPERATURE,
+    ]
+    assert main.desired_state == "on"
 
 
 def test_schedule_entry_does_not_affect_other_targets() -> None:

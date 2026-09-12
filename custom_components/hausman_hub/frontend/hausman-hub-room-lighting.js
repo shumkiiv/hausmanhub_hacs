@@ -299,6 +299,19 @@ function checkInput(deps, label, checked, onCommit) {
   return wrap;
 }
 
+function autoControlField(deps, target, store, panel) {
+  const wrap = deps.el("div", "rle-field");
+  wrap.appendChild(checkInput(deps, "Авто", target.autoControl !== false, (checked) => {
+    target.autoControl = checked;
+    markDirty(store);
+    panel._render();
+  }));
+  if (target.autoControl === false) {
+    wrap.appendChild(deps.el("p", "rle-hint", "Система не трогает эту цель, только вручную."));
+  }
+  return wrap;
+}
+
 function listInput(deps, label, values, onCommit) {
   return field(deps, label, textInput(
     deps,
@@ -366,7 +379,15 @@ function diffTopLevel(baseline, draft) {
 function renderDevices(panel, roomId, store, deps) {
   const draft = store.draft;
   const block = deps.el("section", "rle-block");
-  block.appendChild(deps.el("h4", null, "Устройства"));
+  const header = deps.el("div", "rle-item-head");
+  header.appendChild(deps.el("h4", null, "Устройства"));
+  header.appendChild(button(deps, "Вернуть всё в авто", () => {
+    const current = draft.devices || (draft.devices = { sensors: [], light_targets: [], power_switch: null, wireless_switches: [], selectAll: false });
+    (current.light_targets || []).forEach((target) => { target.autoControl = true; });
+    markDirty(store);
+    saveRoomLighting(panel, roomId);
+  }));
+  block.appendChild(header);
   const devices = draft.devices || (draft.devices = { sensors: [], light_targets: [], power_switch: null, wireless_switches: [], selectAll: false });
   devices.sensors = devices.sensors || [];
   devices.light_targets = devices.light_targets || [];
@@ -422,6 +443,7 @@ function renderDevices(panel, roomId, store, deps) {
       field(deps, "Группа", textInput(deps, target.groupId, (value) => { target.groupId = value || null; markDirty(store); })),
       checkInput(deps, "Поддерживает яркость", target.brightness, (checked) => { target.brightness = checked; markDirty(store); panel._render(); }),
       checkInput(deps, "Поддерживает оттенок", target.color_temperature, (checked) => { target.color_temperature = checked; markDirty(store); panel._render(); }),
+      autoControlField(deps, target, store, panel),
       selectInput(deps, "Авто-подхват", target.autoAdoptOverride === null || target.autoAdoptOverride === undefined ? "inherit" : String(target.autoAdoptOverride), [
         ["inherit", "Как у комнаты"], ["true", "Да"], ["false", "Нет"],
       ], (value) => { target.autoAdoptOverride = value === "inherit" ? null : value === "true"; markDirty(store); }),
@@ -431,7 +453,7 @@ function renderDevices(panel, roomId, store, deps) {
     devices.light_targets.push({
       id: nextFreeId(devices.light_targets, "light"), name: "Свет", kind: "light",
       role: "other", groupId: null, brightness: true, color_temperature: false,
-      autoAdoptOverride: null,
+      autoAdoptOverride: null, autoControl: true,
     });
     markDirty(store);
     panel._render();

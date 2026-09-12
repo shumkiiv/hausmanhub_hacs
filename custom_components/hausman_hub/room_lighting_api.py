@@ -267,12 +267,18 @@ class RoomLightingStatusView(_RoomLightingView):
         context = await _status_context(data, config)
         runtime = data.get(DATA_ROOM_LIGHTING_RUNTIME)
         fresh = runtime is not None and bool(getattr(runtime, "running", False))
+        away = (
+            bool(getattr(runtime, "away", False))
+            if fresh
+            else config.away_behavior.mode.value != "none"
+        )
         return self.json(
             _status_payload(
                 config,
                 context,
                 fresh=fresh,
                 phase=_status_phase(config, context) if fresh else "unknown",
+                away=away,
             ),
             headers=NO_STORE_HEADERS,
         )
@@ -600,6 +606,7 @@ def _status_payload(
     *,
     fresh: bool = False,
     phase: str = "unknown",
+    away: bool | None = None,
 ) -> dict[str, object]:
     evaluate_room_lighting(config, context)
     target = config.devices.light_targets[0] if config.devices.light_targets else None
@@ -708,7 +715,11 @@ def _status_payload(
         "last_action": None,
         "manual_protection": manual_protection,
         "illumination": illumination,
-        "away": config.away_behavior.mode.value != "none",
+        "away": (
+            bool(away)
+            if away is not None
+            else config.away_behavior.mode.value != "none"
+        ),
     }
 
 
