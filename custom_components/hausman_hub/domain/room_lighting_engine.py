@@ -35,6 +35,11 @@ _DAY_CODES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 # Remaining hardcoded boundary: before 23:00 the absence threshold is the
 # longer one. Moving it into the schedule is a later step.
 _EVENING_ABSENCE_BOUNDARY = dt_time(23, 0)
+# The room lighting contract keeps ``timers.absence_seconds`` for
+# compatibility with the initial draft; its default value is 30. A room that
+# leaves it at that legacy default keeps the built-in 600/180 s thresholds,
+# while any other value is an explicit uniform absence threshold for the room.
+_LEGACY_TIMER_ABSENCE_SECONDS = 30
 
 
 class LightAction(StrEnum):
@@ -183,6 +188,7 @@ class RoomLightingContext:
 class EnginePolicy:
     absence_seconds_before_night: int = 600
     absence_seconds_after_night: int = 180
+    absence_seconds_uniform: int | None = None
     fade_seconds: int = 20
     sensor_freshness_seconds: int = 300
     staleness_seconds: int = 86400
@@ -192,6 +198,15 @@ class EnginePolicy:
         policy = cls()
         if config.dimming.enabled and config.dimming.fade_seconds > 0:
             policy = replace(policy, fade_seconds=config.dimming.fade_seconds)
+        timers = config.timers
+        if (
+            timers is not None
+            and timers.absence_seconds != _LEGACY_TIMER_ABSENCE_SECONDS
+        ):
+            # An explicit room value overrides both day and night thresholds.
+            policy = replace(
+                policy, absence_seconds_uniform=timers.absence_seconds
+            )
         if config.manual_off_protection.enabled:
             minimum = config.manual_off_protection.minimum_interval_seconds
             policy = replace(
@@ -201,6 +216,16 @@ class EnginePolicy:
                 ),
             )
         return policy
+
+
+def _absence_threshold(policy: EnginePolicy, now_time: dt_time) -> int:
+    """Return the proven-absence window before the automatic switch-off."""
+
+    if policy.absence_seconds_uniform is not None:
+        return policy.absence_seconds_uniform
+    if now_time >= _EVENING_ABSENCE_BOUNDARY:
+        return policy.absence_seconds_after_night
+    return policy.absence_seconds_before_night
 
 
 @dataclass(frozen=True, slots=True)
@@ -607,11 +632,7 @@ def _evaluate_target(
             extra_skips=skips,
         )
 
-    threshold = (
-        policy.absence_seconds_after_night
-        if now_time >= _EVENING_ABSENCE_BOUNDARY
-        else policy.absence_seconds_before_night
-    )
+    threshold = _absence_threshold(policy, now_time)
     absence_due = (
         absence_proven
         and absence_since is not None

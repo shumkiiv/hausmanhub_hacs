@@ -486,3 +486,16 @@ def test_color_temp_inverted_must_be_boolean() -> None:
     payload["devices"]["light_targets"][0]["colorTempInverted"] = "yes"  # type: ignore[index]
     with pytest.raises(RoomLightingViolation):
         config_from_payload(payload)
+
+
+def test_timers_absence_seconds_round_trips() -> None:
+    assert config_from_payload(_payload()).timers is None
+
+    payload = _payload()
+    payload["timers"] = {"absence_seconds": 300, "turn_off_seconds": 300}  # type: ignore[index]
+    config = config_from_payload(payload)
+    assert config.timers is not None
+    assert config.timers.absence_seconds == 300
+    encoded = config.to_dict()
+    assert encoded["timers"] == {"absence_seconds": 300, "turn_off_seconds": 300}  # type: ignore[index]
+    assert config_from_payload(encoded).to_dict() == encoded

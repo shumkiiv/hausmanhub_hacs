@@ -91,7 +91,11 @@ def _schedule_night() -> dict[str, object]:
     }
 
 
-def _config(schedule: list[dict[str, object]] | None = None, illumination: dict[str, object] | None = None):
+def _config(
+    schedule: list[dict[str, object]] | None = None,
+    illumination: dict[str, object] | None = None,
+    timers: dict[str, object] | None = None,
+):
     payload: dict[str, object] = {
         "contract": {"name": "hausman-hub-room-lighting-config", "version": 1},
         "roomId": "room_demo_entry",
@@ -162,6 +166,7 @@ def _config(schedule: list[dict[str, object]] | None = None, illumination: dict[
         "autoAdopt": True,
         "updatedAt": 1,
         "overrides": {},
+        "timers": timers,
     }
     return config_from_payload(payload)
 
@@ -620,6 +625,85 @@ def test_policy_from_config_uses_dimming_and_protection() -> None:
     policy = EnginePolicy.from_config(config)
     assert policy.fade_seconds == 20
     assert policy.absence_seconds_before_night == 600
+
+
+def test_policy_from_config_uses_room_absence_seconds() -> None:
+    policy = EnginePolicy.from_config(
+        _config(timers={"absence_seconds": 300, "turn_off_seconds": 300})
+    )
+    assert policy.absence_seconds_uniform == 300
+
+    fallback = EnginePolicy.from_config(_config())
+    assert fallback.absence_seconds_uniform is None
+    assert fallback.absence_seconds_before_night == 600
+    assert fallback.absence_seconds_after_night == 180
+
+
+def test_room_absence_seconds_turns_off_after_300_seconds() -> None:
+    config = _config(timers={"absence_seconds": 300, "turn_off_seconds": 300})
+    for elapsed_ms, due in ((299_000, False), (301_000, True)):
+        now = _at(12, 0)
+        decision = evaluate_room_lighting(
+            config,
+            _ctx(
+                now,
+                presence=SensorState.OFF,
+                presence_at=now - elapsed_ms,
+                lights=(
+                    _light("light_main", SensorState.ON, now - 1000, brightness=40),
+                ),
+                ownership=(_auto("light_main", now - 1000),),
+            ),
+        )
+        main = decision_target(decision, "light_main")
+        assert main is not None
+        if due:
+            assert main.commands, f"absence {elapsed_ms} must turn the light off"
+            assert main.commands[0].reason is DecisionReason.DIMMING
+        else:
+            assert main.commands == (), f"absence {elapsed_ms} must stay untouched"
+
+
+def test_legacy_timer_default_keeps_day_and_night_thresholds() -> None:
+    # The compatibility default 30 must not become the room threshold: tambur
+    # stores it and must keep the built-in 600/180 behaviour.
+    legacy = _config(timers={"absence_seconds": 30, "turn_off_seconds": 300})
+    assert EnginePolicy.from_config(legacy).absence_seconds_uniform is None
+
+    day_now = _at(12, 0)
+    day = evaluate_room_lighting(
+        legacy,
+        _ctx(
+            day_now,
+            presence=SensorState.OFF,
+            presence_at=day_now - 301_000,
+            lights=(
+                _light("light_main", SensorState.ON, day_now - 1000, brightness=40),
+            ),
+            ownership=(_auto("light_main", day_now - 1000),),
+        ),
+    )
+    day_main = decision_target(day, "light_main")
+    assert day_main is not None
+    assert day_main.commands == ()
+
+    night_now = _at(23, 30)
+    night = evaluate_room_lighting(
+        legacy,
+        _ctx(
+            night_now,
+            presence=SensorState.OFF,
+            presence_at=night_now - 181_000,
+            lights=(
+                _light("light_main", SensorState.ON, night_now - 1000, brightness=40),
+            ),
+            ownership=(_auto("light_main", night_now - 1000),),
+        ),
+    )
+    night_main = decision_target(night, "light_main")
+    assert night_main is not None
+    assert night_main.commands
+    assert night_main.commands[0].reason is DecisionReason.DIMMING
 
 
 def test_schedule_entry_does_not_affect_other_targets() -> None:
