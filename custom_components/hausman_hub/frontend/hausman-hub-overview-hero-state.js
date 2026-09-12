@@ -1,4 +1,4 @@
-import { roomHeroImage } from "./hausman-hub-room-icons.js?v=1.52.265";
+import { roomHeroImage } from "./hausman-hub-room-icons.js?v=1.52.266";
 
 function heroSummary(dashboard) {
   const summary = dashboard?.summary && typeof dashboard.summary === "object"
