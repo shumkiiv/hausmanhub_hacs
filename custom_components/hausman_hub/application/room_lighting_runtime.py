@@ -25,6 +25,7 @@ from ..domain.room_lighting import (
     SensorKind,
     SwitchAction,
     SwitchBinding,
+    room_lighting_entity_collisions,
 )
 from ..domain.room_lighting_engine import (
     DecisionReason,
@@ -597,6 +598,22 @@ class RoomLightingRuntime:
 
         return await self._build_context(config)
 
+    async def async_execute_command(
+        self, config: RoomLightingConfig, command: PlannedCommand
+    ) -> dict[str, object]:
+        """Execute one planned command through the shared HA executor."""
+
+        del config
+        if self._hass is None:
+            return {"confirmed": False}
+        receipt = await self._executor.execute(  # type: ignore[attr-defined]
+            self._hass, command
+        )
+        to_payload = getattr(receipt, "to_payload", None)
+        if callable(to_payload):
+            return dict(to_payload())
+        return {"confirmed": bool(getattr(receipt, "confirmed", False))}
+
     def configs(self) -> tuple[RoomLightingConfig, ...]:
         return tuple(self._configs.values())
 
@@ -687,29 +704,26 @@ class RoomLightingRuntime:
             moment = self._now_ms()
             expected = self._executing_actions.get(entity_id)
             if expected is not None and expected == service:
-                # Only a command this runtime is actively issuing counts as
-                # automatic. A foreign call that races the same entity (for
-                # example a switch.turn_off while our turn_on is in flight) is
-                # never promoted to automatic ownership.
-                self._ownership.record_auto(
-                    room_id, target_id, moment, confirmed=True
-                )
-            else:
-                # Conservative and intentional: any other light/switch call is
-                # attributed to a person even when the caller is another
-                # automation (Node-RED, a scene or a script). Manual intent must
-                # win over the automatic branch until the protection releases.
-                self._ownership.record_manual(
-                    room_id,
-                    target_id,
-                    moment,
-                    confirmed=True,
-                    turned_off=(
-                        service == "turn_off"
-                        or (service == "toggle" and self._entity_is_on(entity_id))
-                    ),
-                )
-                self._absence.pop(room_id, None)
+                # A command this runtime is actively issuing never grants
+                # automatic ownership here. Only a confirmed read-back receipt
+                # in ``_dispatch`` may record AUTO; until then automation has
+                # no right to the target.
+                continue
+            # Conservative and intentional: any other light/switch call is
+            # attributed to a person even when the caller is another
+            # automation (Node-RED, a scene or a script). Manual intent must
+            # win over the automatic branch until the protection releases.
+            self._ownership.record_manual(
+                room_id,
+                target_id,
+                moment,
+                confirmed=True,
+                turned_off=(
+                    service == "turn_off"
+                    or (service == "toggle" and self._entity_is_on(entity_id))
+                ),
+            )
+            self._absence.pop(room_id, None)
             self._schedule_ownership_save()
 
     # -- device triggers ---------------------------------------------------
@@ -989,9 +1003,31 @@ class RoomLightingRuntime:
     ) -> None:
         if self._hass is None:
             return
+        power = config.devices.power_switch
+        power_entity = power.entity_id if power is not None else None
         for command in decision.commands:
             if not self._running:
                 return
+            if (
+                power_entity is not None
+                and command.action is not LightAction.TURN_OFF
+                and not self._entity_is_on(power_entity)
+            ):
+                # A target that is switched on through its room power switch
+                # must get power first; a confirmed power-on is required.
+                ensure_power = getattr(self._executor, "async_power_on", None)
+                powered = False
+                if callable(ensure_power):
+                    try:
+                        powered = bool(await ensure_power(self._hass, power_entity))
+                    except Exception:  # noqa: BLE001 - keep the room isolated
+                        powered = False
+                if not powered:
+                    _LOGGER.warning(
+                        "room lighting power switch is still off; "
+                        "skipping the target command"
+                    )
+                    continue
             target = config.devices.target(command.target_id)
             entity_id = target.entity_id if target is not None else None
             if entity_id is not None:
@@ -1026,12 +1062,23 @@ class RoomLightingRuntime:
 
         result: dict[tuple[str, str], bool] = {}
         for room_id, config in self._configs.items():
+            powered = self._room_power_on(config)
             for target in config.devices.light_targets:
                 entity_id = target.entity_id
-                result[(room_id, target.id)] = (
-                    self._entity_is_on(entity_id) if entity_id else False
+                result[(room_id, target.id)] = bool(
+                    powered
+                    and entity_id
+                    and self._entity_is_on(entity_id)
                 )
         return result
+
+    def _room_power_on(self, config: RoomLightingConfig) -> bool:
+        """Whether the room's configured power switch is provably on."""
+
+        power = config.devices.power_switch
+        if power is None or power.entity_id is None:
+            return True
+        return self._entity_is_on(power.entity_id)
 
     def _presence_active_by_room(self) -> dict[str, bool]:
         """Whether a room's own presence or motion sensor currently reads on.
@@ -1055,21 +1102,32 @@ class RoomLightingRuntime:
         rooms_by_entity: EntityRooms = {}
         targets_by_entity: dict[str, tuple[str, str]] = {}
         targets: dict[str, object] = {}
+        # One physical entity must belong to one room. A collision is reported
+        # explicitly instead of silently overwriting the first room's owner.
+        for collision in room_lighting_entity_collisions(self._configs.values()):
+            _LOGGER.warning("room lighting entity collision: %s", collision)
         for config in self._configs.values():
             for sensor in config.devices.sensors:
                 if sensor.entity_id:
                     rooms_by_entity.setdefault(sensor.entity_id, set()).add(
                         config.room_id
                     )
+            power = config.devices.power_switch
+            if power is not None and power.entity_id:
+                # A power switch changes the effective state of every target in
+                # the room, so its state changes must trigger a recompute.
+                rooms_by_entity.setdefault(power.entity_id, set()).add(
+                    config.room_id
+                )
             for target in config.devices.light_targets:
                 targets[target.id] = target
                 if target.entity_id:
                     rooms_by_entity.setdefault(target.entity_id, set()).add(
                         config.room_id
                     )
-                    targets_by_entity[target.entity_id] = (
-                        config.room_id,
-                        target.id,
+                    targets_by_entity.setdefault(
+                        target.entity_id,
+                        (config.room_id, target.id),
                     )
         self._rooms_by_entity = rooms_by_entity
         self._targets_by_entity = targets_by_entity

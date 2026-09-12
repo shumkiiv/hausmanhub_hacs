@@ -200,6 +200,7 @@ class RoomLightingApiTest(unittest.TestCase):
             self.api.DATA_ROOM_LIGHTING_LIVE_TESTS: {},
             self.api.DATA_ROOM_LIGHTING_CONTEXT: context_factory,
             self.api.DATA_ROOM_LIGHTING_LIVE_CONTEXT: live_context_factory,
+            self.api.DATA_ROOM_LIGHTING_LIVE_TEST_SLEEP: lambda _seconds: asyncio.sleep(0),
         }
         self.config_view = self.api.RoomLightingConfigView(self.hass)
         self.status_view = self.api.RoomLightingStatusView(self.hass)
@@ -688,6 +689,83 @@ class RoomLightingApiTest(unittest.TestCase):
 
         asyncio.run(flow())
 
+    def test_config_rejects_entity_shared_with_another_room(self) -> None:
+        async def flow() -> None:
+            first = await self.config_view.put(
+                _json_request(
+                    self._config_path("room_a"),
+                    _config_payload("room_a"),
+                    room_id="room_a",
+                )
+            )
+            self.assertEqual(200, first.status)
+            second = await self.config_view.put(
+                _json_request(
+                    self._config_path("room_b"),
+                    _config_payload("room_b"),
+                    room_id="room_b",
+                )
+            )
+            self.assertEqual(400, second.status)
+            self.assertEqual("invalid_request", second.payload["code"])
+
+        asyncio.run(flow())
+
+    def test_status_remaining_seconds_is_the_actual_remainder(self) -> None:
+        from datetime import datetime, time as dt_time, timezone
+
+        from custom_components.hausman_hub.domain.room_lighting_engine import (
+            LightSnapshot,
+            ProtectionSnapshot,
+            RoomLightingContext,
+        )
+        from custom_components.hausman_hub.domain.room_lighting_ownership import (
+            SensorState,
+        )
+
+        async def flow() -> None:
+            room_id = "room_demo_entry"
+            now_ms = int(
+                datetime(2026, 9, 11, 10, 0, tzinfo=timezone.utc).timestamp() * 1000
+            )
+            await self.config_view.put(
+                _json_request(
+                    self._config_path(room_id),
+                    _config_payload(room_id),
+                    room_id=room_id,
+                )
+            )
+
+            def provider(_config):
+                return RoomLightingContext(
+                    now=now_ms,
+                    timezone=timezone.utc,
+                    sunrise=dt_time(7, 0),
+                    sunset=dt_time(19, 0),
+                    lights=(LightSnapshot("light_main", SensorState.OFF, now_ms),),
+                    protection=ProtectionSnapshot(
+                        active=True,
+                        started_at=now_ms - 100_000,
+                        minimum_interval_seconds=600,
+                    ),
+                )
+
+            self.hass.data["hausman_hub"][
+                self.api.DATA_ROOM_LIGHTING_CONTEXT
+            ] = provider
+            response = await self.status_view.get(
+                _request(
+                    self.api.ROOM_LIGHTING_STATUS_PATH.format(room_id=room_id),
+                    room_id=room_id,
+                )
+            )
+            self.assertEqual(200, response.status)
+            _validate("room-lighting-status.schema.json", response.payload)
+            self.assertEqual(
+                500, response.payload["manual_protection"]["remaining_seconds"]
+            )
+
+        asyncio.run(flow())
 
 if __name__ == "__main__":
     unittest.main()

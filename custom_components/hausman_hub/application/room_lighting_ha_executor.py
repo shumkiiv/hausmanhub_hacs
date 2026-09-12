@@ -12,7 +12,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Mapping
 
 from ..domain.room_lighting import LightKind, LightTarget
-from ..domain.room_lighting_engine import LightAction, PlannedCommand
+from ..domain.room_lighting_engine import (
+    COLOR_TEMPERATURE_TOLERANCE_KELVIN,
+    LightAction,
+    PlannedCommand,
+)
 from .room_lighting_color import (
     FALLBACK_MAX_KELVIN,
     FALLBACK_MIN_KELVIN,
@@ -94,6 +98,23 @@ class RoomLightingHaExecutor:
             service_data=data,
         )
 
+    async def async_power_on(self, hass: HomeAssistant, entity_id: str) -> bool:
+        """Turn on a room power switch and confirm it through the read-back."""
+
+        if not isinstance(entity_id, str) or not entity_id:
+            return False
+        try:
+            await hass.services.async_call(
+                _SWITCH_DOMAIN,
+                "turn_on",
+                {"entity_id": entity_id},
+                blocking=True,
+            )
+        except Exception:  # noqa: BLE001 - a failed power call must not crash
+            return False
+        state = hass.states.get(entity_id)
+        return state is not None and str(getattr(state, "state", "")).lower() == "on"
+
 
 def _service_call(
     command: PlannedCommand,
@@ -117,7 +138,9 @@ def _service_call(
             kelvin = int(command.color_temperature)
             if target.color_temp_inverted:
                 kelvin = reflect_inverted_kelvin(kelvin, min_kelvin, max_kelvin)
-            data["kelvin"] = kelvin
+            # Home Assistant's light service accepts ``color_temp_kelvin``;
+            # the legacy ``kelvin`` key is ignored by the entity.
+            data["color_temp_kelvin"] = kelvin
         if command.fade_seconds:
             data["transition"] = command.fade_seconds
     return domain, "turn_on", data
@@ -150,6 +173,12 @@ def _read_back(
             if brightness is not None:
                 observed["brightness"] = brightness
             if kelvin is not None:
+                if target.color_temp_inverted:
+                    # Report the logical colour so the read-back is comparable
+                    # with the logical command the engine planned.
+                    kelvin = reflect_inverted_kelvin(
+                        kelvin, *_device_kelvin_bounds(hass, target)
+                    )
                 observed["color_temperature"] = kelvin
     return observed
 
@@ -162,7 +191,23 @@ def _confirmed(
     raw = str(state_after.get("state", "unknown")).lower()
     if command.action is LightAction.TURN_OFF:
         return raw != "on"
-    return raw == "on"
+    if raw != "on":
+        return False
+    # A colour-temperature command is only confirmed when the read-back
+    # matches the requested logical colour; a 2xx call is not enough.
+    if (
+        command.action is LightAction.SET_COLOR_TEMPERATURE
+        and command.color_temperature is not None
+    ):
+        observed = state_after.get("color_temperature")
+        if not isinstance(observed, (int, float)) or isinstance(observed, bool):
+            return False
+        if (
+            abs(int(observed) - int(command.color_temperature))
+            > COLOR_TEMPERATURE_TOLERANCE_KELVIN
+        ):
+            return False
+    return True
 
 
 __all__ = ["RoomLightingHaExecutor", "RoomLightingReceipt"]

@@ -81,6 +81,7 @@ DATA_ROOM_LIGHTING_LIVE_TESTS = "room_lighting_live_tests"
 DATA_ROOM_LIGHTING_EXECUTOR = "room_lighting_live_test_executor"
 DATA_ROOM_LIGHTING_CONTEXT = "room_lighting_status_context_provider"
 DATA_ROOM_LIGHTING_LIVE_CONTEXT = "room_lighting_live_test_context_provider"
+DATA_ROOM_LIGHTING_LIVE_TEST_SLEEP = "room_lighting_live_test_sleep"
 DATA_ROOM_LIGHTING_RUNTIME = "room_lighting_runtime"
 
 _ROOM_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
@@ -240,7 +241,10 @@ class RoomLightingConfigView(_RoomLightingView):
                         "actualRevision": stored.version,
                     },
                 )
-            saved = await service.async_put_config(config)
+            try:
+                saved = await service.async_put_config(config)
+            except RoomLightingViolation as error:
+                return self._invalid(error)
         return self.json(saved.to_dict(), headers=NO_STORE_HEADERS)
 
 
@@ -391,10 +395,29 @@ class RoomLightingLiveTestsView(_RoomLightingView):
         if config is None:
             return self._error("not_found")
         data = self._data()
+        runtime = data.get(DATA_ROOM_LIGHTING_RUNTIME)
         executor = data.get(DATA_ROOM_LIGHTING_EXECUTOR)
+        if (
+            mode == "real"
+            and executor is None
+            and callable(getattr(runtime, "async_execute_command", None))
+        ):
+            async def _runtime_executor(command: object) -> object:
+                return await runtime.async_execute_command(config, command)  # type: ignore[attr-defined]
+
+            executor = _runtime_executor
         if mode == "real" and executor is None:
             return self._error("capability_unavailable")
         context_factory = data.get(DATA_ROOM_LIGHTING_LIVE_CONTEXT)
+        context_provider = None
+        if runtime is not None and callable(
+            getattr(runtime, "async_context_for", None)
+        ):
+            async def _runtime_context() -> object:
+                return await runtime.async_context_for(config)  # type: ignore[attr-defined]
+
+            context_provider = _runtime_context
+        sleeper = data.get(DATA_ROOM_LIGHTING_LIVE_TEST_SLEEP)
         registry = data.setdefault(DATA_ROOM_LIGHTING_LIVE_TESTS, {})
         if not isinstance(registry, dict):
             return self._unavailable()
@@ -412,7 +435,9 @@ class RoomLightingLiveTestsView(_RoomLightingView):
             registry.pop(next(iter(registry)), None)
 
         async def _run() -> None:
-            runner = RoomLightingLiveTestRunner()
+            runner = RoomLightingLiveTestRunner(
+                sleep=sleeper if callable(sleeper) else None
+            )
             try:
                 trace = await runner.run(
                     config,
@@ -423,6 +448,7 @@ class RoomLightingLiveTestsView(_RoomLightingView):
                     context_factory=(
                         context_factory if callable(context_factory) else None
                     ),
+                    context_provider=context_provider,
                 )
             except Exception:  # noqa: BLE001 - background task must not crash the loop
                 return
@@ -672,17 +698,32 @@ def _status_payload(
             "failClosed": not healthy,
         }
     if context.protection.active:
-        manual_protection = {
-            "active": True,
-            "remaining_seconds": max(1, context.protection.minimum_interval_seconds),
-            "reason": "manual_off",
-            "since": (
-                None
-                if context.protection.started_at is None
-                else int(context.protection.started_at) // 1000
-            ),
-            "minimum_interval_seconds": context.protection.minimum_interval_seconds,
-        }
+        started_at = context.protection.started_at
+        minimum = int(context.protection.minimum_interval_seconds)
+        if started_at is None:
+            # Unknown start: report the conservative full interval rather than
+            # a fake zero.
+            remaining_seconds = max(1, minimum)
+        else:
+            remaining_ms = int(started_at) + minimum * 1000 - int(context.now)
+            remaining_seconds = max(0, (remaining_ms + 999) // 1000)
+        if remaining_seconds <= 0:
+            # The minimum interval is over and only the absence hold may
+            # remain, so the minimum timer is honestly reported as finished.
+            manual_protection = {
+                "active": False,
+                "remaining_seconds": 0,
+                "reason": "none",
+                "since": None,
+            }
+        else:
+            manual_protection = {
+                "active": True,
+                "remaining_seconds": remaining_seconds,
+                "reason": "manual_off",
+                "since": None if started_at is None else int(started_at) // 1000,
+                "minimum_interval_seconds": minimum,
+            }
     else:
         manual_protection = {
             "active": False,

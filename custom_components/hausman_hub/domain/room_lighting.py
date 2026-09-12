@@ -7,6 +7,7 @@ Assistant services, entities or any command executor.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime, time as dt_time, timedelta, tzinfo
 from enum import StrEnum
@@ -1410,6 +1411,53 @@ def config_to_payload(config: RoomLightingConfig) -> dict[str, object]:
     if not isinstance(config, RoomLightingConfig):
         raise RoomLightingViolation("room lighting config is required")
     return config.to_dict()
+
+
+def config_entity_ids(config: RoomLightingConfig) -> tuple[str, ...]:
+    """Return every physical entity id referenced by one room configuration."""
+
+    if not isinstance(config, RoomLightingConfig):
+        raise RoomLightingViolation("room lighting config is required")
+    entities: list[str] = []
+    for sensor in config.devices.sensors:
+        if sensor.entity_id is not None:
+            entities.append(sensor.entity_id)
+    for target in config.devices.light_targets:
+        if target.entity_id is not None:
+            entities.append(target.entity_id)
+    power = config.devices.power_switch
+    if power is not None and power.entity_id is not None:
+        entities.append(power.entity_id)
+    for switch in config.devices.wireless_switches:
+        if switch.entity_id is not None:
+            entities.append(switch.entity_id)
+    return tuple(entities)
+
+
+def room_lighting_entity_collisions(
+    configs: Iterable[RoomLightingConfig],
+) -> tuple[str, ...]:
+    """Return readable messages for entity ids shared by different rooms.
+
+    One physical entity must belong to a single room: a shared sensor, light
+    target, power switch or wireless switch would otherwise be silently
+    overwritten by the runtime index.
+    """
+
+    owners: dict[str, str] = {}
+    collisions: list[str] = []
+    for config in configs:
+        if not isinstance(config, RoomLightingConfig):
+            raise RoomLightingViolation("room lighting config is required")
+        for entity_id in config_entity_ids(config):
+            owner = owners.get(entity_id)
+            if owner is not None and owner != config.room_id:
+                collisions.append(
+                    f"entity {entity_id} is used by rooms {owner} and {config.room_id}"
+                )
+            else:
+                owners[entity_id] = config.room_id
+    return tuple(collisions)
 
 
 def config_from_payload(payload: object) -> RoomLightingConfig:

@@ -354,13 +354,24 @@ def cancelled_trace(
 
 
 ContextFactory = Callable[[LiveTestStage], RoomLightingContext]
+ContextProvider = Callable[[], "RoomLightingContext | object"]
 
 
 class RoomLightingLiveTestRunner:
-    """Run the bounded live test without owning any Home Assistant dependency."""
+    """Run the bounded live test over a real wall clock.
 
-    def __init__(self, *, clock: Callable[[], float] = time.time) -> None:
+    ``sleep`` is injectable so tests stay fast; production uses the real
+    ``asyncio.sleep`` and a provider that reads live Home Assistant state.
+    """
+
+    def __init__(
+        self,
+        *,
+        clock: Callable[[], float] = time.time,
+        sleep: Callable[[float], object] | None = None,
+    ) -> None:
         self._clock = clock
+        self._sleep = sleep or asyncio.sleep
 
     async def run(
         self,
@@ -371,6 +382,7 @@ class RoomLightingLiveTestRunner:
         executor: object | None = None,
         cancel_event: asyncio.Event | None = None,
         context_factory: ContextFactory | None = None,
+        context_provider: ContextProvider | None = None,
     ) -> LiveTestTrace:
         if mode not in LIVE_TEST_MODES:
             raise RoomLightingLiveTestViolation(f"unsupported live test mode: {mode}")
@@ -389,14 +401,15 @@ class RoomLightingLiveTestRunner:
         cancelled = False
 
         for stage in build_stages(config):
-            await asyncio.sleep(0)
+            # A real delay drives the advertised ~30 second run.
+            wait = self._sleep(stage.duration_seconds)
+            if inspect.isawaitable(wait):
+                await wait
             if cancel_event is not None and cancel_event.is_set():
                 cancelled = True
                 break
-            context = (
-                context_factory(stage)
-                if context_factory is not None
-                else _default_context(config, started_at_ms)
+            context = await _resolve_context(
+                config, stage, started_at_ms, context_factory, context_provider
             )
             decision = evaluate_room_lighting(config, context)
             if mode == LIVE_TEST_MODE_REAL and executor is not None:
@@ -435,6 +448,30 @@ class RoomLightingLiveTestRunner:
             finished_at=int(self._clock()),
             commands_sent=commands_sent,
         )
+
+
+async def _resolve_context(
+    config: RoomLightingConfig,
+    stage: LiveTestStage,
+    started_at_ms: int,
+    context_factory: ContextFactory | None,
+    context_provider: ContextProvider | None,
+) -> RoomLightingContext:
+    """Prefer the live provider, then a factory, then the synthetic default."""
+
+    if context_provider is not None:
+        value = context_provider()
+        if inspect.isawaitable(value):
+            value = await value
+        if isinstance(value, RoomLightingContext):
+            return value
+    if context_factory is not None:
+        value = context_factory(stage)
+        if inspect.isawaitable(value):
+            value = await value
+        if isinstance(value, RoomLightingContext):
+            return value
+    return _default_context(config, started_at_ms)
 
 
 async def _dispatch(executor: object, command: PlannedCommand) -> dict[str, object]:

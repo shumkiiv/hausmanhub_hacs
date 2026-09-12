@@ -10,8 +10,10 @@ from custom_components.hausman_hub.domain.room_lighting import (
     Anchor,
     AnchorKind,
     RoomLightingViolation,
+    config_entity_ids,
     config_from_payload,
     resolve_anchor_time,
+    room_lighting_entity_collisions,
     room_lighting_violations,
 )
 
@@ -541,3 +543,27 @@ def test_manual_protection_rejects_interval_below_fifteen_seconds() -> None:
     payload["manualOffProtection"]["minimumIntervalSeconds"] = 14  # type: ignore[index]
     with pytest.raises(RoomLightingViolation):
         config_from_payload(payload)
+
+
+def test_config_entity_ids_lists_every_physical_entity() -> None:
+    config = config_from_payload(_payload())
+    entities = config_entity_ids(config)
+    assert "binary_sensor.demo_presence" in entities
+    assert "light.demo_main" in entities
+    assert "switch.demo_spots" in entities
+
+
+def test_entity_shared_by_two_rooms_is_a_collision() -> None:
+    first = config_from_payload(_payload())
+    other = _payload()
+    other["roomId"] = "room_other"
+    other["name"] = "Другая"
+    second = config_from_payload(other)
+
+    collisions = room_lighting_entity_collisions((first, second))
+
+    assert collisions
+    assert "binary_sensor.demo_presence" in collisions[0]
+    assert "room_demo_entry" in collisions[0]
+    assert "room_other" in collisions[0]
+    assert not room_lighting_entity_collisions((first,))

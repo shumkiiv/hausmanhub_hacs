@@ -57,6 +57,7 @@ def _config_payload(
     minimum_interval_seconds: int = 600,
     stable_absence_seconds: int = 30,
     commands_enabled: bool = False,
+    power_switch_entity: str | None = None,
 ) -> dict[str, object]:
     sensors: list[dict[str, object]] = [
         {
@@ -97,7 +98,16 @@ def _config_payload(
                     "autoAdoptOverride": None,
                 }
             ],
-            "power_switch": None,
+            "power_switch": (
+                None
+                if power_switch_entity is None
+                else {
+                    "id": "power",
+                    "name": "Питание",
+                    "entityId": power_switch_entity,
+                    "autoAdoptOverride": None,
+                }
+            ),
             "wireless_switches": [],
             "selectAll": False,
         },
@@ -216,8 +226,8 @@ class _FakeServices:
                 attributes["brightness"] = round(
                     int(data["brightness_pct"]) / 100 * 255
                 )
-            if "kelvin" in data:
-                attributes["color_temp_kelvin"] = int(data["kelvin"])
+            if "color_temp_kelvin" in data:
+                attributes["color_temp_kelvin"] = int(data["color_temp_kelvin"])
         else:
             new_state = getattr(current, "state", "off")
         self._hass.states.set(entity_id, new_state, attributes)
@@ -364,13 +374,18 @@ def _make_runtime(
     ownership_store: object | None = None,
     now_ms: object | None = None,
     payload: dict[str, object] | None = None,
+    payloads: list[dict[str, object]] | None = None,
     device_automation_api: object | None = None,
 ) -> RoomLightingRuntime:
     shadow = RoomLightingShadowService(_MemoryShadowStore())
-    room_payload = payload if payload is not None else _config_payload()
-    if commands_enabled:
-        room_payload = {**room_payload, "commandsEnabled": True}
-    service = _ConfigService(config_from_payload(room_payload))
+    if payloads is not None:
+        configs = [config_from_payload(item) for item in payloads]
+    else:
+        room_payload = payload if payload is not None else _config_payload()
+        if commands_enabled:
+            room_payload = {**room_payload, "commandsEnabled": True}
+        configs = [config_from_payload(room_payload)]
+    service = _ConfigService(*configs)
     return RoomLightingRuntime(
         hass,
         service,
@@ -555,7 +570,7 @@ async def test_per_room_commands_default_stays_shadow() -> None:
         await runtime.stop()
 
 
-async def test_ownership_marks_foreign_manual_and_own_auto() -> None:
+async def test_ownership_marks_foreign_manual_and_own_call_grants_no_auto() -> None:
     hass = _FakeHass()
     _seed_presence_and_light(hass)
     runtime = _make_runtime(hass, commands_enabled=False)
@@ -567,10 +582,27 @@ async def test_ownership_marks_foreign_manual_and_own_auto() -> None:
         assert manual.source is OwnershipSource.MANUAL
         assert manual.confirmed is True
 
+        # Our own call_service event, before any read-back receipt, must not
+        # grant automatic ownership.
         runtime._executing_actions["light.demo_main"] = "turn_on"
         runtime._service_event(_event("light", "turn_on", "light.demo_main"))
-        automatic = runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"})[-1]  # type: ignore[attr-defined]
-        assert automatic.source is OwnershipSource.AUTO
+        records = runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"})  # type: ignore[attr-defined]
+        assert all(record.source is not OwnershipSource.AUTO for record in records)
+    finally:
+        await runtime.stop()
+
+
+async def test_failed_receipt_does_not_grant_auto() -> None:
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    executor = _SpyExecutor(confirmed=False)
+    runtime = _make_runtime(hass, commands_enabled=True, executor=executor)
+
+    await runtime.start(hass, "entry")
+    try:
+        assert executor.calls
+        records = runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"})  # type: ignore[attr-defined]
+        assert all(record.source is not OwnershipSource.AUTO for record in records)
     finally:
         await runtime.stop()
 
@@ -593,11 +625,12 @@ async def test_foreign_off_while_own_command_in_flight_stays_manual() -> None:
             is not None
         )
 
-        # The runtime's own matching service call is automatic again.
+        # The runtime's own matching call_service event grants no AUTO before
+        # the executor confirms it through a read-back receipt.
         runtime._executing_actions["light.demo_main"] = "turn_on"
         runtime._service_event(_event("light", "turn_on", "light.demo_main"))
         latest = runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"})[-1]  # type: ignore[attr-defined]
-        assert latest.source is OwnershipSource.AUTO
+        assert latest.source is OwnershipSource.MANUAL
     finally:
         await runtime.stop()
 
@@ -1224,7 +1257,7 @@ async def test_executor_reflects_inverted_kelvin_around_neutral() -> None:
             color_temperature=2200,
         ),
     )
-    assert hass.services.calls[-1][2]["kelvin"] == 3800
+    assert hass.services.calls[-1][2]["color_temp_kelvin"] == 3800
 
     await executor.execute(
         hass,
@@ -1234,7 +1267,7 @@ async def test_executor_reflects_inverted_kelvin_around_neutral() -> None:
             color_temperature=3000,
         ),
     )
-    assert hass.services.calls[-1][2]["kelvin"] == 3000
+    assert hass.services.calls[-1][2]["color_temp_kelvin"] == 3000
 
 
 async def test_executor_clamps_inverted_kelvin_to_device_bounds() -> None:
@@ -1250,7 +1283,7 @@ async def test_executor_clamps_inverted_kelvin_to_device_bounds() -> None:
         ),
     )
     # 2 * 3000 - 6500 = -500, clamped to the device minimum of 2000 K.
-    assert hass.services.calls[-1][2]["kelvin"] == 2000
+    assert hass.services.calls[-1][2]["color_temp_kelvin"] == 2000
 
 
 async def test_executor_keeps_kelvin_for_normal_target() -> None:
@@ -1265,7 +1298,7 @@ async def test_executor_keeps_kelvin_for_normal_target() -> None:
             color_temperature=2200,
         ),
     )
-    assert hass.services.calls[-1][2]["kelvin"] == 2200
+    assert hass.services.calls[-1][2]["color_temp_kelvin"] == 2200
 
 
 async def test_inverted_target_observation_is_logical_and_idempotent() -> None:
@@ -1545,3 +1578,140 @@ def test_ownership_journal_keeps_stale_manual_while_presence_active() -> None:
 
     assert journal.snapshots_for("room_a", {"main"})
     assert journal.last_manual_off_at("room_a", {"main"}) == 4_000
+
+
+POWER_ENTITY = "switch.demo_power"
+
+
+async def test_power_switch_state_event_recomputes_the_room() -> None:
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    hass.states.set(POWER_ENTITY, "off", last_changed=_NOW_DT)
+    runtime = _make_runtime(
+        hass, payload=_config_payload(power_switch_entity=POWER_ENTITY)
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        before = len(runtime._shadow.journal_payload()["entries"])  # type: ignore[attr-defined]
+        hass.states.set(POWER_ENTITY, "on", last_changed=_NOW_DT)
+        runtime._state_event(SimpleNamespace(data={"entity_id": POWER_ENTITY}))
+        await asyncio.gather(*hass.tasks)
+        after = len(runtime._shadow.journal_payload()["entries"])  # type: ignore[attr-defined]
+        assert after > before
+    finally:
+        await runtime.stop()
+
+
+async def test_unpowered_target_reads_off_and_engine_plans_turn_on() -> None:
+    config = config_from_payload(
+        _config_payload(power_switch_entity=POWER_ENTITY)
+    )
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "on", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "on", {"brightness": 153}, last_changed=_NOW_DT)
+    hass.states.set(POWER_ENTITY, "off", last_changed=_NOW_DT)
+
+    context = await build_context(hass, config, _NOW_MS)
+    light = context.light("light_main")
+    assert light is not None
+    assert light.state is SensorState.OFF
+
+    decision = evaluate_room_lighting(config, context)
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert any(command.action is LightAction.TURN_ON for command in main.commands)
+
+
+async def test_dispatch_switches_power_on_before_the_target() -> None:
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    hass.states.set(POWER_ENTITY, "off", last_changed=_NOW_DT)
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=True,
+        executor=RoomLightingHaExecutor(),
+        payload=_config_payload(power_switch_entity=POWER_ENTITY),
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        entities = [call[2].get("entity_id") for call in hass.services.calls]
+        assert POWER_ENTITY in entities
+        assert "light.demo_main" in entities
+        assert entities.index(POWER_ENTITY) < entities.index("light.demo_main")
+    finally:
+        await runtime.stop()
+
+
+async def test_executor_confirms_colour_only_on_matching_read_back() -> None:
+    hass = _FakeHass()
+    executor = _light_executor(hass, inverted=True)
+
+    receipt = await executor.execute(
+        hass,
+        PlannedCommand(
+            "light_main",
+            LightAction.SET_COLOR_TEMPERATURE,
+            color_temperature=2200,
+        ),
+    )
+    assert hass.services.calls[-1][2]["color_temp_kelvin"] == 3800
+    assert receipt.confirmed is True
+    # The read-back is reported in the logical space.
+    assert receipt.state_after is not None
+    assert receipt.state_after["color_temperature"] == 2200
+
+    # A device that accepts the call without applying the colour must not be
+    # reported as a confirmed colour command.
+    class _StaleServices:
+        def __init__(self, hass: _FakeHass) -> None:
+            self._hass = hass
+
+        async def async_call(
+            self, domain: str, service: str, data: dict[str, object], blocking: bool = True
+        ) -> None:
+            del domain, service, blocking
+            entity_id = data.get("entity_id")
+            if isinstance(entity_id, str):
+                current = self._hass.states.get(entity_id)
+                attributes = dict(current.attributes) if current is not None else {}
+                self._hass.states.set(entity_id, "on", attributes)
+
+    hass.states.set(
+        "light.demo_main",
+        "on",
+        {
+            "color_temp_kelvin": 2000,
+            "min_color_temp_kelvin": 2000,
+            "max_color_temp_kelvin": 6535,
+        },
+    )
+    hass.services = _StaleServices(hass)  # type: ignore[assignment]
+    failed = await executor.execute(
+        hass,
+        PlannedCommand(
+            "light_main",
+            LightAction.SET_COLOR_TEMPERATURE,
+            color_temperature=2200,
+        ),
+    )
+    assert failed.confirmed is False
+
+
+async def test_duplicate_entity_across_rooms_logs_a_warning(caplog) -> None:
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    first = _config_payload()
+    second = _config_payload()
+    second["roomId"] = "room_other"
+    second["name"] = "Другая"
+    runtime = _make_runtime(hass, payloads=[first, second])
+
+    with caplog.at_level(logging.WARNING):
+        await runtime.start(hass, "entry")
+    try:
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("entity collision" in message for message in messages)
+    finally:
+        await runtime.stop()

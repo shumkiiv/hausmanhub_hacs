@@ -45,6 +45,10 @@ def _validate_schema(payload: dict[str, object]) -> None:
     Draft202012Validator(schema).validate(payload)
 
 
+async def _no_sleep(_seconds: float) -> None:
+    await asyncio.sleep(0)
+
+
 def _config():
     payload = {
         "contract": {"name": "hausman-hub-room-lighting-config", "version": 1},
@@ -260,7 +264,7 @@ def test_build_stages_uses_canonical_stages_and_is_near_30_seconds() -> None:
 
 async def test_safe_run_never_calls_executor_and_is_schema_valid() -> None:
     spy = _SpyExecutor()
-    trace = await RoomLightingLiveTestRunner().run(
+    trace = await RoomLightingLiveTestRunner(sleep=_no_sleep).run(
         _config(),
         mode="safe",
         correlation_id="live-safe-001",
@@ -282,7 +286,7 @@ async def test_safe_run_never_calls_executor_and_is_schema_valid() -> None:
 
 async def test_real_run_dispatches_and_is_schema_valid() -> None:
     spy = _SpyExecutor()
-    trace = await RoomLightingLiveTestRunner().run(
+    trace = await RoomLightingLiveTestRunner(sleep=_no_sleep).run(
         _config(),
         mode="real",
         correlation_id="live-real-001",
@@ -298,7 +302,7 @@ async def test_real_run_dispatches_and_is_schema_valid() -> None:
 
 async def test_real_mode_requires_executor() -> None:
     with pytest.raises(RoomLightingLiveTestViolation):
-        await RoomLightingLiveTestRunner().run(
+        await RoomLightingLiveTestRunner(sleep=_no_sleep).run(
             _config(),
             mode="real",
             correlation_id="live-real-002",
@@ -308,7 +312,7 @@ async def test_real_mode_requires_executor() -> None:
 async def test_cancel_stops_the_run_and_is_schema_valid() -> None:
     cancel_event = asyncio.Event()
     cancel_event.set()
-    trace = await RoomLightingLiveTestRunner().run(
+    trace = await RoomLightingLiveTestRunner(sleep=_no_sleep).run(
         _config(),
         mode="safe",
         correlation_id="live-cancel-001",
@@ -321,3 +325,53 @@ async def test_cancel_stops_the_run_and_is_schema_valid() -> None:
     assert trace.commands_sent == 0
     assert trace.steps == ()
     _validate_schema(trace.to_payload())
+
+
+async def test_runner_sleeps_real_stage_durations_and_reads_live_context() -> None:
+    sleeps: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    provider_calls = {"count": 0}
+
+    async def provider():
+        provider_calls["count"] += 1
+        return _context_factory()(None)
+
+    spy = _SpyExecutor()
+    trace = await RoomLightingLiveTestRunner(sleep=fake_sleep).run(
+        _config(),
+        mode="real",
+        correlation_id="live-real-honest-1",
+        executor=spy,
+        context_provider=provider,
+    )
+
+    stages = build_stages(_config())
+    assert sleeps == [stage.duration_seconds for stage in stages]
+    assert 20 <= sum(sleeps) <= 40
+    assert provider_calls["count"] == len(stages)
+    assert spy.calls
+    assert trace.status == "passed"
+    _validate_schema(trace.to_payload())
+
+
+async def test_live_provider_takes_precedence_over_the_synthetic_factory() -> None:
+    def synthetic(_stage):
+        raise AssertionError("the synthetic factory must not be used")
+
+    async def provider():
+        return _context_factory()(None)
+
+    trace = await RoomLightingLiveTestRunner(
+        sleep=lambda _seconds: asyncio.sleep(0)
+    ).run(
+        _config(),
+        mode="safe",
+        correlation_id="live-safe-honest-1",
+        context_factory=synthetic,
+        context_provider=provider,
+    )
+    assert trace.status == "passed"
+    assert trace.steps

@@ -18,6 +18,7 @@ from ..domain.room_lighting import (
     RoomLightingConfig,
     RoomLightingViolation,
     config_from_payload,
+    room_lighting_entity_collisions,
     room_lighting_violations,
 )
 
@@ -201,6 +202,14 @@ class RoomLightingService:
         violations = room_lighting_violations(config)
         if violations:
             raise RoomLightingViolation("; ".join(violations))
+        others = tuple(
+            existing
+            for existing in await self.async_list_configs()
+            if existing.room_id != config.room_id
+        )
+        collisions = room_lighting_entity_collisions((config, *others))
+        if collisions:
+            raise RoomLightingViolation("; ".join(collisions))
         existing = await self._store.async_get(config.room_id)  # type: ignore[attr-defined]
         if existing is not None and not _changed(existing, config):
             return existing

@@ -165,6 +165,7 @@ class RoomLightingHaStateProvider:
     ) -> RoomLightingContext:
         tz = _resolve_timezone(hass)
         sunrise, sunset = self._sun_times(hass, tz)
+        power_on = self._room_power_on(hass, config)
         return RoomLightingContext(
             now=now,
             timezone=tz,
@@ -175,13 +176,22 @@ class RoomLightingHaStateProvider:
                 for sensor in config.devices.sensors
             ),
             lights=tuple(
-                self._light_snapshot(hass, target, now)
+                self._light_snapshot(hass, target, now, power_on=power_on)
                 for target in config.devices.light_targets
             ),
             ownership=self._ownership(config),
             protection=self._protection(config),
             unobserved_since=self._unobserved_since(),
         )
+
+    def _room_power_on(self, hass: HomeAssistant, config: RoomLightingConfig) -> bool:
+        """Whether the room's power switch, when configured, is provably on."""
+
+        power = config.devices.power_switch
+        if power is None or power.entity_id is None:
+            return True
+        state = hass.states.get(power.entity_id)
+        return _state_of(getattr(state, "state", None)) is SensorState.ON
 
     def _unobserved_since(self) -> int | None:
         if self._unobserved_since_provider is None:
@@ -261,8 +271,21 @@ class RoomLightingHaStateProvider:
         )
 
     def _light_snapshot(
-        self, hass: HomeAssistant, target: LightTarget, now: int
+        self,
+        hass: HomeAssistant,
+        target: LightTarget,
+        now: int,
+        *,
+        power_on: bool = True,
     ) -> LightSnapshot:
+        if not power_on:
+            # An unpowered target cannot be on, regardless of the stale module
+            # state: the engine must treat it as off and request a turn-on.
+            return LightSnapshot(
+                target_id=target.id,
+                state=SensorState.OFF,
+                last_changed=now,
+            )
         state = hass.states.get(target.entity_id) if target.entity_id else None
         if state is None:
             return LightSnapshot(
