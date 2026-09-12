@@ -685,7 +685,7 @@ class ManualOffProtection:
         _integer(
             self.minimum_interval_seconds,
             "manual protection minimum interval",
-            minimum=30,
+            minimum=15,
             maximum=86400,
         )
         object.__setattr__(

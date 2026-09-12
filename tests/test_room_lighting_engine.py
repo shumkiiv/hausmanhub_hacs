@@ -407,6 +407,63 @@ def test_protection_timer_expiry_without_absence_still_blocks() -> None:
     assert main.skips[0].reason is SkipReason.MANUAL_PROTECTION
 
 
+def test_fifteen_second_manual_protection_releases_on_presence() -> None:
+    now = _at(10, 0)
+    protection = ProtectionSnapshot(
+        active=True,
+        started_at=now - 20_000,
+        minimum_interval_seconds=15,
+        stable_absence_seconds=15,
+        release_mode="timer_and_absence",
+        reason="manual_off",
+        absence_confirmed=True,
+        absence_since=now - 20_000,
+    )
+    decision = evaluate_room_lighting(
+        _config(),
+        _ctx(
+            now,
+            lights=(_light("light_main", SensorState.OFF, now - 1000),),
+            ownership=(
+                OwnershipSnapshot("light_main", OwnershipSource.MANUAL, True, now - 20_000),
+            ),
+            protection=protection,
+        ),
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert [command.action for command in main.commands][:1] == [LightAction.TURN_ON]
+
+
+def test_fifteen_second_manual_protection_blocks_before_release() -> None:
+    now = _at(10, 0)
+    protection = ProtectionSnapshot(
+        active=True,
+        started_at=now - 10_000,
+        minimum_interval_seconds=15,
+        stable_absence_seconds=15,
+        release_mode="timer_and_absence",
+        reason="manual_off",
+        absence_confirmed=True,
+        absence_since=now - 10_000,
+    )
+    decision = evaluate_room_lighting(
+        _config(),
+        _ctx(
+            now,
+            lights=(_light("light_main", SensorState.OFF, now - 1000),),
+            ownership=(
+                OwnershipSnapshot("light_main", OwnershipSource.MANUAL, True, now - 10_000),
+            ),
+            protection=protection,
+        ),
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.commands == ()
+    assert main.skips[0].reason is SkipReason.MANUAL_OWNERSHIP
+
+
 def test_manual_ownership_not_removed_by_schedule_off() -> None:
     now = _at(23, 30)
     decision = evaluate_room_lighting(
@@ -756,7 +813,7 @@ def test_manual_only_target_is_never_touched() -> None:
     assert any(skip.reason is SkipReason.MANUAL_MODE for skip in main_on.skips)
 
 
-def test_away_room_off_turns_off_only_automatic_targets() -> None:
+def test_away_room_off_turns_off_all_targets_including_manual_only() -> None:
     now = _at(10, 0)
     config = _config(away_mode="room_off", auto_control={"light_mirror": False})
     decision = evaluate_room_lighting(
@@ -778,11 +835,29 @@ def test_away_room_off_turns_off_only_automatic_targets() -> None:
     assert [command.action for command in main.commands] == [LightAction.TURN_OFF]
     assert main.commands[0].reason is DecisionReason.AWAY
 
-    # The manual-only mirror is not touched even during away.
+    # Away outranks autoControl=false: the manual-only mirror goes off too.
+    mirror = decision_target(decision, "light_mirror")
+    assert mirror is not None
+    assert mirror.desired_state == "off"
+    assert [command.action for command in mirror.commands] == [LightAction.TURN_OFF]
+    assert mirror.commands[0].reason is DecisionReason.AWAY
+
+
+def test_away_off_manual_only_target_is_idempotent() -> None:
+    now = _at(10, 0)
+    config = _config(away_mode="room_off", auto_control={"light_mirror": False})
+    decision = evaluate_room_lighting(
+        config,
+        _ctx(
+            now,
+            away=True,
+            lights=(_light("light_mirror", SensorState.OFF, now - 1000),),
+        ),
+    )
     mirror = decision_target(decision, "light_mirror")
     assert mirror is not None
     assert mirror.commands == ()
-    assert any(skip.reason is SkipReason.MANUAL_MODE for skip in mirror.skips)
+    assert any(skip.reason is SkipReason.IDEMPOTENT for skip in mirror.skips)
 
 
 def test_away_off_is_idempotent_when_automatic_target_already_off() -> None:

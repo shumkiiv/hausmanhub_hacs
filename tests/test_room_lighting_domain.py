@@ -522,3 +522,22 @@ def test_auto_control_must_be_boolean() -> None:
     payload["devices"]["light_targets"][0]["autoControl"] = "yes"  # type: ignore[index]
     with pytest.raises(RoomLightingViolation):
         config_from_payload(payload)
+
+
+def test_manual_protection_accepts_fifteen_second_minimum() -> None:
+    payload = _payload()
+    payload["manualOffProtection"]["minimumIntervalSeconds"] = 15  # type: ignore[index]
+    payload["manualOffProtection"]["stableAbsenceSeconds"] = 15  # type: ignore[index]
+    config = config_from_payload(payload)
+    assert config.manual_off_protection.minimum_interval_seconds == 15
+    assert config.manual_off_protection.stable_absence_seconds == 15
+    encoded = config.to_dict()
+    assert encoded["manualOffProtection"]["minimumIntervalSeconds"] == 15  # type: ignore[index]
+    assert config_from_payload(encoded).to_dict() == encoded
+
+
+def test_manual_protection_rejects_interval_below_fifteen_seconds() -> None:
+    payload = _payload()
+    payload["manualOffProtection"]["minimumIntervalSeconds"] = 14  # type: ignore[index]
+    with pytest.raises(RoomLightingViolation):
+        config_from_payload(payload)
