@@ -128,8 +128,9 @@ def release_expired_manual(
 
     The transition only fires when the newest record is a confirmed manual
     action, the minimum interval elapsed and a stable absence was already
-    confirmed during the protection window. It is a pure predicate: the caller
-    still requires a new event before turning light on.
+    confirmed *after* the manual off. A historical absence that predates the
+    manual action must not release the protection. It is a pure predicate: the
+    caller still requires a new event before turning light on.
     """
 
     latest = latest_ownership(records, target_id)
@@ -140,6 +141,8 @@ def release_expired_manual(
     if now - latest.at < minimum_interval_seconds * 1000:
         return False
     if not absence_confirmed or absence_since is None:
+        return False
+    if absence_since < latest.at:
         return False
     return now - absence_since >= stable_absence_seconds * 1000
 

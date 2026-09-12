@@ -72,7 +72,6 @@ AWAY_ON_DEBOUNCE_SECONDS = 3.0
 _DEVICE_TRIGGER_PLATFORM = "mqtt"
 _DEVICE_TRIGGER_INFO_NAME = "managed-room-lighting-runtime"
 _TARGET_DOMAINS = frozenset({"light", "switch"})
-_MANUAL_OFF_SERVICES = frozenset({"turn_off", "toggle"})
 _PRESENCE_KINDS = frozenset({SensorKind.PRESENCE, SensorKind.MOTION})
 
 NowMs = Callable[[], int]
@@ -168,11 +167,12 @@ class RoomLightingOwnershipJournal:
         return bool(self._legacy_records or self._legacy_manual_off)
 
     def migrate_legacy(self, rooms_targets: Mapping[str, Iterable[str]]) -> None:
-        """Attach legacy target-id-only evidence to its room.
+        """Attach legacy target-id-only evidence to a single unambiguous room.
 
-        Old payloads were keyed by target id alone. The room is resolved from
-        the current room configs; a legacy id that matches several rooms is
-        copied to each so no evidence is lost.
+        Old payloads were keyed by target id alone. A legacy id that is still
+        unique across the current room configs is attached to that room; an id
+        that several rooms still use is ambiguous and is dropped instead of
+        being shared between rooms.
         """
 
         if not self.has_legacy():
@@ -182,16 +182,51 @@ class RoomLightingOwnershipJournal:
             for room_id, target_ids in rooms_targets.items()
         }
         for record in self._legacy_records:
-            for room_id, target_ids in owned.items():
-                if record.target_id in target_ids:
-                    self._append(room_id, record)
+            room_id = _single_room_for(record.target_id, owned)
+            if room_id is not None:
+                self._append(room_id, record)
         for target_id, moment in self._legacy_manual_off.items():
-            for room_id, target_ids in owned.items():
-                if target_id in target_ids:
-                    self._manual_off[(room_id, target_id)] = moment
+            room_id = _single_room_for(target_id, owned)
+            if room_id is not None:
+                self._manual_off[(room_id, target_id)] = moment
         self._legacy_records = []
         self._legacy_manual_off = {}
         self._dirty = True
+
+    def prune_stale_manual(
+        self,
+        *,
+        now: int,
+        minimum_interval_seconds: Mapping[str, int],
+        light_on: Mapping[tuple[str, str], bool],
+        presence_active: Mapping[str, bool],
+    ) -> None:
+        """Forget manual evidence whose protection window expired on an off light.
+
+        Only a stale MANUAL record is dropped: the protection interval elapsed
+        and the target is currently off, so keeping the manual hold would block
+        automation forever after a restart. A room whose own presence or motion
+        sensor still reads ``on`` is skipped: somebody is demonstrably there, so
+        the hold must survive the restart and wait for absence to be confirmed
+        again, exactly as the engine requires.
+        """
+
+        removed = False
+        for (room_id, target_id), moment in list(self._manual_off.items()):
+            if presence_active.get(room_id, False):
+                continue
+            bucket = self._records.get((room_id, target_id))
+            if not bucket or bucket[-1].source is not OwnershipSource.MANUAL:
+                continue
+            if now - moment < minimum_interval_seconds.get(room_id, 0) * 1000:
+                continue
+            if light_on.get((room_id, target_id), False):
+                continue
+            self._manual_off.pop((room_id, target_id), None)
+            self._records.pop((room_id, target_id), None)
+            removed = True
+        if removed:
+            self._dirty = True
 
     def snapshots_for(
         self, room_id: str, target_ids: Iterable[str]
@@ -298,6 +333,17 @@ class RoomLightingOwnershipJournal:
         self._dirty = False
 
 
+def _single_room_for(
+    target_id: str, owned: Mapping[str, set[str]]
+) -> str | None:
+    """Return the only room owning a target id, or None when ambiguous."""
+
+    matches = [
+        room_id for room_id, target_ids in owned.items() if target_id in target_ids
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
 def _ownership_record(raw: object) -> OwnershipSnapshot | None:
     if not isinstance(raw, Mapping):
         return None
@@ -378,7 +424,7 @@ class RoomLightingRuntime:
         self._configs: dict[str, RoomLightingConfig] = {}
         self._rooms_by_entity: EntityRooms = {}
         self._targets_by_entity: dict[str, tuple[str, str]] = {}
-        self._executing_entities: set[str] = set()
+        self._executing_actions: dict[str, str] = {}
         self._unsubscribers: list[Callable[[], None]] = []
         self._lock = asyncio.Lock()
         self._save_lock = asyncio.Lock()
@@ -435,6 +481,21 @@ class RoomLightingRuntime:
                 room_id: config.devices.light_target_ids
                 for room_id, config in self._configs.items()
             }
+        )
+        # Stale manual holds (protection window expired on an off light) would
+        # otherwise block automation forever after a restart.
+        self._ownership.prune_stale_manual(
+            now=self._now_ms(),
+            minimum_interval_seconds={
+                room_id: (
+                    config.manual_off_protection.minimum_interval_seconds
+                    if config.manual_off_protection.enabled
+                    else 0
+                )
+                for room_id, config in self._configs.items()
+            },
+            light_on=self._light_on_by_target(),
+            presence_active=self._presence_active_by_room(),
         )
         try:
             entities = tuple(sorted(self._rooms_by_entity))
@@ -624,12 +685,17 @@ class RoomLightingRuntime:
                 continue
             room_id, target_id = target
             moment = self._now_ms()
-            if entity_id in self._executing_entities:
+            expected = self._executing_actions.get(entity_id)
+            if expected is not None and expected == service:
+                # Only a command this runtime is actively issuing counts as
+                # automatic. A foreign call that races the same entity (for
+                # example a switch.turn_off while our turn_on is in flight) is
+                # never promoted to automatic ownership.
                 self._ownership.record_auto(
                     room_id, target_id, moment, confirmed=True
                 )
             else:
-                # Conservative and intentional: a foreign light/switch call is
+                # Conservative and intentional: any other light/switch call is
                 # attributed to a person even when the caller is another
                 # automation (Node-RED, a scene or a script). Manual intent must
                 # win over the automatic branch until the protection releases.
@@ -638,7 +704,10 @@ class RoomLightingRuntime:
                     target_id,
                     moment,
                     confirmed=True,
-                    turned_off=service in _MANUAL_OFF_SERVICES,
+                    turned_off=(
+                        service == "turn_off"
+                        or (service == "toggle" and self._entity_is_on(entity_id))
+                    ),
                 )
                 self._absence.pop(room_id, None)
             self._schedule_ownership_save()
@@ -926,7 +995,7 @@ class RoomLightingRuntime:
             target = config.devices.target(command.target_id)
             entity_id = target.entity_id if target is not None else None
             if entity_id is not None:
-                self._executing_entities.add(entity_id)
+                self._executing_actions[entity_id] = _planned_service_name(command)
             try:
                 receipt = await self._executor.execute(  # type: ignore[attr-defined]
                     self._hass, command
@@ -936,7 +1005,7 @@ class RoomLightingRuntime:
                 receipt = None
             finally:
                 if entity_id is not None:
-                    self._executing_entities.discard(entity_id)
+                    self._executing_actions.pop(entity_id, None)
             if _receipt_confirmed(receipt):
                 self._ownership.record_auto(
                     config.room_id, command.target_id, moment, confirmed=True
@@ -945,6 +1014,42 @@ class RoomLightingRuntime:
         await self._persist_ownership()
 
     # -- helpers -----------------------------------------------------------
+
+    def _entity_is_on(self, entity_id: str) -> bool:
+        if self._hass is None:
+            return False
+        state = self._hass.states.get(entity_id)
+        return state is not None and str(getattr(state, "state", "")).lower() == "on"
+
+    def _light_on_by_target(self) -> dict[tuple[str, str], bool]:
+        """Current on/off state per (room_id, target_id) for stale pruning."""
+
+        result: dict[tuple[str, str], bool] = {}
+        for room_id, config in self._configs.items():
+            for target in config.devices.light_targets:
+                entity_id = target.entity_id
+                result[(room_id, target.id)] = (
+                    self._entity_is_on(entity_id) if entity_id else False
+                )
+        return result
+
+    def _presence_active_by_room(self) -> dict[str, bool]:
+        """Whether a room's own presence or motion sensor currently reads on.
+
+        Only an explicit ``on`` counts as active presence: off, unknown and
+        unavailable sensors do not prove somebody is there, so those rooms may
+        still have a stale manual hold pruned.
+        """
+
+        result: dict[str, bool] = {}
+        for room_id, config in self._configs.items():
+            result[room_id] = any(
+                sensor.kind in _PRESENCE_KINDS
+                and sensor.entity_id is not None
+                and self._entity_is_on(sensor.entity_id)
+                for sensor in config.devices.sensors
+            )
+        return result
 
     def _rebuild_index(self) -> None:
         rooms_by_entity: EntityRooms = {}
@@ -1102,6 +1207,14 @@ def _entity_ids(service_data: object) -> tuple[str, ...]:
     if isinstance(value, (list, tuple, set, frozenset)):
         return tuple(item for item in value if isinstance(item, str))
     return ()
+
+
+def _planned_service_name(command: PlannedCommand) -> str:
+    """The Home Assistant service a planned command is executed through."""
+
+    if command.action is LightAction.TURN_OFF:
+        return "turn_off"
+    return "turn_on"
 
 
 def _receipt_confirmed(receipt: object) -> bool:

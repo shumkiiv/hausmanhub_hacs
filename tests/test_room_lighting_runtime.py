@@ -567,10 +567,37 @@ async def test_ownership_marks_foreign_manual_and_own_auto() -> None:
         assert manual.source is OwnershipSource.MANUAL
         assert manual.confirmed is True
 
-        runtime._executing_entities.add("light.demo_main")
+        runtime._executing_actions["light.demo_main"] = "turn_on"
         runtime._service_event(_event("light", "turn_on", "light.demo_main"))
         automatic = runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"})[-1]  # type: ignore[attr-defined]
         assert automatic.source is OwnershipSource.AUTO
+    finally:
+        await runtime.stop()
+
+
+async def test_foreign_off_while_own_command_in_flight_stays_manual() -> None:
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    runtime = _make_runtime(hass, commands_enabled=False)
+
+    await runtime.start(hass, "entry")
+    try:
+        # The runtime is mid turn_on on this entity: a foreign turn_off racing
+        # it must still be attributed to the person, never to automation.
+        runtime._executing_actions["light.demo_main"] = "turn_on"
+        runtime._service_event(_event("light", "turn_off", "light.demo_main"))
+        latest = runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"})[-1]  # type: ignore[attr-defined]
+        assert latest.source is OwnershipSource.MANUAL
+        assert (
+            runtime._ownership.last_manual_off_at(_ROOM_ID, {"light_main"})  # type: ignore[attr-defined]
+            is not None
+        )
+
+        # The runtime's own matching service call is automatic again.
+        runtime._executing_actions["light.demo_main"] = "turn_on"
+        runtime._service_event(_event("light", "turn_on", "light.demo_main"))
+        latest = runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"})[-1]  # type: ignore[attr-defined]
+        assert latest.source is OwnershipSource.AUTO
     finally:
         await runtime.stop()
 
@@ -701,6 +728,136 @@ async def test_manual_off_protection_survives_restart() -> None:
         assert executor2.calls
     finally:
         await runtime2.stop()
+
+
+async def test_restart_keeps_manual_protection_while_presence_active() -> None:
+    payload = _config_payload(minimum_interval_seconds=60, stable_absence_seconds=5)
+    ownership_store = _MemoryOwnershipStore()
+    clock = _Clock(_NOW_MS)
+    t0 = _NOW_MS
+
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    runtime1 = _make_runtime(
+        hass,
+        commands_enabled=False,
+        ownership_store=ownership_store,
+        now_ms=clock,
+        payload=payload,
+    )
+    await runtime1.start(hass, "entry")
+    runtime1._service_event(_event("light", "turn_off", "light.demo_main"))
+    await asyncio.gather(*hass.tasks)
+    assert runtime1._ownership.last_manual_off_at(_ROOM_ID, {"light_main"}) == t0  # type: ignore[attr-defined]
+    await runtime1.stop()
+
+    # Restart long after the interval with the light off, but the room's
+    # presence sensor still reads on: the person is demonstrably there, so the
+    # manual hold must survive until absence is confirmed again.
+    clock.value = t0 + 600_000
+    hass2 = _FakeHass()
+    hass2.states.set("binary_sensor.demo_presence", "on", last_changed=_dt(clock.value))
+    hass2.states.set("light.demo_main", "off", last_changed=_dt(t0))
+    runtime2 = _make_runtime(
+        hass2,
+        commands_enabled=False,
+        ownership_store=ownership_store,
+        now_ms=clock,
+        payload=payload,
+    )
+    await runtime2.start(hass2, "entry")
+    try:
+        assert runtime2._ownership.last_manual_off_at(_ROOM_ID, {"light_main"}) == t0  # type: ignore[attr-defined]
+        config = runtime2.configs()[0]
+        protection = runtime2._protection_for(config)  # type: ignore[attr-defined]
+        assert protection.active is True
+        assert protection.started_at == t0
+    finally:
+        await runtime2.stop()
+
+
+async def test_restart_prunes_manual_protection_when_presence_not_active() -> None:
+    payload = _config_payload(minimum_interval_seconds=60, stable_absence_seconds=5)
+    ownership_store = _MemoryOwnershipStore()
+    clock = _Clock(_NOW_MS)
+    t0 = _NOW_MS
+
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    runtime1 = _make_runtime(
+        hass,
+        commands_enabled=False,
+        ownership_store=ownership_store,
+        now_ms=clock,
+        payload=payload,
+    )
+    await runtime1.start(hass, "entry")
+    runtime1._service_event(_event("light", "turn_off", "light.demo_main"))
+    await asyncio.gather(*hass.tasks)
+    await runtime1.stop()
+
+    # Restart after the interval with the light off and nobody present: the
+    # stale hold is dropped so it cannot block automation forever.
+    clock.value = t0 + 600_000
+    hass2 = _FakeHass()
+    hass2.states.set("binary_sensor.demo_presence", "off", last_changed=_dt(clock.value))
+    hass2.states.set("light.demo_main", "off", last_changed=_dt(t0))
+    runtime2 = _make_runtime(
+        hass2,
+        commands_enabled=False,
+        ownership_store=ownership_store,
+        now_ms=clock,
+        payload=payload,
+    )
+    await runtime2.start(hass2, "entry")
+    try:
+        assert runtime2._ownership.last_manual_off_at(_ROOM_ID, {"light_main"}) is None  # type: ignore[attr-defined]
+        assert runtime2._ownership.snapshots_for(_ROOM_ID, {"light_main"}) == ()  # type: ignore[attr-defined]
+        config = runtime2.configs()[0]
+        assert runtime2._protection_for(config).active is False  # type: ignore[attr-defined]
+    finally:
+        await runtime2.stop()
+
+
+async def test_restart_prunes_manual_protection_without_presence_sensor() -> None:
+    payload = _config_payload(minimum_interval_seconds=60, stable_absence_seconds=5)
+    payload["devices"]["sensors"] = []  # type: ignore[index]
+    ownership_store = _MemoryOwnershipStore()
+    clock = _Clock(_NOW_MS)
+    t0 = _NOW_MS
+
+    hass = _FakeHass()
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    runtime1 = _make_runtime(
+        hass,
+        commands_enabled=False,
+        ownership_store=ownership_store,
+        now_ms=clock,
+        payload=payload,
+    )
+    await runtime1.start(hass, "entry")
+    runtime1._service_event(_event("light", "turn_off", "light.demo_main"))
+    await asyncio.gather(*hass.tasks)
+    await runtime1.stop()
+
+    # No presence sensor can ever release the hold through the engine, so the
+    # expired hold on an off light is dropped at startup.
+    clock.value = t0 + 600_000
+    hass2 = _FakeHass()
+    hass2.states.set("light.demo_main", "off", last_changed=_dt(t0))
+    runtime2 = _make_runtime(
+        hass2,
+        commands_enabled=False,
+        ownership_store=ownership_store,
+        now_ms=clock,
+        payload=payload,
+    )
+    await runtime2.start(hass2, "entry")
+    try:
+        assert runtime2._ownership.last_manual_off_at(_ROOM_ID, {"light_main"}) is None  # type: ignore[attr-defined]
+    finally:
+        await runtime2.stop()
+
 
 
 async def test_restart_sets_unobserved_and_keeps_persisted_auto_on() -> None:
@@ -1328,3 +1485,63 @@ async def test_service_event_ownership_is_scoped_to_room() -> None:
         )
     finally:
         await runtime.stop()
+
+
+def test_ownership_journal_migration_skips_ambiguous_target_id() -> None:
+    journal = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
+    journal.restore(
+        {
+            "version": 1,
+            "records": [
+                {
+                    "targetId": "chandelier",
+                    "source": "manual",
+                    "confirmed": True,
+                    "at": 4_000,
+                }
+            ],
+            "manualOff": {"chandelier": 4_000},
+        }
+    )
+    journal.migrate_legacy(
+        {"room_a": ("chandelier",), "room_b": ("chandelier", "mirror")}
+    )
+
+    assert journal.snapshots_for("room_a", {"chandelier"}) == ()
+    assert journal.snapshots_for("room_b", {"chandelier"}) == ()
+    assert journal.last_manual_off_at("room_a", {"chandelier"}) is None
+    assert journal.last_manual_off_at("room_b", {"chandelier"}) is None
+    assert not journal.has_legacy()
+
+
+def test_ownership_journal_prunes_stale_manual_only_when_light_off() -> None:
+    journal = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
+    journal.record_manual("room_a", "main", 4_000, turned_off=True)
+    journal.record_manual("room_b", "main", 4_000, turned_off=True)
+
+    journal.prune_stale_manual(
+        now=4_000 + 600_000,
+        minimum_interval_seconds={"room_a": 600, "room_b": 600},
+        light_on={("room_a", "main"): False, ("room_b", "main"): True},
+        presence_active={},
+    )
+
+    assert journal.snapshots_for("room_a", {"main"}) == ()
+    assert journal.last_manual_off_at("room_a", {"main"}) is None
+    assert journal.snapshots_for("room_b", {"main"})
+    assert journal.last_manual_off_at("room_b", {"main"}) == 4_000
+
+
+def test_ownership_journal_keeps_stale_manual_while_presence_active() -> None:
+    journal = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
+    journal.record_manual("room_a", "main", 4_000, turned_off=True)
+
+    journal.prune_stale_manual(
+        now=4_000 + 600_000,
+        minimum_interval_seconds={"room_a": 600},
+        light_on={("room_a", "main"): False},
+        presence_active={"room_a": True},
+    )
+
+    assert journal.snapshots_for("room_a", {"main"})
+    assert journal.last_manual_off_at("room_a", {"main"}) == 4_000

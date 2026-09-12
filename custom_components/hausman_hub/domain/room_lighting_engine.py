@@ -152,6 +152,10 @@ class ProtectionSnapshot:
         absence_ok = (
             absence_proven
             and absence_since is not None
+            # The absence must have started after the manual off: a historical
+            # absence that predates the manual action must not release it.
+            and self.started_at is not None
+            and absence_since >= self.started_at
             and now - absence_since >= self.stable_absence_seconds * 1000
         )
         if self.release_mode == "timer_only":

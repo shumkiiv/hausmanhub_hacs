@@ -407,6 +407,63 @@ def test_protection_timer_expiry_without_absence_still_blocks() -> None:
     assert main.skips[0].reason is SkipReason.MANUAL_PROTECTION
 
 
+def test_protection_ignores_absence_that_predates_manual_off() -> None:
+    now = _at(10, 0)
+    protection = ProtectionSnapshot(
+        active=True,
+        started_at=now - 700_000,
+        minimum_interval_seconds=600,
+        stable_absence_seconds=30,
+        release_mode="timer_and_absence",
+        reason="manual_off",
+        absence_confirmed=True,
+        absence_since=now - 800_000,
+    )
+    decision = evaluate_room_lighting(
+        _config(),
+        _ctx(
+            now,
+            lights=(_light("light_main", SensorState.OFF, now - 1000),),
+            protection=protection,
+        ),
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.commands == ()
+    assert main.skips[0].reason is SkipReason.MANUAL_PROTECTION
+
+
+def test_manual_release_requires_absence_after_manual_off() -> None:
+    now = _at(10, 0)
+    protection = ProtectionSnapshot(
+        active=True,
+        started_at=now - 700_000,
+        minimum_interval_seconds=600,
+        stable_absence_seconds=30,
+        release_mode="timer_and_absence",
+        reason="manual_off",
+        absence_confirmed=True,
+        absence_since=now - 800_000,
+    )
+    decision = evaluate_room_lighting(
+        _config(),
+        _ctx(
+            now,
+            lights=(_light("light_main", SensorState.OFF, now - 1000),),
+            ownership=(
+                OwnershipSnapshot(
+                    "light_main", OwnershipSource.MANUAL, True, now - 700_000
+                ),
+            ),
+            protection=protection,
+        ),
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.commands == ()
+    assert main.skips[0].reason is SkipReason.MANUAL_OWNERSHIP
+
+
 def test_fifteen_second_manual_protection_releases_on_presence() -> None:
     now = _at(10, 0)
     protection = ProtectionSnapshot(
