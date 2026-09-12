@@ -780,6 +780,7 @@ class RoomLightingConfig:
     away_behavior: AwayBehavior
     auto_adopt: bool
     updated_at: int
+    commands_enabled: bool = False
     illumination: Illumination | None = None
     timers: Timers | None = None
     behaviors: Behaviors | None = None
@@ -806,6 +807,7 @@ class RoomLightingConfig:
             raise RoomLightingViolation("room lighting config requires away behaviour")
         _flag(self.auto_adopt, "auto adopt flag")
         _integer(self.updated_at, "updated at", minimum=0, maximum=9_007_199_254_740_991)
+        _flag(self.commands_enabled, "commands enabled flag")
         if self.illumination is not None and not isinstance(self.illumination, Illumination):
             raise RoomLightingViolation("illumination block is invalid")
         if self.timers is not None and not isinstance(self.timers, Timers):
@@ -923,6 +925,7 @@ class RoomLightingConfig:
             },
             "awayBehavior": _away_to_payload(self.away_behavior),
             "autoAdopt": self.auto_adopt,
+            "commandsEnabled": self.commands_enabled,
             "updatedAt": self.updated_at,
             "templateId": self.template_id,
             "overrides": {
@@ -1368,6 +1371,7 @@ def room_lighting_config_from_payload(payload: object) -> RoomLightingConfig:
         away_behavior=_away_from_payload(_require(data, "awayBehavior", "away behaviour")),
         auto_adopt=_require(data, "autoAdopt", "auto adopt"),
         updated_at=_require(data, "updatedAt", "updated at"),
+        commands_enabled=data.get("commandsEnabled", False),
         illumination=None if illumination is None else _illumination_from_payload(illumination),
         timers=None if timers is None else _timers_from_payload(timers),
         behaviors=None if behaviors is None else _behaviors_from_payload(behaviors),

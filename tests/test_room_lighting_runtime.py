@@ -2,7 +2,7 @@
 
 The tests use a synthetic Home Assistant shape, so no real Home Assistant and
 no physical device is involved. The shadow-first guarantee is asserted
-directly: with ``commands_enabled=False`` the executor is never called.
+directly: with per-room ``commandsEnabled=false`` the executor is never called.
 """
 
 from __future__ import annotations
@@ -46,6 +46,7 @@ def _config_payload(
     with_lux: bool = False,
     minimum_interval_seconds: int = 600,
     stable_absence_seconds: int = 30,
+    commands_enabled: bool = False,
 ) -> dict[str, object]:
     sensors: list[dict[str, object]] = [
         {
@@ -129,6 +130,7 @@ def _config_payload(
         },
         "awayBehavior": {"mode": "none"},
         "autoAdopt": True,
+        "commandsEnabled": commands_enabled,
         "updatedAt": 1,
         "overrides": {},
     }
@@ -355,14 +357,14 @@ def _make_runtime(
     device_automation_api: object | None = None,
 ) -> RoomLightingRuntime:
     shadow = RoomLightingShadowService(_MemoryShadowStore())
-    service = _ConfigService(
-        config_from_payload(payload if payload is not None else _config_payload())
-    )
+    room_payload = payload if payload is not None else _config_payload()
+    if commands_enabled:
+        room_payload = {**room_payload, "commandsEnabled": True}
+    service = _ConfigService(config_from_payload(room_payload))
     return RoomLightingRuntime(
         hass,
         service,
         shadow,
-        commands_enabled=commands_enabled,
         executor=executor,
         ownership_store=ownership_store,
         now_ms=now_ms or (lambda: _NOW_MS),
@@ -447,7 +449,7 @@ async def test_runtime_shadow_mode_never_calls_executor() -> None:
 
     await runtime.start(hass, "entry")
     try:
-        assert runtime.commands_enabled is False
+        assert runtime.configs()[0].commands_enabled is False
         assert executor.calls == []
         entries = runtime._shadow.journal_payload()["entries"]  # type: ignore[attr-defined]
         assert entries
@@ -502,6 +504,43 @@ async def test_runtime_dispatches_plan_when_commands_enabled() -> None:
         assert ownership
         assert ownership[-1].source is OwnershipSource.AUTO
         assert ownership[-1].confirmed is True
+    finally:
+        await runtime.stop()
+
+
+async def test_per_room_commands_enabled_field_runs_executor() -> None:
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass,
+        executor=executor,
+        payload=_config_payload(commands_enabled=True),
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        assert runtime.configs()[0].commands_enabled is True
+        assert executor.calls
+        entry = runtime._shadow.journal_payload()["entries"][-1]  # type: ignore[attr-defined]
+        assert entry["commandsEnabled"] is True
+    finally:
+        await runtime.stop()
+
+
+async def test_per_room_commands_default_stays_shadow() -> None:
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    executor = _SpyExecutor()
+    runtime = _make_runtime(hass, executor=executor)
+
+    await runtime.start(hass, "entry")
+    try:
+        assert runtime.configs()[0].commands_enabled is False
+        assert executor.calls == []
+        entry = runtime._shadow.journal_payload()["entries"][-1]  # type: ignore[attr-defined]
+        assert entry["commandsEnabled"] is False
+        assert entry["mode"] == "shadow"
     finally:
         await runtime.stop()
 
@@ -885,7 +924,6 @@ async def test_device_trigger_attaches_for_each_room() -> None:
         hass,
         _ConfigService(first, second),
         RoomLightingShadowService(_MemoryShadowStore()),
-        commands_enabled=False,
         executor=_SpyExecutor(),
         now_ms=lambda: _NOW_MS,
         track_state_changes=lambda hass, entities, callback: (lambda: None),
@@ -928,7 +966,6 @@ async def test_registered_event_callbacks_are_ha_callbacks() -> None:
         hass,
         _ConfigService(config_from_payload(_config_payload())),
         RoomLightingShadowService(_MemoryShadowStore()),
-        commands_enabled=False,
         executor=_SpyExecutor(),
         now_ms=lambda: _NOW_MS,
         track_state_changes=track_state_changes,
@@ -966,7 +1003,6 @@ async def test_create_task_from_worker_thread_uses_the_event_loop() -> None:
         _LoopHass(),
         _ConfigService(config_from_payload(_config_payload())),
         RoomLightingShadowService(_MemoryShadowStore()),
-        commands_enabled=False,
         executor=_SpyExecutor(),
         now_ms=lambda: _NOW_MS,
         track_state_changes=lambda h, e, c: (lambda: None),

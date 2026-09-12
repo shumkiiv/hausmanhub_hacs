@@ -441,3 +441,25 @@ def test_min_on_seconds_round_trip_and_bounds() -> None:
         invalid["schedule"][0]["how"]["minOnSeconds"] = bad  # type: ignore[index]
         with pytest.raises(RoomLightingViolation):
             config_from_payload(invalid)
+
+
+def test_commands_enabled_defaults_to_shadow_and_round_trips() -> None:
+    payload = _payload()
+    payload.pop("commandsEnabled", None)
+    config = config_from_payload(payload)
+    assert config.commands_enabled is False
+    assert config.to_dict()["commandsEnabled"] is False
+
+    payload["commandsEnabled"] = True
+    config = config_from_payload(payload)
+    assert config.commands_enabled is True
+    encoded = config.to_dict()
+    assert encoded["commandsEnabled"] is True
+    assert config_from_payload(encoded).to_dict() == encoded
+
+
+def test_commands_enabled_must_be_boolean() -> None:
+    payload = _payload()
+    payload["commandsEnabled"] = "yes"
+    with pytest.raises(RoomLightingViolation):
+        config_from_payload(payload)

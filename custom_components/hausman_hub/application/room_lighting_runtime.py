@@ -2,12 +2,12 @@
 
 The runtime subscribes to every room entity and to the Home Assistant service
 bus, builds a real state context, evaluates the deterministic engine, journals
-the decision and only then, when the commands flag is explicitly enabled,
-dispatches the plan through :class:`RoomLightingHaExecutor`.
+the decision and only then, when the room's persisted ``commandsEnabled`` config
+flag is true, dispatches the plan through :class:`RoomLightingHaExecutor`.
 
-Shadow-first: ``commands_enabled`` defaults to ``False``. In that mode the
-executor is never called and the decision is only written to the bounded shadow
-journal.
+Shadow-first: ``commandsEnabled`` defaults to ``False`` per room. In that mode
+the executor is never called and the decision is only written to the bounded
+shadow journal.
 """
 
 from __future__ import annotations
@@ -256,8 +256,6 @@ class RoomLightingRuntime:
         executor: object | None = None,
         ownership: RoomLightingOwnershipJournal | None = None,
         ownership_store: object | None = None,
-        commands_enabled: bool = False,
-        commands_enabled_provider: Callable[[str], bool] | None = None,
         now_ms: NowMs | None = None,
         track_state_changes: Callable[..., Callable[[], None]] | None = None,
         track_interval: Callable[..., Callable[[], None]] | None = None,
@@ -281,8 +279,6 @@ class RoomLightingRuntime:
             unobserved_since_provider=lambda: self._unobserved_since,
         )
         self._executor = executor or RoomLightingHaExecutor()
-        self._commands_enabled = bool(commands_enabled)
-        self._commands_enabled_provider = commands_enabled_provider
         self._now_ms = now_ms or _default_now_ms
         self._track_state_changes = track_state_changes
         self._track_interval = track_interval
@@ -306,17 +302,10 @@ class RoomLightingRuntime:
     def running(self) -> bool:
         return self._running
 
-    @property
-    def commands_enabled(self) -> bool:
-        return self._commands_enabled
+    def _room_commands_enabled(self, config: RoomLightingConfig) -> bool:
+        """Physical commands are a per-room, persisted opt-in (default shadow)."""
 
-    def set_commands_enabled(self, enabled: bool) -> None:
-        self._commands_enabled = bool(enabled)
-
-    def _room_commands_enabled(self, room_id: str) -> bool:
-        if self._commands_enabled_provider is not None:
-            return bool(self._commands_enabled_provider(room_id))
-        return self._commands_enabled
+        return bool(config.commands_enabled)
 
     async def start(
         self, hass: HomeAssistant, entry_id: str
@@ -651,7 +640,7 @@ class RoomLightingRuntime:
             )
             return
         self._device_trigger_seen[dedup_key] = moment
-        enabled = self._room_commands_enabled(config.room_id)
+        enabled = self._room_commands_enabled(config)
         for binding in bindings:
             target_ids = _binding_target_ids(config, binding)
             _LOGGER.info(
@@ -736,7 +725,7 @@ class RoomLightingRuntime:
         except Exception:  # noqa: BLE001 - isolation per room is deliberate
             _LOGGER.warning("room lighting evaluation failed; skipping the room")
             return
-        enabled = self._room_commands_enabled(config.room_id)
+        enabled = self._room_commands_enabled(config)
         record = getattr(self._shadow, "async_record", None)
         if callable(record):
             try:
