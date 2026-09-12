@@ -26,11 +26,19 @@ from custom_components.hausman_hub.application.room_lighting_shadow import (
     RoomLightingShadowService,
 )
 from custom_components.hausman_hub.domain.room_lighting import (
+    LightKind,
+    LightTarget,
     SensorKind,
     config_from_payload,
 )
-from custom_components.hausman_hub.domain.room_lighting_engine import LightAction
+from custom_components.hausman_hub.domain.room_lighting_engine import (
+    LightAction,
+    PlannedCommand,
+    decision_target,
+    evaluate_room_lighting,
+)
 from custom_components.hausman_hub.domain.room_lighting_ownership import (
+    OwnershipSnapshot,
     OwnershipSource,
     SensorState,
 )
@@ -1018,3 +1026,126 @@ async def test_create_task_from_worker_thread_uses_the_event_loop() -> None:
     await asyncio.sleep(0.05)
     assert len(recorded) == 1
     await asyncio.gather(*recorded)
+
+
+def _light_executor(hass: _FakeHass, *, inverted: bool) -> RoomLightingHaExecutor:
+    hass.states.set(
+        "light.demo_main",
+        "on",
+        {
+            "color_temp_kelvin": 3000,
+            "min_color_temp_kelvin": 2000,
+            "max_color_temp_kelvin": 6535,
+        },
+    )
+    return RoomLightingHaExecutor(
+        {
+            "light_main": LightTarget(
+                id="light_main",
+                name="Люстра",
+                kind=LightKind.LIGHT,
+                brightness=True,
+                color_temperature=True,
+                entity_id="light.demo_main",
+                color_temp_inverted=inverted,
+            )
+        }
+    )
+
+
+async def test_executor_reflects_inverted_kelvin_around_neutral() -> None:
+    hass = _FakeHass()
+    executor = _light_executor(hass, inverted=True)
+
+    await executor.execute(
+        hass,
+        PlannedCommand(
+            "light_main",
+            LightAction.SET_COLOR_TEMPERATURE,
+            color_temperature=2200,
+        ),
+    )
+    assert hass.services.calls[-1][2]["kelvin"] == 3800
+
+    await executor.execute(
+        hass,
+        PlannedCommand(
+            "light_main",
+            LightAction.SET_COLOR_TEMPERATURE,
+            color_temperature=3000,
+        ),
+    )
+    assert hass.services.calls[-1][2]["kelvin"] == 3000
+
+
+async def test_executor_clamps_inverted_kelvin_to_device_bounds() -> None:
+    hass = _FakeHass()
+    executor = _light_executor(hass, inverted=True)
+
+    await executor.execute(
+        hass,
+        PlannedCommand(
+            "light_main",
+            LightAction.SET_COLOR_TEMPERATURE,
+            color_temperature=6500,
+        ),
+    )
+    # 2 * 3000 - 6500 = -500, clamped to the device minimum of 2000 K.
+    assert hass.services.calls[-1][2]["kelvin"] == 2000
+
+
+async def test_executor_keeps_kelvin_for_normal_target() -> None:
+    hass = _FakeHass()
+    executor = _light_executor(hass, inverted=False)
+
+    await executor.execute(
+        hass,
+        PlannedCommand(
+            "light_main",
+            LightAction.SET_COLOR_TEMPERATURE,
+            color_temperature=2200,
+        ),
+    )
+    assert hass.services.calls[-1][2]["kelvin"] == 2200
+
+
+async def test_inverted_target_observation_is_logical_and_idempotent() -> None:
+    payload = _config_payload()
+    payload["devices"]["light_targets"][0]["colorTempInverted"] = True  # type: ignore[index]
+    payload["schedule"][0]["how"]["colorTemperature"] = 2200  # type: ignore[index]
+    config = config_from_payload(payload)
+
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "on", last_changed=_NOW_DT)
+    hass.states.set(
+        "light.demo_main",
+        "on",
+        {
+            "brightness": 153,  # 60 %
+            "color_temp_kelvin": 3800,  # raw command that is physically 2200 K
+            "min_color_temp_kelvin": 2000,
+            "max_color_temp_kelvin": 6535,
+        },
+        last_changed=_NOW_DT,
+    )
+    context = await build_context(
+        hass,
+        config,
+        _NOW_MS,
+        ownership_provider=lambda _config: (
+            OwnershipSnapshot(
+                "light_main", OwnershipSource.AUTO, True, _NOW_MS - 1000
+            ),
+        ),
+    )
+    light = context.light("light_main")
+    assert light is not None
+    # The provider reflects the raw 3800 K back to the logical 2200 K.
+    assert light.color_temperature == 2200
+
+    decision = evaluate_room_lighting(config, context)
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert LightAction.SET_COLOR_TEMPERATURE not in [
+        command.action for command in main.commands
+    ]

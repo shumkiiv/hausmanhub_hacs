@@ -27,6 +27,7 @@ from ..domain.room_lighting_engine import (
     SensorSnapshot,
 )
 from ..domain.room_lighting_ownership import OwnershipSnapshot, SensorState
+from .room_lighting_color import device_kelvin_bounds, reflect_inverted_kelvin
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -279,6 +280,10 @@ class RoomLightingHaStateProvider:
             if isinstance(attributes, dict):
                 brightness = _brightness_percent(attributes.get("brightness"))
                 color_temperature = _color_temperature_kelvin(attributes)
+                if color_temperature is not None and target.color_temp_inverted:
+                    color_temperature = reflect_inverted_kelvin(
+                        color_temperature, *device_kelvin_bounds(attributes)
+                    )
         return LightSnapshot(
             target_id=target.id,
             state=light_state,

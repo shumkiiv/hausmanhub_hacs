@@ -463,3 +463,26 @@ def test_commands_enabled_must_be_boolean() -> None:
     payload["commandsEnabled"] = "yes"
     with pytest.raises(RoomLightingViolation):
         config_from_payload(payload)
+
+
+def test_color_temp_inverted_defaults_false_and_round_trips() -> None:
+    payload = _payload()
+    config = config_from_payload(payload)
+    assert config.devices.light_targets[0].color_temp_inverted is False
+    encoded = config.to_dict()
+    assert encoded["devices"]["light_targets"][0]["colorTempInverted"] is False  # type: ignore[index]
+    assert config_from_payload(encoded).to_dict() == encoded
+
+    payload["devices"]["light_targets"][0]["colorTempInverted"] = True  # type: ignore[index]
+    inverted = config_from_payload(payload)
+    assert inverted.devices.light_targets[0].color_temp_inverted is True
+    encoded = inverted.to_dict()
+    assert encoded["devices"]["light_targets"][0]["colorTempInverted"] is True  # type: ignore[index]
+    assert config_from_payload(encoded).to_dict() == encoded
+
+
+def test_color_temp_inverted_must_be_boolean() -> None:
+    payload = _payload()
+    payload["devices"]["light_targets"][0]["colorTempInverted"] = "yes"  # type: ignore[index]
+    with pytest.raises(RoomLightingViolation):
+        config_from_payload(payload)

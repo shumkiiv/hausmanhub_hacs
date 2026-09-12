@@ -436,7 +436,6 @@ def test_embedded_source_policy_rejects_direct_commands_and_context() -> None:
 
 def test_release_trust_hashes_match_managed_system_sources() -> None:
     sources = {
-        "system-tambur-adaptive-controller": "tambur_controller.js",
         "system-shower-comfort-controller": "shower_controller.js",
         "system-small-corridor-light-controller": "small_corridor_controller.js",
     }
@@ -2041,57 +2040,6 @@ async def test_storage_real_service_switch_ownership_and_120_second_off_path() -
     assert coordinator.storage_state["deadlineMs"] is None
 
 
-def test_tambur_power_up_plan_matches_release_envelope() -> None:
-    source = Path("tools/managed_scenarios/tambur_controller.js").read_text(encoding="utf-8")
-    payload = {
-        "inputs": {
-            "entity_156050daca86aa6c": {"state": "on", "attributes": {}},
-            "entity_10b78187426f8485": {"state": "off", "attributes": {}},
-            "entity_6b9ccdab9bb484b2": {"state": "above_horizon", "attributes": {}},
-            "entity_71859313239a14e4": {"state": "off", "attributes": {"brightness": 13, "color_temp_kelvin": 6500}},
-            "entity_fbdf27871edb89bf": {"state": "off", "attributes": {}},
-        },
-        "correlationId": "run.power-up",
-        "context": {
-            "timestampMs": 1_785_553_200_000,
-            "controls": {
-                "policyRevision": 4,
-                "state": {
-                    "ready": True,
-                    "generation": 9,
-                    "transition": "light_action",
-                    "action": {
-                        "targetId": "entity_71859313239a14e4",
-                        "actionId": "set_color_temperature",
-                        "value": 3000,
-                    },
-                },
-            },
-        },
-    }
-    executed = subprocess.run(
-        ["node", "-e", f"const msg={{payload:{json.dumps(payload)}}};\n(function(){{\n{source}\n}})();\nconsole.log(JSON.stringify(msg.payload));"],
-        check=True, capture_output=True, text=True,
-    )
-    result = json.loads(executed.stdout)
-    actions = [
-        scenario_node_red._action_from_payload(item, "test")  # noqa: SLF001
-        for item in result["actions"]
-    ]
-    NodeRedScenarioBackend._validate_plan_envelope(  # noqa: SLF001
-        "system-tambur-adaptive-controller",
-        _definition(),
-        actions,
-        expected_control_action={
-            "targetId": "entity_71859313239a14e4",
-            "actionId": "set_color_temperature",
-            "value": 3000,
-        },
-    )
-    assert [action.action_id for action in actions].count("set_color_temperature") == 1
-    assert len(actions) == 1
-
-
 def test_release_owned_trigger_context_is_exact_and_correlated() -> None:
     trigger = {
         "source": "manual",
@@ -2146,80 +2094,6 @@ def test_release_owned_direct_off_plan_is_exact_group_without_mirror() -> None:
             [*group, ScenarioAction("mirror_off", ScenarioActionType.DEVICE_ACTION, target_id="entity_fbdf27871edb89bf", action_id="turn_off")],
             trigger,
         )
-def test_system_input_snapshot_drives_real_tambur_sunset_mired_branch() -> None:
-    ids = {
-        "sun": "entity_6b9ccdab9bb484b2",
-        "chandelier": "entity_71859313239a14e4",
-        "presence": "entity_156050daca86aa6c",
-        "motion": "entity_10b78187426f8485",
-        "mirror": "entity_fbdf27871edb89bf",
-    }
-    devices = {
-        entity_id: ScenarioDeviceEntry(entity_id, entity_id, entity_id, ())
-        for entity_id in ids.values()
-    }
-    states = {
-        ids["sun"]: SimpleNamespace(
-            state="below_horizon",
-            attributes={"next_setting": "2026-08-27T13:00:00Z", "token": "secret"},
-        ),
-        ids["chandelier"]: SimpleNamespace(
-            state="on",
-            attributes={"brightness": 153, "color_temp": 278, "internal_url": "http://private"},
-        ),
-        ids["presence"]: SimpleNamespace(state="on", attributes={}),
-        ids["motion"]: SimpleNamespace(state="off", attributes={}),
-        ids["mirror"]: SimpleNamespace(state="off", attributes={}),
-    }
-    definition = _definition(
-        node_red=ScenarioNodeRedMetadata(input_target_ids=tuple(devices)),
-    )
-    backend = NodeRedScenarioBackend(
-        SimpleNamespace(states=SimpleNamespace(get=states.get))
-    )
-    snapshot = backend._input_snapshot(  # noqa: SLF001
-        "system-tambur-adaptive-controller",
-        definition,
-        SimpleNamespace(device=devices.get),
-    )
-    assert snapshot[ids["sun"]]["attributes"] == {"next_setting": "2026-08-27T13:00:00Z"}
-    assert snapshot[ids["chandelier"]]["attributes"] == {"brightness": 153, "color_temp": 278}
-    source = Path("tools/managed_scenarios/tambur_controller.js").read_text(encoding="utf-8")
-    expected = {
-        "targetId": ids["chandelier"],
-        "actionId": "set_brightness_percent",
-        "value": 50,
-    }
-    request = {
-        "inputs": snapshot,
-        "context": {
-            "timestampMs": 1_787_839_200_000,
-            "controls": {
-                "policyRevision": 2,
-                "state": {
-                    "ready": True,
-                    "generation": 3,
-                    "transition": "brightness_sequence",
-                    "action": expected,
-                },
-            },
-        },
-    }
-    executed = subprocess.run(
-        ["node", "-e", f"const msg={{payload:{json.dumps(request)}}};\n(function(){{\n{source}\n}})();\nconsole.log(JSON.stringify(msg.payload));"],
-        check=True, capture_output=True, text=True,
-    )
-    payload = json.loads(executed.stdout)
-    actions = [scenario_node_red._action_from_payload(item, "tambur") for item in payload["actions"]]  # noqa: SLF001
-    NodeRedScenarioBackend._validate_plan_envelope(  # noqa: SLF001
-        "system-tambur-adaptive-controller",
-        definition,
-        actions,
-        expected_control_action=expected,
-    )
-    assert payload["selectedBranch"] == "brightness_sequence"
-    assert [action.id for action in actions] == ["server_action"]
-
 
 def test_system_branch_validator_rejects_mutated_values_order_unions_and_excess() -> None:
     tambur = [
@@ -2397,26 +2271,6 @@ def test_system_branch_validator_accepts_exhaustive_real_source_plans() -> None:
             expected_control_action=expected,
         )
 
-    tambur_requests = []
-    for hour, sun, presence, motion, chandelier, mirror in product(
-        (2, 12, 20), ("above_horizon", "below_horizon", "unknown"),
-        ("on", "off", "unknown"), ("on", "off", "unknown"),
-        ("on", "off"), ("on", "off"),
-    ):
-        tambur_requests.append({"context": {"timestampMs": 1_787_760_000_000 + hour * 3_600_000}, "inputs": {
-            "entity_156050daca86aa6c": {"state": presence, "attributes": {}},
-            "entity_10b78187426f8485": {"state": motion, "attributes": {}},
-            "entity_6b9ccdab9bb484b2": {"state": sun, "attributes": {"next_setting": "2026-08-27T13:00:00Z"}},
-            "entity_71859313239a14e4": {"state": chandelier, "attributes": {"brightness": 153, "color_temp_kelvin": 3600}},
-            "entity_fbdf27871edb89bf": {"state": mirror, "attributes": {}},
-            "entity_5f3b4436fb7b6f2b": {"state": "50", "attributes": {}},
-            "entity_cd0098e5ff95da46": {"state": "on", "attributes": {}},
-            "entity_b47991988cc6b9f3": {"state": "on", "attributes": {}},
-        }})
-    for payload in run_many("tools/managed_scenarios/tambur_controller.js", tambur_requests):
-        actions = [scenario_node_red._action_from_payload(item, "tambur") for item in payload["actions"]]  # noqa: SLF001
-        NodeRedScenarioBackend._validate_plan_envelope("system-tambur-adaptive-controller", _definition(), actions)  # noqa: SLF001
-
     small_requests = []
     for hour, sun, motion, relay, chandelier, local_light, lux in product(
         (0, 6, 20), ("above_horizon", "below_horizon", "unknown"),
@@ -2540,13 +2394,13 @@ async def _case_plan_blocks_changed_source_before_execution_post() -> None:
 
 
 async def _case_system_plan_blocks_source_outside_release() -> None:
-    scenario_id = "system-tambur-adaptive-controller"
-    trusted = Path("tools/managed_scenarios/tambur_controller.js").read_text(
+    scenario_id = "system-small-corridor-light-controller"
+    trusted = Path("tools/managed_scenarios/small_corridor_controller.js").read_text(
         encoding="utf-8"
     )
     changed = trusted + "\n// changed after release\n"
     deployed = build_managed_flow(
-        scenario_id, "Тамбур", changed, flow_id="flow-tambur"
+        scenario_id, "Малый коридор", changed, flow_id="flow-small-corridor"
     )
     calls: list[tuple[str, str]] = []
 
@@ -2554,12 +2408,12 @@ async def _case_system_plan_blocks_source_outside_release() -> None:
         calls.append((method, path))
         if method == "GET" and path.endswith("/flows"):
             return 200, _global_revision(deployed, "rev-one")
-        if method == "GET" and path.endswith("/flow/flow-tambur"):
+        if method == "GET" and path.endswith("/flow/flow-small-corridor"):
             return 200, deployed
         raise AssertionError("execution endpoint must not be called")
 
     metadata = ScenarioNodeRedMetadata(
-        flow_id="flow-tambur",
+        flow_id="flow-small-corridor",
         source_hash=managed_source_hash(changed),
         sync_status=ScenarioNodeRedSyncStatus.SYNCED,
     )
@@ -2584,7 +2438,7 @@ async def _case_system_plan_blocks_source_outside_release() -> None:
         raise AssertionError("untrusted system source must fail closed")
     assert calls == [
         ("GET", "/ingress/token/flows"),
-        ("GET", "/ingress/token/flow/flow-tambur"),
+        ("GET", "/ingress/token/flow/flow-small-corridor"),
     ]
 
 

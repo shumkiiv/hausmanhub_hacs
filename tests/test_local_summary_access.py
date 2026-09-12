@@ -4282,7 +4282,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.258", panel.payload["integration_version"])
+        self.assertEqual("1.52.259", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -5305,7 +5305,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(107, len(self.hass.http.views))
+        self.assertEqual(106, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -10612,121 +10612,6 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         self.assertEqual(200, response.status)
 
-    def test_missing_bindings_prevent_tambur_migration_and_subscription(self) -> None:
-        from custom_components.hausman_hub.application.managed_switch_migration import (
-            ManagedSwitchMigration,
-        )
-        from custom_components.hausman_hub.application.smart_switch_runtime import (
-            SmartSwitchTriggerAdapter,
-        )
-        from custom_components.hausman_hub.application.tambur_room_migration import (
-            TamburRoomStartupCoordinator,
-        )
-
-        async def unexpected_global_migration(_migration: object) -> str:
-            raise AssertionError("global migration must stay deferred in room mode")
-
-        def unexpected_adapter(*_args: object, **_kwargs: object) -> None:
-            raise AssertionError("missing bindings must not construct an adapter")
-
-        def unexpected_room_startup(*_args: object, **_kwargs: object) -> None:
-            raise AssertionError("missing bindings must not start room migration")
-
-        hass = FakeHomeAssistant()
-        entry = FakeEntry(
-            {
-                "mode": "read-only",
-                "direct_execution_status": "direct_execution_blocked",
-            },
-            {},
-            "synthetic-switch-cleanup-failure",
-        )
-        hass.config_entries.entries = [entry]
-
-        with (
-            patch.object(
-                ManagedSwitchMigration,
-                "async_apply",
-                unexpected_global_migration,
-            ),
-            patch.object(
-                SmartSwitchTriggerAdapter,
-                "__init__",
-                unexpected_adapter,
-            ),
-            patch.object(
-                TamburRoomStartupCoordinator,
-                "__init__",
-                unexpected_room_startup,
-            ),
-        ):
-            self.assertTrue(asyncio.run(self.integration.async_setup_entry(hass, entry)))
-
-        self.assertEqual(
-            {
-                "state": "deferred",
-                "reason": "tambur_room_only",
-            },
-            hass.data["hausman_hub"]["managed_switch_migration"],
-        )
-        self.assertEqual(
-            {"state": "blocked", "stage": "bindings_unavailable"},
-            hass.data["hausman_hub"]["tambur_room_migration"],
-        )
-        self.assertEqual(
-            {
-                "state": "unavailable",
-                "reason": "bindings_unavailable",
-            },
-            hass.data["hausman_hub"]["smart_switch_runtime"],
-        )
-
-    def test_setup_defers_incomplete_global_controller_content_in_room_mode(self) -> None:
-        from custom_components.hausman_hub.application import (
-            managed_switch_migration as migration_module,
-        )
-
-        hass = FakeHomeAssistant()
-        entry = FakeEntry(
-            {
-                "mode": "read-only",
-                "direct_execution_status": "direct_execution_blocked",
-            },
-            {},
-            "synthetic-switch-catalog-warmup",
-        )
-        hass.config_entries.entries = [entry]
-        incomplete_manifest = tuple(
-            replace(item, activation_ready=False)
-            for item in migration_module.FULL_MIGRATION_MANIFEST
-        )
-
-        with patch.object(
-            migration_module,
-            "FULL_MIGRATION_MANIFEST",
-            incomplete_manifest,
-        ):
-            self.assertTrue(asyncio.run(self.integration.async_setup_entry(hass, entry)))
-
-        self.assertEqual(
-            {
-                "state": "deferred",
-                "reason": "tambur_room_only",
-            },
-            hass.data["hausman_hub"]["managed_switch_migration"],
-        )
-        self.assertEqual(
-            {"state": "blocked", "stage": "bindings_unavailable"},
-            hass.data["hausman_hub"]["tambur_room_migration"],
-        )
-        self.assertEqual(
-            {
-                "state": "unavailable",
-                "reason": "bindings_unavailable",
-            },
-            hass.data["hausman_hub"]["smart_switch_runtime"],
-        )
-
     def test_archive_store_load_failure_does_not_abort_climate_setup(self) -> None:
         from custom_components.hausman_hub.application.operation_journal_admin import (
             JournalArchiveError,
@@ -10761,233 +10646,6 @@ class LocalSummaryAccessTest(unittest.TestCase):
         with self.assertRaisesRegex(JournalArchiveError, "archive_storage_unavailable"):
             asyncio.run(archive_service.async_archive("admin"))
 
-    def test_public_manual_off_cancels_tambur_auto_on_during_power_warmup(self) -> None:
-        """The real public path fences auto work before waiting for light authority."""
-
-        from custom_components.hausman_hub.application.scenario_decision_bridge import (
-            ScenarioDecisionBridge,
-        )
-        from custom_components.hausman_hub.application.scenario_executor import (
-            ScenarioExecutor,
-        )
-        from custom_components.hausman_hub.application.scenario_service import (
-            ScenarioService,
-        )
-        from custom_components.hausman_hub.application.scenarios import (
-            ScenarioCatalog,
-            ScenarioDeviceAction,
-            ScenarioDeviceEntry,
-        )
-        from custom_components.hausman_hub.domain.device_power_dependencies import (
-            DevicePowerDependency,
-        )
-
-        target_id = "lamp_chandelier_demo"
-        entity_id = "light.tambur_chandelier"
-        power_entity_id = "switch.tambur_power"
-        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-
-        class Store:
-            value = None
-
-            async def async_load(inner_self):
-                return copy.deepcopy(inner_self.value)
-
-            async def async_save(inner_self, value):
-                inner_self.value = copy.deepcopy(value)
-
-        catalog = ScenarioCatalog(
-            devices={
-                target_id: ScenarioDeviceEntry(
-                    target_id=target_id,
-                    name="Люстра тамбура",
-                    entity_id=entity_id,
-                    actions=(
-                        ScenarioDeviceAction(
-                            "turn_on", "Включить", "light", "turn_on", frozenset()
-                        ),
-                        ScenarioDeviceAction(
-                            "turn_off", "Выключить", "light", "turn_off", frozenset()
-                        ),
-                    ),
-                )
-            },
-            scenarios={},
-        )
-        stamp = datetime.now(timezone.utc)
-        self.hass.states.values[entity_id] = SimpleNamespace(
-            state="off", attributes={}, last_changed=stamp,
-            last_updated=stamp, last_reported=stamp,
-        )
-        self.hass.states.values[power_entity_id] = SimpleNamespace(
-            state="off", attributes={}, last_changed=stamp,
-            last_updated=stamp, last_reported=stamp,
-        )
-        power_on = asyncio.Event()
-        calls: list[tuple[str, str, str]] = []
-
-        class Services:
-            async def async_call(
-                inner_self,
-                domain: str,
-                action_id: str,
-                data: dict[str, object],
-                **_kwargs: object,
-            ) -> None:
-                current_entity = str(data["entity_id"])
-                calls.append((domain, action_id, current_entity))
-                observed = datetime.now(timezone.utc)
-                self.hass.states.values[current_entity] = SimpleNamespace(
-                    state="on" if action_id == "turn_on" else "off",
-                    attributes={}, last_changed=observed,
-                    last_updated=observed, last_reported=observed,
-                )
-                if current_entity == power_entity_id and action_id == "turn_on":
-                    power_on.set()
-
-        self.hass.services = Services()
-        service = ScenarioService(self.hass, Store(), catalog)
-        executor = ScenarioExecutor(
-            self.hass,
-            catalog,
-            service.async_run_scenario,
-            power_dependency_resolver=lambda: {
-                entity_id: DevicePowerDependency(
-                    entity_id, power_entity_id, "auto_turn_on", 30
-                )
-            },
-            command_guard=lambda *_args: None,
-            electrical_breaker_resolver=lambda _entity: False,
-            readback_window_seconds=0.05,
-            readback_interval_seconds=0.01,
-        )
-        service.set_executor(executor)
-
-        async def source(_scenario_id, event, observation_epoch):
-            return {
-                "settingsRevision": 7,
-                "issuedAtMs": now_ms,
-                "expiresAtMs": now_ms + 60_000,
-                "event": event,
-                "clock": {
-                    "nowMs": now_ms,
-                    "timezone": "Asia/Omsk",
-                    "localDate": "2027-01-15",
-                    "minutesOfDay": 660,
-                    "sunsetAtMs": now_ms + 20_000_000,
-                },
-                "bindings": {
-                    "chandelier": target_id,
-                    "points": "lamp_points_demo",
-                    "mirror": "lamp_mirror_demo",
-                    "power": "power_demo",
-                    "presenceSensors": ["sensor_demo"],
-                },
-                "settings": {
-                    "morningStart": "09:00", "morningEnd": "10:00",
-                    "eveningLatestStart": "21:00", "mainOff": "23:00",
-                    "mirrorOff": "01:00", "minPercent": 5, "maxPercent": 80,
-                    "dayKelvin": 3000, "eveningKelvin": 2200,
-                    "absenceDaySeconds": 600, "absenceNightSeconds": 180,
-                    "fadeSeconds": 20, "manualOffMinSeconds": 600,
-                    "manualOffAbsenceSeconds": 30, "manualOnHoldSeconds": 3600,
-                },
-                "observations": {
-                    target_id: {"state": "off", "revision": 11, "observedAtMs": now_ms, "fresh": True, "continuityEpoch": observation_epoch},
-                    "lamp_points_demo": {"state": "off", "revision": 12, "observedAtMs": now_ms, "fresh": True, "continuityEpoch": observation_epoch},
-                    "lamp_mirror_demo": {"state": "off", "revision": 13, "observedAtMs": now_ms, "fresh": True, "continuityEpoch": observation_epoch},
-                    "sensor_demo": {"state": "on", "revision": 20, "observedAtMs": now_ms, "fresh": True, "continuityEpoch": observation_epoch},
-                },
-                "authority": {
-                    target_id: {"owner": "none", "generation": 2, "protectionActive": False},
-                    "lamp_points_demo": {"owner": "none", "generation": 3, "protectionActive": False},
-                    "lamp_mirror_demo": {"owner": "none", "generation": 4, "protectionActive": False},
-                },
-            }
-
-        async def authority(_target_id):
-            return {"generation": 2, "observedRevision": 11, "observedAtMs": now_ms, "observationEpoch": 1, "fresh": True, "owner": "none", "protectionActive": False}
-
-        bridge_store = Store()
-        bridge = ScenarioDecisionBridge(
-            bridge_store,
-            snapshot_provider=source,
-            authority_provider=authority,
-            now_ms=lambda: now_ms,
-            executor=executor,
-        )
-        service.set_manual_action_pre_admission(bridge.async_register_manual_intent)
-        self.hass.data["hausman_hub"]["scenario_service"] = service
-        device_view = next(
-            view for view in self.hass.http.views
-            if view.url == "/api/hausman_hub/v1/device-actions"
-        )
-
-        async def run_race() -> tuple[dict[str, object], object]:
-            await bridge.async_recover()
-            request = await bridge.async_snapshot(
-                "system-tambur-adaptive-controller",
-                {"id": "presence.1", "kind": "sensor", "observedAtMs": now_ms, "targetId": "sensor_demo"},
-            )
-            decision = {
-                "contract": {"name": "hausman-node-red-decision", "version": 1},
-                "correlationId": request["correlationId"],
-                "scenarioId": "system-tambur-adaptive-controller",
-                "planId": request["correlationId"],
-                "controllerVersion": 1, "settingsRevision": 7,
-                "baseRevision": request["durable"]["revision"],
-                "snapshotRevision": request["snapshotRevision"],
-                "observationEpoch": request["observationEpoch"],
-                "expiresAtMs": request["expiresAtMs"],
-                "status": "decided", "reasonCode": "presence_day", "trace": [],
-                "nextState": {"phase": "occupied", "phaseStartedAtMs": now_ms, "absenceSinceMs": None, "absenceEpoch": None, "fadeStartPercent": None, "fadeStartedAtMs": None, "fadeReason": None},
-                "wakeups": [],
-                "action": {"id": f"{str(request['correlationId'])[:119]}.act", "targetId": target_id, "actionId": "turn_on", "authorityGeneration": 2, "observedRevision": 11},
-            }
-            automatic = asyncio.create_task(
-                executor.async_execute_tambur_decision(decision, bridge)
-            )
-            await asyncio.wait_for(power_on.wait(), 1)
-            manual = asyncio.create_task(
-                device_view.post(
-                    FakeJsonRequest(
-                        "192.168.1.20", reader_user("system-users"),
-                        "/api/hausman_hub/v1/device-actions",
-                        {"targetId": target_id, "actionId": "turn_off"},
-                    )
-                )
-            )
-            return await automatic, await manual
-
-        automatic_result, manual_response = asyncio.run(run_race())
-
-        self.assertIn(automatic_result["status"], {"failed", "uncertain"})
-        self.assertEqual(200, manual_response.status)
-        self.assertTrue(bridge_store.value["manualIntents"])
-        self.assertEqual(
-            [("switch", "turn_on", power_entity_id)],
-            [call for call in calls if call[1] == "turn_on"],
-        )
-        self.assertNotIn(("light", "turn_on", entity_id), calls)
-        self.assertNotIn(("switch", "turn_off", power_entity_id), calls)
-        self.assertFalse(executor._light_priority.authority_lock().locked())  # noqa: SLF001
-
-    def test_setup_rejects_an_unsafe_entry_before_registering_the_view(self) -> None:
-        """A rejected entry must not open even the local count-only path."""
-
-        unsafe_hass = FakeHomeAssistant()
-        unsafe_entry = FakeEntry(
-            {
-                "mode": "shadow",
-                "direct_execution_status": "not_blocked",
-            },
-            {},
-        )
-        unsafe_hass.config_entries.entries = [unsafe_entry]
-
-        self.assertFalse(asyncio.run(self.integration.async_setup_entry(unsafe_hass, unsafe_entry)))
-        self.assertEqual([], unsafe_hass.http.views)
-
     def test_setup_with_the_optional_page_closed_keeps_only_the_count_display(self) -> None:
         """Closing the page must not remove the nine safe HausmanHub count sensors."""
 
@@ -11007,7 +10665,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(106, len(closed_hass.http.views))
+        self.assertEqual(105, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -11095,7 +10753,6 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/admin/scenarios/delete",
                 "/api/hausman_hub/v1/admin/scenarios/run",
                 "/api/hausman_hub/v1/admin/scenarios/test",
-                "/api/hausman_hub/v1/admin/tambur-legacy-runtime",
                 "/api/hausman_hub/v1/scenarios",
                 "/api/hausman_hub/v1/scenarios/action",
                 "/api/hausman_hub/v1/scenarios/ai-draft",

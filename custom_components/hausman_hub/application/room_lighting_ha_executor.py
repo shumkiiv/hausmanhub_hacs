@@ -13,6 +13,12 @@ from typing import TYPE_CHECKING, Mapping
 
 from ..domain.room_lighting import LightKind, LightTarget
 from ..domain.room_lighting_engine import LightAction, PlannedCommand
+from .room_lighting_color import (
+    FALLBACK_MAX_KELVIN,
+    FALLBACK_MIN_KELVIN,
+    device_kelvin_bounds,
+    reflect_inverted_kelvin,
+)
 from .room_lighting_ha_state import (
     _brightness_percent,
     _color_temperature_kelvin,
@@ -73,7 +79,10 @@ class RoomLightingHaExecutor:
                 service="unknown",
                 service_data={},
             )
-        domain, service, data = _service_call(command, target)
+        min_kelvin, max_kelvin = _device_kelvin_bounds(hass, target)
+        domain, service, data = _service_call(
+            command, target, min_kelvin=min_kelvin, max_kelvin=max_kelvin
+        )
         await hass.services.async_call(domain, service, data, blocking=True)
         state_after = _read_back(hass, target)
         return RoomLightingReceipt(
@@ -87,7 +96,11 @@ class RoomLightingHaExecutor:
 
 
 def _service_call(
-    command: PlannedCommand, target: LightTarget
+    command: PlannedCommand,
+    target: LightTarget,
+    *,
+    min_kelvin: int = FALLBACK_MIN_KELVIN,
+    max_kelvin: int = FALLBACK_MAX_KELVIN,
 ) -> tuple[str, str, dict[str, object]]:
     domain = _LIGHT_DOMAIN if target.kind is LightKind.LIGHT else _SWITCH_DOMAIN
     entity_id = target.entity_id
@@ -101,10 +114,23 @@ def _service_call(
         if command.brightness is not None:
             data["brightness_pct"] = command.brightness
         if command.color_temperature is not None:
-            data["kelvin"] = command.color_temperature
+            kelvin = int(command.color_temperature)
+            if target.color_temp_inverted:
+                kelvin = reflect_inverted_kelvin(kelvin, min_kelvin, max_kelvin)
+            data["kelvin"] = kelvin
         if command.fade_seconds:
             data["transition"] = command.fade_seconds
     return domain, "turn_on", data
+
+
+def _device_kelvin_bounds(hass: HomeAssistant, target: LightTarget) -> tuple[int, int]:
+    """Return the device kelvin bounds or the conservative fallback."""
+
+    if target.entity_id is None:
+        return FALLBACK_MIN_KELVIN, FALLBACK_MAX_KELVIN
+    state = hass.states.get(target.entity_id)
+    attributes = getattr(state, "attributes", None)
+    return device_kelvin_bounds(attributes)
 
 
 def _read_back(
