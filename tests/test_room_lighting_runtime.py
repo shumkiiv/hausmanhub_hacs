@@ -21,6 +21,7 @@ from custom_components.hausman_hub.application.room_lighting_ha_state import (
 )
 from custom_components.hausman_hub.application.room_lighting_runtime import (
     AWAY_ENTITY_ID,
+    RoomLightingOwnershipJournal,
     RoomLightingRuntime,
 )
 from custom_components.hausman_hub.application.room_lighting_shadow import (
@@ -509,7 +510,7 @@ async def test_runtime_dispatches_plan_when_commands_enabled() -> None:
         assert entry["mode"] == "live"
         assert entry["commands"][0]["action"] == LightAction.TURN_ON.value
         # A confirmed receipt grants proven automatic ownership.
-        ownership = runtime._ownership.snapshots_for({"light_main"})  # type: ignore[attr-defined]
+        ownership = runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"})  # type: ignore[attr-defined]
         assert ownership
         assert ownership[-1].source is OwnershipSource.AUTO
         assert ownership[-1].confirmed is True
@@ -562,13 +563,13 @@ async def test_ownership_marks_foreign_manual_and_own_auto() -> None:
     await runtime.start(hass, "entry")
     try:
         runtime._service_event(_event("light", "turn_on", "light.demo_main"))
-        manual = runtime._ownership.snapshots_for({"light_main"})[-1]  # type: ignore[attr-defined]
+        manual = runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"})[-1]  # type: ignore[attr-defined]
         assert manual.source is OwnershipSource.MANUAL
         assert manual.confirmed is True
 
         runtime._executing_entities.add("light.demo_main")
         runtime._service_event(_event("light", "turn_on", "light.demo_main"))
-        automatic = runtime._ownership.snapshots_for({"light_main"})[-1]  # type: ignore[attr-defined]
+        automatic = runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"})[-1]  # type: ignore[attr-defined]
         assert automatic.source is OwnershipSource.AUTO
     finally:
         await runtime.stop()
@@ -659,7 +660,7 @@ async def test_manual_off_protection_survives_restart() -> None:
     await runtime1.start(hass, "entry")
     runtime1._service_event(_event("light", "turn_off", "light.demo_main"))
     await asyncio.gather(*hass.tasks)
-    assert runtime1._ownership.last_manual_off_at({"light_main"}) == t0  # type: ignore[attr-defined]
+    assert runtime1._ownership.last_manual_off_at(_ROOM_ID, {"light_main"}) == t0  # type: ignore[attr-defined]
     assert ownership_store.payload is not None
     await runtime1.stop()
 
@@ -778,7 +779,7 @@ async def test_device_trigger_shadow_logs_intent_without_commands(caplog) -> Non
         assert str(trigger_info["trigger_data"]["id"]).startswith("room-lighting-")  # type: ignore[index]
         await action({}, None)  # type: ignore[operator]
         assert executor.calls == []
-        ownership = runtime._ownership.snapshots_for({"light_main"})  # type: ignore[attr-defined]
+        ownership = runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"})  # type: ignore[attr-defined]
         assert ownership
         assert ownership[-1].source is OwnershipSource.MANUAL
         assert "device trigger" in caplog.text
@@ -807,7 +808,7 @@ async def test_device_trigger_dispatches_manual_action_when_enabled() -> None:
         await action({}, None)  # type: ignore[operator]
         assert len(executor.calls) == 1
         assert executor.calls[0].action is LightAction.TURN_ON
-        ownership = runtime._ownership.snapshots_for({"light_main"})  # type: ignore[attr-defined]
+        ownership = runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"})  # type: ignore[attr-defined]
         assert ownership[-1].source is OwnershipSource.MANUAL
     finally:
         await runtime.stop()
@@ -862,7 +863,7 @@ async def test_device_trigger_shadow_toggle_off_marks_manual_off() -> None:
         await action({}, None)  # type: ignore[operator]
         assert executor.calls == []
         assert (
-            runtime._ownership.last_manual_off_at({"light_main"})  # type: ignore[attr-defined]
+            runtime._ownership.last_manual_off_at(_ROOM_ID, {"light_main"})  # type: ignore[attr-defined]
             is not None
         )
     finally:
@@ -1249,5 +1250,81 @@ async def test_away_in_shadow_only_journals_without_commands() -> None:
 
         assert runtime.away is True
         assert executor.calls == []
+    finally:
+        await runtime.stop()
+
+
+def test_ownership_journal_isolates_same_target_id_across_rooms() -> None:
+    journal = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
+    journal.record_manual("room_a", "main", 4_000, turned_off=True)
+
+    assert journal.snapshots_for("room_a", {"main"})
+    assert journal.snapshots_for("room_b", {"main"}) == ()
+    assert journal.last_manual_off_at("room_a", {"main"}) == 4_000
+    assert journal.last_manual_off_at("room_b", {"main"}) is None
+
+
+def test_ownership_journal_migrates_legacy_target_only_payload() -> None:
+    journal = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
+    journal.restore(
+        {
+            "version": 1,
+            "records": [
+                {
+                    "targetId": "main",
+                    "source": "manual",
+                    "confirmed": True,
+                    "at": 4_000,
+                }
+            ],
+            "manualOff": {"main": 4_000},
+        }
+    )
+    assert journal.has_legacy()
+    assert journal.snapshots_for("room_a", {"main"}) == ()
+
+    journal.migrate_legacy({"room_a": ("main",), "room_b": ("other",)})
+
+    assert journal.snapshots_for("room_a", {"main"})
+    assert journal.snapshots_for("room_b", {"main"}) == ()
+    assert journal.last_manual_off_at("room_a", {"main"}) == 4_000
+    assert journal.last_manual_off_at("room_b", {"main"}) is None
+    assert not journal.has_legacy()
+
+
+async def test_service_event_ownership_is_scoped_to_room() -> None:
+    hass = _FakeHass()
+    second = _config_payload()
+    second["roomId"] = "room_demo_second"
+    second["devices"]["light_targets"][0]["entityId"] = "light.demo_second"  # type: ignore[index]
+
+    runtime = RoomLightingRuntime(
+        hass,
+        _ConfigService(
+            config_from_payload(_config_payload()),
+            config_from_payload(second),
+        ),
+        RoomLightingShadowService(_MemoryShadowStore()),
+        now_ms=lambda: _NOW_MS,
+        track_state_changes=lambda hass, entities, callback: (lambda: None),
+        track_interval=lambda hass, callback, interval: (lambda: None),
+        listen_bus=lambda hass, event_type, callback: (lambda: None),
+    )
+    await runtime.start(hass, "entry")
+    try:
+        # Both rooms reuse the same target id "light_main"; a manual call on
+        # the first room's entity must not grant anything to the second room.
+        runtime._service_event(_event("light", "turn_on", "light.demo_main"))
+        assert runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"})  # type: ignore[attr-defined]
+        assert (
+            runtime._ownership.snapshots_for("room_demo_second", {"light_main"})  # type: ignore[attr-defined]
+            == ()
+        )
+        assert (
+            runtime._ownership.last_manual_off_at(  # type: ignore[attr-defined]
+                "room_demo_second", {"light_main"}
+            )
+            is None
+        )
     finally:
         await runtime.stop()

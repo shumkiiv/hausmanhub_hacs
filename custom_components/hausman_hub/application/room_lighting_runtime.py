@@ -101,8 +101,14 @@ class RoomLightingOwnershipJournal:
     ) -> None:
         self._max_records = max(1, int(max_records))
         self._now_ms = now_ms or _default_now_ms
-        self._records: dict[str, list[OwnershipSnapshot]] = {}
-        self._manual_off: dict[str, int] = {}
+        # Ownership is keyed by (room_id, target_id): two rooms may reuse the
+        # same target id without sharing ownership or manual protection.
+        self._records: dict[tuple[str, str], list[OwnershipSnapshot]] = {}
+        self._manual_off: dict[tuple[str, str], int] = {}
+        # Records from the legacy target-id-only payload wait here until the
+        # runtime knows the room/target mapping and can migrate them safely.
+        self._legacy_records: list[OwnershipSnapshot] = []
+        self._legacy_manual_off: dict[str, int] = {}
         self._dirty = False
 
     @property
@@ -114,6 +120,7 @@ class RoomLightingOwnershipJournal:
 
     def record_manual(
         self,
+        room_id: str,
         target_id: str,
         at: int | None = None,
         *,
@@ -124,14 +131,15 @@ class RoomLightingOwnershipJournal:
         record = OwnershipSnapshot(
             target_id, OwnershipSource.MANUAL, confirmed, moment
         )
-        self._append(record)
+        self._append(room_id, record)
         if turned_off:
-            self._manual_off[target_id] = moment
+            self._manual_off[(room_id, target_id)] = moment
         self._dirty = True
         return record
 
     def record_auto(
         self,
+        room_id: str,
         target_id: str,
         at: int | None = None,
         *,
@@ -139,12 +147,12 @@ class RoomLightingOwnershipJournal:
     ) -> OwnershipSnapshot:
         moment = self._now_ms() if at is None else at
         record = OwnershipSnapshot(target_id, OwnershipSource.AUTO, confirmed, moment)
-        self._append(record)
+        self._append(room_id, record)
         self._dirty = True
         return record
 
-    def _append(self, record: OwnershipSnapshot) -> None:
-        bucket = self._records.setdefault(record.target_id, [])
+    def _append(self, room_id: str, record: OwnershipSnapshot) -> None:
+        bucket = self._records.setdefault((room_id, record.target_id), [])
         bucket.append(record)
         if len(bucket) > self._max_records:
             del bucket[: len(bucket) - self._max_records]
@@ -154,24 +162,55 @@ class RoomLightingOwnershipJournal:
             record
             for bucket in self._records.values()
             for record in bucket
-        )
+        ) + tuple(self._legacy_records)
+
+    def has_legacy(self) -> bool:
+        return bool(self._legacy_records or self._legacy_manual_off)
+
+    def migrate_legacy(self, rooms_targets: Mapping[str, Iterable[str]]) -> None:
+        """Attach legacy target-id-only evidence to its room.
+
+        Old payloads were keyed by target id alone. The room is resolved from
+        the current room configs; a legacy id that matches several rooms is
+        copied to each so no evidence is lost.
+        """
+
+        if not self.has_legacy():
+            return
+        owned = {
+            room_id: set(target_ids)
+            for room_id, target_ids in rooms_targets.items()
+        }
+        for record in self._legacy_records:
+            for room_id, target_ids in owned.items():
+                if record.target_id in target_ids:
+                    self._append(room_id, record)
+        for target_id, moment in self._legacy_manual_off.items():
+            for room_id, target_ids in owned.items():
+                if target_id in target_ids:
+                    self._manual_off[(room_id, target_id)] = moment
+        self._legacy_records = []
+        self._legacy_manual_off = {}
+        self._dirty = True
 
     def snapshots_for(
-        self, target_ids: Iterable[str]
+        self, room_id: str, target_ids: Iterable[str]
     ) -> tuple[OwnershipSnapshot, ...]:
         wanted = set(target_ids)
         return tuple(
             record
-            for target_id, bucket in self._records.items()
-            if target_id in wanted
+            for (record_room, target_id), bucket in self._records.items()
+            if record_room == room_id and target_id in wanted
             for record in bucket
         )
 
-    def last_manual_off_at(self, target_ids: Iterable[str]) -> int | None:
+    def last_manual_off_at(
+        self, room_id: str, target_ids: Iterable[str]
+    ) -> int | None:
         moments = [
-            self._manual_off[target_id]
+            self._manual_off[(room_id, target_id)]
             for target_id in target_ids
-            if target_id in self._manual_off
+            if (room_id, target_id) in self._manual_off
         ]
         return max(moments) if moments else None
 
@@ -180,14 +219,32 @@ class RoomLightingOwnershipJournal:
             "version": OWNERSHIP_STORAGE_VERSION,
             "records": [
                 {
+                    "roomId": room_id,
                     "targetId": record.target_id,
                     "source": record.source.value,
                     "confirmed": record.confirmed,
                     "at": record.at,
                 }
-                for record in self.snapshots()
+                for (room_id, _), bucket in self._records.items()
+                for record in bucket
+            ]
+            + [
+                {
+                    "targetId": record.target_id,
+                    "source": record.source.value,
+                    "confirmed": record.confirmed,
+                    "at": record.at,
+                }
+                for record in self._legacy_records
             ],
-            "manualOff": dict(self._manual_off),
+            "manualOff": [
+                {"roomId": room_id, "targetId": target_id, "at": moment}
+                for (room_id, target_id), moment in self._manual_off.items()
+            ]
+            + [
+                {"targetId": target_id, "at": moment}
+                for target_id, moment in self._legacy_manual_off.items()
+            ],
         }
 
     def restore(self, payload: object) -> None:
@@ -195,6 +252,8 @@ class RoomLightingOwnershipJournal:
 
         self._records = {}
         self._manual_off = {}
+        self._legacy_records = []
+        self._legacy_manual_off = {}
         if not isinstance(payload, Mapping):
             self._dirty = False
             return
@@ -202,10 +261,16 @@ class RoomLightingOwnershipJournal:
         if isinstance(raw_records, (list, tuple)):
             for raw in raw_records:
                 record = _ownership_record(raw)
-                if record is not None:
-                    self._append(record)
+                if record is None:
+                    continue
+                room_id = raw.get("roomId") if isinstance(raw, Mapping) else None
+                if isinstance(room_id, str) and room_id:
+                    self._append(room_id, record)
+                else:
+                    self._legacy_records.append(record)
         raw_manual_off = payload.get("manualOff")
         if isinstance(raw_manual_off, Mapping):
+            # Legacy format: {targetId: moment}.
             for target_id, moment in raw_manual_off.items():
                 if (
                     isinstance(target_id, str)
@@ -213,7 +278,23 @@ class RoomLightingOwnershipJournal:
                     and type(moment) is int
                     and moment >= 0
                 ):
-                    self._manual_off[target_id] = moment
+                    self._legacy_manual_off[target_id] = moment
+        elif isinstance(raw_manual_off, (list, tuple)):
+            for raw in raw_manual_off:
+                if not isinstance(raw, Mapping):
+                    continue
+                room_id = raw.get("roomId")
+                target_id = raw.get("targetId")
+                moment = raw.get("at")
+                if (
+                    isinstance(room_id, str)
+                    and room_id
+                    and isinstance(target_id, str)
+                    and target_id
+                    and type(moment) is int
+                    and moment >= 0
+                ):
+                    self._manual_off[(room_id, target_id)] = moment
         self._dirty = False
 
 
@@ -281,7 +362,7 @@ class RoomLightingRuntime:
         self._state_provider = state_provider or RoomLightingHaStateProvider(
             now_ms=now_ms,
             ownership_provider=lambda config: self._ownership.snapshots_for(
-                config.devices.light_target_ids
+                config.room_id, config.devices.light_target_ids
             ),
             protection_provider=self._protection_for,
             unobserved_since_provider=lambda: self._unobserved_since,
@@ -296,8 +377,7 @@ class RoomLightingRuntime:
         self._interval_seconds = max(1, int(interval_seconds))
         self._configs: dict[str, RoomLightingConfig] = {}
         self._rooms_by_entity: EntityRooms = {}
-        self._targets_by_entity: dict[str, str] = {}
-        self._room_by_target: dict[str, str] = {}
+        self._targets_by_entity: dict[str, tuple[str, str]] = {}
         self._executing_entities: set[str] = set()
         self._unsubscribers: list[Callable[[], None]] = []
         self._lock = asyncio.Lock()
@@ -348,6 +428,14 @@ class RoomLightingRuntime:
         configs = await self._service.async_list_configs()  # type: ignore[attr-defined]
         self._configs = {config.room_id: config for config in configs}
         self._rebuild_index()
+        # Legacy journals were keyed by target id only; attach them to rooms
+        # now that the room/target mapping is known.
+        self._ownership.migrate_legacy(
+            {
+                room_id: config.devices.light_target_ids
+                for room_id, config in self._configs.items()
+            }
+        )
         try:
             entities = tuple(sorted(self._rooms_by_entity))
             if entities and self._track_state_changes is not None:
@@ -531,24 +619,28 @@ class RoomLightingRuntime:
         service = str(data.get("service") or "")
         service_data = data.get("service_data")
         for entity_id in _entity_ids(service_data):
-            target_id = self._targets_by_entity.get(entity_id)
-            if target_id is None:
+            target = self._targets_by_entity.get(entity_id)
+            if target is None:
                 continue
+            room_id, target_id = target
             moment = self._now_ms()
             if entity_id in self._executing_entities:
-                self._ownership.record_auto(target_id, moment, confirmed=True)
+                self._ownership.record_auto(
+                    room_id, target_id, moment, confirmed=True
+                )
             else:
                 # Conservative and intentional: a foreign light/switch call is
                 # attributed to a person even when the caller is another
                 # automation (Node-RED, a scene or a script). Manual intent must
                 # win over the automatic branch until the protection releases.
                 self._ownership.record_manual(
+                    room_id,
                     target_id,
                     moment,
                     confirmed=True,
                     turned_off=service in _MANUAL_OFF_SERVICES,
                 )
-                self._absence.pop(self._room_by_target.get(target_id), None)
+                self._absence.pop(room_id, None)
             self._schedule_ownership_save()
 
     # -- device triggers ---------------------------------------------------
@@ -734,6 +826,7 @@ class RoomLightingRuntime:
             for target_id in target_ids:
                 target = config.devices.target(target_id)
                 self._ownership.record_manual(
+                    config.room_id,
                     target_id,
                     moment,
                     confirmed=True,
@@ -846,7 +939,7 @@ class RoomLightingRuntime:
                     self._executing_entities.discard(entity_id)
             if _receipt_confirmed(receipt):
                 self._ownership.record_auto(
-                    command.target_id, moment, confirmed=True
+                    config.room_id, command.target_id, moment, confirmed=True
                 )
                 self._schedule_ownership_save()
         await self._persist_ownership()
@@ -855,8 +948,7 @@ class RoomLightingRuntime:
 
     def _rebuild_index(self) -> None:
         rooms_by_entity: EntityRooms = {}
-        targets_by_entity: dict[str, str] = {}
-        room_by_target: dict[str, str] = {}
+        targets_by_entity: dict[str, tuple[str, str]] = {}
         targets: dict[str, object] = {}
         for config in self._configs.values():
             for sensor in config.devices.sensors:
@@ -866,15 +958,16 @@ class RoomLightingRuntime:
                     )
             for target in config.devices.light_targets:
                 targets[target.id] = target
-                room_by_target[target.id] = config.room_id
                 if target.entity_id:
                     rooms_by_entity.setdefault(target.entity_id, set()).add(
                         config.room_id
                     )
-                    targets_by_entity[target.entity_id] = target.id
+                    targets_by_entity[target.entity_id] = (
+                        config.room_id,
+                        target.id,
+                    )
         self._rooms_by_entity = rooms_by_entity
         self._targets_by_entity = targets_by_entity
-        self._room_by_target = room_by_target
         update = getattr(self._executor, "update_targets", None)
         if callable(update):
             update(targets)
@@ -883,7 +976,8 @@ class RoomLightingRuntime:
         if not config.manual_off_protection.enabled:
             return ProtectionSnapshot()
         started_at = self._ownership.last_manual_off_at(
-            target.id for target in config.devices.light_targets
+            config.room_id,
+            (target.id for target in config.devices.light_targets),
         )
         if started_at is None:
             return ProtectionSnapshot()
