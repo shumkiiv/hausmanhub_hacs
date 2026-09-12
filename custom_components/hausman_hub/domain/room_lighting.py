@@ -1414,14 +1414,17 @@ def config_to_payload(config: RoomLightingConfig) -> dict[str, object]:
 
 
 def config_entity_ids(config: RoomLightingConfig) -> tuple[str, ...]:
-    """Return every physical entity id referenced by one room configuration."""
+    """Return the control entity ids referenced by one room configuration.
+
+    Only control entities are returned: light targets, the power switch and
+    wireless switches. Sensors are intentionally excluded, because a shared
+    presence, motion or illuminance sensor is legitimate shared infrastructure,
+    while a control entity must belong to a single room.
+    """
 
     if not isinstance(config, RoomLightingConfig):
         raise RoomLightingViolation("room lighting config is required")
     entities: list[str] = []
-    for sensor in config.devices.sensors:
-        if sensor.entity_id is not None:
-            entities.append(sensor.entity_id)
     for target in config.devices.light_targets:
         if target.entity_id is not None:
             entities.append(target.entity_id)
@@ -1437,11 +1440,11 @@ def config_entity_ids(config: RoomLightingConfig) -> tuple[str, ...]:
 def room_lighting_entity_collisions(
     configs: Iterable[RoomLightingConfig],
 ) -> tuple[str, ...]:
-    """Return readable messages for entity ids shared by different rooms.
+    """Return readable messages for control entity ids shared by different rooms.
 
-    One physical entity must belong to a single room: a shared sensor, light
-    target, power switch or wireless switch would otherwise be silently
-    overwritten by the runtime index.
+    Only control entities are checked: a light target, power switch or wireless
+    switch must belong to a single room, because the runtime indexes it
+    one-to-one. Shared sensors are allowed.
     """
 
     owners: dict[str, str] = {}
