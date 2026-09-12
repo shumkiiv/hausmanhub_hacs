@@ -1032,12 +1032,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "reason": status.get("stage", "binding"),
             }
 
+    from .tambur_runtime_api import (
+        async_ensure_tambur_runtime_gate,
+        register_tambur_runtime_api,
+    )
+
+    tambur_runtime_gate = await async_ensure_tambur_runtime_gate(
+        hass, entry.entry_id
+    )
+    register_tambur_runtime_api(hass, entry.entry_id)
+    if not tambur_runtime_gate.enabled:
+        _LOGGER.warning(
+            "Tambur legacy runtime is deactivated at setup: %s",
+            tambur_runtime_gate.reason or "operator request",
+        )
     if tambur_room_migration is not None and smart_switch_adapter is not None:
         tambur_room_startup = TamburRoomStartupCoordinator(
             scenario_service,
             tambur_room_migration,
             _async_activate_tambur_runtime,
             status_publisher=_publish_tambur_status,
+            runtime_gate=tambur_runtime_gate,
         )
         entry.async_on_unload(tambur_room_startup.cancel)
         await tambur_room_startup.async_start()
@@ -1170,6 +1185,7 @@ async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     from .tablet_power_api import clear_tablet_power_api
     from .manual_light_off_protection_api import clear_manual_light_off_protection_api
     from .room_lighting_api import clear_room_lighting_api
+    from .tambur_runtime_api import clear_tambur_runtime_api
 
     clear_event_stream(hass, entry.entry_id)
     clear_voice_greeting(hass, entry.entry_id)
@@ -1178,6 +1194,7 @@ async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     clear_tablet_power_api(hass)
     clear_manual_light_off_protection_api(hass)
     clear_room_lighting_api(hass)
+    clear_tambur_runtime_api(hass)
     clear_climate_api(hass, entry.entry_id)
 
     try:
@@ -1212,6 +1229,7 @@ async def _close_running_duplicate_hausmanhub_entries(
     from .tablet_power_api import clear_tablet_power_api
     from .manual_light_off_protection_api import clear_manual_light_off_protection_api
     from .room_lighting_api import clear_room_lighting_api
+    from .tambur_runtime_api import clear_tambur_runtime_api
 
     loaded_entries = tuple(hass.config_entries.async_loaded_entries(domain))
     for loaded_entry in loaded_entries:
@@ -1223,6 +1241,7 @@ async def _close_running_duplicate_hausmanhub_entries(
         clear_tablet_power_api(hass)
         clear_manual_light_off_protection_api(hass)
         clear_room_lighting_api(hass)
+        clear_tambur_runtime_api(hass)
         clear_climate_api(hass, loaded_entry.entry_id)
     for loaded_entry in loaded_entries:
         await hass.config_entries.async_unload(loaded_entry.entry_id)
@@ -1294,6 +1313,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .tablet_power_api import clear_tablet_power_api
     from .manual_light_off_protection_api import clear_manual_light_off_protection_api
     from .room_lighting_api import clear_room_lighting_api
+    from .tambur_runtime_api import clear_tambur_runtime_api
 
     safe_device_command_lifecycle = hass.data.get("hausman_hub", {}).get(
         "safe_device_command_lifecycle"
@@ -1321,6 +1341,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         clear_tablet_power_api(hass)
         clear_manual_light_off_protection_api(hass)
         clear_room_lighting_api(hass)
+        clear_tambur_runtime_api(hass)
         clear_climate_api(hass, entry.entry_id)
         from .panel import unregister_hausmanhub_panel
 

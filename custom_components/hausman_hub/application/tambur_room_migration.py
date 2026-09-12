@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 import hashlib
 import json
+import logging
 from typing import TYPE_CHECKING
 
 from .managed_switch_migration import (
@@ -28,6 +29,9 @@ from .smart_switch_bindings import SmartSwitchBindings
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 TAMBUR_SCENARIO_ID = "system-tambur-adaptive-controller"
@@ -805,11 +809,13 @@ class TamburRoomStartupCoordinator:
         activate: Callable[[TamburRuntimeScope], Awaitable[object]],
         *,
         status_publisher: Callable[[dict[str, str]], None] | None = None,
+        runtime_gate: object | None = None,
     ) -> None:
         self._service = service
         self._migration = migration
         self._activate = activate
         self._publish_status = status_publisher or (lambda _status: None)
+        self._runtime_gate = runtime_gate
         self._remove_observer: Callable[[], None] | None = None
         self._lock = asyncio.Lock()
         self._started = False
@@ -823,6 +829,15 @@ class TamburRoomStartupCoordinator:
         if self._started or self._cancelled:
             return
         self._started = True
+        if self._runtime_gate is not None and not bool(
+            getattr(self._runtime_gate, "enabled", True)
+        ):
+            reason = str(
+                getattr(self._runtime_gate, "reason", "") or "operator request"
+            )
+            _LOGGER.warning("Tambur legacy runtime deactivated: %s", reason)
+            self._publish_status({"state": "deactivated", "stage": "runtime"})
+            return
         add = getattr(self._service, "add_catalog_warmup_observer", None)
         if callable(add):
             self._remove_observer = add(self._async_catalog_snapshot)
