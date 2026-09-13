@@ -5,7 +5,11 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
-  workers: 2,
+  // Two workers run fine on a developer machine, but the exhaustive
+  // interaction audit opens a fresh document for every control. Running it in
+  // parallel with the shared-state tests exhausts the CI runner and makes the
+  // panel-open waits time out, so the release gate runs one worker.
+  workers: process.env.CI ? 1 : 2,
   reporter: process.env.CI
     ? [["line"], ["html", { open: "never" }]]
     : [["line"]],
