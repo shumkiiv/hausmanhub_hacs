@@ -123,14 +123,18 @@ def release_expired_manual(
     stable_absence_seconds: int,
     absence_confirmed: bool,
     absence_since: int | None,
+    release_mode: str = "timer_and_absence",
 ) -> bool:
     """Whether an expired manual-off protection releases manual ownership.
 
     The transition only fires when the newest record is a confirmed manual
-    action, the minimum interval elapsed and a stable absence was already
-    confirmed *after* the manual off. A historical absence that predates the
-    manual action must not release the protection. It is a pure predicate: the
-    caller still requires a new event before turning light on.
+    action and the minimum interval elapsed. ``timer_only`` releases on the
+    timer alone: the owner rule for such rooms is that a short protection
+    interval returns everything to automatic after the light is switched off.
+    Every other mode additionally requires a stable absence confirmed *after*
+    the manual action; a historical absence that predates it must not release
+    the protection. It is a pure predicate: the caller still requires a new
+    event before turning light on.
     """
 
     latest = latest_ownership(records, target_id)
@@ -140,6 +144,8 @@ def release_expired_manual(
         return False
     if now - latest.at < minimum_interval_seconds * 1000:
         return False
+    if release_mode == "timer_only":
+        return True
     if not absence_confirmed or absence_since is None:
         return False
     if absence_since < latest.at:

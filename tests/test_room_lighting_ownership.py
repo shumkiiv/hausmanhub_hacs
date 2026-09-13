@@ -192,3 +192,35 @@ def test_release_expired_manual_requires_timer_and_stable_absence() -> None:
         absence_confirmed=True,
         absence_since=650_000,
     )
+
+
+def test_timer_only_releases_without_absence_evidence() -> None:
+    """A short timer-only room returns to auto right after the light is off.
+
+    The shower owner rule is explicit: manual protection applies while the
+    person owns the light, and once it is switched off the short interval
+    returns everything to automatic, even when the absence was never observed
+    (a restart or a stale presence sensor must not hold the light forever).
+    """
+
+    records = [_record(OwnershipSource.MANUAL, 1_000)]
+    assert release_expired_manual(
+        records,
+        "light_main",
+        now=20_000,
+        minimum_interval_seconds=15,
+        stable_absence_seconds=15,
+        absence_confirmed=False,
+        absence_since=None,
+        release_mode="timer_only",
+    )
+    assert not release_expired_manual(
+        records,
+        "light_main",
+        now=10_000,
+        minimum_interval_seconds=15,
+        stable_absence_seconds=15,
+        absence_confirmed=False,
+        absence_since=None,
+        release_mode="timer_only",
+    )

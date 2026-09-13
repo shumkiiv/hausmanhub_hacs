@@ -512,6 +512,7 @@ def _evaluate_target(
                 stable_absence_seconds=context.protection.stable_absence_seconds,
                 absence_confirmed=effective_absence,
                 absence_since=effective_absence_since,
+                release_mode=context.protection.release_mode,
             )
         )
         if not released:
