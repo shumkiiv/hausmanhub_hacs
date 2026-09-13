@@ -1172,3 +1172,41 @@ def test_night_light_min_on_seconds_holds_then_turns_off() -> None:
     assert due_mirror is not None
     assert due_mirror.commands
     assert due_mirror.commands[0].reason is DecisionReason.DIMMING
+
+
+def test_unhealthy_lux_sensor_does_not_turn_the_light_off() -> None:
+    """A faulty illumination sensor keeps the light instead of darkening a room."""
+
+    now = _at(22, 0)
+    illumination = {
+        "sensor": "sensor.demo_lux",
+        "calibration": {"offset": 0, "multiplier": 1},
+        "hysteresis": 5,
+        "minLux": 0,
+        "maxLux": 20000,
+        "thresholds": [],
+        "failClosed": True,
+    }
+    context = _ctx(
+        now,
+        presence=SensorState.OFF,
+        presence_at=now - 900_000,
+        lights=(_light("light_main", SensorState.ON, now - 900_000, brightness=80),),
+        ownership=(_auto("light_main", now - 1_200_000),),
+        sensors=(
+            _presence(SensorState.OFF, now - 900_000),
+            SensorSnapshot(
+                sensor_id="sensor_demo_lux",
+                kind=SensorKind.ILLUMINANCE,
+                state=SensorState.ON,
+                last_changed=now,
+                lux=None,
+                lux_healthy=False,
+            ),
+        ),
+    )
+    decision = evaluate_room_lighting(_config(illumination=illumination), context)
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.commands == ()
+    assert any(skip.reason is SkipReason.LUX_FAIL_CLOSED for skip in main.skips)
