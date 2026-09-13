@@ -1,0 +1,164 @@
+/* Room lighting settings editor, styled like the existing Hausman screens. */
+
+.rle-screen {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  gap: 12px;
+  color: var(--hmh-text, #1f2733);
+}
+
+.rle-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.rle-back,
+.rle-nav-item,
+.rle-save,
+.rle-reload {
+  min-height: 44px;
+  min-width: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--hmh-border, rgba(31, 39, 51, 0.14));
+  background: var(--hmh-surface, #ffffff);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.rle-back:focus-visible,
+.rle-nav-item:focus-visible,
+.rle-save:focus-visible,
+.rle-reload:focus-visible {
+  outline: 2px solid var(--hmh-accent, #d79a3b);
+  outline-offset: 2px;
+}
+
+.rle-title h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.rle-subtitle,
+.rle-hint,
+.rle-device {
+  margin: 0;
+  opacity: 0.72;
+  font-size: 0.85rem;
+}
+
+.rle-live {
+  margin: 0 0 0 auto;
+  font-size: 0.85rem;
+  min-height: 1.2em;
+}
+
+.rle-body {
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.rle-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: sticky;
+  top: 12px;
+}
+
+.rle-nav-item {
+  text-align: left;
+  padding: 8px 10px;
+}
+
+.rle-nav-item.is-active {
+  border-color: var(--hmh-accent, #d79a3b);
+  box-shadow: inset 3px 0 0 var(--hmh-accent, #d79a3b);
+}
+
+.rle-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.rle-decision {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--hmh-surface-muted, rgba(31, 39, 51, 0.05));
+  font-size: 0.9rem;
+}
+
+.rle-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rle-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--hmh-border, rgba(31, 39, 51, 0.12));
+  background: var(--hmh-surface, #ffffff);
+}
+
+.rle-row strong {
+  font-weight: 600;
+}
+
+.rle-issues {
+  margin: 0;
+  padding-left: 18px;
+  color: #b3402f;
+  font-size: 0.9rem;
+}
+
+.rle-conflict {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(215, 154, 59, 0.14);
+  border: 1px solid rgba(215, 154, 59, 0.5);
+}
+
+.rle-save-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  position: sticky;
+  bottom: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--hmh-surface, #ffffff);
+  border: 1px solid var(--hmh-border, rgba(31, 39, 51, 0.12));
+}
+
+.rle-save-state {
+  margin-right: auto;
+  font-size: 0.9rem;
+}
+
+.rle-reload[hidden] {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .rle-body {
+    grid-template-columns: 1fr;
+  }
+
+  .rle-nav {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}

@@ -25,7 +25,7 @@ KNOWN_FRONTEND_ASSET_NAMES = (
     "error-taxonomy", "feedback", "first-run-draft", "harness-intents", "hero-room-navigation", "home-sections", "intercom",
     "inventory-duplicates", "kiosk", "library-hero", "light-protection", "lighting-side", "lighting", "media-device", "media-overview",
     "media-side", "modal", "navigation", "notice", "overview-events-modal", "overview-hero-state", "overview-side", "overview-utility-cards",
-    "overview", "pagination", "panel", "power-links", "rollout", "room-climate-sources", "room-device-groups", "room-icons", "room-lighting", "room-setup",
+    "overview", "pagination", "panel", "power-links", "rollout", "room-climate-sources", "room-device-groups", "room-icons", "room-lighting", "room-lighting-editor", "room-setup",
     "rooms-side", "rooms", "scenario-ai", "scenario-badges", "scenario-bulk", "scenario-catalog", "scenario-device-picker",
     "scenario-editor-scroll", "scenario-extensions", "scenario-fields", "scenario-icons", "scenario-node-red", "scenario-rooms", "scenario-state",
     "scenarios", "security-overview", "settings-profile", "settings-rooms", "settings", "switch", "technical-log", "tokens", "ui-state",
