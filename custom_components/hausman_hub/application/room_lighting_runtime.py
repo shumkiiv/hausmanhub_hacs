@@ -425,6 +425,7 @@ class RoomLightingRuntime:
         self._configs: dict[str, RoomLightingConfig] = {}
         self._rooms_by_entity: EntityRooms = {}
         self._targets_by_entity: dict[str, tuple[str, str]] = {}
+        self._power_by_entity: dict[str, str] = {}
         self._executing_actions: dict[str, str] = {}
         self._unsubscribers: list[Callable[[], None]] = []
         self._lock = asyncio.Lock()
@@ -697,6 +698,10 @@ class RoomLightingRuntime:
         service = str(data.get("service") or "")
         service_data = data.get("service_data")
         for entity_id in _entity_ids(service_data):
+            power_room = self._power_by_entity.get(entity_id)
+            if power_room is not None:
+                self._record_power_manual(power_room, entity_id, service)
+                continue
             target = self._targets_by_entity.get(entity_id)
             if target is None:
                 continue
@@ -725,6 +730,38 @@ class RoomLightingRuntime:
             )
             self._absence.pop(room_id, None)
             self._schedule_ownership_save()
+
+    def _record_power_manual(self, room_id: str, entity_id: str, service: str) -> None:
+        """Attribute a manual room-power switch change to the whole room.
+
+        The room power switch feeds one or more light targets and Home
+        Assistant does not expose which ones, so every target of the room is
+        attributed. This is the core guard against the race where a manual
+        switch-off is immediately overridden by the automatic branch: a
+        manual power-off starts the room manual-off protection, and
+        ``_dispatch`` refuses to re-power the room while it is active.
+        """
+
+        config = self._configs.get(room_id)
+        if config is None:
+            return
+        if self._executing_actions.get(entity_id) == service:
+            # This runtime is issuing the power call itself.
+            return
+        turned_off = service == "turn_off" or (
+            service == "toggle" and self._entity_is_on(entity_id)
+        )
+        moment = self._now_ms()
+        for target in config.devices.light_targets:
+            self._ownership.record_manual(
+                room_id,
+                target.id,
+                moment,
+                confirmed=True,
+                turned_off=turned_off,
+            )
+        self._absence.pop(room_id, None)
+        self._schedule_ownership_save()
 
     # -- device triggers ---------------------------------------------------
 
@@ -1005,9 +1042,21 @@ class RoomLightingRuntime:
             return
         power = config.devices.power_switch
         power_entity = power.entity_id if power is not None else None
+        protection = self._protection_for(config)
+        auto_on_blocked = protection.blocks_auto_on(
+            now=moment,
+            absence_proven=protection.absence_confirmed,
+            absence_since=protection.absence_since,
+        )
         for command in decision.commands:
             if not self._running:
                 return
+            if command.action is not LightAction.TURN_OFF and auto_on_blocked:
+                # Core race guard: a manual switch-off owns the room until its
+                # protection window releases. The automatic branch must never
+                # re-power a light or turn a target back on right after a
+                # person switched it off.
+                continue
             if (
                 power_entity is not None
                 and command.action is not LightAction.TURN_OFF
@@ -1018,10 +1067,13 @@ class RoomLightingRuntime:
                 ensure_power = getattr(self._executor, "async_power_on", None)
                 powered = False
                 if callable(ensure_power):
+                    self._executing_actions[power_entity] = "turn_on"
                     try:
                         powered = bool(await ensure_power(self._hass, power_entity))
                     except Exception:  # noqa: BLE001 - keep the room isolated
                         powered = False
+                    finally:
+                        self._executing_actions.pop(power_entity, None)
                 if not powered:
                     _LOGGER.warning(
                         "room lighting power switch is still off; "
@@ -1101,6 +1153,7 @@ class RoomLightingRuntime:
     def _rebuild_index(self) -> None:
         rooms_by_entity: EntityRooms = {}
         targets_by_entity: dict[str, tuple[str, str]] = {}
+        power_by_entity: dict[str, str] = {}
         targets: dict[str, object] = {}
         # One physical entity must belong to one room. A collision is reported
         # explicitly instead of silently overwriting the first room's owner.
@@ -1119,6 +1172,7 @@ class RoomLightingRuntime:
                 rooms_by_entity.setdefault(power.entity_id, set()).add(
                     config.room_id
                 )
+                power_by_entity.setdefault(power.entity_id, config.room_id)
             for target in config.devices.light_targets:
                 targets[target.id] = target
                 if target.entity_id:
@@ -1131,6 +1185,7 @@ class RoomLightingRuntime:
                     )
         self._rooms_by_entity = rooms_by_entity
         self._targets_by_entity = targets_by_entity
+        self._power_by_entity = power_by_entity
         update = getattr(self._executor, "update_targets", None)
         if callable(update):
             update(targets)

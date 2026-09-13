@@ -24,7 +24,19 @@ async function failClimateAction(panel, error, receipt) {
     await panel._load();
   }
   panel._notice = policy.safeMessage;
-  panel._error = true;
+  /* A received server answer is not a connection loss. A rejected or
+     unconfirmed command must keep the panel online: the offline banner is
+     reserved for a real transport failure where no HTTP response arrived.
+     A successful snapshot refresh already clears ``_error`` in ``_load``. */
+  if (!receipt && !hasHttpStatus(error)) {
+    panel._error = true;
+  }
+}
+
+function hasHttpStatus(error) {
+  if (!error || typeof error !== "object") return false;
+  const status = Number(error.status !== undefined ? error.status : error.status_code);
+  return Number.isInteger(status) && status > 0;
 }
 
 export async function synchronizeClimate(panel) {
