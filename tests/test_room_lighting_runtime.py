@@ -1747,11 +1747,36 @@ async def test_own_command_state_report_is_not_attributed_as_manual() -> None:
 
     await runtime.start(hass, "entry")
     try:
-        runtime._command_grace["light.demo_main"] = runtime._now_ms()
+        runtime._command_grace["light.demo_main"] = ("turn_off", runtime._now_ms())
         hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
         runtime._state_event(SimpleNamespace(data={"entity_id": "light.demo_main"}))
 
         assert runtime._ownership.last_manual_off_at(_ROOM_ID, {"light_main"}) is None
+    finally:
+        await runtime.stop()
+
+
+async def test_automatic_turn_on_does_not_mask_a_manual_off() -> None:
+    """A recent automatic on must not swallow the person's switch-off."""
+
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    hass.states.set("light.demo_main", "on", {"brightness": 153}, last_changed=_NOW_DT)
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=RoomLightingHaExecutor()
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        # Our own command was turn_on; the person then switches the light off.
+        runtime._command_grace["light.demo_main"] = ("turn_on", runtime._now_ms())
+        hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+        runtime._state_event(SimpleNamespace(data={"entity_id": "light.demo_main"}))
+
+        assert (
+            runtime._ownership.last_manual_off_at(_ROOM_ID, {"light_main"})
+            is not None
+        )
     finally:
         await runtime.stop()
 

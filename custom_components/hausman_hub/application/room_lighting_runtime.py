@@ -431,7 +431,7 @@ class RoomLightingRuntime:
         self._targets_by_entity: dict[str, tuple[str, str]] = {}
         self._power_by_entity: dict[str, str] = {}
         self._target_last_state: dict[str, str] = {}
-        self._command_grace: dict[str, int] = {}
+        self._command_grace: dict[str, tuple[str, int]] = {}
         self._executing_actions: dict[str, str] = {}
         self._unsubscribers: list[Callable[[], None]] = []
         self._lock = asyncio.Lock()
@@ -668,9 +668,15 @@ class RoomLightingRuntime:
         if previous is None or previous != "on" or state != "off":
             return
         moment = self._now_ms()
-        commanded_at = self._command_grace.get(entity_id)
-        if commanded_at is not None and moment - commanded_at < COMMAND_GRACE_MS:
-            # This transition is the delayed report of our own command.
+        commanded = self._command_grace.get(entity_id)
+        if (
+            commanded is not None
+            # Only our own turn-off can explain an observed off report. A
+            # recent automatic turn-on must never mask a person switching the
+            # light off right after the automation turned it on.
+            and commanded[0] == "turn_off"
+            and moment - commanded[1] < COMMAND_GRACE_MS
+        ):
             return
         room_id, target_id = target
         self._ownership.record_manual(
@@ -1112,7 +1118,7 @@ class RoomLightingRuntime:
                 powered = False
                 if callable(ensure_power):
                     self._executing_actions[power_entity] = "turn_on"
-                    self._command_grace[power_entity] = self._now_ms()
+                    self._command_grace[power_entity] = ("turn_on", self._now_ms())
                     try:
                         powered = bool(await ensure_power(self._hass, power_entity))
                     except Exception:  # noqa: BLE001 - keep the room isolated
@@ -1129,7 +1135,7 @@ class RoomLightingRuntime:
             entity_id = target.entity_id if target is not None else None
             if entity_id is not None:
                 self._executing_actions[entity_id] = _planned_service_name(command)
-                self._command_grace[entity_id] = self._now_ms()
+                self._command_grace[entity_id] = (_planned_service_name(command), self._now_ms())
             try:
                 receipt = await self._executor.execute(  # type: ignore[attr-defined]
                     self._hass, command
