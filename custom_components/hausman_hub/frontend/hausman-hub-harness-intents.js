@@ -12,6 +12,7 @@ export const HARNESS_INTENT_RULES = [
   [".lighting-room-search input", "lighting:search", "ui-only"],
   [".lighting-room-chip", "lighting:filter", "ui-only"],
   [".lighting-room-card", "lighting:room", "ui-only"],
+  [".lighting-room-configure", "lighting:room-configure", "ui-only"],
   [".lighting-room-power", "lighting:room-power", "blocked"],
   ["#hausman-lighting .inventory-device-summary", "lighting:device", "ui-only"],
   [".lighting-side-action", "lighting:side-action", "blocked"],

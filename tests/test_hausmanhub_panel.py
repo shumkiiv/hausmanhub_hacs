@@ -46,6 +46,30 @@ def test_full_gate_modules_emit_harness_keys() -> None:
         source = (frontend / module).read_text(encoding="utf-8")
         assert "data-harness-key" in source or "dataset.harnessKey" in source
         assert "data-harness-intent" in source or "dataset.harnessIntent" in source
+
+
+def test_room_lighting_configure_control_is_classified_and_styled_in_shadow() -> None:
+    frontend = PANEL_JS.parent
+    lighting = (frontend / "hausman-hub-lighting.js").read_text(encoding="utf-8")
+    intents = (frontend / "hausman-hub-harness-intents.js").read_text(encoding="utf-8")
+    editor_css = frontend / "hausman-hub-room-lighting-editor.css"
+    room_lighting_css = (frontend / "hausman-hub-room-lighting.css").read_text(encoding="utf-8")
+    manifest = json.loads(
+        (ROOT / "qa" / "full-functional" / "hacs-interactions.json").read_text(encoding="utf-8")
+    )
+
+    # The "Настроить" action must be a classified harness control, not a raw
+    # span without an intent: the exhaustive audit fails on unclassified sites.
+    assert '[".lighting-room-configure", "lighting:room-configure", "ui-only"]' in intents
+    assert "lighting:room-configure" in {item["key"] for item in manifest["interaction_intents"]}
+    # Only a real room.id may open the editor; the name fallback is forbidden.
+    assert "openRoomLightingSettings(panel, room.id, name)" in lighting
+    assert "room.id || room.roomId" not in lighting
+    # The screen styles must resolve inside the panel shadow DOM through the
+    # existing panel.css -> rooms.css -> room-lighting.css import chain.
+    assert '@import url("./hausman-hub-room-lighting-editor.css?v=1.52.275")' in room_lighting_css
+    assert editor_css.is_file()
+    assert ".rls-screen" in editor_css.read_text(encoding="utf-8")
 HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 ROOM_DEVICE_GROUPS_JS = PANEL_JS.with_name("hausman-hub-room-device-groups.js")
@@ -91,6 +115,8 @@ LIBRARY_HERO_CSS = PANEL_JS.with_name("hausman-hub-library-hero.css")
 CLIMATE_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-climate-overview.js")
 CLIMATE_OVERVIEW_CSS = PANEL_JS.with_name("hausman-hub-climate-overview.css")
 LIGHTING_CSS = PANEL_JS.with_name("hausman-hub-lighting.css")
+ROOM_LIGHTING_CSS = PANEL_JS.with_name("hausman-hub-room-lighting.css")
+ROOM_LIGHTING_EDITOR_CSS = PANEL_JS.with_name("hausman-hub-room-lighting-editor.css")
 LIGHT_PROTECTION_JS = PANEL_JS.with_name("hausman-hub-light-protection.js")
 LIGHT_PROTECTION_CSS = PANEL_JS.with_name("hausman-hub-light-protection.css")
 LIBRARY_HERO_CONSUMERS = (
@@ -1098,6 +1124,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         control_channel_styles = CONTROL_CHANNEL_CSS.read_text(encoding="utf-8")
         button_styles = BUTTONS_CSS.read_text(encoding="utf-8")
         lighting_styles = LIGHTING_CSS.read_text(encoding="utf-8")
+        room_lighting_styles = ROOM_LIGHTING_CSS.read_text(encoding="utf-8")
 
         self.assertNotIn("?v=1.52.227", styles)
         self.assertLessEqual(len(styles.encode("utf-8")), MAX_PANEL_CSS_BYTES)

@@ -4,6 +4,7 @@ import { lightingSideIcon, openLightingTurnOffConfirm, renderLightingSide } from
 import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.270";
 import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.270";
 import { renderManualLightProtectionStatus } from "./hausman-hub-light-protection.js?v=1.52.270";
+import { openRoomLightingSettings, renderRoomLightingSettingsScreen } from "./hausman-hub-room-lighting-editor.js?v=1.52.275";
 
 const LIGHTING_EXCLUSIONS = [
   "ambilight", "глазок", "домофон", "пульт", "очистител", "аквариум", "aquarium",
@@ -315,7 +316,19 @@ function renderLightingRoomCard(panel, page, rooms, name, roomDevices, deps) {
   }
   card.appendChild(footer);
   card.addEventListener("click", () => openRoomSheet(panel, page, name, roomDevices, deps));
-  return card;
+  // "Настроить" is a sibling button, not a nested widget: the room card stays
+  // a single click target and the accessibility audit gains no nested control.
+  // Only a real room id opens the editor; the server rejects a name fallback.
+  const shell = el("article", "lighting-room-card-shell");
+  shell.appendChild(card);
+  if (room && room.id) {
+    const configure = el("button", "lighting-room-configure", "Настроить");
+    configure.type = "button";
+    setAttr(configure, "aria-label", `Настроить свет комнаты ${name}`);
+    configure.addEventListener("click", () => openRoomLightingSettings(panel, room.id, name));
+    shell.appendChild(configure);
+  }
+  return shell;
 }
 
 const ROOM_FILTERS = [
@@ -431,6 +444,10 @@ function renderLightingDevices(panel, container, rooms, devices, deps) {
 
 export function renderLightingOverview(panel, container, deps) {
   container.innerHTML = "";
+  if (panel._lightingRoomEditor) {
+    renderRoomLightingSettingsScreen(panel, container, deps);
+    return;
+  }
   const dashboard = panel._homeDashboard;
   if (!dashboard) {
     const empty = deps.el("section", "card empty-state lighting-empty-state");

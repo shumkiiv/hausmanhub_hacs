@@ -1,5 +1,7 @@
 /* Room lighting editor block inside the room card. */
 
+@import url("./hausman-hub-room-lighting-editor.css?v=1.52.275");
+
 .room-lighting-editor {
   display: flex;
   flex-direction: column;
@@ -186,4 +188,187 @@
 
 .rle-live-step.is-failed .rle-live-status {
   color: var(--error-color, #b3261e);
+}
+
+/* Full-size screen variant and seven canonical sections. */
+
+.room-lighting-editor.is-screen {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.rle-body {
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.rle-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: sticky;
+  top: 12px;
+}
+
+.rle-nav-item {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.16));
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rle-nav-item.is-active {
+  border-color: var(--primary-color, #4f8cff);
+  background: color-mix(in srgb, var(--primary-color, #4f8cff) 12%, transparent);
+}
+
+.rle-nav-item:focus-visible,
+.rle-save-bar .rle-button:focus-visible,
+.rle-conflict .rle-button:focus-visible,
+.rle-advanced summary:focus-visible,
+.rle-technical summary:focus-visible {
+  outline: 2px solid var(--primary-color, #4f8cff);
+  outline-offset: 2px;
+}
+
+.rle-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.rle-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.rle-decision {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+  background: var(--card-background-color, rgba(255, 255, 255, 0.6));
+}
+
+.rle-save-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  position: sticky;
+  bottom: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.16));
+  background: var(--card-background-color, #fff);
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.08);
+}
+
+.rle-save-bar .rle-button {
+  min-height: 40px;
+}
+
+.rle-save-state {
+  margin-right: auto;
+  font-size: 13px;
+}
+
+.rle-conflict {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--warning-color, #d79a3b);
+  background: color-mix(in srgb, var(--warning-color, #d79a3b) 12%, transparent);
+}
+
+.rle-conflict p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.rle-issues {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--error-color, #b3261e);
+  font-size: 13px;
+}
+
+.rle-preview-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.rle-preview-step {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+
+.rle-preview-step small {
+  opacity: 0.75;
+}
+
+.rle-advanced,
+.rle-technical {
+  display: block;
+  border-radius: 10px;
+  border: 1px dashed var(--divider-color, rgba(0, 0, 0, 0.2));
+}
+
+.rle-advanced summary,
+.rle-technical summary {
+  padding: 8px 10px;
+  font-size: 13px;
+  opacity: 0.8;
+  cursor: pointer;
+}
+
+.rle-details-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+
+.rle-device-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+}
+
+@media (max-width: 900px) {
+  .rle-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rle-nav {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
 }

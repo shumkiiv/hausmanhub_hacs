@@ -245,6 +245,65 @@ return msg;`;
         settings: { globalPolicy: { enabled: true, minimumIntervalSeconds: 600, releaseMode: "timer_and_absence", stableAbsenceSeconds: 30, extendOnRepeatedManualOff: true, noSensorFallback: "timer_only", protectedScope: "profile", allowManualRelease: true }, roomOverrides: {}, profileOverrides: {}, profiles: [] },
         protections: [{ roomId: "shower", profileId: "shower-main", lightIds: ["light.shower_main"], startedAt: "2026-09-03T12:00:00Z", notBefore: "2026-09-03T12:10:00Z", remainingMinimumSeconds: 600, absenceSince: null, effectivePolicy: { enabled: true, minimumIntervalSeconds: 600, releaseMode: "timer_and_absence", stableAbsenceSeconds: 30, extendOnRepeatedManualOff: true, noSensorFallback: "timer_only", protectedScope: "profile", allowManualRelease: true }, effectivePolicySource: "global", policyFingerprint: "f7c3a5d0d650f9d4c1a355d9e11a5d4ce0099709908dd15f6a515ee93a5b6c9a", reason: "manual_off", attributionSource: "manual_command", attributionId: "harness", revision: 1, state: "active" }],
       };
+      panel._roomLightingHarness = {
+        config: {
+          contract: { name: "hausman-hub-room-lighting-config", version: 1 },
+          roomId: "office", name: "Кабинет", version: 3, updatedAt: 1789000000,
+          templateId: "day_profile", autoAdopt: true, commandsEnabled: false,
+          devices: {
+            sensors: [
+              { id: "sensor_motion", name: "Датчик движения", kind: "motion", entityId: "binary_sensor.office_motion" },
+            ],
+            light_targets: [
+              { id: "target_office_main", name: "Люстра", kind: "light", role: "main", groupId: "main", entityId: "light.office_chandelier", brightness: true, color_temperature: true, autoAdoptOverride: null, autoControl: true },
+              { id: "target_office_line1", name: "Выключатель", kind: "switch", role: "other", groupId: null, entityId: "switch.office_1", brightness: false, color_temperature: false, autoAdoptOverride: null, autoControl: true },
+            ],
+            power_switch: null,
+            wireless_switches: [
+              { id: "sw_office", name: "Выключатель у двери", entityId: "sensor.office_button", buttons: ["left"], pressTypes: ["single"] },
+            ],
+            selectAll: false,
+          },
+          schedule: [
+            { id: "sch_morning", title: "Утро", when: { daysOfWeek: "all", holiday: false, anchor: { kind: "fixed", time: "07:00", offsetMinutes: 0 } }, targets: { lightTargets: ["target_office_main"], groupIds: [], roles: [] }, how: { brightness: 70, colorTemperature: 4000, fade: true, mode: "on_presence", minOnSeconds: 0 } },
+          ],
+          switchBindings: [
+            { switchId: "sw_office", button: "left", pressType: "single", action: "toggle", targets: { lightTargets: ["target_office_main"], groupIds: [], roles: [] } },
+          ],
+          illumination: { sensor: "sensor.office_lux", calibration: { offset: 0, multiplier: 1 }, hysteresis: 5, minLux: 0, maxLux: 20000, thresholds: [], failClosed: true },
+          timers: { absence_seconds: 300, turn_off_seconds: 3600 },
+          behaviors: { onlyWhenDark: false, respectManualOff: true, restoreOwnershipAfterRestart: true },
+          dimming: { enabled: true, onAbsence: true, fadeSeconds: 20, targetPercent: 0 },
+          manualOffProtection: { enabled: true, minimumIntervalSeconds: 600, releaseMode: "timer_and_absence", stableAbsenceSeconds: 30, priority: "manual_above_auto" },
+          awayBehavior: { mode: "none" },
+          overrides: { default_brightness: null, default_color_temperature: null },
+        },
+        templates: {
+          contract: { name: "hausman-hub-room-lighting-template-catalog", version: 1 },
+          defaultTemplateId: "day_profile",
+          templates: [
+            { id: "day_profile", title: "Дневной профиль" },
+            { id: "night_profile", title: "Ночной профиль" },
+          ],
+        },
+        catalog: {
+          contract: { name: "hausman-hub-room-lighting-editor-catalog", version: 1 },
+          roomId: "office",
+          devices: [
+            { id: "office_chandelier", entityId: "light.office_chandelier", label: "Люстра кабинет", physicalDeviceLabel: "Люстра", channelLabel: "Основной канал", kind: "light", available: true, supportsBrightness: true, supportsColorTemperature: true, gestures: [] },
+            { id: "office_motion", entityId: "binary_sensor.office_motion", label: "Датчик движения", physicalDeviceLabel: "Датчик движения", channelLabel: null, kind: "sensor", available: true, supportsBrightness: false, supportsColorTemperature: false, gestures: [] },
+          ],
+        },
+        status: {
+          contract: { name: "hausman-hub-room-lighting-status", version: 1 },
+          sources: [
+            { source_id: "target_office_main", name: "Люстра", kind: "light", role: "main", state: "off", ownership: "none", manual_protection_active: false },
+          ],
+          illumination: { healthy: true, lux: 120, sensorState: "ok", failClosed: false },
+        },
+        failPut: false,
+        conflictOnPut: false,
+      };
       window.__hausmanHubHarnessCalls = [];
       const cloneHarnessValue = (value) => JSON.parse(JSON.stringify(value ?? null));
       panel._hass = {
@@ -392,6 +451,56 @@ return msg;`;
           }
           if (method === "POST" && path === "hausman_hub/v1/device-actions") {
             return { status: "confirmed", receipt: { confirmed: true } };
+          }
+          const lightingMatch = String(path).match(/^hausman_hub\/v1\/rooms\/([^/]+)\/lighting(?:\/(.+))?$/);
+          if (lightingMatch) {
+            const harness = panel._roomLightingHarness;
+            const action = lightingMatch[2] || "config";
+            if (method === "GET" && action === "config") {
+              if (!harness.config) { const error = new Error("not found"); error.status = 404; throw error; }
+              return cloneHarnessValue(harness.config);
+            }
+            if (method === "PUT" && action === "config") {
+              if (harness.failPut) { const error = new Error("save failed"); error.status = 500; throw error; }
+              if (harness.conflictOnPut || payload.version !== harness.config.version) {
+                const error = new Error("revision conflict");
+                error.status = 409;
+                error.body = {
+                  contract: { name: "hausman-hub-error", version: 1 },
+                  code: "revision_conflict",
+                  message: "Настройки изменились на другом клиенте.",
+                  details: { expectedRevision: payload.version, actualRevision: harness.config.version },
+                };
+                throw error;
+              }
+              harness.config = {
+                ...cloneHarnessValue(payload),
+                version: harness.config.version + 1,
+                updatedAt: harness.config.updatedAt + 1,
+              };
+              return cloneHarnessValue(harness.config);
+            }
+            if (method === "GET" && action === "templates") return cloneHarnessValue(harness.templates);
+            if (method === "GET" && action === "editor-catalog") return cloneHarnessValue(harness.catalog);
+            if (method === "GET" && action === "status") return cloneHarnessValue(harness.status);
+            if (method === "POST" && action === "preview") {
+              return {
+                contract: { name: "hausman-hub-room-lighting-preview", version: 1 },
+                safe: true,
+                summary: "Черновик проверен. Предпросмотр не сохраняет настройку и не отправляет команд устройству.",
+                steps: [
+                  { section: "overview", title: "Событие", detail: "Проверяем черновик по текущему состоянию комнаты.", status: "ok" },
+                  { section: "review-save", title: "Предпросмотр", detail: "Черновик безопасен, команды устройству не отправляются.", status: "ok" },
+                ],
+                sectionIssues: [],
+              };
+            }
+            if (method === "POST" && action === "templates/apply") {
+              const applied = cloneHarnessValue(harness.config);
+              applied.templateId = payload.templateId;
+              applied.version = 1;
+              return applied;
+            }
           }
           return {};
         },

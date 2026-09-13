@@ -1,0 +1,88 @@
+/* Room lighting settings screen frame opened from the "Освещение" tab.
+   Only the outer frame lives here; the editor itself keeps the `.rle-*`
+   styles from hausman-hub-room-lighting.css. The `.rls-*` prefix is unique
+   to this screen so the editor is never duplicated. */
+
+.rls-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  color: var(--hmh-text, #e7ecf3);
+}
+
+.rls-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--hmh-border, rgba(255, 255, 255, 0.12));
+  border-radius: 16px;
+  background: var(--lighting-card-surface, var(--hmh-surface, #12171d));
+}
+
+.rls-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid color-mix(in srgb, var(--hmh-accent, #4f8cff) 45%, var(--hmh-border, #2f3845));
+  border-radius: 12px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.rls-back:hover,
+.rls-back:focus-visible {
+  border-color: var(--hmh-accent, #4f8cff);
+}
+
+.rls-back:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--hmh-accent, #4f8cff) 62%, transparent);
+  outline-offset: 2px;
+}
+
+.rls-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.rls-heading h2 {
+  margin: 0;
+  font-size: clamp(20px, 2.2vw, 28px);
+}
+
+.rls-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  opacity: 0.7;
+}
+
+.rls-hint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  opacity: 0.75;
+}
+
+.rls-error {
+  margin: 0;
+  font-size: 14px;
+  color: var(--error-color, #b3261e);
+}
+
+.rls-body {
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .rls-header {
+    flex-direction: column;
+  }
+}

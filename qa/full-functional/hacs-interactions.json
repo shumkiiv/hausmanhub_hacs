@@ -907,6 +907,14 @@
       }
     },
     {
+      "key": "lighting:room-configure",
+      "state": "shared",
+      "intent": "ui-only",
+      "effect": {
+        "kind": "dom-or-value-change"
+      }
+    },
+    {
       "key": "lighting:room-power",
       "state": "shared",
       "intent": "blocked"
@@ -1809,6 +1817,6 @@
   ],
   "provenance": {
     "version": "1.52.275",
-    "content_digest": "33c9baaffe994ae46233dd4769a01fef66b8f45767d5b3f76ad7151349e0117a"
+    "content_digest": "a2c9a11db91bf094ba4f232fd362b29dc8d7891cdabbe5919c83ccc78ca0c33b"
   }
 }
