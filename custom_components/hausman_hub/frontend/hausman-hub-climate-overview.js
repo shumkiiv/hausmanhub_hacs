@@ -1,11 +1,11 @@
 /* Climate control surface shared with the tablet information architecture. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.265";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.265";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.265";
-import { pendingOperationId, requiresSnapshotRefresh, resolveApiError, resolveClimateReceipt } from "./hausman-hub-error-taxonomy.js?v=1.52.265";
-import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.265";
-import { renderClimateSide } from "./hausman-hub-climate-side.js?v=1.52.265";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.266";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.266";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.266";
+import { pendingOperationId, requiresSnapshotRefresh, resolveApiError, resolveClimateReceipt } from "./hausman-hub-error-taxonomy.js?v=1.52.266";
+import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.266";
+import { renderClimateSide } from "./hausman-hub-climate-side.js?v=1.52.266";
 
 const CLIMATE_ACTION_API = "hausman_hub/v1/climate/actions";
 const CLIMATE_OPERATION_API = "hausman_hub/v1/climate/operations";
@@ -24,7 +24,19 @@ async function failClimateAction(panel, error, receipt) {
     await panel._load();
   }
   panel._notice = policy.safeMessage;
-  panel._error = true;
+  /* A received server answer is not a connection loss. A rejected or
+     unconfirmed command must keep the panel online: the offline banner is
+     reserved for a real transport failure where no HTTP response arrived.
+     A successful snapshot refresh already clears ``_error`` in ``_load``. */
+  if (!receipt && !hasHttpStatus(error)) {
+    panel._error = true;
+  }
+}
+
+function hasHttpStatus(error) {
+  if (!error || typeof error !== "object") return false;
+  const status = Number(error.status !== undefined ? error.status : error.status_code);
+  return Number.isInteger(status) && status > 0;
 }
 
 export async function synchronizeClimate(panel) {

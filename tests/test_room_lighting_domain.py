@@ -545,25 +545,70 @@ def test_manual_protection_rejects_interval_below_fifteen_seconds() -> None:
         config_from_payload(payload)
 
 
-def test_config_entity_ids_lists_every_physical_entity() -> None:
+def test_config_entity_ids_lists_control_entities_only() -> None:
     config = config_from_payload(_payload())
     entities = config_entity_ids(config)
-    assert "binary_sensor.demo_presence" in entities
+
     assert "light.demo_main" in entities
     assert "switch.demo_spots" in entities
+    assert "switch.demo_power" in entities
+    assert "sensor.demo_wall_action" in entities
+    assert "binary_sensor.demo_presence" not in entities
+    assert "sensor.demo_lux" not in entities
 
 
-def test_entity_shared_by_two_rooms_is_a_collision() -> None:
-    first = config_from_payload(_payload())
+def _second_room_payload() -> dict[str, object]:
     other = _payload()
     other["roomId"] = "room_other"
     other["name"] = "Другая"
+    return other
+
+
+def test_shared_sensor_between_two_rooms_is_not_a_collision() -> None:
+    first = config_from_payload(_payload())
+    other = _second_room_payload()
+    # Only the sensors stay shared; every control entity is unique per room.
+    targets = other["devices"]["light_targets"]  # type: ignore[index]
+    targets[0]["entityId"] = "light.other_main"  # type: ignore[index]
+    targets[1]["entityId"] = "switch.other_spots"  # type: ignore[index]
+    other["devices"]["power_switch"]["entityId"] = "switch.other_power"  # type: ignore[index]
+    other["devices"]["wireless_switches"][0]["entityId"] = "sensor.other_wall_action"  # type: ignore[index]
     second = config_from_payload(other)
 
-    collisions = room_lighting_entity_collisions((first, second))
+    assert room_lighting_entity_collisions((first, second)) == ()
 
-    assert collisions
-    assert "binary_sensor.demo_presence" in collisions[0]
-    assert "room_demo_entry" in collisions[0]
-    assert "room_other" in collisions[0]
+
+def test_shared_light_target_between_two_rooms_is_a_collision() -> None:
+    first = config_from_payload(_payload())
+    second = config_from_payload(_second_room_payload())
+
+    collisions = room_lighting_entity_collisions((first, second))
+    joined = "; ".join(collisions)
+
+    assert "light.demo_main" in joined
+    assert "room_demo_entry" in joined
+    assert "room_other" in joined
+    assert "binary_sensor.demo_presence" not in joined
+    assert "sensor.demo_lux" not in joined
     assert not room_lighting_entity_collisions((first,))
+
+
+def test_shared_switch_target_and_power_switch_are_collisions() -> None:
+    first = config_from_payload(_payload())
+    second = config_from_payload(_second_room_payload())
+
+    collisions = room_lighting_entity_collisions((first, second))
+    joined = "; ".join(collisions)
+
+    assert "switch.demo_spots" in joined
+    assert "switch.demo_power" in joined
+
+    # A switch target that stays shared, while the rest is unique, still collides.
+    other = _second_room_payload()
+    other["devices"]["light_targets"][0]["entityId"] = "light.other_main"  # type: ignore[index]
+    other["devices"]["power_switch"]["entityId"] = "switch.other_power"  # type: ignore[index]
+    other["devices"]["wireless_switches"][0]["entityId"] = "sensor.other_wall_action"  # type: ignore[index]
+    third = config_from_payload(other)
+    assert "switch.demo_spots" in "; ".join(
+        room_lighting_entity_collisions((first, third))
+    )
