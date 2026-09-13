@@ -1852,3 +1852,74 @@ async def test_duplicate_entity_across_rooms_logs_a_warning(caplog) -> None:
         assert any("entity collision" in message for message in messages)
     finally:
         await runtime.stop()
+
+
+async def test_stale_turn_off_grace_does_not_mask_a_later_manual_off() -> None:
+    """The own-turn-off marker explains one report and is then consumed."""
+
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    hass.states.set("light.demo_main", "on", {"brightness": 153}, last_changed=_NOW_DT)
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=RoomLightingHaExecutor()
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        runtime._command_grace["light.demo_main"] = ("turn_off", runtime._now_ms())
+        # Our own off report consumes the marker.
+        hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+        runtime._state_event(SimpleNamespace(data={"entity_id": "light.demo_main"}))
+        # A person turns it on and off again inside the old window.
+        hass.states.set("light.demo_main", "on", last_changed=_NOW_DT)
+        runtime._state_event(SimpleNamespace(data={"entity_id": "light.demo_main"}))
+        hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+        runtime._state_event(SimpleNamespace(data={"entity_id": "light.demo_main"}))
+
+        assert (
+            runtime._ownership.last_manual_off_at(_ROOM_ID, {"light_main"})
+            is not None
+        )
+    finally:
+        await runtime.stop()
+
+
+async def test_physical_power_switch_off_blocks_re_power_and_turn_on() -> None:
+    """A wall switch cutting the room power counts as a manual off."""
+
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    hass.states.set(POWER_ENTITY, "on", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "on", {"brightness": 153}, last_changed=_NOW_DT)
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=True,
+        executor=RoomLightingHaExecutor(),
+        payload=_config_payload(power_switch_entity=POWER_ENTITY),
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        hass.services.calls.clear()
+        # The physical relay changes state without a Home Assistant call.
+        hass.states.set(POWER_ENTITY, "off", last_changed=_NOW_DT)
+        runtime._state_event(SimpleNamespace(data={"entity_id": POWER_ENTITY}))
+        await asyncio.gather(*hass.tasks)
+        assert (
+            runtime._ownership.last_manual_off_at(_ROOM_ID, {"light_main"})
+            is not None
+        )
+        # The light reports off because the power is gone; nothing may restore it.
+        hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+        runtime._state_event(SimpleNamespace(data={"entity_id": "light.demo_main"}))
+        await asyncio.gather(*hass.tasks)
+        power_on_calls = [
+            call
+            for call in hass.services.calls
+            if call[0] == "switch"
+            and call[1] == "turn_on"
+            and call[2].get("entity_id") == POWER_ENTITY
+        ]
+        assert power_on_calls == []
+    finally:
+        await runtime.stop()

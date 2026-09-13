@@ -486,7 +486,7 @@ class RoomLightingRuntime:
         # mistaken for a manual transition.
         self._target_last_state = {
             entity_id: self._entity_state(entity_id)
-            for entity_id in self._targets_by_entity
+            for entity_id in (*self._targets_by_entity, *self._power_by_entity)
         }
         # Legacy journals were keyed by target id only; attach them to rooms
         # now that the room/target mapping is known.
@@ -646,6 +646,7 @@ class RoomLightingRuntime:
         if not rooms:
             return
         self._observe_target_transition(entity_id)
+        self._observe_power_transition(entity_id)
         self._create_task(self.async_process(sorted(rooms)))
 
     def _observe_target_transition(self, entity_id: str) -> None:
@@ -677,6 +678,10 @@ class RoomLightingRuntime:
             and commanded[0] == "turn_off"
             and moment - commanded[1] < COMMAND_GRACE_MS
         ):
+            # Consume the marker: it explains this report only. Keeping it
+            # would mask a later real manual off inside the same window
+            # (a person switching the light off again after our own off).
+            self._command_grace.pop(entity_id, None)
             return
         room_id, target_id = target
         self._ownership.record_manual(
@@ -780,6 +785,35 @@ class RoomLightingRuntime:
             )
             self._absence.pop(room_id, None)
             self._schedule_ownership_save()
+
+    def _observe_power_transition(self, entity_id: str) -> None:
+        """Attribute a physical power-switch off without a service call.
+
+        A wall switch can cut the room power directly; Home Assistant then
+        reports only the state change. Without this the engine sees an
+        unpowered room and immediately restores power and turns the light on.
+        """
+
+        room_id = self._power_by_entity.get(entity_id)
+        if room_id is None:
+            return
+        state = self._entity_state(entity_id)
+        previous = self._target_last_state.get(entity_id)
+        self._target_last_state[entity_id] = state
+        if previous is None or previous != "on" or state != "off":
+            return
+        moment = self._now_ms()
+        commanded = self._command_grace.get(entity_id)
+        if (
+            commanded is not None
+            and commanded[0] == "turn_off"
+            and moment - commanded[1] < COMMAND_GRACE_MS
+        ):
+            self._command_grace.pop(entity_id, None)
+            return
+        if self._executing_actions.get(entity_id) == "turn_off":
+            return
+        self._record_power_manual(room_id, entity_id, "turn_off")
 
     def _record_power_manual(self, room_id: str, entity_id: str, service: str) -> None:
         """Attribute a manual room-power switch change to the whole room.
