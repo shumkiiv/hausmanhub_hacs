@@ -41,11 +41,11 @@ jobs:
         run: python3 tools/check_critical_coverage.py
       - name: Проверить интерфейс в браузере
         env:
-          QA_ARTIFACT_ROOT: ${{ github.workspace }}/hausman-browser-gate
+          QA_ARTIFACT_ROOT: ${{ runner.temp }}/hausman-browser-gate
         run: npm run test:browser
       - name: Проверить отчёт browser-gate
         env:
-          HACS_RUNTIME_REPORT: ${{ github.workspace }}/hausman-browser-gate/hacs-full-interaction-runtime.json
+          HACS_RUNTIME_REPORT: ${{ runner.temp }}/hausman-browser-gate/hacs-full-interaction-runtime.json
         run: python3 qa/full-functional/check_manifest.py
       - name: Сохранить отчёт browser-gate при ошибке
         if: failure()
@@ -55,6 +55,6 @@ jobs:
           path: |
             playwright-report/
             test-results/
-            hausman-browser-gate/hacs-full-interaction-runtime.json
+            ${{ runner.temp }}/hausman-browser-gate/hacs-full-interaction-runtime.json
           if-no-files-found: ignore
           retention-days: 7
