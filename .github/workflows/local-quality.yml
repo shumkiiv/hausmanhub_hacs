@@ -55,5 +55,6 @@ jobs:
           path: |
             playwright-report/
             test-results/
+            ${{ runner.temp }}/hausman-browser-gate/hacs-full-interaction-runtime.json
           if-no-files-found: ignore
           retention-days: 7

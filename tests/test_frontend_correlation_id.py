@@ -402,7 +402,10 @@ class FrontendCorrelationSurfacesTest(unittest.TestCase):
             device_actions_source,
         )
         self.assertIn('from "./hausman-hub-correlation.js?v=', climate_source)
-        self.assertEqual(5, climate_source.count("withCorrelationId(CLIMATE_ACTION_API"))
+        # Every climate action goes through the shared envelope helper, which is
+        # the only place that adds the correlation id.
+        self.assertEqual(1, climate_source.count("withCorrelationId(CLIMATE_ACTION_API"))
+        self.assertEqual(6, climate_source.count("climateActionRequest(panel,"))
         self.assertIn('from "./hausman-hub-correlation.js?v=', inventory_source)
         self.assertIn("withCorrelationId(DEVICE_MAINTENANCE_API", inventory_source)
         self.assertIn('from "./hausman-hub-correlation.js?v=', discovery_source)

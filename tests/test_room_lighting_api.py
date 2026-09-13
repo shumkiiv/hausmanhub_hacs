@@ -8,11 +8,11 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import os
 from pathlib import Path
 import sys
 import unittest
 
-import pytest
 from jsonschema import Draft202012Validator
 
 from tests.test_local_summary_access import (
@@ -27,14 +27,24 @@ from tests.test_local_summary_access import (
 PACKAGE_MODULE = "custom_components.hausman_hub"
 API_MODULE = f"{PACKAGE_MODULE}.room_lighting_api"
 _CONTRACT_DIR = Path(
-    "/home/ivsh/projects/HausmanHub/worktrees/codex-room-lighting-contract-2026-09-11/schemas/v1"
+    os.environ.get(
+        "HAUSMANHUB_CONTRACT_DIR",
+        "/home/ivsh/projects/HausmanHub/worktrees/"
+        "codex-room-lighting-contract-2026-09-11/schemas/v1",
+    )
 )
 
 
 def _validate(schema_name: str, payload: object) -> None:
     path = _CONTRACT_DIR / schema_name
     if not path.is_file():
-        pytest.skip(f"room lighting contract schema is not available: {schema_name}")
+        # A missing contract checkout must skip, not error. ``pytest.skip``
+        # raises ``_pytest.outcomes.Skipped``, which unittest reports as an
+        # error when raised inside ``asyncio.run``. ``unittest.SkipTest`` is
+        # honoured by both runners.
+        raise unittest.SkipTest(
+            f"room lighting contract schema is not available: {schema_name}"
+        )
     schema = json.loads(path.read_text(encoding="utf-8"))
     Draft202012Validator(schema).validate(payload)
 

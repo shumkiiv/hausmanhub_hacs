@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 import re
+import unittest
 from datetime import datetime, time, timezone
 
 import pytest
@@ -33,14 +35,17 @@ _TZ = timezone.utc
 _CYRILLIC = re.compile(r"[А-Яа-яЁё]")
 _NOW = int(datetime(2026, 9, 11, 10, 0, tzinfo=_TZ).timestamp() * 1000)
 _CONTRACT_SCHEMA = Path(
-    "/home/ivsh/projects/HausmanHub/worktrees/codex-room-lighting-contract-2026-09-11/"
-    "schemas/v1/room-lighting-live-test.schema.json"
-)
+    os.environ.get(
+        "HAUSMANHUB_CONTRACT_DIR",
+        "/home/ivsh/projects/HausmanHub/worktrees/"
+        "codex-room-lighting-contract-2026-09-11/schemas/v1",
+    )
+) / "room-lighting-live-test.schema.json"
 
 
 def _validate_schema(payload: dict[str, object]) -> None:
     if not _CONTRACT_SCHEMA.is_file():
-        pytest.skip("room lighting contract schema is not available")
+        raise unittest.SkipTest("room lighting contract schema is not available")
     schema = json.loads(_CONTRACT_SCHEMA.read_text(encoding="utf-8"))
     Draft202012Validator(schema).validate(payload)
 

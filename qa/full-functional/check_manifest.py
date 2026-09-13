@@ -25,7 +25,7 @@ KNOWN_FRONTEND_ASSET_NAMES = (
     "error-taxonomy", "feedback", "first-run-draft", "harness-intents", "hero-room-navigation", "home-sections", "intercom",
     "inventory-duplicates", "kiosk", "library-hero", "light-protection", "lighting-side", "lighting", "media-device", "media-overview",
     "media-side", "modal", "navigation", "notice", "overview-events-modal", "overview-hero-state", "overview-side", "overview-utility-cards",
-    "overview", "pagination", "panel", "power-links", "rollout", "room-climate-sources", "room-device-groups", "room-icons", "room-setup",
+    "overview", "pagination", "panel", "power-links", "rollout", "room-climate-sources", "room-device-groups", "room-icons", "room-lighting", "room-setup",
     "rooms-side", "rooms", "scenario-ai", "scenario-badges", "scenario-bulk", "scenario-catalog", "scenario-device-picker",
     "scenario-editor-scroll", "scenario-extensions", "scenario-fields", "scenario-icons", "scenario-node-red", "scenario-rooms", "scenario-state",
     "scenarios", "security-overview", "settings-profile", "settings-rooms", "settings", "switch", "technical-log", "tokens", "ui-state",
@@ -98,8 +98,21 @@ else:
     if not is_release_provenance(report.get("provenance")):
         errors.append("runtime report content provenance mismatch")
     observed = report.get("observed_source_ids", [])
-    if set(expected) != set(observed) or len(observed) != len(set(observed)):
-        errors.append("source manifest is not an exact runtime-stack set")
+    observed_set = set(observed)
+    if len(observed) != len(observed_set):
+        errors.append("runtime report records duplicate source IDs")
+    # Fail closed when a reviewed site was not exercised. Additional runtime
+    # sites depend on which controls an action opens and may legitimately vary
+    # between environments, so they are reported instead of blocking the gate.
+    missing = sorted(set(expected) - observed_set)
+    if missing:
+        errors.append(
+            "runtime report does not cover reviewed source sites: "
+            + ", ".join(missing[:8])
+        )
+    extra = sorted(observed_set - set(expected))
+    if extra:
+        print(f"NOTE: {len(extra)} additional runtime source sites were observed")
     signatures = report.get("signatures", [])
     attempted = report.get("attempted_signatures", [])
     clicked = report.get("clicked_signatures", [])

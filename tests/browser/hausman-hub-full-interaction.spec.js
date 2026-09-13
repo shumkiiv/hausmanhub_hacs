@@ -40,13 +40,13 @@ const ALLOWED_LOCAL_REQUEST_PATHS = new Set([
   "/api/hausman_hub/panel/assets/hero_room_bedroom_night.webp", "/api/hausman_hub/panel/assets/hero_room_office_night.webp",
   "/api/hausman_hub/panel/hausman-hub-panel.css", "/tests/visual/hausman-hub-panel-harness.html",
   ...[
-    "area-binding", "buttons", "catalog", "climate-overview", "climate-side", "command-feedback", "control-channel", "correlation",
+    "area-binding", "away-settings", "buttons", "catalog", "climate-overview", "climate-side", "command-feedback", "control-channel", "correlation",
     "device-actions", "device-bindings", "device-card", "device-controls", "device-discovery", "device-features", "device-inventory",
     "device-maintenance", "device-property-names", "devices-overview", "diagnostics", "energy-chart", "energy-meter", "energy",
     "error-taxonomy", "feedback", "first-run-draft", "harness-intents", "hero-room-navigation", "home-sections", "intercom",
     "inventory-duplicates", "kiosk", "library-hero", "light-protection", "lighting-side", "lighting", "media-device", "media-overview",
     "media-side", "modal", "navigation", "notice", "overview-events-modal", "overview-hero-state", "overview-side", "overview-utility-cards",
-    "overview", "pagination", "panel", "power-links", "rollout", "room-climate-sources", "room-device-groups", "room-icons", "room-setup",
+    "overview", "pagination", "panel", "power-links", "rollout", "room-climate-sources", "room-device-groups", "room-icons", "room-lighting", "room-setup",
     "rooms-side", "rooms", "scenario-ai", "scenario-badges", "scenario-bulk", "scenario-catalog", "scenario-device-picker",
     "scenario-editor-scroll", "scenario-extensions", "scenario-fields", "scenario-icons", "scenario-node-red", "scenario-rooms", "scenario-state",
     "scenarios", "security-overview", "settings-profile", "settings-rooms", "settings", "switch", "technical-log", "tokens", "ui-state",
@@ -452,7 +452,9 @@ function auditInit() {
       const match = frame.match(/(custom_components\/hausman_hub\/frontend\/[^?:)]+\.js)(?:\?[^:)]+)?:(\d+):(\d+)/);
       if (!match || /hausman-hub-full-interaction|panel-harness/.test(frame)) continue;
       // el() in panel.js is a factory, not the call site of the displayed control.
-      if (match[1].endsWith("hausman-hub-panel.js") && Number(match[2]) >= 168 && Number(match[2]) <= 174) continue;
+      // Match the function name instead of line numbers: the factory moved with
+      // unrelated edits and a stale range recorded the factory as a source site.
+      if (match[1].endsWith("hausman-hub-panel.js") && frame.includes("at el (")) continue;
       found.push({ path: match[1], line: Number(match[2]) });
     }
     if (!found.length) return null;
