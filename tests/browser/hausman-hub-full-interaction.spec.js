@@ -452,7 +452,9 @@ function auditInit() {
       const match = frame.match(/(custom_components\/hausman_hub\/frontend\/[^?:)]+\.js)(?:\?[^:)]+)?:(\d+):(\d+)/);
       if (!match || /hausman-hub-full-interaction|panel-harness/.test(frame)) continue;
       // el() in panel.js is a factory, not the call site of the displayed control.
-      if (match[1].endsWith("hausman-hub-panel.js") && Number(match[2]) >= 168 && Number(match[2]) <= 174) continue;
+      // Match the function name instead of line numbers: the factory moved with
+      // unrelated edits and a stale range recorded the factory as a source site.
+      if (match[1].endsWith("hausman-hub-panel.js") && frame.includes("at el (")) continue;
       found.push({ path: match[1], line: Number(match[2]) });
     }
     if (!found.length) return null;

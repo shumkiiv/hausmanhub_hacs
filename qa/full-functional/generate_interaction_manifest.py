@@ -9,6 +9,10 @@ ROOT = Path(__file__).resolve().parents[2]
 OUT = Path(__file__).with_name("hacs-interactions.json")
 from release_pin import provenance, is_release_provenance
 CONTROL = re.compile(r"\bel\(\s*['\"](button|input|select|textarea|a)['\"]|document\.createElement\(\s*['\"](button|input|select|textarea|a)['\"]")
+# The shared el() factory in panel.js calls document.createElement(tag). The
+# runtime stack can attribute a control to that factory line, so the observed
+# site is a real recorded construct even though the tag is a variable.
+FACTORY = re.compile(r"document\.createElement\(\s*tag\s*\)")
 EVENT = re.compile(r"\.addEventListener\(\s*['\"](click|change|input|submit)['\"]")
 SOURCE_ID = re.compile(r"^(custom_components/hausman_hub/frontend/[^:]+\.js):(\d+):(create|listener):(\d+)$")
 
@@ -18,7 +22,9 @@ def section_for(path: str) -> str:
 
 def source_construct(path: str, line: int, construct: str, ordinal: int) -> bool:
     text = (ROOT / path).read_text(encoding="utf-8").splitlines()[line - 1]
-    return len(CONTROL.findall(text) if construct == "create" else EVENT.findall(text)) >= ordinal
+    if construct == "create":
+        return len(CONTROL.findall(text)) >= ordinal or bool(FACTORY.search(text))
+    return len(EVENT.findall(text)) >= ordinal
 
 def load_interaction_intents() -> list[dict]:
     existing = json.loads(OUT.read_text(encoding="utf-8"))
