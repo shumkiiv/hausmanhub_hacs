@@ -13,7 +13,9 @@ import importlib
 import json
 import os
 from pathlib import Path
+import re
 import sys
+from types import SimpleNamespace
 import unittest
 
 from jsonschema import Draft202012Validator
@@ -276,6 +278,35 @@ class CriticalSensorNotificationServiceTest(unittest.TestCase):
             now=_NOW_SECONDS + 240,
         )
         self.assertEqual(1, len(missing))
+
+    def test_participants_drop_removed_sensor_but_keep_unobserved_one(self) -> None:
+        service = CriticalSensorNotificationService()
+        service.evaluate(
+            [_health(), _health(sensor_id="sensor_demo_removed")],
+            now=_NOW_SECONDS,
+        )
+        self.assertEqual(2, len(service.active()))
+
+        # A missing observation must not clear the fault: the sensor still
+        # exists in the configuration, so its entry stays with the same since.
+        unobserved = service.evaluate(
+            [],
+            now=_NOW_SECONDS + 60,
+            participants=[(ROOM_ID, "sensor_demo_presence")],
+        )
+        self.assertEqual(
+            ["sensor_demo_presence"], [item.sensor_id for item in unobserved]
+        )
+        self.assertEqual(_NOW_SECONDS, unobserved[0].since)
+
+        # Removing the sensor from every configuration drops its entry even
+        # though no fresh reading ever arrived.
+        removed = service.evaluate(
+            [],
+            now=_NOW_SECONDS + 120,
+            participants=[],
+        )
+        self.assertEqual((), removed)
 
     def test_non_critical_sensor_produces_nothing(self) -> None:
         config = config_from_payload(_light_payload(with_lux=True))
@@ -560,6 +591,67 @@ class CriticalSensorHealthExtractionTest(unittest.TestCase):
         )
         self.assertTrue(all(item.role is CriticalSensorRole.CLIMATE for item in active))
 
+    def test_maximum_length_room_id_keeps_every_window_notification(self) -> None:
+        observed_at = _NOW_MS
+        max_room_id = "room_" + "a" * 59
+        self.assertEqual(64, len(max_room_id))
+        long_room = ClimateRoom(
+            room_id=max_room_id,
+            name="Комната с длинным идентификатором",
+            window_entity_id="binary_sensor.long_window",
+        )
+        short_room = ClimateRoom(
+            room_id=ROOM_ID,
+            name=ROOM_NAME,
+            window_entity_id="binary_sensor.demo_window",
+        )
+        states = {
+            "binary_sensor.long_window": ClimateHaEntityState(
+                entity_id="binary_sensor.long_window",
+                state="unavailable",
+                attributes={},
+                last_updated_ms=observed_at,
+            ),
+            "binary_sensor.demo_window": ClimateHaEntityState(
+                entity_id="binary_sensor.demo_window",
+                state="unknown",
+                attributes={},
+                last_updated_ms=observed_at,
+            ),
+        }
+
+        class _StateView:
+            def entity_state(
+                self, entity_id: str
+            ) -> ClimateHaEntityState | None:
+                return states.get(entity_id)
+
+        inputs = climate_sensor_health_inputs(
+            ClimateRegistry(rooms=(long_room, short_room)),
+            _StateView(),
+            observed_at=observed_at,
+        )
+        active = CriticalSensorNotificationService().evaluate(
+            list(inputs), now=_NOW_SECONDS
+        )
+
+        # Before the guard the long synthetic id raised and the API silently
+        # dropped every climate notification. Both rooms must survive with a
+        # stable id that fits the contract pattern.
+        self.assertEqual({max_room_id, ROOM_ID}, {item.room_id for item in active})
+        self.assertEqual(2, len(active))
+        for item in active:
+            self.assertIsNotNone(
+                re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", item.sensor_id),
+                item.sensor_id,
+            )
+        by_room = {item.room_id: item for item in active}
+        self.assertEqual(f"{ROOM_ID}_window", by_room[ROOM_ID].sensor_id)
+        self.assertLessEqual(len(by_room[max_room_id].sensor_id), 64)
+        self.assertEqual(
+            CriticalSensorReason.UNAVAILABLE, by_room[max_room_id].reason
+        )
+
 
 class CriticalSensorNotificationsApiTest(unittest.TestCase):
     """The read-only GET evaluates live state and returns active faults."""
@@ -597,6 +689,7 @@ class CriticalSensorNotificationsApiTest(unittest.TestCase):
         self.service = RoomLightingService(_MemoryStore())
         self.presence_state = SensorState.UNKNOWN
         self.presence_last_changed = _NOW_MS
+        self.presence_observed = True
         self.api.register_critical_sensor_notification_api(self.hass)
         self.hass.data["hausman_hub"].update(
             {
@@ -608,8 +701,8 @@ class CriticalSensorNotificationsApiTest(unittest.TestCase):
         self.view = self.api.CriticalSensorNotificationsView(self.hass)
 
     def _context(self, _config: object) -> RoomLightingContext:
-        return _context(
-            sensors=(
+        sensors = (
+            (
                 SensorSnapshot(
                     "sensor_demo_presence",
                     SensorKind.PRESENCE,
@@ -617,7 +710,10 @@ class CriticalSensorNotificationsApiTest(unittest.TestCase):
                     self.presence_last_changed,
                 ),
             )
+            if self.presence_observed
+            else ()
         )
+        return _context(sensors=sensors)
 
     def test_get_returns_active_fault_and_keeps_since_on_repeat(self) -> None:
         async def flow() -> None:
@@ -654,6 +750,35 @@ class CriticalSensorNotificationsApiTest(unittest.TestCase):
 
         self.assertEqual(1, len(first.payload["notifications"]))
         self.assertEqual([], second.payload["notifications"])
+
+    def test_get_drops_a_removed_sensor_but_keeps_an_unobserved_one(self) -> None:
+        # An empty climate runtime completes the participant picture, so the
+        # view can prove that a configured key disappeared.
+        self.api.register_critical_sensor_notification_api(
+            self.hass,
+            climate_runtime=SimpleNamespace(registry=ClimateRegistry()),
+        )
+
+        async def flow() -> tuple[object, object, object]:
+            path = self.api.CRITICAL_SENSOR_NOTIFICATIONS_PATH
+            first = await self.view.get(_request(path))
+            self.presence_observed = False
+            unobserved = await self.view.get(_request(path))
+            payload = _light_payload()
+            payload["devices"]["sensors"] = []
+            await self.service.async_put_config(config_from_payload(payload))
+            removed = await self.view.get(_request(path))
+            return first, unobserved, removed
+
+        first, unobserved, removed = asyncio.run(flow())
+
+        self.assertEqual(1, len(first.payload["notifications"]))
+        self.assertEqual(1, len(unobserved.payload["notifications"]))
+        self.assertEqual(
+            first.payload["notifications"][0]["since"],
+            unobserved.payload["notifications"][0]["since"],
+        )
+        self.assertEqual([], removed.payload["notifications"])
 
     def test_get_rejects_a_non_local_request(self) -> None:
         request = FakeRequest(

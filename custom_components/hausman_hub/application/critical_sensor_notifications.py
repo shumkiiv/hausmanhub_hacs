@@ -10,13 +10,17 @@ directly or sends a physical command.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import replace
+import hashlib
 
 from ..domain.climate import (
+    ClimateDevice,
     ClimateDeviceKind,
+    ClimateEndpoint,
     ClimateEndpointRole,
     ClimateRegistry,
+    ClimateRoom,
 )
 from ..domain.critical_sensor_notification import (
     CriticalSensorHealth,
@@ -25,7 +29,7 @@ from ..domain.critical_sensor_notification import (
     CriticalSensorRole,
     build_critical_sensor_notification,
 )
-from ..domain.room_lighting import RoomLightingConfig, SensorKind
+from ..domain.room_lighting import RoomLightingConfig, RoomSensor, SensorKind
 from ..domain.room_lighting_engine import (
     EnginePolicy,
     RoomLightingContext,
@@ -46,6 +50,8 @@ _CLIMATE_SENSOR_ROLES = {
     ClimateDeviceKind.HUMIDITY_SENSOR: ClimateEndpointRole.HUMIDITY,
 }
 _WINDOW_HEALTHY_STATES = frozenset({"on", "off"})
+_MAX_STABLE_ID_LENGTH = 64
+_WINDOW_SENSOR_SUFFIX = "_window"
 
 
 class CriticalSensorNotificationServiceViolation(ValueError):
@@ -63,6 +69,7 @@ class CriticalSensorNotificationService:
         healths: Sequence[CriticalSensorHealth],
         *,
         now: int,
+        participants: Iterable[tuple[str, str]] | None = None,
     ) -> tuple[CriticalSensorNotification, ...]:
         """Apply one evaluation cycle and return the sorted active set.
 
@@ -70,8 +77,16 @@ class CriticalSensorNotificationService:
         (room, sensor) pair is not active yet. Repeating the same reason keeps
         the entry and its ``since``; a changed reason replaces the same entry
         without touching ``since``. A healthy input with ``reason=None`` is the
-        only signal allowed to clear an entry, so a missing or unknown reading
+        only reading allowed to clear an entry, so a missing or unknown reading
         can never drop a fault by accident.
+
+        ``participants`` is the full set of ``(room_id, sensor_id)`` keys that
+        still exist in the current light and climate configurations. When it is
+        given, an active entry whose key is absent is dropped even though no
+        fresh reading ever arrived: a sensor removed from the configuration
+        must not leave a notification forever. Keys that merely were not
+        observed this cycle stay active. ``None`` means the configuration could
+        not be read, so nothing is dropped automatically.
         """
 
         if type(now) is not int or now < 0:
@@ -110,6 +125,11 @@ class CriticalSensorNotificationService:
                     entity_id=health.entity_id,
                     reason=health.reason,
                 )
+        if participants is not None:
+            known = set(participants)
+            for key in tuple(self._active):
+                if key not in known:
+                    del self._active[key]
         return self.active()
 
     def active(self) -> tuple[CriticalSensorNotification, ...]:
@@ -156,20 +176,8 @@ def light_sensor_health_inputs(
         )
     engine_policy = policy or EnginePolicy.from_config(config)
     snapshots = {sensor.sensor_id: sensor for sensor in context.sensors}
-    used_illumination = (
-        config.illumination.sensor if config.illumination is not None else None
-    )
     result: list[CriticalSensorHealth] = []
-    for sensor in config.devices.sensors:
-        if sensor.entity_id is None:
-            continue
-        if (
-            sensor.kind is SensorKind.ILLUMINANCE
-            and sensor.entity_id != used_illumination
-        ):
-            # A configured lux sensor that feeds no illumination block is not
-            # part of the light decision and must never raise a critical fault.
-            continue
+    for sensor in _participating_light_sensors(config):
         snapshot = snapshots.get(sensor.id)
         if snapshot is None:
             # Not observed this cycle: no claim can be made, so the coordinator
@@ -204,6 +212,57 @@ def light_sensor_health_inputs(
             )
         )
     return tuple(result)
+
+
+def light_sensor_participant_keys(
+    config: RoomLightingConfig,
+    *,
+    state_lookup: StateLookup | None = None,
+) -> tuple[tuple[str, str], ...]:
+    """Return every (room, sensor) key the current light config still keeps.
+
+    The keys match the inputs ``light_sensor_health_inputs`` may produce. An
+    unobserved sensor still counts here, so its earlier fault stays active
+    until the sensor disappears from the configuration.
+    """
+
+    if not isinstance(config, RoomLightingConfig):
+        raise CriticalSensorNotificationServiceViolation(
+            "validated room lighting config is required"
+        )
+    keys = [
+        (config.room_id, sensor.id)
+        for sensor in _participating_light_sensors(config)
+    ]
+    power = config.devices.power_switch
+    if (
+        power is not None
+        and power.entity_id is not None
+        and state_lookup is not None
+    ):
+        keys.append((config.room_id, power.id))
+    return tuple(keys)
+
+
+def _participating_light_sensors(
+    config: RoomLightingConfig,
+) -> Iterator[RoomSensor]:
+    """Yield the configured sensors that take part in a light decision."""
+
+    used_illumination = (
+        config.illumination.sensor if config.illumination is not None else None
+    )
+    for sensor in config.devices.sensors:
+        if sensor.entity_id is None:
+            continue
+        if (
+            sensor.kind is SensorKind.ILLUMINANCE
+            and sensor.entity_id != used_illumination
+        ):
+            # A configured lux sensor that feeds no illumination block is not
+            # part of the light decision and must never raise a critical fault.
+            continue
+        yield sensor
 
 
 def _light_sensor_reason(
@@ -271,6 +330,70 @@ def climate_sensor_health_inputs(
             "observed_at must be non-negative milliseconds"
         )
     result: list[CriticalSensorHealth] = []
+    for room, device, endpoint in _participating_climate_devices(registry):
+        result.append(
+            CriticalSensorHealth(
+                room_id=room.room_id,
+                room_name=room.name,
+                role=CriticalSensorRole.CLIMATE,
+                sensor_id=device.device_id,
+                sensor_name=device.name,
+                entity_id=endpoint.entity_id,
+                reason=_climate_value_reason(
+                    states.entity_state(endpoint.entity_id), observed_at
+                ),
+            )
+        )
+    for room in registry.rooms:
+        if room.window_entity_id is None:
+            continue
+        result.append(
+            CriticalSensorHealth(
+                room_id=room.room_id,
+                room_name=room.name,
+                role=CriticalSensorRole.CLIMATE,
+                sensor_id=_climate_window_sensor_id(room.room_id),
+                sensor_name="Датчик открытия окна",
+                entity_id=room.window_entity_id,
+                reason=_climate_window_reason(
+                    states.entity_state(room.window_entity_id)
+                ),
+            )
+        )
+    return tuple(result)
+
+
+def climate_sensor_participant_keys(
+    registry: ClimateRegistry,
+) -> tuple[tuple[str, str], ...]:
+    """Return every (room, sensor) key the current climate registry keeps.
+
+    The keys match the inputs ``climate_sensor_health_inputs`` may produce,
+    including the synthetic window sensor id, so a removed climate room drops
+    its notifications without touching the other rooms.
+    """
+
+    if not isinstance(registry, ClimateRegistry):
+        raise CriticalSensorNotificationServiceViolation(
+            "validated climate registry is required"
+        )
+    keys = [
+        (room.room_id, device.device_id)
+        for room, device, _ in _participating_climate_devices(registry)
+    ]
+    keys.extend(
+        (room.room_id, _climate_window_sensor_id(room.room_id))
+        for room in registry.rooms
+        if room.window_entity_id is not None
+    )
+    return tuple(keys)
+
+
+def _participating_climate_devices(
+    registry: ClimateRegistry,
+) -> Iterator[tuple[ClimateRoom, ClimateDevice, ClimateEndpoint]]:
+    """Yield the room value sensors that take part in a climate decision."""
+
     for room in registry.rooms:
         for device in registry.devices:
             if device.room_id != room.room_id:
@@ -281,34 +404,26 @@ def climate_sensor_health_inputs(
             endpoint = device.endpoint(role)
             if endpoint is None:
                 continue
-            result.append(
-                CriticalSensorHealth(
-                    room_id=room.room_id,
-                    room_name=room.name,
-                    role=CriticalSensorRole.CLIMATE,
-                    sensor_id=device.device_id,
-                    sensor_name=device.name,
-                    entity_id=endpoint.entity_id,
-                    reason=_climate_value_reason(
-                        states.entity_state(endpoint.entity_id), observed_at
-                    ),
-                )
-            )
-        if room.window_entity_id is not None:
-            result.append(
-                CriticalSensorHealth(
-                    room_id=room.room_id,
-                    room_name=room.name,
-                    role=CriticalSensorRole.CLIMATE,
-                    sensor_id=f"{room.room_id}_window",
-                    sensor_name="Датчик открытия окна",
-                    entity_id=room.window_entity_id,
-                    reason=_climate_window_reason(
-                        states.entity_state(room.window_entity_id)
-                    ),
-                )
-            )
-    return tuple(result)
+            yield room, device, endpoint
+
+
+def _climate_window_sensor_id(room_id: str) -> str:
+    """Return a stable window sensor id that fits the stable-id bound.
+
+    ``f"{room_id}_window"`` can exceed the 64-character limit for a
+    maximum-length room id. Long ids keep a readable prefix and append a short
+    deterministic digest, so two different rooms cannot silently share one key
+    and a single long id can no longer drop every climate notification.
+    """
+
+    candidate = f"{room_id}{_WINDOW_SENSOR_SUFFIX}"
+    if len(candidate) <= _MAX_STABLE_ID_LENGTH:
+        return candidate
+    digest = hashlib.sha256(room_id.encode("utf-8")).hexdigest()[:8]
+    prefix_length = (
+        _MAX_STABLE_ID_LENGTH - len(digest) - len(_WINDOW_SENSOR_SUFFIX) - 1
+    )
+    return f"{room_id[:prefix_length]}_{digest}{_WINDOW_SENSOR_SUFFIX}"
 
 
 def _climate_value_reason(
@@ -349,5 +464,7 @@ __all__ = [
     "CriticalSensorNotificationServiceViolation",
     "StateLookup",
     "climate_sensor_health_inputs",
+    "climate_sensor_participant_keys",
     "light_sensor_health_inputs",
+    "light_sensor_participant_keys",
 ]
