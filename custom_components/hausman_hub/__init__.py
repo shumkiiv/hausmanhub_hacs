@@ -743,6 +743,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .room_lighting_api import register_room_lighting_api
 
     register_room_lighting_api(hass, entry.entry_id)
+    from .room_lighting_editor_api import (
+        register_room_lighting_editor_api,
+    )
+
+    register_room_lighting_editor_api(hass)
     from .application.room_lighting_runtime import (
         HomeAssistantRoomLightingOwnershipStore,
         RoomLightingRuntime,
@@ -802,6 +807,7 @@ async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     from .tablet_power_api import clear_tablet_power_api
     from .manual_light_off_protection_api import clear_manual_light_off_protection_api
     from .room_lighting_api import clear_room_lighting_api
+    from .room_lighting_editor_api import clear_room_lighting_editor_api
 
     clear_event_stream(hass, entry.entry_id)
     clear_voice_greeting(hass, entry.entry_id)
@@ -810,6 +816,7 @@ async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     clear_tablet_power_api(hass)
     clear_manual_light_off_protection_api(hass)
     clear_room_lighting_api(hass)
+    clear_room_lighting_editor_api(hass)
     clear_climate_api(hass, entry.entry_id)
 
     try:
@@ -844,6 +851,7 @@ async def _close_running_duplicate_hausmanhub_entries(
     from .tablet_power_api import clear_tablet_power_api
     from .manual_light_off_protection_api import clear_manual_light_off_protection_api
     from .room_lighting_api import clear_room_lighting_api
+    from .room_lighting_editor_api import clear_room_lighting_editor_api
 
     loaded_entries = tuple(hass.config_entries.async_loaded_entries(domain))
     for loaded_entry in loaded_entries:
@@ -855,6 +863,7 @@ async def _close_running_duplicate_hausmanhub_entries(
         clear_tablet_power_api(hass)
         clear_manual_light_off_protection_api(hass)
         clear_room_lighting_api(hass)
+        clear_room_lighting_editor_api(hass)
         clear_climate_api(hass, loaded_entry.entry_id)
     for loaded_entry in loaded_entries:
         await hass.config_entries.async_unload(loaded_entry.entry_id)
@@ -926,6 +935,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .tablet_power_api import clear_tablet_power_api
     from .manual_light_off_protection_api import clear_manual_light_off_protection_api
     from .room_lighting_api import clear_room_lighting_api
+    from .room_lighting_editor_api import clear_room_lighting_editor_api
 
     safe_device_command_lifecycle = hass.data.get("hausman_hub", {}).get(
         "safe_device_command_lifecycle"
@@ -953,6 +963,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         clear_tablet_power_api(hass)
         clear_manual_light_off_protection_api(hass)
         clear_room_lighting_api(hass)
+        clear_room_lighting_editor_api(hass)
         clear_climate_api(hass, entry.entry_id)
         from .panel import unregister_hausmanhub_panel
 

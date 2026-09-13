@@ -79,8 +79,8 @@ _SKIP_TEXT: dict[str, str] = {
 class EditorDevice:
     """One physical entity the editor may offer for a room."""
 
-    entity_id: str
     kind: str
+    entity_id: str | None = None
     user_label: str | None = None
     physical_device_label: str | None = None
     channel_label: str | None = None
@@ -121,7 +121,8 @@ class RoomLightingEditorService:
             used_labels.add(label)
             devices.append(
                 {
-                    "id": _device_id(device.entity_id),
+                    "id": _device_id(device),
+                    "entityId": device.entity_id,
                     "label": label,
                     "physicalDeviceLabel": device.physical_device_label
                     or label,
@@ -244,10 +245,15 @@ class RoomLightingEditorService:
         return config
 
 
-def _device_id(entity_id: str) -> str:
-    """Derive a stable, contract-safe id from one entity id."""
+def _device_id(device: "EditorDevice") -> str:
+    """Derive a stable, contract-safe id from one entity id or channel."""
 
-    candidate = entity_id.split(".", 1)[-1].lower()
+    source = device.entity_id or " ".join(
+        part
+        for part in (device.physical_device_label, device.channel_label)
+        if part
+    )
+    candidate = source.split(".", 1)[-1].lower() if source else "device"
     cleaned = "".join(
         character if character.isalnum() or character in "_-" else "_"
         for character in candidate
@@ -289,7 +295,7 @@ def _unique_label(
 ) -> str:
     if label not in used_labels:
         return label
-    suffix = device.channel_label or _device_id(device.entity_id)
+    suffix = device.channel_label or _device_id(device)
     candidate = f"{label} · {suffix}"
     counter = 2
     while candidate in used_labels:
