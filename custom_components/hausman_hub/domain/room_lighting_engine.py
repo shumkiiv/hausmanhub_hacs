@@ -553,9 +553,12 @@ def _evaluate_target(
     brightness = schedule_entry.how.brightness if schedule_entry is not None else None
     color = schedule_entry.how.color_temperature if schedule_entry is not None else None
     lux_fail = False
-    if want_on and config.illumination is not None:
+    if config.illumination is not None:
+        # Evaluate the illumination sensor for both branches: an unhealthy
+        # sensor must block an automatic switch-off as well, so a broken lux
+        # reading never leaves the room dark.
         lux, lux_fail = _lux_value(context, config, policy)
-        if not lux_fail and lux is not None:
+        if want_on and not lux_fail and lux is not None:
             brightness, color = _apply_lux(brightness, color, config, target, lux)
             reason = DecisionReason.LUX
 
@@ -693,6 +696,14 @@ def _evaluate_target(
         and context.now - absence_since >= threshold * 1000
     )
     schedule_off = schedule_entry is not None and schedule_entry.how.mode is ScheduleMode.OFF
+    if lux_fail:
+        # Owner rule: a faulty illumination sensor keeps the light instead of
+        # turning it off. Away is handled earlier and still switches off.
+        return _unchanged(
+            target_id,
+            Skip(target_id, SkipReason.LUX_FAIL_CLOSED),
+            extra_skips=skips,
+        )
     if absence_due:
         command = _turn_off_command(
             config, target, target_id, light_brightness, DecisionReason.DIMMING
