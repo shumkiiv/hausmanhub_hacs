@@ -1,4 +1,4 @@
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.273";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.274";
 
 /* Modal with the nearest scenario runs, opened from the greeting-row button. */
 export function openUpcomingEventsModal(panel, container, deps, events, appendRow) {
