@@ -1698,6 +1698,64 @@ async def test_manual_power_off_is_not_immediately_overridden() -> None:
         await runtime.stop()
 
 
+async def test_external_light_off_starts_protection_and_blocks_auto_on() -> None:
+    """A wall switch without a Home Assistant call still counts as manual off."""
+
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    hass.states.set(
+        "light.demo_main", "on", {"brightness": 153}, last_changed=_NOW_DT
+    )
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=RoomLightingHaExecutor()
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        hass.services.calls.clear()
+        # The physical wall switch cuts the light; Home Assistant only sees the
+        # state change, there is no ``call_service`` event for it.
+        hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+        runtime._state_event(SimpleNamespace(data={"entity_id": "light.demo_main"}))
+        await asyncio.gather(*hass.tasks)
+
+        assert (
+            runtime._ownership.last_manual_off_at(_ROOM_ID, {"light_main"})
+            is not None
+        )
+        turn_on_calls = [
+            call
+            for call in hass.services.calls
+            if call[0] == "light" and call[1] == "turn_on"
+        ]
+        assert turn_on_calls == []
+    finally:
+        await runtime.stop()
+
+
+async def test_own_command_state_report_is_not_attributed_as_manual() -> None:
+    """The delayed device report of our own command is not a manual action."""
+
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    hass.states.set(
+        "light.demo_main", "on", {"brightness": 153}, last_changed=_NOW_DT
+    )
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=RoomLightingHaExecutor()
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        runtime._command_grace["light.demo_main"] = runtime._now_ms()
+        hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+        runtime._state_event(SimpleNamespace(data={"entity_id": "light.demo_main"}))
+
+        assert runtime._ownership.last_manual_off_at(_ROOM_ID, {"light_main"}) is None
+    finally:
+        await runtime.stop()
+
+
 async def test_executor_confirms_colour_only_on_matching_read_back() -> None:
     hass = _FakeHass()
     executor = _light_executor(hass, inverted=True)

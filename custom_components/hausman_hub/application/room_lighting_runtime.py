@@ -64,6 +64,10 @@ DEFAULT_INTERVAL_SECONDS = 60
 MAX_OWNERSHIP_RECORDS = 500
 OWNERSHIP_STORAGE_VERSION = 1
 DEVICE_TRIGGER_DEDUP_MS = 2_000
+# Window in which a state change caused by our own command is not mistaken for
+# a person switching the light. Device reports can arrive a few seconds after
+# the service call, so the marker must outlive the immediate call.
+COMMAND_GRACE_MS = 15_000
 # Matter device "A100 Away" from the Aqara A100 lock: on = nobody is home.
 # This is the same source the legacy ``system-away-turn-off`` scenario used.
 AWAY_ENTITY_ID = "binary_sensor.a100_away_zaniatost"
@@ -426,6 +430,8 @@ class RoomLightingRuntime:
         self._rooms_by_entity: EntityRooms = {}
         self._targets_by_entity: dict[str, tuple[str, str]] = {}
         self._power_by_entity: dict[str, str] = {}
+        self._target_last_state: dict[str, str] = {}
+        self._command_grace: dict[str, int] = {}
         self._executing_actions: dict[str, str] = {}
         self._unsubscribers: list[Callable[[], None]] = []
         self._lock = asyncio.Lock()
@@ -476,6 +482,12 @@ class RoomLightingRuntime:
         configs = await self._service.async_list_configs()  # type: ignore[attr-defined]
         self._configs = {config.room_id: config for config in configs}
         self._rebuild_index()
+        # Seed the observed states so the first event after start is never
+        # mistaken for a manual transition.
+        self._target_last_state = {
+            entity_id: self._entity_state(entity_id)
+            for entity_id in self._targets_by_entity
+        }
         # Legacy journals were keyed by target id only; attach them to rooms
         # now that the room/target mapping is known.
         self._ownership.migrate_legacy(
@@ -633,7 +645,39 @@ class RoomLightingRuntime:
         rooms = self._rooms_by_entity.get(entity_id)
         if not rooms:
             return
+        self._observe_target_transition(entity_id)
         self._create_task(self.async_process(sorted(rooms)))
+
+    def _observe_target_transition(self, entity_id: str) -> None:
+        """Attribution for a light that was switched off outside Home Assistant.
+
+        A physical wall switch or a direct Zigbee binding changes the light
+        state without a ``call_service`` event. The runtime used to miss that
+        manual off, and the automatic branch immediately turned the light back
+        on. An observed on -> off transition that this runtime did not command
+        now starts the room manual-off protection, exactly like a manual off
+        published through Home Assistant.
+        """
+
+        target = self._targets_by_entity.get(entity_id)
+        if target is None:
+            return
+        state = self._entity_state(entity_id)
+        previous = self._target_last_state.get(entity_id)
+        self._target_last_state[entity_id] = state
+        if previous is None or previous != "on" or state != "off":
+            return
+        moment = self._now_ms()
+        commanded_at = self._command_grace.get(entity_id)
+        if commanded_at is not None and moment - commanded_at < COMMAND_GRACE_MS:
+            # This transition is the delayed report of our own command.
+            return
+        room_id, target_id = target
+        self._ownership.record_manual(
+            room_id, target_id, moment, confirmed=True, turned_off=True
+        )
+        self._absence.pop(room_id, None)
+        self._schedule_ownership_save()
 
     @staticmethod
     def _current_away_state(hass: HomeAssistant) -> bool:
@@ -1068,6 +1112,7 @@ class RoomLightingRuntime:
                 powered = False
                 if callable(ensure_power):
                     self._executing_actions[power_entity] = "turn_on"
+                    self._command_grace[power_entity] = self._now_ms()
                     try:
                         powered = bool(await ensure_power(self._hass, power_entity))
                     except Exception:  # noqa: BLE001 - keep the room isolated
@@ -1084,6 +1129,7 @@ class RoomLightingRuntime:
             entity_id = target.entity_id if target is not None else None
             if entity_id is not None:
                 self._executing_actions[entity_id] = _planned_service_name(command)
+                self._command_grace[entity_id] = self._now_ms()
             try:
                 receipt = await self._executor.execute(  # type: ignore[attr-defined]
                     self._hass, command
@@ -1108,6 +1154,14 @@ class RoomLightingRuntime:
             return False
         state = self._hass.states.get(entity_id)
         return state is not None and str(getattr(state, "state", "")).lower() == "on"
+
+    def _entity_state(self, entity_id: str) -> str:
+        if self._hass is None:
+            return "unknown"
+        state = self._hass.states.get(entity_id)
+        if state is None:
+            return "unknown"
+        return str(getattr(state, "state", "unknown")).lower()
 
     def _light_on_by_target(self) -> dict[tuple[str, str], bool]:
         """Current on/off state per (room_id, target_id) for stale pruning."""
