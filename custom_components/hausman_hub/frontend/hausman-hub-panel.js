@@ -30,7 +30,7 @@ import { applyIntents } from "./hausman-hub-harness-intents.js?v=1.52.274";
 import { deviceActionInitialValue } from "./hausman-hub-device-controls.js?v=1.52.274";
 import { catalogTargets, deviceActionReceiptText, executeDeviceAction } from "./hausman-hub-device-actions.js?v=1.52.274";
 import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.274";
-import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.274";
+import { applyCriticalNotifications, applyFeedback } from "./hausman-hub-feedback.js?v=1.52.274";
 import { applyCommandActivity, applyCommandTarget, captureCommandIntent } from "./hausman-hub-command-feedback.js?v=1.52.274";
 import { apiErrorMessage, resolveApiError } from "./hausman-hub-error-taxonomy.js?v=1.52.274";
 import { canExecuteCommand, loadingUiState, offlineUiState, staleUiState } from "./hausman-hub-ui-state.js?v=1.52.274";
@@ -51,6 +51,7 @@ const DASHBOARD_API = "hausman_hub/v1/dashboard";
 const CLIMATE_RUNTIME_API = "hausman_hub/v1/climate/runtime";
 const DEVICE_ACTIONS_API = "hausman_hub/v1/device-actions";
 const CAPABILITIES_API = "hausman_hub/v1/capabilities";
+const CRITICAL_API = "hausman_hub/v1/critical-sensor-notifications";
 const PANEL_TABLET_PROFILE_API = "hausman_hub/v1/tablet-profile";
 const MODE_API = "hausman_hub/v1/admin/climate-mode";
 const HOME_API = "hausman_hub/v1/admin/home-environment";
@@ -832,6 +833,7 @@ class HausmanHubPanel extends HTMLElement {
         this._hass.callApi("GET", SCENARIOS_UPCOMING_API).catch(() => null),
         this._hass.callApi("GET", CLIMATE_RUNTIME_API).catch(() => null),
         this._hass.callApi("GET", CAPABILITIES_API).catch(() => null),
+        this._hass.callApi("GET", CRITICAL_API).catch(() => null),
       ]);
       this._data = results[0];
       this._settings = {
@@ -847,6 +849,7 @@ class HausmanHubPanel extends HTMLElement {
       this._upcomingEvents = results[9];
       this._climateRuntime = results[10];
       this._capabilities = results[11];
+      this._criticalNotifications = results[12];
       this._deviceFeatures = await loadDeviceFeatureMatrix(this._hass, results[11]);
       await refreshManualLightProtection(this, results[11]);
       const draftResumed = resumeFirstRunDraft(this);
@@ -1044,6 +1047,7 @@ class HausmanHubPanel extends HTMLElement {
     shell.container.className = this._isFirstRunActive() || this._isFirstRunDeferred()
       ? "setup-shell" : "";
     applyFeedback(shell.notice, this._notice, setAttr);
+    applyCriticalNotifications(this);
     this._syncCommandFeedback();
     if (this._error) {
       shell.banner.style.display = "";

@@ -1244,6 +1244,74 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("подтверждение|ожида", FEEDBACK_JS.read_text(encoding="utf-8"))
         self.assertIn("&& !this._deviceBindings.error", content)
 
+    def test_critical_sensor_notifications_use_an_assertive_text_surface(self) -> None:
+        panel = PANEL_JS.read_text(encoding="utf-8")
+        feedback = FEEDBACK_JS.read_text(encoding="utf-8")
+        styles = NAVIGATION_CSS.read_text(encoding="utf-8")
+
+        self.assertIn('"hausman_hub/v1/critical-sensor-notifications"', panel)
+        self.assertIn('.callApi("GET", CRITICAL_API).catch(() => null)', panel)
+        self.assertIn("applyCriticalNotifications(this)", panel)
+        self.assertIn("Array.isArray(response.notifications)", feedback)
+        self.assertNotIn("innerHTML", feedback)
+        self.assertIn(".critical-notices {", styles)
+        self.assertNotIn(".critical-notices.notice", styles)
+
+        script = f"""
+          const fs = require("fs");
+          const vm = require("vm");
+          class FakeElement {{
+            constructor(tag = "element") {{
+              this.tagName = tag.toUpperCase();
+              this.children = [];
+              this.className = "";
+              this.textContent = "";
+              this.attributes = {{}};
+              this.hidden = false;
+            }}
+            appendChild(child) {{ this.children.push(child); return child; }}
+            setAttribute(name, value) {{ this.attributes[name] = String(value); }}
+          }}
+          global.document = {{ createElement: (tag) => new FakeElement(tag) }};
+          vm.runInThisContext(
+            fs.readFileSync({str(FEEDBACK_JS)!r}, "utf8").replace(/export /g, ""),
+            {{ filename: {str(FEEDBACK_JS)!r} }}
+          );
+          const collect = (node) => node.textContent + node.children.map(collect).join("");
+          const container = new FakeElement("main");
+          const panel = {{
+            _shell: {{ container }},
+            _criticalNotifications: {{ notifications: [
+              {{ roomId: "living", role: "light", reason: "stale", message: "Комната «Гостиная»: Датчик движения передаёт устаревшие показания." }},
+            ] }},
+          }};
+          applyCriticalNotifications(panel);
+          const node = container.children[0];
+          if (!node || node.className !== "critical-notices") throw new Error("critical surface missing");
+          if (node.attributes.role !== "alert") throw new Error("role=alert missing");
+          if (node.attributes["aria-live"] !== "assertive") throw new Error("assertive live region missing");
+          if (node.attributes["aria-atomic"] !== "true") throw new Error("atomic live region missing");
+          if (node.hidden) throw new Error("critical surface hidden with notifications");
+          const text = collect(node);
+          if (!text.includes("Комната «Гостиная»") || !text.includes("устаревшие")) throw new Error("room or reason missing: " + text);
+          if (text.includes("undefined") || text.includes("null")) throw new Error("missing field leaked into text: " + text);
+          const interactive = (child) => ["BUTTON", "A", "INPUT", "SELECT", "TEXTAREA"].includes(child.tagName) || child.children.some(interactive);
+          if (node.children.some(interactive)) throw new Error("interactive control added");
+          panel._criticalNotifications = null;
+          applyCriticalNotifications(panel);
+          if (node.hidden) throw new Error("failed refresh must keep the last known notifications");
+          panel._criticalNotifications = {{ notifications: [] }};
+          applyCriticalNotifications(panel);
+          if (!node.hidden) throw new Error("empty notifications must hide the surface");
+        """
+        completed = subprocess.run(
+            ("node", "--input-type=commonjs", "--eval", script),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_catalog_refresh_is_stable_and_kiosk_is_available(self) -> None:
         content = PANEL_JS.read_text(encoding="utf-8")
         navigation = NAVIGATION_JS.read_text(encoding="utf-8")

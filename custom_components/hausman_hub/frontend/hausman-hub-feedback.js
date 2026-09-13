@@ -36,3 +36,54 @@ export function applyFeedback(element, message, setAttr) {
   }
   return tone;
 }
+
+const CRITICAL_TEXT = {
+  light: "Свет", climate: "Климат", unavailable: "недоступен",
+  stale: "устаревшие показания", unhealthy: "недостоверные показания", unknown: "состояние неизвестно",
+};
+
+function criticalAttr(node, name, value) {
+  if (typeof node.setAttribute === "function") node.setAttribute(name, value);
+}
+
+export function applyCriticalNotifications(panel) {
+  const response = panel._criticalNotifications;
+  if (response && Array.isArray(response.notifications)) {
+    panel._criticalNotificationsActive = response.notifications.filter((item) => item && typeof item.message === "string" && item.message);
+  }
+  const items = panel._criticalNotificationsActive || [];
+  let node = panel._criticalNotificationsNode;
+  if (!node) {
+    node = document.createElement("section");
+    node.className = "critical-notices";
+    criticalAttr(node, "role", "alert");
+    criticalAttr(node, "aria-live", "assertive");
+    criticalAttr(node, "aria-atomic", "true");
+    panel._criticalNotificationsNode = node;
+    const container = panel._shell && panel._shell.container;
+    if (container) container.appendChild(node);
+  }
+  node.hidden = !items.length;
+  const signature = items.map((item) => `${item.role}:${item.reason}:${item.message}`).join("|");
+  if (node._criticalSignature === signature) return;
+  node._criticalSignature = signature;
+  node.textContent = "";
+  if (!items.length) return;
+  const title = document.createElement("strong");
+  title.className = "critical-notices-title";
+  title.textContent = `Критические отказы датчиков: ${items.length}`;
+  node.appendChild(title);
+  for (const item of items) {
+    const row = document.createElement("p");
+    row.className = "critical-notices-item";
+    const message = document.createElement("strong");
+    message.className = "critical-notices-message";
+    message.textContent = item.message;
+    const reason = document.createElement("span");
+    reason.className = "critical-notices-reason";
+    reason.textContent = `${CRITICAL_TEXT[item.role] || "Датчик"} · причина: ${CRITICAL_TEXT[item.reason] || "неизвестна"}`;
+    row.appendChild(message);
+    row.appendChild(reason);
+    node.appendChild(row);
+  }
+}
