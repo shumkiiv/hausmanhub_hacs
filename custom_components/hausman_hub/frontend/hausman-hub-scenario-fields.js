@@ -1,6 +1,6 @@
 /* Focused form controls for the guided scenario editor. */
 
-import { SCENARIO_ICON_GROUPS, scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.270";
+import { SCENARIO_ICON_GROUPS, scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.271";
 
 export function scenarioField(deps, label, value, onChange, options = {}) {
   const { el, setAttr } = deps;

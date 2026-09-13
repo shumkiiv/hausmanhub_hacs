@@ -3,7 +3,7 @@
    local draft, never invents server rules and never sends a physical command
    from the preview. */
 
-import { apiErrorMessage, resolveApiError } from "./hausman-hub-error-taxonomy.js?v=1.52.270";
+import { apiErrorMessage, resolveApiError } from "./hausman-hub-error-taxonomy.js?v=1.52.271";
 
 const BASE = (roomId) => `hausman_hub/v1/rooms/${encodeURIComponent(roomId)}/lighting`;
 
@@ -25,7 +25,7 @@ function ensureStyles() {
   const link = document.createElement("link");
   link.id = id;
   link.rel = "stylesheet";
-  link.href = "./hausman-hub-room-lighting-editor.css?v=1.52.270";
+  link.href = "./hausman-hub-room-lighting-editor.css?v=1.52.271";
   document.head.appendChild(link);
 }
 
