@@ -777,6 +777,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         domain_data[DATA_ROOM_LIGHTING_RUNTIME] = room_lighting_runtime
         await room_lighting_runtime.start(hass, entry.entry_id)
         entry.async_on_unload(room_lighting_runtime.cancel)
+    from .critical_sensor_notification_api import (
+        register_critical_sensor_notification_api,
+    )
+
+    register_critical_sensor_notification_api(
+        hass, climate_runtime=climate_runtime
+    )
     from .realtime_api import register_event_stream
 
     register_event_stream(hass, entry.entry_id)
@@ -808,6 +815,9 @@ async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     from .manual_light_off_protection_api import clear_manual_light_off_protection_api
     from .room_lighting_api import clear_room_lighting_api
     from .room_lighting_editor_api import clear_room_lighting_editor_api
+    from .critical_sensor_notification_api import (
+        clear_critical_sensor_notification_api,
+    )
 
     clear_event_stream(hass, entry.entry_id)
     clear_voice_greeting(hass, entry.entry_id)
@@ -817,6 +827,7 @@ async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     clear_manual_light_off_protection_api(hass)
     clear_room_lighting_api(hass)
     clear_room_lighting_editor_api(hass)
+    clear_critical_sensor_notification_api(hass)
     clear_climate_api(hass, entry.entry_id)
 
     try:
@@ -852,6 +863,9 @@ async def _close_running_duplicate_hausmanhub_entries(
     from .manual_light_off_protection_api import clear_manual_light_off_protection_api
     from .room_lighting_api import clear_room_lighting_api
     from .room_lighting_editor_api import clear_room_lighting_editor_api
+    from .critical_sensor_notification_api import (
+        clear_critical_sensor_notification_api,
+    )
 
     loaded_entries = tuple(hass.config_entries.async_loaded_entries(domain))
     for loaded_entry in loaded_entries:
@@ -864,6 +878,7 @@ async def _close_running_duplicate_hausmanhub_entries(
         clear_manual_light_off_protection_api(hass)
         clear_room_lighting_api(hass)
         clear_room_lighting_editor_api(hass)
+        clear_critical_sensor_notification_api(hass)
         clear_climate_api(hass, loaded_entry.entry_id)
     for loaded_entry in loaded_entries:
         await hass.config_entries.async_unload(loaded_entry.entry_id)

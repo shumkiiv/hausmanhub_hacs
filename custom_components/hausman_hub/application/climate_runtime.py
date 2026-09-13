@@ -403,6 +403,18 @@ class ClimateRuntime:
         return len(self._registry.devices)
 
     @property
+    def registry(self) -> ClimateRegistry:
+        """Return the loaded validated registry for read-only adapters."""
+
+        return self._registry
+
+    @property
+    def ha_state_view(self) -> ClimateHaStateView | None:
+        """Return the read-only HA state view used for native observations."""
+
+        return self._ha_state_view
+
+    @property
     def status(self) -> str:
         """Return a coarse redacted runtime status."""
 
