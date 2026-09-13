@@ -1,10 +1,9 @@
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.271";
-import { appendDeviceRangeControls, appendDeviceVisual, localizedDeviceState, openPhysicalDeviceSheet } from "./hausman-hub-device-card.js?v=1.52.271";
-import { lightingSideIcon, openLightingTurnOffConfirm, renderLightingSide } from "./hausman-hub-lighting-side.js?v=1.52.271";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.271";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.271";
-import { renderManualLightProtectionStatus } from "./hausman-hub-light-protection.js?v=1.52.271";
-import { renderRoomLightingEditor } from "./hausman-hub-room-lighting-editor.js?v=1.52.271";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.270";
+import { appendDeviceRangeControls, appendDeviceVisual, localizedDeviceState, openPhysicalDeviceSheet } from "./hausman-hub-device-card.js?v=1.52.270";
+import { lightingSideIcon, openLightingTurnOffConfirm, renderLightingSide } from "./hausman-hub-lighting-side.js?v=1.52.270";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.270";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.270";
+import { renderManualLightProtectionStatus } from "./hausman-hub-light-protection.js?v=1.52.270";
 
 const LIGHTING_EXCLUSIONS = [
   "ambilight", "глазок", "домофон", "пульт", "очистител", "аквариум", "aquarium",
@@ -272,18 +271,6 @@ function lightingRoomMatches(name, roomDevices, query, filter) {
   return true;
 }
 
-async function openRoomLightingEditor(panel, page, roomId) {
-  const host = document.createElement("div");
-  host.className = "rle-host";
-  page.appendChild(host);
-  const close = () => host.remove();
-  try {
-    await renderRoomLightingEditor(panel, host, { roomId, onBack: close });
-  } catch (error) {
-    host.remove();
-  }
-}
-
 function renderLightingRoomCard(panel, page, rooms, name, roomDevices, deps) {
   const { el, svgIcon, setAttr } = deps;
   const activeDevices = roomDevices.filter(deviceIsActive);
@@ -309,22 +296,6 @@ function renderLightingRoomCard(panel, page, rooms, name, roomDevices, deps) {
     `${roomDevices.length} физ. устройств${unavailable ? ` · ${unavailable} без связи` : ""}`));
   const footer = el("span", "lighting-room-footer");
   footer.appendChild(el("span", "lighting-room-open", "Открыть устройства и линии"));
-  const configure = el("span", "lighting-room-configure");
-  setAttr(configure, "role", "button");
-  setAttr(configure, "tabindex", "0");
-  setAttr(configure, "aria-label", `Настроить свет комнаты ${name}`);
-  configure.textContent = "Настроить";
-  const openEditor = (event) => {
-    if (event && typeof event.preventDefault === "function") event.preventDefault();
-    if (event && typeof event.stopPropagation === "function") event.stopPropagation();
-    const roomId = (room && (room.id || room.roomId)) || name;
-    void openRoomLightingEditor(panel, page, roomId);
-  };
-  configure.addEventListener("click", openEditor);
-  configure.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" || event.key === " ") openEditor(event);
-  });
-  footer.appendChild(configure);
   if (activeDevices.length) {
     const power = el("span", "lighting-room-power");
     setAttr(power, "role", "button");
