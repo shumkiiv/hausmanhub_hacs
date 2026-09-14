@@ -603,7 +603,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
     )
     scenario_service.set_executor(scenario_executor)
-    from .application.scenario_control_coordinator import ScenarioControlCoordinator
+    from .application.scenario_control_coordinator import (
+        ScenarioControlCoordinator,
+        TAMBUR_SCENARIO_ID,
+    )
     from .scenario_control_state_storage import HomeAssistantScenarioControlStateStore
 
     scenario_control_coordinator = ScenarioControlCoordinator(
@@ -645,9 +648,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     activation_latch = ActivationLatch()
 
-    # The coordinator owns every adaptive lighting controller.  The generic
-    # event and schedule adapters receive the same IDs as exclusions below,
-    # which leaves exactly one path that can issue each controller command.
+    # Tambur was transferred to RoomLightingRuntime.  The coordinator remains
+    # active for every other controller but must neither subscribe to Tambur
+    # nor reserve its targets, otherwise the new runtime has no writer.  The
+    # generic event and schedule adapters keep the transferred scenario
+    # excluded as well: a manual trigger would run its managed flow and
+    # replay the stale recorded action as a second command source.
+    externally_managed_scenarios = frozenset({TAMBUR_SCENARIO_ID})
+    scenario_control_coordinator.set_externally_managed_scenarios(
+        externally_managed_scenarios
+    )
     if getattr(hass, "bus", None) is not None:
         await scenario_control_coordinator.async_start(entry, activation_latch)
         await async_start_scenario_schedule(
@@ -655,7 +665,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry,
             scenario_service,
             activation_latch,
-            scenario_control_coordinator.owned_scenario_ids,
+            scenario_control_coordinator.owned_scenario_ids
+            | externally_managed_scenarios,
             curtain_protection,
         )
         from .scenario_events import async_start_scenario_events
@@ -666,7 +677,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             scenario_service,
             scenario_command_contexts,
             activation_latch,
-            scenario_control_coordinator.owned_scenario_ids,
+            scenario_control_coordinator.owned_scenario_ids
+            | externally_managed_scenarios,
         )
     entry.async_on_unload(scenario_service.start_catalog_warmup())
     from .manual_light_off_protection_events import (
@@ -790,6 +802,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .panel import async_register_hausmanhub_panel
 
     await async_register_hausmanhub_panel(hass)
+    # Every listener is registered now.  Opening the gate only at this point
+    # avoids reacting to partially restored state, then reconciles durable
+    # controllers without granting a restart the right to turn lights on.
+    activation_latch.open()
+    scenario_control_coordinator.activate()
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
     return True
 

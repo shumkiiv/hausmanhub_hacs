@@ -16,6 +16,10 @@ from custom_components.hausman_hub.domain.room_lighting import (
     room_lighting_entity_collisions,
     room_lighting_violations,
 )
+from custom_components.hausman_hub.domain.room_lighting_auxiliary import BathroomTimes
+from custom_components.hausman_hub.domain.room_lighting_engine import (
+    bathroom_auxiliary_inputs,
+)
 
 
 def _payload() -> dict[str, object]:
@@ -612,3 +616,207 @@ def test_shared_switch_target_and_power_switch_are_collisions() -> None:
     assert "switch.demo_spots" in "; ".join(
         room_lighting_entity_collisions((first, third))
     )
+
+
+def _bathroom_payload() -> dict[str, object]:
+    """Mirror of fixtures/v1/room-lighting-config-bathroom-auxiliary.json."""
+
+    return {
+        "contract": {"name": "hausman-hub-room-lighting-config", "version": 1},
+        "roomId": "room_demo_bathroom",
+        "name": "Ванная",
+        "version": 2,
+        "devices": {
+            "sensors": [
+                {
+                    "id": "sensor_demo_bathroom_humidity",
+                    "name": "Влажность",
+                    "kind": "humidity",
+                    "entityId": "sensor.demo_bathroom_humidity",
+                    "autoAdoptOverride": None,
+                }
+            ],
+            "light_targets": [
+                {
+                    "id": "light_demo_bathroom_main",
+                    "name": "Свет основной",
+                    "kind": "light",
+                    "entityId": "light.demo_bathroom_main",
+                    "role": "main",
+                    "groupId": None,
+                    "brightness": False,
+                    "color_temperature": False,
+                    "autoControl": True,
+                    "autoAdoptOverride": None,
+                },
+                {
+                    "id": "light_demo_bathroom_second",
+                    "name": "Свет второй",
+                    "kind": "switch",
+                    "entityId": "switch.demo_bathroom_second",
+                    "role": None,
+                    "groupId": None,
+                    "brightness": False,
+                    "color_temperature": False,
+                    "autoControl": True,
+                    "autoAdoptOverride": None,
+                },
+            ],
+            "power_switch": None,
+            "auxiliaries": [
+                {
+                    "id": "aux_demo_bathroom_fan",
+                    "name": "Вытяжка",
+                    "kind": "fan",
+                    "entityId": "switch.demo_bathroom_fan",
+                    "autoAdoptOverride": None,
+                }
+            ],
+            "selectAll": False,
+        },
+        "schedule": [
+            {
+                "id": "sch_bathroom_presence",
+                "title": "По присутствию",
+                "when": {
+                    "daysOfWeek": "all",
+                    "holiday": False,
+                    "anchor": {"kind": "fixed", "time": "00:00", "offsetMinutes": 0},
+                },
+                "targets": {
+                    "lightTargets": ["light_demo_bathroom_main"],
+                    "groupIds": [],
+                    "roles": [],
+                },
+                "how": {
+                    "brightness": None,
+                    "colorTemperature": None,
+                    "fade": True,
+                    "mode": "on_presence",
+                    "minOnSeconds": 0,
+                },
+            }
+        ],
+        "switchBindings": [],
+        "dimming": {
+            "enabled": False,
+            "onAbsence": False,
+            "fadeSeconds": 5,
+            "targetPercent": 0,
+        },
+        "manualOffProtection": {
+            "enabled": True,
+            "minimumIntervalSeconds": 600,
+            "releaseMode": "timer_and_absence",
+            "stableAbsenceSeconds": 30,
+            "priority": "manual_above_auto",
+        },
+        "auxiliary": {
+            "fan": {
+                "targetId": "aux_demo_bathroom_fan",
+                "humidityThreshold": 70,
+                "dayOffSeconds": 900,
+                "quietStart": "06:00",
+                "dayStart": "08:00",
+                "nightStart": "22:00",
+            }
+        },
+        "awayBehavior": {"mode": "none"},
+        "autoAdopt": True,
+        "commandsEnabled": True,
+        "updatedAt": 0,
+    }
+
+
+def test_humidity_sensor_and_auxiliary_fan_round_trip() -> None:
+    config = config_from_payload(_bathroom_payload())
+
+    assert config.devices.sensors[0].kind.value == "humidity"
+    assert config.devices.humidity_entity_ids == frozenset(
+        {"sensor.demo_bathroom_humidity"}
+    )
+    assert config.devices.auxiliaries[0].kind.value == "fan"
+    assert config.auxiliary is not None
+    assert config.auxiliary.fan.target_id == "aux_demo_bathroom_fan"
+    assert room_lighting_violations(_bathroom_payload()) == ()
+
+    encoded = config.to_dict()
+    assert encoded["roomId"] == "room_demo_bathroom"
+    assert config_from_payload(encoded).to_dict() == encoded
+    assert config.to_dict()["devices"]["auxiliaries"] == [  # type: ignore[index]
+        {
+            "id": "aux_demo_bathroom_fan",
+            "name": "Вытяжка",
+            "kind": "fan",
+            "entityId": "switch.demo_bathroom_fan",
+            "autoAdoptOverride": None,
+        }
+    ]
+
+
+def test_documents_without_auxiliary_model_stay_valid() -> None:
+    config = config_from_payload(_payload())
+    assert config.devices.auxiliaries == ()
+    assert config.auxiliary is None
+    assert "auxiliary" not in config.to_dict()
+
+
+def test_auxiliary_policy_defaults_are_applied() -> None:
+    payload = _bathroom_payload()
+    payload["auxiliary"] = {"fan": {"targetId": "aux_demo_bathroom_fan"}}  # type: ignore[assignment]
+    fan = config_from_payload(payload).auxiliary.fan  # type: ignore[union-attr]
+    assert (fan.humidity_threshold, fan.day_off_seconds) == (65, 1800)
+    assert (fan.quiet_start, fan.day_start, fan.night_start) == (
+        "06:00",
+        "08:00",
+        "22:00",
+    )
+
+
+def test_auxiliary_fan_unknown_target_is_rejected() -> None:
+    payload = _bathroom_payload()
+    payload["auxiliary"]["fan"]["targetId"] = "aux_missing"  # type: ignore[index]
+    assert room_lighting_violations(payload)
+    with pytest.raises(RoomLightingViolation):
+        config_from_payload(payload)
+
+
+def test_auxiliary_fan_band_order_is_enforced() -> None:
+    payload = _bathroom_payload()
+    payload["auxiliary"]["fan"]["dayStart"] = "05:00"  # type: ignore[index]
+    with pytest.raises(RoomLightingViolation):
+        config_from_payload(payload)
+
+
+@pytest.mark.parametrize(
+    "entity_id", ["light.demo_fan", "binary_sensor.demo_fan", "demo_fan"]
+)
+def test_auxiliary_entity_id_pattern_is_enforced(entity_id: str) -> None:
+    payload = _bathroom_payload()
+    payload["devices"]["auxiliaries"][0]["entityId"] = entity_id  # type: ignore[index]
+    with pytest.raises(RoomLightingViolation):
+        config_from_payload(payload)
+
+
+def test_auxiliary_fan_entity_is_a_control_entity() -> None:
+    left = config_from_payload(_bathroom_payload())
+    right_payload = _bathroom_payload()
+    right_payload["roomId"] = "room_demo_bath_two"  # type: ignore[index]
+    right = config_from_payload(right_payload)
+    collisions = room_lighting_entity_collisions((left, right))
+    assert any("switch.demo_bathroom_fan" in item for item in collisions)
+
+
+def test_bathroom_auxiliary_inputs_derive_policy_and_bands() -> None:
+    config = config_from_payload(_bathroom_payload())
+    inputs = bathroom_auxiliary_inputs(config)
+    assert inputs is not None
+    policy, times = inputs
+    assert policy.humidity_threshold == 70
+    assert policy.day_off_seconds == 900
+    assert times == BathroomTimes(
+        quiet_start_minutes=360,
+        day_start_minutes=480,
+        night_start_minutes=1320,
+    )
+    assert bathroom_auxiliary_inputs(config_from_payload(_payload())) is None

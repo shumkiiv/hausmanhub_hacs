@@ -20,6 +20,7 @@ from .room_lighting import (
     SensorKind,
     resolve_anchor_time,
 )
+from .room_lighting_auxiliary import BathroomPolicy, BathroomTimes
 from .room_lighting_ownership import (
     OwnershipSnapshot,
     SensorState,
@@ -389,6 +390,41 @@ def evaluate_room_lighting(
         targets=tuple(targets),
         commands_enabled=False,
     )
+
+
+def bathroom_auxiliary_inputs(
+    config: RoomLightingConfig,
+) -> tuple[BathroomPolicy, BathroomTimes] | None:
+    """Derive the pure bathroom exhaust inputs from one room configuration.
+
+    Returns ``None`` when the room carries no auxiliary fan policy. Band
+    boundaries are minute-of-day values, so the result stays free of any
+    clock or timezone access; the runtime supplies the current minute and
+    observations when it evaluates the auxiliary engine.
+    """
+
+    if not isinstance(config, RoomLightingConfig):
+        raise RoomLightingEngineViolation("validated room lighting config is required")
+    if config.auxiliary is None:
+        return None
+    fan = config.auxiliary.fan
+    policy = BathroomPolicy(
+        humidity_threshold=fan.humidity_threshold,
+        day_off_seconds=fan.day_off_seconds,
+    )
+    times = BathroomTimes(
+        quiet_start_minutes=_time_minutes(fan.quiet_start),
+        day_start_minutes=_time_minutes(fan.day_start),
+        night_start_minutes=_time_minutes(fan.night_start),
+    )
+    return policy, times
+
+
+def _time_minutes(value: str) -> int:
+    if not isinstance(value, str) or ":" not in value:
+        raise RoomLightingEngineViolation("auxiliary band boundary must be HH:MM")
+    hour, minute = (int(part) for part in value.split(":"))
+    return hour * 60 + minute
 
 
 def _light_on(context: RoomLightingContext, target_id: str) -> bool:

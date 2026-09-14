@@ -27,6 +27,7 @@ from ..domain.room_lighting import (
     SwitchBinding,
     room_lighting_entity_collisions,
 )
+from ..domain.room_lighting_auxiliary import evaluate_bathroom_exhaust
 from ..domain.room_lighting_engine import (
     DecisionReason,
     LightAction,
@@ -34,6 +35,7 @@ from ..domain.room_lighting_engine import (
     ProtectionSnapshot,
     RoomLightingDecision,
     RoomLightingContext,
+    bathroom_auxiliary_inputs,
     evaluate_room_lighting,
 )
 from ..domain.room_lighting_ownership import (
@@ -438,7 +440,9 @@ class RoomLightingRuntime:
         self._state_provider = state_provider or RoomLightingHaStateProvider(
             now_ms=now_ms,
             ownership_provider=lambda config: self._ownership.snapshots_for(
-                config.room_id, config.devices.light_target_ids
+                config.room_id,
+                config.devices.light_target_ids
+                | frozenset(item.id for item in config.devices.auxiliaries),
             ),
             protection_provider=self._protection_for,
             unobserved_since_provider=lambda: self._unobserved_since,
@@ -520,6 +524,7 @@ class RoomLightingRuntime:
         self._ownership.migrate_legacy(
             {
                 room_id: config.devices.light_target_ids
+                | frozenset(item.id for item in config.devices.auxiliaries)
                 for room_id, config in self._configs.items()
             }
         )
@@ -1171,6 +1176,7 @@ class RoomLightingRuntime:
                 await record(decision, commands_enabled=enabled)
             except Exception:  # noqa: BLE001 - journal failure must not dispatch
                 _LOGGER.warning("room lighting journal write failed")
+        await self._record_auxiliary_shadow(config, moment)
         if not enabled:
             _LOGGER.debug(
                 "room lighting shadow decision journaled for %s", config.room_id
@@ -1180,6 +1186,43 @@ class RoomLightingRuntime:
         if not self._running:
             return
         await self._dispatch(config, decision, moment)
+
+    async def _record_auxiliary_shadow(
+        self, config: RoomLightingConfig, moment: int
+    ) -> None:
+        """Compute and journal the pure auxiliary decision; never command.
+
+        This is the shadow-parity path for the bathroom fan: the legacy
+        controller is still the single writer, so the new engine only records
+        what it would decide. A room without an auxiliary policy, or one whose
+        fan cannot be mapped to exactly two lights, is skipped without a guess.
+        """
+
+        if self._hass is None or config.auxiliary is None:
+            return
+        recorder = getattr(self._shadow, "async_record_auxiliary", None)
+        if not callable(recorder):
+            return
+        try:
+            inputs = bathroom_auxiliary_inputs(config)
+            observation = (
+                self._state_provider.build_auxiliary_observation(
+                    self._hass, config, moment
+                )
+                if inputs is not None
+                else None
+            )
+            if inputs is None or observation is None:
+                return
+            decision = evaluate_bathroom_exhaust(observation, inputs[0])
+            await recorder(
+                at=moment,
+                room_id=config.room_id,
+                observation=observation,
+                decision=decision,
+            )
+        except Exception:  # noqa: BLE001 - shadow evidence must never break a room
+            _LOGGER.warning("room lighting auxiliary shadow failed")
 
     async def _dispatch(
         self,

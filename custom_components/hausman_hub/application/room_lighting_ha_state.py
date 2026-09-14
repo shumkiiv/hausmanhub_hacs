@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from datetime import datetime, time as dt_time, timezone, tzinfo
 import logging
+import math
 from typing import TYPE_CHECKING
 
 from ..domain.room_lighting import (
@@ -20,13 +21,22 @@ from ..domain.room_lighting import (
     RoomSensor,
     SensorKind,
 )
+from ..domain.room_lighting_auxiliary import (
+    BathroomObservation,
+    bathroom_band,
+)
 from ..domain.room_lighting_engine import (
     LightSnapshot,
     ProtectionSnapshot,
     RoomLightingContext,
     SensorSnapshot,
+    bathroom_auxiliary_inputs,
 )
-from ..domain.room_lighting_ownership import OwnershipSnapshot, SensorState
+from ..domain.room_lighting_ownership import (
+    OwnershipSnapshot,
+    SensorState,
+    has_proven_auto_ownership,
+)
 from .room_lighting_color import device_kelvin_bounds, reflect_inverted_kelvin
 
 if TYPE_CHECKING:
@@ -314,6 +324,70 @@ class RoomLightingHaStateProvider:
             brightness=brightness,
             color_temperature=color_temperature,
         )
+
+    def build_auxiliary_observation(
+        self,
+        hass: HomeAssistant,
+        config: RoomLightingConfig,
+        now: int,
+    ) -> BathroomObservation | None:
+        """Build the pure bathroom observation, or ``None`` when it cannot map.
+
+        The fan follows the room's light targets in their declared order, which
+        is exactly the legacy two-light contract. A room with a different light
+        count, or a fan without an entity, is left unmapped rather than
+        guessed. A missing, unavailable or non-finite humidity reading becomes
+        ``None``; the engine then never treats it as dry air.
+        """
+
+        if config.auxiliary is None:
+            return None
+        if len(config.devices.light_targets) != 2:
+            return None
+        fan_policy = config.auxiliary.fan
+        fan_target = config.devices.auxiliary(fan_policy.target_id)
+        if fan_target is None or fan_target.entity_id is None:
+            return None
+        inputs = bathroom_auxiliary_inputs(config)
+        if inputs is None:
+            return None
+        _policy, times = inputs
+        tz = _resolve_timezone(hass)
+        local = datetime.fromtimestamp(now / 1000, tz)
+        humidity_sensor = next(
+            (
+                sensor
+                for sensor in config.devices.sensors
+                if sensor.kind is SensorKind.HUMIDITY
+                and sensor.entity_id is not None
+            ),
+            None,
+        )
+        humidity: float | None = None
+        if humidity_sensor is not None:
+            state = hass.states.get(humidity_sensor.entity_id)
+            raw = _as_float(getattr(state, "state", None))
+            if raw is not None and math.isfinite(raw):
+                humidity = raw
+        return BathroomObservation(
+            band=bathroom_band(local.hour * 60 + local.minute, times),
+            lights=tuple(
+                self._auxiliary_state(hass, target.entity_id)
+                for target in config.devices.light_targets
+            ),
+            humidity=humidity,
+            fan=self._auxiliary_state(hass, fan_target.entity_id),
+            fan_owned=has_proven_auto_ownership(
+                self._ownership(config), fan_policy.target_id
+            ),
+        )
+
+    @staticmethod
+    def _auxiliary_state(hass: HomeAssistant, entity_id: str | None) -> SensorState:
+        if entity_id is None:
+            return SensorState.UNKNOWN
+        state = hass.states.get(entity_id)
+        return _state_of(getattr(state, "state", None))
 
 
 async def build_context(

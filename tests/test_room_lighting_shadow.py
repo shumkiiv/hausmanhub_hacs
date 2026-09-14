@@ -12,6 +12,11 @@ from custom_components.hausman_hub.domain.room_lighting import (
     SensorKind,
     config_from_payload,
 )
+from custom_components.hausman_hub.domain.room_lighting_auxiliary import (
+    BathroomBand,
+    BathroomObservation,
+    evaluate_bathroom_exhaust,
+)
 from custom_components.hausman_hub.domain.room_lighting_engine import (
     LightSnapshot,
     RoomLightingContext,
@@ -204,3 +209,38 @@ async def test_journal_is_bounded() -> None:
         await service.async_evaluate(_config(), _ctx(now))
 
     assert len(service.journal_payload()["entries"]) == MAX_JOURNAL_ENTRIES
+
+
+async def test_auxiliary_shadow_records_decision_without_command() -> None:
+    store = _MemoryStore()
+    service = RoomLightingShadowService(store)
+    observation = BathroomObservation(
+        band=BathroomBand.DAY,
+        lights=(SensorState.ON, SensorState.OFF),
+        humidity=70.0,
+        fan=SensorState.OFF,
+        fan_owned=False,
+    )
+    decision = evaluate_bathroom_exhaust(observation)
+
+    await service.async_record_auxiliary(
+        at=123,
+        room_id="room_demo_bathroom",
+        observation=observation,
+        decision=decision,
+    )
+
+    entry = service.journal_payload()["entries"][-1]
+    assert entry["roomId"] == "room_demo_bathroom"
+    assert entry["mode"] == "shadow"
+    assert entry["commandsEnabled"] is False
+    auxiliary = entry["auxiliary"]
+    assert auxiliary["band"] == "day"
+    assert auxiliary["lights"] == ["on", "off"]
+    assert auxiliary["humidity"] == 70.0
+    assert auxiliary["fan"] == "off"
+    assert auxiliary["fanOwned"] is False
+    assert auxiliary["transition"] == "bathroom_hold"
+    assert auxiliary["action"] == "turn_on"
+    assert auxiliary["armTimerSeconds"] is None
+    assert store.saves == 1

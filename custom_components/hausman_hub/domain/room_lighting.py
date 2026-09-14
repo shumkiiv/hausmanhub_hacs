@@ -23,6 +23,7 @@ MAX_SWITCH_BINDINGS = 64
 MAX_LIGHT_TARGETS = 64
 MAX_SENSORS = 32
 MAX_WIRELESS_SWITCHES = 16
+MAX_AUXILIARIES = 8
 MIN_BRIGHTNESS = 0
 MAX_BRIGHTNESS = 100
 MIN_KELVIN = 2000
@@ -37,6 +38,7 @@ _BINARY_SENSOR = re.compile(r"^binary_sensor\.[a-z0-9_]+$")
 _LUX_SENSOR = re.compile(r"^sensor\.[a-z0-9_]+$")
 _LIGHT_ENTITY = re.compile(r"^light\.[a-z0-9_]+$")
 _SWITCH_ENTITY = re.compile(r"^switch\.[a-z0-9_]+$")
+_AUXILIARY_ENTITY = re.compile(r"^(?:switch|fan)\.[a-z0-9_]+$")
 _WIRELESS_ENTITY = re.compile(r"^(?:sensor|event|binary_sensor)\.[a-z0-9_]+$")
 _HA_DEVICE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 _DEVICE_TRIGGER_SUBTYPE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$")
@@ -55,11 +57,16 @@ class SensorKind(StrEnum):
     PRESENCE = "presence"
     MOTION = "motion"
     ILLUMINANCE = "illuminance"
+    HUMIDITY = "humidity"
 
 
 class LightKind(StrEnum):
     LIGHT = "light"
     SWITCH = "switch"
+
+
+class AuxiliaryKind(StrEnum):
+    FAN = "fan"
 
 
 class LightRole(StrEnum):
@@ -255,7 +262,11 @@ class RoomSensor:
         if self.entity_id is not None:
             if not isinstance(self.entity_id, str):
                 raise RoomLightingViolation("sensor entity id must be text")
-            pattern = _LUX_SENSOR if self.kind is SensorKind.ILLUMINANCE else _BINARY_SENSOR
+            if self.kind in (SensorKind.ILLUMINANCE, SensorKind.HUMIDITY):
+                # Lux and humidity sensors live on the sensor domain.
+                pattern = _LUX_SENSOR
+            else:
+                pattern = _BINARY_SENSOR
             if pattern.fullmatch(self.entity_id) is None:
                 raise RoomLightingViolation(
                     "sensor entity id does not match its sensor kind"
@@ -382,11 +393,89 @@ class WirelessSwitch:
 
 
 @dataclass(frozen=True, slots=True)
+class AuxiliaryTarget:
+    """One auxiliary actuator outside the light profile, for example a fan."""
+
+    id: str
+    name: str
+    kind: AuxiliaryKind
+    entity_id: str | None = None
+    auto_adopt_override: bool | None = None
+
+    def __post_init__(self) -> None:
+        _stable_id(self.id, "auxiliary target id")
+        _text(self.name, "auxiliary target name")
+        object.__setattr__(
+            self, "kind", _enum(self.kind, AuxiliaryKind, "auxiliary target kind")
+        )
+        if self.entity_id is not None and (
+            not isinstance(self.entity_id, str)
+            or _AUXILIARY_ENTITY.fullmatch(self.entity_id) is None
+        ):
+            raise RoomLightingViolation("auxiliary target entity id is invalid")
+        if self.auto_adopt_override is not None:
+            _flag(self.auto_adopt_override, "auxiliary target auto adopt override")
+
+
+@dataclass(frozen=True, slots=True)
+class AuxiliaryFanPolicy:
+    """Bathroom-style fan policy: humidity threshold, dry delay, time bands."""
+
+    target_id: str
+    humidity_threshold: int = 65
+    day_off_seconds: int = 1800
+    quiet_start: str = "06:00"
+    day_start: str = "08:00"
+    night_start: str = "22:00"
+
+    def __post_init__(self) -> None:
+        _stable_id(self.target_id, "auxiliary fan target id")
+        _integer(
+            self.humidity_threshold,
+            "auxiliary fan humidity threshold",
+            minimum=1,
+            maximum=100,
+        )
+        _integer(
+            self.day_off_seconds,
+            "auxiliary fan day-off seconds",
+            minimum=1,
+            maximum=7200,
+        )
+        for label, value in (
+            ("quiet start", self.quiet_start),
+            ("day start", self.day_start),
+            ("night start", self.night_start),
+        ):
+            if not isinstance(value, str) or _TIME_OF_DAY.fullmatch(value) is None:
+                raise RoomLightingViolation(f"auxiliary fan {label} must be HH:MM")
+        quiet = _clock_minutes(self.quiet_start)
+        day = _clock_minutes(self.day_start)
+        night = _clock_minutes(self.night_start)
+        if not quiet < day < night:
+            raise RoomLightingViolation(
+                "auxiliary fan band boundaries must be ordered quiet < day < night"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class AuxiliaryPolicy:
+    """Auxiliary actuator policy block of one room configuration."""
+
+    fan: AuxiliaryFanPolicy
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.fan, AuxiliaryFanPolicy):
+            raise RoomLightingViolation("auxiliary policy requires a fan block")
+
+
+@dataclass(frozen=True, slots=True)
 class Devices:
     sensors: tuple[RoomSensor, ...] = ()
     light_targets: tuple[LightTarget, ...] = ()
     power_switch: PowerSwitch | None = None
     wireless_switches: tuple[WirelessSwitch, ...] = ()
+    auxiliaries: tuple[AuxiliaryTarget, ...] = ()
     select_all: bool = False
 
     def __post_init__(self) -> None:
@@ -394,6 +483,7 @@ class Devices:
             (self.sensors, MAX_SENSORS, "sensors"),
             (self.light_targets, MAX_LIGHT_TARGETS, "light targets"),
             (self.wireless_switches, MAX_WIRELESS_SWITCHES, "wireless switches"),
+            (self.auxiliaries, MAX_AUXILIARIES, "auxiliaries"),
         ):
             if not isinstance(values, tuple) or len(values) > maximum:
                 raise RoomLightingViolation(f"{label} exceed the safe bound")
@@ -401,6 +491,7 @@ class Devices:
         identifiers: list[str] = [item.id for item in self.sensors]
         identifiers.extend(item.id for item in self.light_targets)
         identifiers.extend(item.id for item in self.wireless_switches)
+        identifiers.extend(item.id for item in self.auxiliaries)
         if self.power_switch is not None:
             identifiers.append(self.power_switch.id)
         if len(identifiers) != len(set(identifiers)):
@@ -443,6 +534,20 @@ class Devices:
             if item.id == switch_id:
                 return item
         return None
+
+    def auxiliary(self, target_id: str) -> AuxiliaryTarget | None:
+        for item in self.auxiliaries:
+            if item.id == target_id:
+                return item
+        return None
+
+    @property
+    def humidity_entity_ids(self) -> frozenset[str]:
+        return frozenset(
+            item.entity_id
+            for item in self.sensors
+            if item.kind is SensorKind.HUMIDITY and item.entity_id is not None
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -789,6 +894,7 @@ class RoomLightingConfig:
     illumination: Illumination | None = None
     timers: Timers | None = None
     behaviors: Behaviors | None = None
+    auxiliary: AuxiliaryPolicy | None = None
     template_id: str | None = None
     overrides: Overrides = field(default_factory=Overrides)
 
@@ -819,6 +925,8 @@ class RoomLightingConfig:
             raise RoomLightingViolation("timers block is invalid")
         if self.behaviors is not None and not isinstance(self.behaviors, Behaviors):
             raise RoomLightingViolation("behaviours block is invalid")
+        if self.auxiliary is not None and not isinstance(self.auxiliary, AuxiliaryPolicy):
+            raise RoomLightingViolation("auxiliary block is invalid")
         if self.template_id is not None:
             _stable_id(self.template_id, "template id")
         if not isinstance(self.overrides, Overrides):
@@ -896,6 +1004,12 @@ class RoomLightingConfig:
                 violations.append(
                     "illumination sensor is not selected as an illuminance sensor"
                 )
+        if self.auxiliary is not None:
+            if self.devices.auxiliary(self.auxiliary.fan.target_id) is None:
+                violations.append(
+                    "auxiliary fan references an unknown auxiliary target: "
+                    f"{self.auxiliary.fan.target_id}"
+                )
         return tuple(violations)
 
     def effective_auto_adopt(self, override: bool | None) -> bool:
@@ -951,6 +1065,17 @@ class RoomLightingConfig:
                 "respectManualOff": self.behaviors.respect_manual_off,
                 "restoreOwnershipAfterRestart": self.behaviors.restore_ownership_after_restart,
             }
+        if self.auxiliary is not None:
+            payload["auxiliary"] = {
+                "fan": {
+                    "targetId": self.auxiliary.fan.target_id,
+                    "humidityThreshold": self.auxiliary.fan.humidity_threshold,
+                    "dayOffSeconds": self.auxiliary.fan.day_off_seconds,
+                    "quietStart": self.auxiliary.fan.quiet_start,
+                    "dayStart": self.auxiliary.fan.day_start,
+                    "nightStart": self.auxiliary.fan.night_start,
+                }
+            }
         return payload
 
 
@@ -993,6 +1118,18 @@ def _devices_to_payload(devices: Devices) -> dict[str, object]:
                 item.entity_id,
             )
             for item in devices.light_targets
+        ],
+        "auxiliaries": [
+            _device_entity(
+                {
+                    "id": item.id,
+                    "name": item.name,
+                    "kind": item.kind.value,
+                    "autoAdoptOverride": item.auto_adopt_override,
+                },
+                item.entity_id,
+            )
+            for item in devices.auxiliaries
         ],
         "power_switch": (
             None
@@ -1197,16 +1334,44 @@ def _wireless_switch_from_payload(payload: object) -> WirelessSwitch:
     )
 
 
+def _auxiliary_target_from_payload(payload: object) -> AuxiliaryTarget:
+    data = _as_dict(payload, "auxiliary target")
+    return AuxiliaryTarget(
+        id=_require(data, "id", "auxiliary target id"),
+        name=_require(data, "name", "auxiliary target name"),
+        kind=_require(data, "kind", "auxiliary target kind"),
+        entity_id=data.get("entityId"),
+        auto_adopt_override=data.get("autoAdoptOverride"),
+    )
+
+
+def _auxiliary_policy_from_payload(payload: object) -> AuxiliaryPolicy:
+    data = _as_dict(payload, "auxiliary policy")
+    fan = _as_dict(_require(data, "fan", "auxiliary fan policy"), "auxiliary fan policy")
+    return AuxiliaryPolicy(
+        fan=AuxiliaryFanPolicy(
+            target_id=_require(fan, "targetId", "auxiliary fan target id"),
+            humidity_threshold=fan.get("humidityThreshold", 65),
+            day_off_seconds=fan.get("dayOffSeconds", 1800),
+            quiet_start=fan.get("quietStart", "06:00"),
+            day_start=fan.get("dayStart", "08:00"),
+            night_start=fan.get("nightStart", "22:00"),
+        )
+    )
+
+
 def _devices_from_payload(payload: object) -> Devices:
     data = _as_dict(payload, "devices")
     sensors = _as_list(data.get("sensors", []), "sensors")
     targets = _as_list(data.get("light_targets", []), "light targets")
     wireless = _as_list(data.get("wireless_switches", []), "wireless switches")
+    auxiliaries = _as_list(data.get("auxiliaries", []), "auxiliaries")
     return Devices(
         sensors=tuple(_sensor_from_payload(item) for item in sensors),
         light_targets=tuple(_light_target_from_payload(item) for item in targets),
         power_switch=_power_switch_from_payload(data.get("power_switch")),
         wireless_switches=tuple(_wireless_switch_from_payload(item) for item in wireless),
+        auxiliaries=tuple(_auxiliary_target_from_payload(item) for item in auxiliaries),
         select_all=data.get("selectAll", False),
     )
 
@@ -1366,6 +1531,7 @@ def room_lighting_config_from_payload(payload: object) -> RoomLightingConfig:
     illumination = data.get("illumination")
     timers = data.get("timers")
     behaviors = data.get("behaviors")
+    auxiliary = data.get("auxiliary")
     return RoomLightingConfig(
         room_id=_require(data, "roomId", "room id"),
         name=_require(data, "name", "room name"),
@@ -1384,6 +1550,7 @@ def room_lighting_config_from_payload(payload: object) -> RoomLightingConfig:
         illumination=None if illumination is None else _illumination_from_payload(illumination),
         timers=None if timers is None else _timers_from_payload(timers),
         behaviors=None if behaviors is None else _behaviors_from_payload(behaviors),
+        auxiliary=None if auxiliary is None else _auxiliary_policy_from_payload(auxiliary),
         template_id=data.get("templateId"),
         overrides=_overrides_from_payload(data.get("overrides")),
     )
@@ -1416,10 +1583,11 @@ def config_to_payload(config: RoomLightingConfig) -> dict[str, object]:
 def config_entity_ids(config: RoomLightingConfig) -> tuple[str, ...]:
     """Return the control entity ids referenced by one room configuration.
 
-    Only control entities are returned: light targets, the power switch and
-    wireless switches. Sensors are intentionally excluded, because a shared
-    presence, motion or illuminance sensor is legitimate shared infrastructure,
-    while a control entity must belong to a single room.
+    Only control entities are returned: light targets, the power switch,
+    wireless switches and auxiliary actuators. Sensors are intentionally
+    excluded, because a shared presence, motion or illuminance sensor is
+    legitimate shared infrastructure, while a control entity must belong to a
+    single room.
     """
 
     if not isinstance(config, RoomLightingConfig):
@@ -1434,6 +1602,9 @@ def config_entity_ids(config: RoomLightingConfig) -> tuple[str, ...]:
     for switch in config.devices.wireless_switches:
         if switch.entity_id is not None:
             entities.append(switch.entity_id)
+    for auxiliary in config.devices.auxiliaries:
+        if auxiliary.entity_id is not None:
+            entities.append(auxiliary.entity_id)
     return tuple(entities)
 
 
@@ -1467,6 +1638,11 @@ def config_from_payload(payload: object) -> RoomLightingConfig:
     """Decode and validate one configuration payload."""
 
     return room_lighting_config_from_payload(payload)
+
+
+def _clock_minutes(value: str) -> int:
+    hour, minute = (int(part) for part in value.split(":"))
+    return hour * 60 + minute
 
 
 def resolve_anchor_time(

@@ -258,7 +258,15 @@ class RoomLightingService:
         if keep_devices and room_id is not None:
             stored = await self._store.async_get(room_id)  # type: ignore[attr-defined]
             if stored is not None:
-                payload["devices"] = stored.to_dict()["devices"]
+                stored_payload = stored.to_dict()
+                payload["devices"] = stored_payload["devices"]
+                # Keep the kept devices and their auxiliary policy together:
+                # the fan policy references a device from this list. A
+                # template-level policy is dropped so a kept fan device never
+                # survives without its thresholds.
+                payload.pop("auxiliary", None)
+                if stored_payload.get("auxiliary") is not None:
+                    payload["auxiliary"] = stored_payload["auxiliary"]
         return config_from_payload(payload)
 
 

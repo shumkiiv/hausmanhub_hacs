@@ -220,6 +220,51 @@ class RoomLightingServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(config.schedule)
         self.assertEqual("room_off", config.away_behavior.mode.value)
 
+    async def test_apply_template_keeps_room_auxiliary_policy_with_devices(self) -> None:
+        room_id = "room_demo_bathroom"
+        base = await self.service.async_apply_template(DEFAULT_TEMPLATE_ID, room_id=room_id)
+        payload = base.to_dict()
+        payload["devices"]["auxiliaries"] = [  # type: ignore[index]
+            {
+                "id": "aux_demo_fan",
+                "name": "Вытяжка",
+                "kind": "fan",
+                "entityId": "switch.demo_fan",
+                "autoAdoptOverride": None,
+            }
+        ]
+        payload["auxiliary"] = {  # type: ignore[index]
+            "fan": {
+                "targetId": "aux_demo_fan",
+                "humidityThreshold": 70,
+                "dayOffSeconds": 900,
+                "quietStart": "06:00",
+                "dayStart": "08:00",
+                "nightStart": "22:00",
+            }
+        }
+        stored = await self.service.async_put_config(config_from_payload(payload))
+        self.assertIsNotNone(stored.auxiliary)
+
+        kept = await self.service.async_apply_template(
+            DEFAULT_TEMPLATE_ID,
+            {"name": "Шаблон ванной"},
+            room_id=room_id,
+            keep_devices=True,
+        )
+        self.assertIsNotNone(kept.auxiliary)
+        self.assertEqual("aux_demo_fan", kept.auxiliary.fan.target_id)  # type: ignore[union-attr]
+        self.assertEqual(70, kept.auxiliary.fan.humidity_threshold)  # type: ignore[union-attr]
+        self.assertEqual(["aux_demo_fan"], [item.id for item in kept.devices.auxiliaries])
+
+        replaced = await self.service.async_apply_template(
+            DEFAULT_TEMPLATE_ID,
+            {"name": "Шаблон без устройств"},
+            room_id=room_id,
+        )
+        self.assertIsNone(replaced.auxiliary)
+        self.assertEqual((), replaced.devices.auxiliaries)
+
     async def test_operations_never_call_home_assistant_services(self) -> None:
         config = config_from_payload(_payload(room_id="room_demo_entry"))
         await self.service.async_put_config(config)

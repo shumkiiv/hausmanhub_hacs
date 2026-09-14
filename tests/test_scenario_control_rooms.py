@@ -30,6 +30,10 @@ from custom_components.hausman_hub.application.scenario_control_coordinator impo
     SHOWER_MAIN_TARGET_ID,
     SHOWER_PRESENCE_TARGET_ID,
     TAMBUR_POWER_TARGET_ID,
+    TAMBUR_CHANDELIER_TARGET_ID,
+    TAMBUR_MIRROR_TARGET_ID,
+    TAMBUR_POINTS_TARGET_ID,
+    TAMBUR_SCENARIO_ID,
     SUN_TARGET_ID,
     TOILET_SCENARIO_ID,
     TOILET_AWAY_TARGET_ID,
@@ -353,6 +357,53 @@ def test_coordinator_command_inventory_includes_lights_relays_and_room_power() -
         SHOWER_MAIN_TARGET_ID,
         SHOWER_FAN_TARGET_ID,
     } <= coordinator.command_target_ids
+
+
+def test_transferred_tambur_is_neither_coordinator_owner_nor_reserved() -> None:
+    coordinator = object.__new__(ScenarioControlCoordinator)
+    coordinator.set_externally_managed_scenarios(frozenset({TAMBUR_SCENARIO_ID}))
+
+    assert TAMBUR_SCENARIO_ID not in coordinator.owned_scenario_ids
+    assert not {
+        TAMBUR_CHANDELIER_TARGET_ID,
+        TAMBUR_POINTS_TARGET_ID,
+        TAMBUR_MIRROR_TARGET_ID,
+        TAMBUR_POWER_TARGET_ID,
+    }.intersection(coordinator.command_target_ids)
+    assert SHOWER_MAIN_TARGET_ID in coordinator.command_target_ids
+
+
+def test_transferred_scenario_ids_are_reported_for_adapter_exclusions() -> None:
+    coordinator = object.__new__(ScenarioControlCoordinator)
+    coordinator.set_externally_managed_scenarios(frozenset({TAMBUR_SCENARIO_ID}))
+
+    assert coordinator.externally_managed_scenario_ids == frozenset(
+        {TAMBUR_SCENARIO_ID}
+    )
+    assert TAMBUR_SCENARIO_ID not in coordinator.owned_scenario_ids
+
+
+@pytest.mark.asyncio
+async def test_transferred_tambur_control_context_is_fail_closed() -> None:
+    """A manual run of the transferred scenario never replays a stale action."""
+
+    now = [datetime(2026, 9, 7, 12, tzinfo=ZoneInfo("Asia/Omsk"))]
+    coordinator, _service, _states, _priority, _store = await make_room_coordinator(
+        now=now,
+        clock=[0],
+    )
+    coordinator.set_externally_managed_scenarios(frozenset({TAMBUR_SCENARIO_ID}))
+
+    tambur = await coordinator.async_control_context(
+        TAMBUR_SCENARIO_ID, "run-tambur", {"source": "manual"}
+    )
+    assert tambur["state"]["ready"] is False
+    assert tambur["state"]["transition"] == "externally_managed"
+
+    bathroom = await coordinator.async_control_context(
+        BATHROOM_SCENARIO_ID, "run-bathroom", {"source": "manual"}
+    )
+    assert bathroom["state"]["ready"] is True
 
 
 def test_room_runtime_and_tool_sources_are_exact_manifest_bytes() -> None:

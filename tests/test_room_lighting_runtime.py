@@ -409,6 +409,92 @@ def _seed_presence_and_light(hass: _FakeHass) -> None:
     hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
 
 
+def _bathroom_payload() -> dict[str, object]:
+    payload = _config_payload()
+    payload["roomId"] = "room_demo_bathroom"
+    payload["name"] = "Ванная"
+    payload["devices"]["sensors"].append(  # type: ignore[index]
+        {
+            "id": "sensor_demo_humidity",
+            "name": "Влажность",
+            "kind": "humidity",
+            "entityId": "sensor.demo_humidity",
+            "autoAdoptOverride": None,
+        }
+    )
+    payload["devices"]["light_targets"].append(  # type: ignore[index]
+        {
+            "id": "light_second",
+            "name": "Свет второй",
+            "kind": "switch",
+            "entityId": "switch.demo_second",
+            "role": None,
+            "groupId": None,
+            "brightness": False,
+            "color_temperature": False,
+            "autoAdoptOverride": None,
+        }
+    )
+    payload["devices"]["auxiliaries"] = [  # type: ignore[index]
+        {
+            "id": "aux_fan",
+            "name": "Вытяжка",
+            "kind": "fan",
+            "entityId": "switch.demo_fan",
+            "autoAdoptOverride": None,
+        }
+    ]
+    payload["auxiliary"] = {  # type: ignore[index]
+        "fan": {
+            "targetId": "aux_fan",
+            "humidityThreshold": 65,
+            "dayOffSeconds": 1800,
+            "quietStart": "06:00",
+            "dayStart": "08:00",
+            "nightStart": "22:00",
+        }
+    }
+    return payload
+
+
+async def test_runtime_records_auxiliary_shadow_without_any_command() -> None:
+    hass = _FakeHass()
+    hass.states.set("light.demo_main", "on", last_changed=_NOW_DT)
+    hass.states.set("switch.demo_second", "off", last_changed=_NOW_DT)
+    hass.states.set("sensor.demo_humidity", "70", last_changed=_NOW_DT)
+    hass.states.set("switch.demo_fan", "off", last_changed=_NOW_DT)
+    config = config_from_payload(_bathroom_payload())
+    shadow = RoomLightingShadowService(_MemoryShadowStore())
+    runtime = RoomLightingRuntime(
+        hass,
+        _ConfigService(config),
+        shadow,
+        now_ms=lambda: _NOW_MS,
+        track_state_changes=lambda hass, entities, callback: (lambda: None),
+        track_interval=lambda hass, callback, interval: (lambda: None),
+        listen_bus=lambda hass, event_type, callback: (lambda: None),
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        entries = shadow.journal_payload()["entries"]
+        auxiliary_entries = [entry for entry in entries if "auxiliary" in entry]
+        assert len(auxiliary_entries) == 1
+        auxiliary = auxiliary_entries[0]["auxiliary"]
+        # 10:00 UTC is the day band: a lit room above the humidity threshold
+        # asks for the fan; the pure engine records it and nothing is sent.
+        assert auxiliary["band"] == "day"
+        assert auxiliary["lights"] == ["on", "off"]
+        assert auxiliary["humidity"] == 70.0
+        assert auxiliary["fan"] == "off"
+        assert auxiliary["transition"] == "bathroom_hold"
+        assert auxiliary["action"] == "turn_on"
+        assert auxiliary["fanOwned"] is False
+        assert hass.services.calls == []
+    finally:
+        await runtime.stop()
+
+
 async def test_state_provider_builds_context_from_fake_hass() -> None:
     hass = _FakeHass()
     last = datetime(2026, 9, 11, 9, 59, tzinfo=_TZ)
