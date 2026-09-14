@@ -376,6 +376,8 @@ def _make_runtime(
     payload: dict[str, object] | None = None,
     payloads: list[dict[str, object]] | None = None,
     device_automation_api: object | None = None,
+    reserved_target_ids: tuple[str, ...] = (),
+    reserved_entity_ids_provider: object | None = None,
 ) -> RoomLightingRuntime:
     shadow = RoomLightingShadowService(_MemoryShadowStore())
     if payloads is not None:
@@ -397,6 +399,8 @@ def _make_runtime(
         track_interval=lambda hass, callback, interval: (lambda: None),
         listen_bus=lambda hass, event_type, callback: (lambda: None),
         device_automation_api=device_automation_api,
+        reserved_target_ids=reserved_target_ids,
+        reserved_entity_ids_provider=reserved_entity_ids_provider,
     )
 
 
@@ -529,6 +533,73 @@ async def test_runtime_dispatches_plan_when_commands_enabled() -> None:
         assert ownership
         assert ownership[-1].source is OwnershipSource.AUTO
         assert ownership[-1].confirmed is True
+    finally:
+        await runtime.stop()
+
+
+async def test_reserved_target_blocks_direct_command_without_executor_call() -> None:
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=True,
+        executor=executor,
+        reserved_target_ids=("light_main",),
+    )
+    config = config_from_payload(_config_payload(commands_enabled=True))
+
+    receipt = await runtime.async_execute_command(
+        config, PlannedCommand("light_main", LightAction.TURN_ON)
+    )
+
+    assert receipt == {
+        "confirmed": False,
+        "blocked": True,
+        "reason": "reserved_command_target",
+    }
+    assert executor.calls == []
+
+
+async def test_reserved_entity_blocks_dispatch_and_binding_without_executor_call() -> None:
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=True,
+        executor=executor,
+        payload=_trigger_config_payload(),
+        reserved_entity_ids_provider=lambda: ("light.demo_main",),
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        assert executor.calls == []
+        await runtime._handle_device_trigger(
+            runtime.configs()[0], "device_demo_mirror", "sw_mirror", "1_single"
+        )
+        assert executor.calls == []
+    finally:
+        await runtime.stop()
+
+
+async def test_reserved_power_blocks_dispatch_before_power_or_light_call() -> None:
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    hass.states.set(POWER_ENTITY, "off", last_changed=_NOW_DT)
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=True,
+        executor=executor,
+        payload=_config_payload(power_switch_entity=POWER_ENTITY),
+        reserved_entity_ids_provider=lambda: (POWER_ENTITY,),
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        assert executor.calls == []
     finally:
         await runtime.stop()
 
@@ -1694,6 +1765,67 @@ async def test_manual_power_off_is_not_immediately_overridden() -> None:
             and call[2].get("entity_id") == POWER_ENTITY
         ]
         assert power_on_calls == []
+    finally:
+        await runtime.stop()
+
+
+def test_explicit_return_to_auto_keeps_manual_off_protection() -> None:
+    journal = RoomLightingOwnershipJournal(now_ms=lambda: _NOW_MS)
+    journal.record_manual(_ROOM_ID, "ordinary", turned_off=False)
+    journal.record_manual(_ROOM_ID, "protected", turned_off=True)
+
+    assert journal.clear_explicit_manual_ownership(
+        _ROOM_ID, {"ordinary", "protected"}
+    ) == ("ordinary",)
+    assert journal.snapshots_for(_ROOM_ID, {"ordinary"}) == ()
+    assert journal.last_manual_off_at(_ROOM_ID, {"protected"}) == _NOW_MS
+
+
+async def test_external_power_on_does_not_claim_all_room_targets_as_manual() -> None:
+    """An unattributed power-on must not suppress the next presence decision."""
+
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set(POWER_ENTITY, "off", last_changed=_NOW_DT)
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=True,
+        executor=RoomLightingHaExecutor(),
+        payload=_config_payload(power_switch_entity=POWER_ENTITY),
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        hass.services.calls.clear()
+        hass.states.set(POWER_ENTITY, "on", last_changed=_NOW_DT)
+        runtime._service_event(
+            SimpleNamespace(
+                data={
+                    "domain": "switch",
+                    "service": "turn_on",
+                    "service_data": {"entity_id": POWER_ENTITY},
+                }
+            )
+        )
+
+        assert runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"}) == ()
+
+        hass.states.set("binary_sensor.demo_presence", "on", last_changed=_NOW_DT)
+        runtime._state_event(
+            SimpleNamespace(data={"entity_id": "binary_sensor.demo_presence"})
+        )
+        await asyncio.gather(*hass.tasks)
+
+        assert runtime._ownership.snapshots_for(
+            _ROOM_ID, {"light_main"}
+        )[-1].source is OwnershipSource.AUTO
+        assert any(
+            call[0] == "light"
+            and call[1] == "turn_on"
+            and call[2].get("entity_id") == "light.demo_main"
+            for call in hass.services.calls
+        )
     finally:
         await runtime.stop()
 

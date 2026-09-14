@@ -645,14 +645,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     activation_latch = ActivationLatch()
 
-    # Generic managed-scenario engine for every room except the separately
-    # owned adaptive-controller scenario. Without this the coordinator listener
-    # and the state/time trigger subscriptions are never armed, so showers,
-    # corridors, storage, bathroom, office, curtains and away scenarios
-    # silently stop.
-    scenario_control_coordinator.set_externally_managed_scenarios(
-        frozenset({"system-tambur-adaptive-controller"})
-    )
+    # The coordinator owns every adaptive lighting controller.  The generic
+    # event and schedule adapters receive the same IDs as exclusions below,
+    # which leaves exactly one path that can issue each controller command.
     if getattr(hass, "bus", None) is not None:
         await scenario_control_coordinator.async_start(entry, activation_latch)
         await async_start_scenario_schedule(
@@ -773,6 +768,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ownership_store=HomeAssistantRoomLightingOwnershipStore(
                 hass, entry.entry_id
             ),
+            reserved_target_ids=scenario_control_coordinator.command_target_ids,
+            reserved_entity_ids_provider=scenario_control_coordinator.command_entity_ids,
         )
         domain_data[DATA_ROOM_LIGHTING_RUNTIME] = room_lighting_runtime
         await room_lighting_runtime.start(hass, entry.entry_id)

@@ -358,18 +358,6 @@ class ScenarioControlCoordinator:
         self._schedule_unsubs: list[Callable[[], None]] = []
         self._activation_latch: object | None = None
         self._started = False
-        self._externally_managed_scenarios: frozenset[str] = frozenset()
-
-    def set_externally_managed_scenarios(self, scenario_ids: frozenset[str]) -> None:
-        """Exclude scenarios owned by another runtime (for example Tambur)."""
-
-        self._externally_managed_scenarios = frozenset(scenario_ids)
-
-    def _tambur_external(self) -> bool:
-        return TAMBUR_SCENARIO_ID in getattr(
-            self, "_externally_managed_scenarios", frozenset()
-        )
-
     @property
     def owned_scenario_ids(self) -> frozenset[str]:
         """Scenario IDs whose device and clock triggers are coordinated here."""
@@ -384,7 +372,45 @@ class ScenarioControlCoordinator:
                 BATHROOM_SCENARIO_ID,
                 OFFICE_SCENARIO_ID,
             }
-        ) - getattr(self, "_externally_managed_scenarios", frozenset())
+        )
+
+    @property
+    def command_target_ids(self) -> frozenset[str]:
+        """Stable inventory of targets for which this coordinator is writer.
+
+        The generic room-lighting runtime receives this inventory during setup.
+        Keeping it beside the controller definitions prevents a newly added
+        relay or room-power target from accidentally gaining a second writer.
+        """
+
+        return frozenset(
+            {
+                STORAGE_LIGHT_TARGET_ID,
+                TAMBUR_CHANDELIER_TARGET_ID,
+                TAMBUR_POINTS_TARGET_ID,
+                TAMBUR_MIRROR_TARGET_ID,
+                TAMBUR_POWER_TARGET_ID,
+                SMALL_CORRIDOR_RELAY_TARGET_ID,
+                SMALL_CORRIDOR_CHANDELIER_TARGET_ID,
+                SHOWER_MAIN_TARGET_ID,
+                SHOWER_EXTRA_TARGET_ID,
+                SHOWER_FAN_TARGET_ID,
+                SHOWER_CABINET_TARGET_ID,
+                TOILET_MAIN_TARGET_ID,
+                TOILET_NIGHT_TARGET_ID,
+                TOILET_FAN_TARGET_ID,
+                TOILET_AWAY_TARGET_ID,
+                *BATHROOM_LIGHT_TARGET_IDS,
+                BATHROOM_FAN_TARGET_ID,
+                OFFICE_LIGHT_TARGET_ID,
+                OFFICE_RELAY_TARGET_ID,
+            }
+        )
+
+    def command_entity_ids(self) -> frozenset[str]:
+        """Resolve the current entities for the canonical command inventory."""
+
+        return self._entity_ids_for_targets(tuple(self.command_target_ids))
 
     async def async_load(self) -> None:
         document = self._policy_service.current
@@ -483,7 +509,7 @@ class ScenarioControlCoordinator:
             entity_id = data.get("entity_id") if isinstance(data, Mapping) else None
             if entity_id in self._storage_entity_ids():
                 await self.async_handle_storage_change()
-            if entity_id in self._tambur_entity_ids() and not self._tambur_external():
+            if entity_id in self._tambur_entity_ids():
                 await self.async_handle_tambur_change(
                     trigger_entity_id=entity_id,
                     old_state=data.get("old_state"),
@@ -522,11 +548,10 @@ class ScenarioControlCoordinator:
                     await self.async_reconcile_storage_exhaust_due()
                 else:
                     self._schedule_exhaust_due()
-            if not self._tambur_external():
-                await self.async_handle_tambur_change(
-                    recovery=True,
-                    allow_activation=False,
-                )
+            await self.async_handle_tambur_change(
+                recovery=True,
+                allow_activation=False,
+            )
             await self.async_handle_small_corridor_change(
                 recovery=True,
                 allow_activation=False,
@@ -2822,7 +2847,7 @@ class ScenarioControlCoordinator:
 
         async with self._decision_lock:
             policy = self._policy_service.current.policy
-            if clock in {policy.evening_latest, "23:00"} and not self._tambur_external():
+            if clock in {policy.evening_latest, "23:00"}:
                 if (
                     self._target_state(TAMBUR_MIRROR_TARGET_ID) == "off"
                     and not self._manual_claims((TAMBUR_MIRROR_TARGET_ID,))
@@ -2835,7 +2860,7 @@ class ScenarioControlCoordinator:
                     )
                 if clock == policy.evening_latest:
                     await self._start_tambur_evening_cap_if_owned()
-            if clock == policy.tambur_main_off and not self._tambur_external():
+            if clock == policy.tambur_main_off:
                 self._cancel_zone_task(TAMBUR_SCENARIO_ID)
                 if not self._manual_claims(
                     (TAMBUR_CHANDELIER_TARGET_ID, TAMBUR_POINTS_TARGET_ID)
@@ -2853,7 +2878,7 @@ class ScenarioControlCoordinator:
                         SMALL_CORRIDOR_SCENARIO_ID,
                         (SMALL_CORRIDOR_CHANDELIER_TARGET_ID, SMALL_CORRIDOR_RELAY_TARGET_ID),
                     )
-            if clock == "10:00" and not self._tambur_external():
+            if clock == "10:00":
                 mirror_entity = self._target_entity_id(TAMBUR_MIRROR_TARGET_ID)
                 if (
                     mirror_entity is not None
@@ -2866,7 +2891,7 @@ class ScenarioControlCoordinator:
                         "turn_off",
                         None,
                     )
-            if clock in {"09:00", "10:00"} and not self._tambur_external():
+            if clock in {"09:00", "10:00"}:
                 await self._async_handle_tambur_change(
                     recovery=True,
                     allow_activation=False,

@@ -21,6 +21,7 @@ from custom_components.hausman_hub.application.scenario_control_coordinator impo
     OFFICE_LIGHT_TARGET_ID,
     OFFICE_LUX_TARGET_ID,
     OFFICE_RELAY_TARGET_ID,
+    STORAGE_LIGHT_TARGET_ID,
     SHOWER_SCENARIO_ID,
     SHOWER_CABINET_TARGET_ID,
     SHOWER_EXTRA_TARGET_ID,
@@ -28,6 +29,7 @@ from custom_components.hausman_hub.application.scenario_control_coordinator impo
     SHOWER_HUMIDITY_TARGET_ID,
     SHOWER_MAIN_TARGET_ID,
     SHOWER_PRESENCE_TARGET_ID,
+    TAMBUR_POWER_TARGET_ID,
     SUN_TARGET_ID,
     TOILET_SCENARIO_ID,
     TOILET_AWAY_TARGET_ID,
@@ -341,16 +343,16 @@ def test_coordinator_owns_all_seven_completed_runtime_controllers() -> None:
     )
 
 
-def test_coordinator_excludes_the_externally_managed_tambur_runtime() -> None:
+def test_coordinator_command_inventory_includes_lights_relays_and_room_power() -> None:
     coordinator = object.__new__(ScenarioControlCoordinator)
-    coordinator.set_externally_managed_scenarios(
-        frozenset({"system-tambur-adaptive-controller"})
-    )
-    owned = coordinator.owned_scenario_ids
-    assert "system-tambur-adaptive-controller" not in owned
-    assert SHOWER_SCENARIO_ID in owned
-    assert "system-small-corridor-light-controller" in owned
-    assert len(owned) == 6
+
+    assert {
+        STORAGE_LIGHT_TARGET_ID,
+        TAMBUR_POWER_TARGET_ID,
+        OFFICE_RELAY_TARGET_ID,
+        SHOWER_MAIN_TARGET_ID,
+        SHOWER_FAN_TARGET_ID,
+    } <= coordinator.command_target_ids
 
 
 def test_room_runtime_and_tool_sources_are_exact_manifest_bytes() -> None:

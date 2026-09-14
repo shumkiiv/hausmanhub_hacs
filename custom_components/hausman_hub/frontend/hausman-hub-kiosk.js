@@ -1,6 +1,6 @@
-import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.276";
-import { overviewHomeName, stableOverviewHeroImage } from "./hausman-hub-overview-hero-state.js?v=1.52.276";
-import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.276";
+import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.277";
+import { overviewHomeName, stableOverviewHeroImage } from "./hausman-hub-overview-hero-state.js?v=1.52.277";
+import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.277";
 
 const KIOSK_RENDERER = (() => {
 const CLIMATE = new Set(["climate", "humidifier", "fan"]);

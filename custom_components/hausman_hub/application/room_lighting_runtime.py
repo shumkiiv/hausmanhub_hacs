@@ -254,6 +254,29 @@ class RoomLightingOwnershipJournal:
         ]
         return max(moments) if moments else None
 
+    def clear_explicit_manual_ownership(
+        self, room_id: str, target_ids: Iterable[str]
+    ) -> tuple[str, ...]:
+        """Return explicitly selected non-protected targets to automatic control.
+
+        This is intentionally not a recovery heuristic: a caller must name the
+        targets. A manual-off protection is never cleared by this operation.
+        """
+
+        cleared: list[str] = []
+        for target_id in sorted(set(target_ids)):
+            key = (room_id, target_id)
+            if key in self._manual_off:
+                continue
+            bucket = self._records.get(key)
+            if not bucket or bucket[-1].source is not OwnershipSource.MANUAL:
+                continue
+            self._records.pop(key, None)
+            cleared.append(target_id)
+        if cleared:
+            self._dirty = True
+        return tuple(cleared)
+
     def to_payload(self) -> dict[str, object]:
         return {
             "version": OWNERSHIP_STORAGE_VERSION,
@@ -400,6 +423,8 @@ class RoomLightingRuntime:
         track_interval: Callable[..., Callable[[], None]] | None = None,
         listen_bus: Callable[..., Callable[[], None]] | None = None,
         device_automation_api: object | None = None,
+        reserved_target_ids: Iterable[str] = (),
+        reserved_entity_ids_provider: Callable[[], Iterable[str]] | None = None,
         interval_seconds: int = DEFAULT_INTERVAL_SECONDS,
         away_debounce_seconds: float = AWAY_ON_DEBOUNCE_SECONDS,
     ) -> None:
@@ -424,6 +449,8 @@ class RoomLightingRuntime:
         self._track_interval = track_interval
         self._listen_bus = listen_bus
         self._device_automation_api = device_automation_api
+        self._reserved_target_ids = frozenset(reserved_target_ids)
+        self._reserved_entity_ids_provider = reserved_entity_ids_provider
         self._device_trigger_seen: dict[tuple[str, str, str], int] = {}
         self._interval_seconds = max(1, int(interval_seconds))
         self._configs: dict[str, RoomLightingConfig] = {}
@@ -611,14 +638,42 @@ class RoomLightingRuntime:
 
         return await self._build_context(config)
 
+    async def async_return_targets_to_automatic(
+        self, room_id: str, target_ids: Iterable[str]
+    ) -> tuple[str, ...]:
+        """Explicitly drop non-protected manual ownership without device calls."""
+
+        async with self._lock:
+            config = self._configs.get(room_id)
+            if config is None:
+                raise ValueError("room lighting configuration is unavailable")
+            allowed = set(config.devices.light_target_ids)
+            selected = set(target_ids)
+            if not selected or not selected <= allowed:
+                raise ValueError("room lighting target selection is invalid")
+            cleared = self._ownership.clear_explicit_manual_ownership(
+                room_id, selected
+            )
+            if cleared:
+                await self._persist_ownership()
+            return cleared
+
     async def async_execute_command(
         self, config: RoomLightingConfig, command: PlannedCommand
     ) -> dict[str, object]:
         """Execute one planned command through the shared HA executor."""
 
-        del config
         if self._hass is None:
             return {"confirmed": False}
+        if self._command_conflicts_with_reserved_writer(config, command):
+            _LOGGER.warning(
+                "room lighting command refused: target is owned by a controller"
+            )
+            return {
+                "confirmed": False,
+                "blocked": True,
+                "reason": "reserved_command_target",
+            }
         receipt = await self._executor.execute(  # type: ignore[attr-defined]
             self._hass, command
         )
@@ -831,6 +886,11 @@ class RoomLightingRuntime:
             return
         if self._executing_actions.get(entity_id) == service:
             # This runtime is issuing the power call itself.
+            return
+        if service == "turn_on":
+            # Powering a room is not itself evidence that a person selected a
+            # light source. In particular, an unattributed startup call must
+            # not make every target permanently manual-only.
             return
         turned_off = service == "turn_off" or (
             service == "toggle" and self._entity_is_on(entity_id)
@@ -1050,6 +1110,11 @@ class RoomLightingRuntime:
     ) -> None:
         if self._hass is None:
             return
+        if self._binding_conflicts_with_reserved_writer(config, target_ids):
+            _LOGGER.warning(
+                "room lighting binding refused: target is owned by a controller"
+            )
+            return
         for target_id in target_ids:
             if not self._running:
                 return
@@ -1135,6 +1200,11 @@ class RoomLightingRuntime:
         for command in decision.commands:
             if not self._running:
                 return
+            if self._command_conflicts_with_reserved_writer(config, command):
+                _LOGGER.warning(
+                    "room lighting dispatch refused: target is owned by a controller"
+                )
+                continue
             if command.action is not LightAction.TURN_OFF and auto_on_blocked:
                 # Core race guard: a manual switch-off owns the room until its
                 # protection window releases. The automatic branch must never
@@ -1188,6 +1258,60 @@ class RoomLightingRuntime:
         await self._persist_ownership()
 
     # -- helpers -----------------------------------------------------------
+
+    def _reserved_entity_ids(self) -> frozenset[str] | None:
+        provider = self._reserved_entity_ids_provider
+        if provider is None:
+            return frozenset()
+        try:
+            return frozenset(
+                entity_id
+                for entity_id in provider()
+                if isinstance(entity_id, str) and entity_id
+            )
+        except Exception:  # noqa: BLE001 - an unknown owner must fail closed
+            _LOGGER.warning("room lighting reserved entity inventory is unavailable")
+            return None
+
+    def _is_reserved_target_or_entity(
+        self, target_id: str | None, entity_id: str | None
+    ) -> bool:
+        if target_id is not None and target_id in self._reserved_target_ids:
+            return True
+        reserved_entities = self._reserved_entity_ids()
+        return reserved_entities is None or (
+            entity_id is not None and entity_id in reserved_entities
+        )
+
+    def _command_conflicts_with_reserved_writer(
+        self, config: RoomLightingConfig, command: PlannedCommand
+    ) -> bool:
+        target = config.devices.target(command.target_id)
+        target_entity = target.entity_id if target is not None else None
+        if self._is_reserved_target_or_entity(command.target_id, target_entity):
+            return True
+        power = config.devices.power_switch
+        return power is not None and self._is_reserved_target_or_entity(
+            power.id, power.entity_id
+        )
+
+    def _binding_conflicts_with_reserved_writer(
+        self, config: RoomLightingConfig, target_ids: Sequence[str]
+    ) -> bool:
+        if any(
+            self._is_reserved_target_or_entity(
+                target_id,
+                config.devices.target(target_id).entity_id
+                if config.devices.target(target_id) is not None
+                else None,
+            )
+            for target_id in target_ids
+        ):
+            return True
+        power = config.devices.power_switch
+        return power is not None and self._is_reserved_target_or_entity(
+            power.id, power.entity_id
+        )
 
     def _entity_is_on(self, entity_id: str) -> bool:
         if self._hass is None:
