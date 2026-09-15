@@ -7,7 +7,7 @@
  * unique to this screen and cannot collide with the editor styles.
  */
 
-import { renderRoomLightingEditor } from "./hausman-hub-room-lighting.js?v=1.52.278";
+import { renderRoomLightingEditor } from "./hausman-hub-room-lighting.js?v=1.52.279";
 
 export function openRoomLightingSettings(panel, roomId, roomName) {
   // Only a real room id opens the editor. A name fallback would be rejected

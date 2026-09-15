@@ -422,6 +422,7 @@ class AuxiliaryFanPolicy:
     """Bathroom-style fan policy: humidity threshold, dry delay, time bands."""
 
     target_id: str
+    light_targets: tuple[str, ...] = ()
     humidity_threshold: int = 65
     day_off_seconds: int = 1800
     quiet_start: str = "06:00"
@@ -430,6 +431,20 @@ class AuxiliaryFanPolicy:
 
     def __post_init__(self) -> None:
         _stable_id(self.target_id, "auxiliary fan target id")
+        if not isinstance(self.light_targets, tuple):
+            raise RoomLightingViolation("auxiliary fan light targets are invalid")
+        if self.light_targets and len(self.light_targets) != 2:
+            raise RoomLightingViolation(
+                "auxiliary fan must follow exactly two ordered light targets"
+            )
+        seen_light_targets: set[str] = set()
+        for light_target in self.light_targets:
+            _stable_id(light_target, "auxiliary fan light target id")
+            if light_target in seen_light_targets:
+                raise RoomLightingViolation(
+                    "auxiliary fan light targets must be unique"
+                )
+            seen_light_targets.add(light_target)
         _integer(
             self.humidity_threshold,
             "auxiliary fan humidity threshold",
@@ -1010,6 +1025,12 @@ class RoomLightingConfig:
                     "auxiliary fan references an unknown auxiliary target: "
                     f"{self.auxiliary.fan.target_id}"
                 )
+            for light_target in self.auxiliary.fan.light_targets:
+                if light_target not in target_ids:
+                    violations.append(
+                        "auxiliary fan references an unknown light target: "
+                        f"{light_target}"
+                    )
         return tuple(violations)
 
     def effective_auto_adopt(self, override: bool | None) -> bool:
@@ -1066,16 +1087,19 @@ class RoomLightingConfig:
                 "restoreOwnershipAfterRestart": self.behaviors.restore_ownership_after_restart,
             }
         if self.auxiliary is not None:
-            payload["auxiliary"] = {
-                "fan": {
-                    "targetId": self.auxiliary.fan.target_id,
-                    "humidityThreshold": self.auxiliary.fan.humidity_threshold,
-                    "dayOffSeconds": self.auxiliary.fan.day_off_seconds,
-                    "quietStart": self.auxiliary.fan.quiet_start,
-                    "dayStart": self.auxiliary.fan.day_start,
-                    "nightStart": self.auxiliary.fan.night_start,
-                }
+            fan_payload: dict[str, object] = {
+                "targetId": self.auxiliary.fan.target_id,
+                "humidityThreshold": self.auxiliary.fan.humidity_threshold,
+                "dayOffSeconds": self.auxiliary.fan.day_off_seconds,
+                "quietStart": self.auxiliary.fan.quiet_start,
+                "dayStart": self.auxiliary.fan.day_start,
+                "nightStart": self.auxiliary.fan.night_start,
             }
+            if self.auxiliary.fan.light_targets:
+                fan_payload["lightTargets"] = list(
+                    self.auxiliary.fan.light_targets
+                )
+            payload["auxiliary"] = {"fan": fan_payload}
         return payload
 
 
@@ -1348,9 +1372,17 @@ def _auxiliary_target_from_payload(payload: object) -> AuxiliaryTarget:
 def _auxiliary_policy_from_payload(payload: object) -> AuxiliaryPolicy:
     data = _as_dict(payload, "auxiliary policy")
     fan = _as_dict(_require(data, "fan", "auxiliary fan policy"), "auxiliary fan policy")
+    light_targets = fan.get("lightTargets")
+    if light_targets is not None:
+        if not isinstance(light_targets, (list, tuple)):
+            raise RoomLightingViolation(
+                "auxiliary fan light targets must be a list"
+            )
+        light_targets = tuple(light_targets)
     return AuxiliaryPolicy(
         fan=AuxiliaryFanPolicy(
             target_id=_require(fan, "targetId", "auxiliary fan target id"),
+            light_targets=light_targets or (),
             humidity_threshold=fan.get("humidityThreshold", 65),
             day_off_seconds=fan.get("dayOffSeconds", 1800),
             quiet_start=fan.get("quietStart", "06:00"),

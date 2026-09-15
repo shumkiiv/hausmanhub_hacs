@@ -342,11 +342,12 @@ class RoomLightingHaStateProvider:
 
         if config.auxiliary is None:
             return None
-        if len(config.devices.light_targets) != 2:
-            return None
         fan_policy = config.auxiliary.fan
         fan_target = config.devices.auxiliary(fan_policy.target_id)
         if fan_target is None or fan_target.entity_id is None:
+            return None
+        followed_lights = self._auxiliary_light_targets(config)
+        if followed_lights is None:
             return None
         inputs = bathroom_auxiliary_inputs(config)
         if inputs is None:
@@ -373,7 +374,7 @@ class RoomLightingHaStateProvider:
             band=bathroom_band(local.hour * 60 + local.minute, times),
             lights=tuple(
                 self._auxiliary_state(hass, target.entity_id)
-                for target in config.devices.light_targets
+                for target in followed_lights
             ),
             humidity=humidity,
             fan=self._auxiliary_state(hass, fan_target.entity_id),
@@ -381,6 +382,34 @@ class RoomLightingHaStateProvider:
                 self._ownership(config), fan_policy.target_id
             ),
         )
+
+    @staticmethod
+    def _auxiliary_light_targets(
+        config: RoomLightingConfig,
+    ) -> tuple[LightTarget, ...] | None:
+        """Return the ordered two lights the fan follows, or None when unmapped.
+
+        The explicit policy list wins; otherwise the room light targets are
+        used only when there are exactly two, because the legacy contract is a
+        two-light controller.
+        """
+
+        fan = config.auxiliary.fan if config.auxiliary is not None else None
+        if fan is None:
+            return None
+        if fan.light_targets:
+            by_id = {target.id: target for target in config.devices.light_targets}
+            selected = tuple(
+                by_id[target_id]
+                for target_id in fan.light_targets
+                if target_id in by_id
+            )
+            if len(selected) != len(fan.light_targets):
+                return None
+            return selected
+        if len(config.devices.light_targets) != 2:
+            return None
+        return tuple(config.devices.light_targets)
 
     @staticmethod
     def _auxiliary_state(hass: HomeAssistant, entity_id: str | None) -> SensorState:

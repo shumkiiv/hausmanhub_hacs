@@ -2141,3 +2141,84 @@ async def test_physical_power_switch_off_blocks_re_power_and_turn_on() -> None:
         assert power_on_calls == []
     finally:
         await runtime.stop()
+
+
+def _three_light_bathroom_payload(*, explicit_lights: bool) -> dict[str, object]:
+    payload = _bathroom_payload()
+    payload["devices"]["light_targets"].append(  # type: ignore[index]
+        {
+            "id": "light_mirror",
+            "name": "Зеркало",
+            "kind": "light",
+            "entityId": "light.demo_mirror",
+            "role": "mirror",
+            "groupId": None,
+            "brightness": False,
+            "color_temperature": False,
+            "autoAdoptOverride": None,
+        }
+    )
+    if explicit_lights:
+        payload["auxiliary"]["fan"]["lightTargets"] = ["light_main", "light_second"]  # type: ignore[index]
+    return payload
+
+
+def _runtime_with_shadow(
+    hass: _FakeHass, payload: dict[str, object]
+) -> tuple[RoomLightingRuntime, RoomLightingShadowService]:
+    shadow = RoomLightingShadowService(_MemoryShadowStore())
+    runtime = RoomLightingRuntime(
+        hass,
+        _ConfigService(config_from_payload(payload)),
+        shadow,
+        now_ms=lambda: _NOW_MS,
+        track_state_changes=lambda hass, entities, callback: (lambda: None),
+        track_interval=lambda hass, callback, interval: (lambda: None),
+        listen_bus=lambda hass, event_type, callback: (lambda: None),
+    )
+    return runtime, shadow
+
+
+async def test_auxiliary_shadow_uses_explicit_fan_lights_with_three_room_lights() -> None:
+    hass = _FakeHass()
+    hass.states.set("light.demo_main", "on", last_changed=_NOW_DT)
+    hass.states.set("switch.demo_second", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_mirror", "on", last_changed=_NOW_DT)
+    hass.states.set("sensor.demo_humidity", "70", last_changed=_NOW_DT)
+    hass.states.set("switch.demo_fan", "off", last_changed=_NOW_DT)
+    runtime, shadow = _runtime_with_shadow(
+        hass, _three_light_bathroom_payload(explicit_lights=True)
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        entries = shadow.journal_payload()["entries"]
+        auxiliary = [entry for entry in entries if "auxiliary" in entry]
+        assert len(auxiliary) == 1
+        payload = auxiliary[0]["auxiliary"]
+        # The fan follows the two named lights, not the mirror.
+        assert payload["lights"] == ["on", "off"]
+        assert payload["band"] == "day"
+        assert payload["action"] == "turn_on"
+        assert hass.services.calls == []
+    finally:
+        await runtime.stop()
+
+
+async def test_auxiliary_shadow_skips_unmapped_three_light_room() -> None:
+    hass = _FakeHass()
+    hass.states.set("light.demo_main", "on", last_changed=_NOW_DT)
+    hass.states.set("switch.demo_second", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_mirror", "on", last_changed=_NOW_DT)
+    hass.states.set("sensor.demo_humidity", "70", last_changed=_NOW_DT)
+    hass.states.set("switch.demo_fan", "off", last_changed=_NOW_DT)
+    runtime, shadow = _runtime_with_shadow(
+        hass, _three_light_bathroom_payload(explicit_lights=False)
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        entries = shadow.journal_payload()["entries"]
+        assert not [entry for entry in entries if "auxiliary" in entry]
+    finally:
+        await runtime.stop()

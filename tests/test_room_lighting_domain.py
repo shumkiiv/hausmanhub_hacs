@@ -820,3 +820,53 @@ def test_bathroom_auxiliary_inputs_derive_policy_and_bands() -> None:
         night_start_minutes=1320,
     )
     assert bathroom_auxiliary_inputs(config_from_payload(_payload())) is None
+
+
+def test_auxiliary_fan_explicit_light_targets_round_trip() -> None:
+    payload = _bathroom_payload()
+    payload["auxiliary"]["fan"]["lightTargets"] = [  # type: ignore[index]
+        "light_demo_bathroom_main",
+        "light_demo_bathroom_second",
+    ]
+    config = config_from_payload(payload)
+    assert config.auxiliary.fan.light_targets == (  # type: ignore[union-attr]
+        "light_demo_bathroom_main",
+        "light_demo_bathroom_second",
+    )
+    encoded = config.to_dict()
+    assert encoded["auxiliary"]["fan"]["lightTargets"] == [  # type: ignore[index]
+        "light_demo_bathroom_main",
+        "light_demo_bathroom_second",
+    ]
+    assert config_from_payload(encoded).to_dict() == encoded
+
+
+def test_auxiliary_fan_without_explicit_lights_omits_the_key() -> None:
+    config = config_from_payload(_bathroom_payload())
+    assert config.auxiliary.fan.light_targets == ()  # type: ignore[union-attr]
+    assert "lightTargets" not in config.to_dict()["auxiliary"]["fan"]  # type: ignore[index]
+
+
+def test_auxiliary_fan_unknown_light_target_is_rejected() -> None:
+    payload = _bathroom_payload()
+    payload["auxiliary"]["fan"]["lightTargets"] = [  # type: ignore[index]
+        "light_missing",
+        "light_demo_bathroom_second",
+    ]
+    assert room_lighting_violations(payload)
+    with pytest.raises(RoomLightingViolation):
+        config_from_payload(payload)
+
+
+@pytest.mark.parametrize(
+    "lights",
+    (
+        ["light_demo_bathroom_main"],
+        ["light_demo_bathroom_main", "light_demo_bathroom_second", "light_third"],
+    ),
+)
+def test_auxiliary_fan_requires_exactly_two_explicit_lights(lights: list[str]) -> None:
+    payload = _bathroom_payload()
+    payload["auxiliary"]["fan"]["lightTargets"] = lights  # type: ignore[index]
+    with pytest.raises(RoomLightingViolation):
+        config_from_payload(payload)
