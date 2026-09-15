@@ -23,6 +23,7 @@ from .room_lighting import (
 from .room_lighting_auxiliary import BathroomPolicy, BathroomTimes
 from .room_lighting_ownership import (
     OwnershipSnapshot,
+    OwnershipSource,
     SensorState,
     has_proven_auto_ownership,
     latest_ownership,
@@ -432,6 +433,19 @@ def _light_on(context: RoomLightingContext, target_id: str) -> bool:
     return light is not None and light.state is SensorState.ON
 
 
+def _proven_manual_ownership(
+    records: tuple[OwnershipSnapshot, ...], target_id: str
+) -> bool:
+    """Whether the newest record is a confirmed manual action."""
+
+    latest = latest_ownership(records, target_id)
+    return (
+        latest is not None
+        and latest.confirmed
+        and latest.source is OwnershipSource.MANUAL
+    )
+
+
 def _has_manual_peer(
     config: RoomLightingConfig,
     target: object,
@@ -526,6 +540,14 @@ def _evaluate_target(
         return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_PEER))
 
     manual = resolve_manual_ownership(context.ownership, target_id, light_on=light_on)
+    # An explicit schedule "off" is a configured transition, not an absence
+    # decision. It may switch an already-on target off even when automatic
+    # ownership is unproven (for example right after a writer hand-over or a
+    # restart). A confirmed manual action still outranks it and is checked
+    # below. Absence-based switch-off and automatic turn-on stay strict.
+    schedule_off_entry = (
+        schedule_entry is not None and schedule_entry.how.mode is ScheduleMode.OFF
+    )
     # Absence that releases manual protection is historical: it is proven by a
     # completed stable absence, not by the presence event that starts a new
     # automatic turn-on. Prefer the protection snapshot so the same evidence
@@ -551,7 +573,10 @@ def _evaluate_target(
                 release_mode=context.protection.release_mode,
             )
         )
-        if not released:
+        if not released and not (
+            schedule_off_entry
+            and not _proven_manual_ownership(context.ownership, target_id)
+        ):
             return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_OWNERSHIP))
 
     # Both the adjust and the turn-off path must prove that automation owned the
@@ -698,18 +723,19 @@ def _evaluate_target(
             extra_skips=skips,
         )
     restored = restored_auto
-    if context.unobserved_since is not None and not restored:
-        return _unchanged(
-            target_id,
-            Skip(target_id, SkipReason.UNOBSERVED),
-            extra_skips=skips,
-        )
-    if not has_proven_auto_ownership(context.ownership, target_id):
-        return _unchanged(
-            target_id,
-            Skip(target_id, SkipReason.NO_AUTO_OWNERSHIP),
-            extra_skips=skips,
-        )
+    if not schedule_off_entry:
+        if context.unobserved_since is not None and not restored:
+            return _unchanged(
+                target_id,
+                Skip(target_id, SkipReason.UNOBSERVED),
+                extra_skips=skips,
+            )
+        if not has_proven_auto_ownership(context.ownership, target_id):
+            return _unchanged(
+                target_id,
+                Skip(target_id, SkipReason.NO_AUTO_OWNERSHIP),
+                extra_skips=skips,
+            )
     auto_record = latest_ownership(context.ownership, target_id)
     min_on_seconds = schedule_entry.how.min_on_seconds if schedule_entry is not None else 0
     if (

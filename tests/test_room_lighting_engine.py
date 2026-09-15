@@ -1210,3 +1210,82 @@ def test_unhealthy_lux_sensor_does_not_turn_the_light_off() -> None:
     assert main is not None
     assert main.commands == ()
     assert any(skip.reason is SkipReason.LUX_FAIL_CLOSED for skip in main.skips)
+
+
+def test_schedule_off_turns_off_an_unowned_on_light() -> None:
+    """A writer hand-over leaves an on light without ownership records.
+
+    The configured off entry must still switch it off: an explicit schedule is
+    a deliberate transition, not an absence decision.
+    """
+
+    now = _at(23, 30)
+    decision = evaluate_room_lighting(
+        _config(schedule=[_schedule_day(), _schedule_off()]),
+        _ctx(
+            now,
+            lights=(_light("light_main", SensorState.ON, now - 1000, brightness=40),),
+        ),
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.desired_state == "off"
+    assert main.commands
+    assert main.commands[0].reason is DecisionReason.SCHEDULE
+
+
+def test_schedule_off_turns_off_across_a_restart_gap() -> None:
+    now = _at(23, 30)
+    decision = evaluate_room_lighting(
+        _config(schedule=[_schedule_day(), _schedule_off()]),
+        _ctx(
+            now,
+            lights=(_light("light_main", SensorState.ON, now - 1000, brightness=40),),
+            unobserved_since=now - 500,
+        ),
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.desired_state == "off"
+    assert main.commands
+
+
+def test_schedule_off_still_respects_a_proven_manual_action() -> None:
+    now = _at(23, 30)
+    decision = evaluate_room_lighting(
+        _config(schedule=[_schedule_day(), _schedule_off()]),
+        _ctx(
+            now,
+            lights=(_light("light_main", SensorState.ON, now - 1000, brightness=40),),
+            ownership=(
+                OwnershipSnapshot("light_main", OwnershipSource.MANUAL, True, now - 500),
+            ),
+        ),
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.commands == ()
+    assert main.skips[0].reason is SkipReason.MANUAL_OWNERSHIP
+
+
+def test_absence_off_without_ownership_is_still_blocked() -> None:
+    """Only the explicit schedule off relaxes the ownership gate."""
+
+    now = _at(12, 0)
+    decision = evaluate_room_lighting(
+        _config(schedule=[_schedule_day()]),
+        _ctx(
+            now,
+            presence=SensorState.OFF,
+            presence_at=now - 700_000,
+            lights=(_light("light_main", SensorState.ON, now - 700_000, brightness=40),),
+        ),
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.commands == ()
+    assert main.skips[0].reason in {
+        SkipReason.MANUAL_OWNERSHIP,
+        SkipReason.NO_AUTO_OWNERSHIP,
+        SkipReason.UNOBSERVED,
+    }
