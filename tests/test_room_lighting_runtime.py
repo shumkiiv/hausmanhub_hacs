@@ -2497,3 +2497,56 @@ async def test_curve_stale_presence_is_not_presence() -> None:
     )
     assert fresh is SensorState.ON
     assert stale is SensorState.UNKNOWN
+
+
+async def test_curve_stale_presence_with_fresh_motion_off_proves_absence() -> None:
+    hass = _FakeHass()
+    runtime = _make_runtime(
+        hass,
+        payload=_curve_payload(commands_enabled=False),
+        now_ms=lambda: _NOW_MS,
+    )
+
+    def context(sensors: tuple[SensorSnapshot, ...]) -> RoomLightingContext:
+        return RoomLightingContext(
+            now=_NOW_MS,
+            timezone=_TZ,
+            sunrise=time(7, 0),
+            sunset=time(19, 0),
+            sensors=sensors,
+        )
+
+    def sensor(state: SensorState, age_ms: int, kind: SensorKind) -> SensorSnapshot:
+        return SensorSnapshot(
+            f"{kind.value}_demo", kind, state, last_changed=_NOW_MS - age_ms
+        )
+
+    stale_on_and_motion_off = runtime._curve_presence_state(  # type: ignore[attr-defined]
+        context(
+            (
+                sensor(SensorState.ON, 1_800_000, SensorKind.PRESENCE),
+                sensor(SensorState.OFF, 200_000, SensorKind.MOTION),
+            )
+        )
+    )
+    assert stale_on_and_motion_off is SensorState.OFF
+
+    stale_on_and_unknown = runtime._curve_presence_state(  # type: ignore[attr-defined]
+        context(
+            (
+                sensor(SensorState.ON, 1_800_000, SensorKind.PRESENCE),
+                sensor(SensorState.UNKNOWN, 10_000, SensorKind.MOTION),
+            )
+        )
+    )
+    assert stale_on_and_unknown is SensorState.UNKNOWN
+
+    fresh_on = runtime._curve_presence_state(  # type: ignore[attr-defined]
+        context(
+            (
+                sensor(SensorState.ON, 10_000, SensorKind.PRESENCE),
+                sensor(SensorState.OFF, 10_000, SensorKind.MOTION),
+            )
+        )
+    )
+    assert fresh_on is SensorState.ON

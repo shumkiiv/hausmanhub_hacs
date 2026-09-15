@@ -442,6 +442,7 @@ def evaluate_curve_room(
     *,
     presence_confirmed: bool,
     absence_seconds: int | None,
+    presence: SensorState | None = None,
     profile: LightCurveProfile | None = None,
 ) -> RoomLightingDecision:
     """Day-curve decisions for the room's main and mirror targets.
@@ -459,7 +460,8 @@ def evaluate_curve_room(
         raise RoomLightingEngineViolation("room does not use the day curve profile")
 
     now_time = datetime.fromtimestamp(context.now / 1000, context.timezone).time()
-    presence = _presence_state(context, EnginePolicy())
+    if presence is None:
+        presence = _presence_state(context, EnginePolicy())
     main_target = next(
         (item for item in config.devices.light_targets if item.role is LightRole.MAIN),
         None,

@@ -1183,12 +1183,14 @@ class RoomLightingRuntime:
             context = await self._build_context(config, moment)
             self._observe_absence(config, context)
             if config.profile == "day_curve":
+                curve_presence = self._curve_presence_state(context)
                 confirmed, absence_seconds = self._observe_curve_presence(
-                    config, context, moment
+                    config, context, moment, presence=curve_presence
                 )
                 decision = evaluate_curve_room(
                     config,
                     context,
+                    presence=curve_presence,
                     presence_confirmed=confirmed,
                     absence_seconds=absence_seconds,
                 )
@@ -1223,6 +1225,8 @@ class RoomLightingRuntime:
         config: RoomLightingConfig,
         context: RoomLightingContext,
         moment: int,
+        *,
+        presence: SensorState | None = None,
     ) -> tuple[bool, int | None]:
         """Track the day-curve presence confirmation and absence for one room.
 
@@ -1235,7 +1239,7 @@ class RoomLightingRuntime:
         tracker = self._curve_presence.setdefault(
             config.room_id, {"since": None, "last_seen": None}
         )
-        present = self._curve_presence_state(context)
+        present = presence if presence is not None else self._curve_presence_state(context)
         if present is SensorState.ON:
             if tracker["since"] is None:
                 tracker["since"] = moment
@@ -1265,20 +1269,41 @@ class RoomLightingRuntime:
 
     @staticmethod
     def _curve_presence_state(context: RoomLightingContext) -> SensorState:
+        """Classify the room presence for the day curve.
+
+        Only a *fresh* ``on`` counts as presence. A sensor that stopped
+        updating is ignored: it is neither presence nor absence. Absence is
+        therefore proven by the remaining sensors when none of them is a fresh
+        ``on``, none is unknown, and at least one is ``off``. This keeps a
+        stuck ``on`` sensor from blocking the absence fade forever while an
+        unknown or unavailable sensor still fails closed.
+        """
+
         relevant = [
             sensor for sensor in context.sensors if sensor.kind in _PRESENCE_KINDS
         ]
         if not relevant:
             return SensorState.UNKNOWN
-        # Only a fresh presence counts, exactly like the deterministic engine:
-        # a sensor that stopped updating is neither presence nor absence.
-        if any(
-            sensor.state is SensorState.ON
-            and context.now - sensor.last_changed <= CURVE_SENSOR_FRESHNESS_MS
-            for sensor in relevant
-        ):
+        fresh_on = False
+        has_unknown = False
+        has_off = False
+        for sensor in relevant:
+            if sensor.state in (SensorState.UNKNOWN, SensorState.UNAVAILABLE):
+                has_unknown = True
+                continue
+            if sensor.state is SensorState.ON:
+                if context.now - sensor.last_changed <= CURVE_SENSOR_FRESHNESS_MS:
+                    fresh_on = True
+                # A stale "on" is ignored: it proves neither occupancy nor
+                # absence.
+                continue
+            if sensor.state is SensorState.OFF:
+                has_off = True
+        if fresh_on:
             return SensorState.ON
-        if all(sensor.state is SensorState.OFF for sensor in relevant):
+        if has_unknown:
+            return SensorState.UNKNOWN
+        if has_off:
             return SensorState.OFF
         return SensorState.UNKNOWN
 
