@@ -4,7 +4,7 @@ import { lightingSideIcon, openLightingTurnOffConfirm, renderLightingSide } from
 import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.270";
 import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.270";
 import { renderManualLightProtectionStatus } from "./hausman-hub-light-protection.js?v=1.52.270";
-import { openRoomLightingSettings, renderRoomLightingSettingsScreen } from "./hausman-hub-room-lighting-editor.js?v=1.52.283";
+import { openRoomLightingSettings, renderRoomLightingSettingsScreen } from "./hausman-hub-room-lighting-editor.js?v=1.52.284";
 
 const LIGHTING_EXCLUSIONS = [
   "ambilight", "глазок", "домофон", "пульт", "очистител", "аквариум", "aquarium",

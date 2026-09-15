@@ -2460,7 +2460,7 @@ async def test_curve_unknown_presence_does_not_accumulate_absence() -> None:
     )
     assert confirmed_now is False
     confirmed_after, _ = runtime._observe_curve_presence(  # type: ignore[attr-defined]
-        config, context(SensorState.ON, base + 1_872_000), base + 1_872_000
+        config, context(SensorState.ON, base + 1_875_000), base + 1_875_000
     )
     assert confirmed_after is True
 
