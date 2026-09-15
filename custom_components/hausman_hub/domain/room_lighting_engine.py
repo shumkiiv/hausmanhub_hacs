@@ -1127,7 +1127,15 @@ def _presence_state(context: RoomLightingContext, policy: EnginePolicy) -> Senso
         for sensor in relevant
     ):
         return SensorState.ON
-    if all(sensor.state is SensorState.OFF for sensor in relevant):
+    if any(
+        sensor.state in {SensorState.UNKNOWN, SensorState.UNAVAILABLE}
+        for sensor in relevant
+    ):
+        return SensorState.UNKNOWN
+    if any(sensor.state is SensorState.OFF for sensor in relevant):
+        # A stale "on" is ignored: it is neither presence nor absence. With no
+        # fresh presence, no unknown sensor and at least one off sensor the
+        # room is treated as absent, so a stuck sensor cannot block absence.
         return SensorState.OFF
     return SensorState.UNKNOWN
 
@@ -1155,10 +1163,16 @@ def _absence_evidence(
         if sensor.state in {SensorState.UNKNOWN, SensorState.UNAVAILABLE}:
             return (False, None, False)
         if sensor.state is SensorState.ON:
-            return (False, None, False)
+            if _is_fresh(sensor, context, policy):
+                return (False, None, False)
+            # A stale "on" is ignored rather than counted as presence; the
+            # remaining off sensors still prove the absence.
+            continue
         if context.now - sensor.last_changed > policy.staleness_seconds * 1000:
             return (False, None, True)
         off_times.append(sensor.last_changed)
+    if not off_times:
+        return (False, None, False)
     absence_since = max(off_times)
     # An unobserved interval is not absence: a restart makes the confirmed
     # absence window start anew instead of inheriting a stale OFF timestamp.

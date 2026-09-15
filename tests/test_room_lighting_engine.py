@@ -1457,3 +1457,48 @@ def test_curve_room_holds_the_light_on_unknown_presence() -> None:
     assert main is not None
     assert main.commands == ()
     assert main.skips[0].reason is SkipReason.SENSOR_UNKNOWN
+
+
+def test_stale_presence_on_does_not_block_absence_off() -> None:
+    now = _at(12, 0)
+    presence = SensorSnapshot(
+        "sensor_presence", SensorKind.PRESENCE, SensorState.ON, now - 700_000
+    )
+    motion = SensorSnapshot(
+        "sensor_motion", SensorKind.MOTION, SensorState.OFF, now - 700_000
+    )
+    decision = evaluate_room_lighting(
+        _config(),
+        _ctx(
+            now,
+            sensors=(presence, motion),
+            lights=(_light("light_main", SensorState.ON, now - 700_000, brightness=80),),
+            ownership=(_auto("light_main", now - 700_000),),
+        ),
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.desired_state == "off"
+    assert main.commands
+
+
+def test_unknown_sensor_still_blocks_absence_off() -> None:
+    now = _at(12, 0)
+    presence = SensorSnapshot(
+        "sensor_presence", SensorKind.PRESENCE, SensorState.ON, now - 700_000
+    )
+    motion = SensorSnapshot(
+        "sensor_motion", SensorKind.MOTION, SensorState.UNKNOWN, now - 700_000
+    )
+    decision = evaluate_room_lighting(
+        _config(),
+        _ctx(
+            now,
+            sensors=(presence, motion),
+            lights=(_light("light_main", SensorState.ON, now - 700_000, brightness=80),),
+            ownership=(_auto("light_main", now - 700_000),),
+        ),
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert not main.commands
