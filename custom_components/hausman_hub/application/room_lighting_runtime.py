@@ -36,6 +36,7 @@ from ..domain.room_lighting_engine import (
     RoomLightingDecision,
     RoomLightingContext,
     bathroom_auxiliary_inputs,
+    evaluate_curve_room,
     evaluate_room_lighting,
 )
 from ..domain.room_lighting_ownership import (
@@ -62,6 +63,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by the test shim
 _LOGGER = logging.getLogger(__name__)
 
 EVENT_CALL_SERVICE = "call_service"
+CURVE_PRESENCE_CONFIRM_MS = 12_000
 DEFAULT_INTERVAL_SECONDS = 60
 MAX_OWNERSHIP_RECORDS = 500
 OWNERSHIP_STORAGE_VERSION = 1
@@ -437,6 +439,7 @@ class RoomLightingRuntime:
         self._ownership_store = ownership_store
         self._unobserved_since: int | None = None
         self._absence: AbsenceState = {}
+        self._curve_presence: dict[str, dict[str, int | None]] = {}
         self._state_provider = state_provider or RoomLightingHaStateProvider(
             now_ms=now_ms,
             ownership_provider=lambda config: self._ownership.snapshots_for(
@@ -1165,7 +1168,18 @@ class RoomLightingRuntime:
         try:
             context = await self._build_context(config, moment)
             self._observe_absence(config, context)
-            decision = evaluate_room_lighting(config, context)
+            if config.profile == "day_curve":
+                confirmed, absence_seconds = self._observe_curve_presence(
+                    config, context, moment
+                )
+                decision = evaluate_curve_room(
+                    config,
+                    context,
+                    presence_confirmed=confirmed,
+                    absence_seconds=absence_seconds,
+                )
+            else:
+                decision = evaluate_room_lighting(config, context)
         except Exception:  # noqa: BLE001 - isolation per room is deliberate
             _LOGGER.warning("room lighting evaluation failed; skipping the room")
             return
@@ -1186,6 +1200,58 @@ class RoomLightingRuntime:
         if not self._running:
             return
         await self._dispatch(config, decision, moment)
+
+    def _observe_curve_presence(
+        self,
+        config: RoomLightingConfig,
+        context: RoomLightingContext,
+        moment: int,
+    ) -> tuple[bool, int | None]:
+        """Track the day-curve presence confirmation and absence for one room.
+
+        The absence accrued before the current presence is frozen and returned
+        while the presence is still unconfirmed, so a reduced brightness is
+        held until the return is confirmed. After a restart no absence is
+        assumed: the timer starts fresh when presence is first observed.
+        """
+
+        tracker = self._curve_presence.setdefault(
+            config.room_id, {"since": None, "last_seen": None}
+        )
+        present = self._curve_presence_state(context)
+        if present is SensorState.ON:
+            if tracker["since"] is None:
+                tracker["since"] = moment
+                tracker["absence"] = (
+                    0
+                    if tracker["last_seen"] is None
+                    else max(0, (moment - int(tracker["last_seen"])) // 1000)
+                )
+            tracker["last_seen"] = moment
+            confirmed = moment - int(tracker["since"]) >= CURVE_PRESENCE_CONFIRM_MS
+            return confirmed, int(tracker.get("absence") or 0)
+        tracker["since"] = None
+        if tracker["last_seen"] is None:
+            if present is SensorState.OFF:
+                # No proven presence yet after start: do not invent an absence.
+                tracker["last_seen"] = moment
+            return False, 0
+        absence = max(0, (moment - int(tracker["last_seen"])) // 1000)
+        tracker["absence"] = absence
+        return False, absence
+
+    @staticmethod
+    def _curve_presence_state(context: RoomLightingContext) -> SensorState:
+        relevant = [
+            sensor for sensor in context.sensors if sensor.kind in _PRESENCE_KINDS
+        ]
+        if not relevant:
+            return SensorState.UNKNOWN
+        if any(sensor.state is SensorState.ON for sensor in relevant):
+            return SensorState.ON
+        if all(sensor.state is SensorState.OFF for sensor in relevant):
+            return SensorState.OFF
+        return SensorState.UNKNOWN
 
     async def _record_auxiliary_shadow(
         self, config: RoomLightingConfig, moment: int

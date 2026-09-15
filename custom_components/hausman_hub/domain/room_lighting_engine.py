@@ -12,8 +12,14 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, time as dt_time, timedelta, tzinfo
 from enum import StrEnum
 
+from .light_curve import (
+    LightCurveContext,
+    LightCurveProfile,
+    evaluate_light_curve,
+)
 from .room_lighting import (
     AwayMode,
+    LightRole,
     RoomLightingConfig,
     ScheduleEntry,
     ScheduleMode,
@@ -426,6 +432,191 @@ def _time_minutes(value: str) -> int:
         raise RoomLightingEngineViolation("auxiliary band boundary must be HH:MM")
     hour, minute = (int(part) for part in value.split(":"))
     return hour * 60 + minute
+
+
+def evaluate_curve_room(
+    config: RoomLightingConfig,
+    context: RoomLightingContext,
+    *,
+    presence_confirmed: bool,
+    absence_seconds: int | None,
+    profile: LightCurveProfile | None = None,
+) -> RoomLightingDecision:
+    """Day-curve decisions for the room's main and mirror targets.
+
+    The time of day, sunrise and sunset define the mode; presence only returns
+    a reduced brightness. A confirmed manual action still blocks the target so
+    a person keeps priority over the configured curve.
+    """
+
+    if not isinstance(config, RoomLightingConfig):
+        raise RoomLightingEngineViolation("validated room lighting config is required")
+    if not isinstance(context, RoomLightingContext):
+        raise RoomLightingEngineViolation("validated room lighting context is required")
+    if config.profile != "day_curve":
+        raise RoomLightingEngineViolation("room does not use the day curve profile")
+
+    now_time = datetime.fromtimestamp(context.now / 1000, context.timezone).time()
+    presence = _presence_state(context, EnginePolicy())
+    main_target = next(
+        (item for item in config.devices.light_targets if item.role is LightRole.MAIN),
+        None,
+    )
+    mirror_target = next(
+        (item for item in config.devices.light_targets if item.role is LightRole.MIRROR),
+        None,
+    )
+    chandelier = context.light(main_target.id) if main_target is not None else None
+    mirror = context.light(mirror_target.id) if mirror_target is not None else None
+    curve = evaluate_light_curve(
+        profile or LightCurveProfile(),
+        LightCurveContext(
+            now=now_time,
+            sunrise=context.sunrise,
+            sunset=context.sunset,
+            presence=presence,
+            chandelier=(
+                chandelier.state if chandelier is not None else SensorState.UNKNOWN
+            ),
+            mirror=mirror.state if mirror is not None else SensorState.UNKNOWN,
+            presence_confirmed=presence_confirmed,
+            absence_seconds=absence_seconds,
+        ),
+    )
+
+    targets: list[TargetDecision] = []
+    if main_target is not None:
+        targets.append(_curve_main_decision(main_target, curve, context))
+    if mirror_target is not None:
+        targets.append(_curve_mirror_decision(mirror_target, curve, context))
+    return RoomLightingDecision(
+        room_id=config.room_id,
+        evaluated_at=context.now,
+        mode=MODE_SHADOW,
+        targets=tuple(targets),
+    )
+
+
+def _curve_manual_blocked(context: RoomLightingContext, target_id: str) -> bool:
+    return _proven_manual_ownership(context.ownership, target_id)
+
+
+def _curve_main_decision(
+    target: object, curve: object, context: RoomLightingContext
+) -> TargetDecision:
+    target_id = target.id  # type: ignore[attr-defined]
+    light = context.light(target_id)
+    light_on = light is not None and light.state is SensorState.ON
+    if _curve_manual_blocked(context, target_id):
+        return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_OWNERSHIP))
+
+    fade = int(curve.fade_seconds)  # type: ignore[attr-defined]
+    if not curve.chandelier_on:  # type: ignore[attr-defined]
+        if not light_on:
+            return _unchanged(target_id, Skip(target_id, SkipReason.IDEMPOTENT))
+        return TargetDecision(
+            target_id=target_id,
+            desired_state="off",
+            desired_brightness=None,
+            desired_color_temperature=None,
+            commands=(
+                PlannedCommand(
+                    target_id,
+                    LightAction.TURN_OFF,
+                    reason=DecisionReason.SCHEDULE,
+                    fade_seconds=fade,
+                ),
+            ),
+        )
+
+    commands: list[PlannedCommand] = []
+    if not light_on:
+        commands.append(
+            PlannedCommand(
+                target_id,
+                LightAction.TURN_ON,
+                reason=DecisionReason.SCHEDULE,
+                fade_seconds=fade,
+            )
+        )
+    brightness = curve.brightness_percent  # type: ignore[attr-defined]
+    kelvin = curve.color_temperature  # type: ignore[attr-defined]
+    if target.brightness and brightness is not None:  # type: ignore[attr-defined]
+        current = light.brightness if light is not None else None
+        if current is None or abs(current - brightness) > BRIGHTNESS_TOLERANCE:
+            commands.append(
+                PlannedCommand(
+                    target_id,
+                    LightAction.SET_BRIGHTNESS,
+                    brightness=brightness,
+                    reason=DecisionReason.SCHEDULE,
+                    fade_seconds=fade,
+                )
+            )
+    if target.color_temperature and kelvin is not None:  # type: ignore[attr-defined]
+        current_kelvin = light.color_temperature if light is not None else None
+        if (
+            current_kelvin is None
+            or abs(current_kelvin - kelvin) > COLOR_TEMPERATURE_TOLERANCE_KELVIN
+        ):
+            commands.append(
+                PlannedCommand(
+                    target_id,
+                    LightAction.SET_COLOR_TEMPERATURE,
+                    color_temperature=kelvin,
+                    reason=DecisionReason.SCHEDULE,
+                    fade_seconds=fade,
+                )
+            )
+    if not commands:
+        return _unchanged(target_id, Skip(target_id, SkipReason.IDEMPOTENT))
+    return TargetDecision(
+        target_id=target_id,
+        desired_state="on",
+        desired_brightness=brightness if target.brightness else None,  # type: ignore[attr-defined]
+        desired_color_temperature=(
+            kelvin if target.color_temperature else None  # type: ignore[attr-defined]
+        ),
+        commands=tuple(commands),
+    )
+
+
+def _curve_mirror_decision(
+    target: object, curve: object, context: RoomLightingContext
+) -> TargetDecision:
+    target_id = target.id  # type: ignore[attr-defined]
+    light_on = _light_on(context, target_id)
+    if _curve_manual_blocked(context, target_id):
+        return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_OWNERSHIP))
+    if curve.mirror_on and not light_on:  # type: ignore[attr-defined]
+        return TargetDecision(
+            target_id=target_id,
+            desired_state="on",
+            desired_brightness=None,
+            desired_color_temperature=None,
+            commands=(
+                PlannedCommand(
+                    target_id,
+                    LightAction.TURN_ON,
+                    reason=DecisionReason.SCHEDULE,
+                ),
+            ),
+        )
+    if not curve.mirror_on and light_on:  # type: ignore[attr-defined]
+        return TargetDecision(
+            target_id=target_id,
+            desired_state="off",
+            desired_brightness=None,
+            desired_color_temperature=None,
+            commands=(
+                PlannedCommand(
+                    target_id,
+                    LightAction.TURN_OFF,
+                    reason=DecisionReason.SCHEDULE,
+                ),
+            ),
+        )
+    return _unchanged(target_id, Skip(target_id, SkipReason.IDEMPOTENT))
 
 
 def _light_on(context: RoomLightingContext, target_id: str) -> bool:

@@ -2222,3 +2222,70 @@ async def test_auxiliary_shadow_skips_unmapped_three_light_room() -> None:
         assert not [entry for entry in entries if "auxiliary" in entry]
     finally:
         await runtime.stop()
+
+
+def _curve_payload(*, commands_enabled: bool) -> dict[str, object]:
+    payload = _config_payload(commands_enabled=commands_enabled)
+    payload["profile"] = "day_curve"
+    payload["devices"]["light_targets"].append(  # type: ignore[index]
+        {
+            "id": "light_mirror",
+            "name": "Зеркало",
+            "kind": "light",
+            "entityId": "light.demo_mirror",
+            "role": "mirror",
+            "groupId": None,
+            "brightness": False,
+            "color_temperature": False,
+            "autoAdoptOverride": None,
+        }
+    )
+    return payload
+
+
+async def test_curve_room_dispatches_mirror_on_at_night() -> None:
+    hass = _FakeHass()
+    night_ms = int(datetime(2026, 9, 11, 23, 30, tzinfo=_TZ).timestamp() * 1000)
+    night_dt = datetime.fromtimestamp(night_ms / 1000, _TZ)
+    hass.states.set("light.demo_main", "off", last_changed=night_dt)
+    hass.states.set("light.demo_mirror", "off", last_changed=night_dt)
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=True,
+        executor=executor,
+        payload=_curve_payload(commands_enabled=True),
+        now_ms=lambda: night_ms,
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        actions = [
+            (command.target_id, command.action)
+            for command in executor.calls
+        ]
+        assert ("light_mirror", LightAction.TURN_ON) in actions
+    finally:
+        await runtime.stop()
+
+
+async def test_curve_room_in_shadow_dispatches_nothing() -> None:
+    hass = _FakeHass()
+    night_ms = int(datetime(2026, 9, 11, 23, 30, tzinfo=_TZ).timestamp() * 1000)
+    night_dt = datetime.fromtimestamp(night_ms / 1000, _TZ)
+    hass.states.set("light.demo_main", "off", last_changed=night_dt)
+    hass.states.set("light.demo_mirror", "off", last_changed=night_dt)
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=False,
+        executor=executor,
+        payload=_curve_payload(commands_enabled=False),
+        now_ms=lambda: night_ms,
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        assert executor.calls == []
+    finally:
+        await runtime.stop()

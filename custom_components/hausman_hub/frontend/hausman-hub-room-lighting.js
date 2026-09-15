@@ -11,7 +11,7 @@
  * visible form only offers readable names and catalog devices.
  */
 
-import { apiErrorMessage, resolveApiError } from "./hausman-hub-error-taxonomy.js?v=1.52.280";
+import { apiErrorMessage, resolveApiError } from "./hausman-hub-error-taxonomy.js?v=1.52.281";
 
 export const ROOM_LIGHTING_SECTIONS = [
   ["overview", "Обзор"],

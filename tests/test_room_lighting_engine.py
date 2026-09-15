@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from datetime import datetime, time, timezone
 
 from custom_components.hausman_hub.domain.room_lighting import config_from_payload
@@ -15,6 +17,7 @@ from custom_components.hausman_hub.domain.room_lighting_engine import (
     SensorSnapshot,
     SkipReason,
     decision_target,
+    evaluate_curve_room,
     evaluate_room_lighting,
 )
 from custom_components.hausman_hub.domain.room_lighting_ownership import (
@@ -97,6 +100,7 @@ def _config(
     timers: dict[str, object] | None = None,
     away_mode: str = "none",
     auto_control: dict[str, bool] | None = None,
+    profile: str | None = None,
 ):
     payload: dict[str, object] = {
         "contract": {"name": "hausman-hub-room-lighting-config", "version": 1},
@@ -179,6 +183,8 @@ def _config(
         "mode": away_mode,
         "return": {"restore": "by_current_conditions"},
     }
+    if profile is not None:
+        payload["profile"] = profile
     return config_from_payload(payload)
 
 
@@ -1289,3 +1295,79 @@ def test_absence_off_without_ownership_is_still_blocked() -> None:
         SkipReason.NO_AUTO_OWNERSHIP,
         SkipReason.UNOBSERVED,
     }
+
+
+def test_curve_room_turns_mirror_on_and_chandelier_off_at_night() -> None:
+    now = _at(23, 30)
+    decision = evaluate_curve_room(
+        _config(profile="day_curve"),
+        _ctx(
+            now,
+            lights=(
+                _light("light_main", SensorState.ON, now - 1000, brightness=60, color=3000),
+            ),
+        ),
+        presence_confirmed=False,
+        absence_seconds=None,
+    )
+    main = decision_target(decision, "light_main")
+    mirror = decision_target(decision, "light_mirror")
+    assert main is not None and main.commands
+    assert main.commands[0].action is LightAction.TURN_OFF
+    assert mirror is not None and mirror.commands
+    assert mirror.commands[0].action is LightAction.TURN_ON
+
+
+def test_curve_room_morning_ramp_sets_brightness_and_warm_colour() -> None:
+    now = _at(10, 0)
+    decision = evaluate_curve_room(
+        _config(profile="day_curve"),
+        _ctx(
+            now,
+            lights=(
+                _light("light_main", SensorState.ON, now - 1000, brightness=20, color=2200),
+            ),
+        ),
+        presence_confirmed=False,
+        absence_seconds=None,
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None and main.commands
+    assert any(
+        command.action is LightAction.SET_BRIGHTNESS and command.brightness == 37
+        for command in main.commands
+    )
+    assert any(
+        command.action is LightAction.SET_COLOR_TEMPERATURE
+        and command.color_temperature == 2467
+        for command in main.commands
+    )
+
+
+def test_curve_room_absence_fades_to_five_percent() -> None:
+    now = _at(14, 0)
+    decision = evaluate_curve_room(
+        _config(profile="day_curve"),
+        _ctx(
+            now,
+            lights=(
+                _light("light_main", SensorState.ON, now - 1000, brightness=100, color=3000),
+            ),
+        ),
+        presence_confirmed=False,
+        absence_seconds=450,
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None and main.commands
+    assert main.commands[0].action is LightAction.SET_BRIGHTNESS
+    assert main.commands[0].brightness == 52
+
+
+def test_curve_room_requires_the_profile() -> None:
+    with pytest.raises(Exception):
+        evaluate_curve_room(
+            _config(),
+            _ctx(_at(12, 0)),
+            presence_confirmed=False,
+            absence_seconds=None,
+        )

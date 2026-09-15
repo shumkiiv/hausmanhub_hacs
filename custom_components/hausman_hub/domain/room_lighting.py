@@ -31,6 +31,7 @@ MAX_KELVIN = 6500
 MIN_LUX = 0
 MAX_LUX = 100_000
 MANUAL_PRIORITY = "manual_above_auto"
+ROOM_LIGHTING_PROFILES = frozenset({"day_curve"})
 
 _STABLE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _TIME_OF_DAY = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
@@ -910,6 +911,7 @@ class RoomLightingConfig:
     timers: Timers | None = None
     behaviors: Behaviors | None = None
     auxiliary: AuxiliaryPolicy | None = None
+    profile: str | None = None
     template_id: str | None = None
     overrides: Overrides = field(default_factory=Overrides)
 
@@ -942,6 +944,8 @@ class RoomLightingConfig:
             raise RoomLightingViolation("behaviours block is invalid")
         if self.auxiliary is not None and not isinstance(self.auxiliary, AuxiliaryPolicy):
             raise RoomLightingViolation("auxiliary block is invalid")
+        if self.profile is not None and self.profile not in ROOM_LIGHTING_PROFILES:
+            raise RoomLightingViolation("room lighting profile is unknown")
         if self.template_id is not None:
             _stable_id(self.template_id, "template id")
         if not isinstance(self.overrides, Overrides):
@@ -1100,6 +1104,8 @@ class RoomLightingConfig:
                     self.auxiliary.fan.light_targets
                 )
             payload["auxiliary"] = {"fan": fan_payload}
+        if self.profile is not None:
+            payload["profile"] = self.profile
         return payload
 
 
@@ -1564,6 +1570,7 @@ def room_lighting_config_from_payload(payload: object) -> RoomLightingConfig:
     timers = data.get("timers")
     behaviors = data.get("behaviors")
     auxiliary = data.get("auxiliary")
+    profile = data.get("profile")
     return RoomLightingConfig(
         room_id=_require(data, "roomId", "room id"),
         name=_require(data, "name", "room name"),
@@ -1583,6 +1590,7 @@ def room_lighting_config_from_payload(payload: object) -> RoomLightingConfig:
         timers=None if timers is None else _timers_from_payload(timers),
         behaviors=None if behaviors is None else _behaviors_from_payload(behaviors),
         auxiliary=None if auxiliary is None else _auxiliary_policy_from_payload(auxiliary),
+        profile=profile,
         template_id=data.get("templateId"),
         overrides=_overrides_from_payload(data.get("overrides")),
     )
