@@ -415,6 +415,8 @@ def bathroom_auxiliary_inputs(
     if config.auxiliary is None:
         return None
     fan = config.auxiliary.fan
+    if fan is None:
+        return None
     policy = BathroomPolicy(
         humidity_threshold=fan.humidity_threshold,
         day_off_seconds=fan.day_off_seconds,
@@ -501,9 +503,11 @@ def _curve_manual_blocked(context: RoomLightingContext, target_id: str) -> bool:
     """Whether a confirmed manual action still outranks the room curve.
 
     A missing or unowned record never blocks the configured curve (for example
-    right after a writer hand-over). A confirmed manual action blocks it until
-    the shared manual-off protection window releases, so a person keeps
-    priority without freezing the target forever.
+    right after a writer hand-over). A confirmed manual action blocks it only
+    for the room's manual-protection window, so a person keeps priority while
+    the curve can never be frozen forever: without a time bound a manual
+    switch-on would block the curve for good because the release evidence for
+    an already-on light cannot be proven.
     """
 
     latest = latest_ownership(context.ownership, target_id)
@@ -513,16 +517,8 @@ def _curve_manual_blocked(context: RoomLightingContext, target_id: str) -> bool:
         or latest.source is not OwnershipSource.MANUAL
     ):
         return False
-    return not release_expired_manual(
-        context.ownership,
-        target_id,
-        now=context.now,
-        minimum_interval_seconds=context.protection.minimum_interval_seconds,
-        stable_absence_seconds=context.protection.stable_absence_seconds,
-        absence_confirmed=context.protection.absence_confirmed,
-        absence_since=context.protection.absence_since,
-        release_mode=context.protection.release_mode,
-    )
+    window = max(0, context.protection.minimum_interval_seconds) * 1000
+    return context.now - latest.at < window
 
 
 def _curve_main_decision(
@@ -531,6 +527,8 @@ def _curve_main_decision(
     target_id = target.id  # type: ignore[attr-defined]
     light = context.light(target_id)
     light_on = light is not None and light.state is SensorState.ON
+    if getattr(curve, "hold", False):
+        return _unchanged(target_id, Skip(target_id, SkipReason.SENSOR_UNKNOWN))
     if _curve_manual_blocked(context, target_id):
         return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_OWNERSHIP))
 

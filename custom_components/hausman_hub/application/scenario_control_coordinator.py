@@ -370,6 +370,14 @@ class ScenarioControlCoordinator:
             self, "_externally_managed_scenarios", frozenset()
         )
 
+    def _scenario_external(self, scenario_id: str) -> bool:
+        return scenario_id in getattr(
+            self, "_externally_managed_scenarios", frozenset()
+        )
+
+    def _shower_external(self) -> bool:
+        return self._scenario_external(SHOWER_SCENARIO_ID)
+
     @property
     def externally_managed_scenario_ids(self) -> frozenset[str]:
         """Scenario IDs transferred to another writer, excluded everywhere.
@@ -414,10 +422,6 @@ class ScenarioControlCoordinator:
                 STORAGE_LIGHT_TARGET_ID,
                 SMALL_CORRIDOR_RELAY_TARGET_ID,
                 SMALL_CORRIDOR_CHANDELIER_TARGET_ID,
-                SHOWER_MAIN_TARGET_ID,
-                SHOWER_EXTRA_TARGET_ID,
-                SHOWER_FAN_TARGET_ID,
-                SHOWER_CABINET_TARGET_ID,
                 TOILET_MAIN_TARGET_ID,
                 TOILET_NIGHT_TARGET_ID,
                 TOILET_FAN_TARGET_ID,
@@ -436,6 +440,17 @@ class ScenarioControlCoordinator:
                     TAMBUR_POINTS_TARGET_ID,
                     TAMBUR_MIRROR_TARGET_ID,
                     TAMBUR_POWER_TARGET_ID,
+                }
+            )
+        ) | (
+            frozenset()
+            if self._shower_external()
+            else frozenset(
+                {
+                    SHOWER_MAIN_TARGET_ID,
+                    SHOWER_EXTRA_TARGET_ID,
+                    SHOWER_FAN_TARGET_ID,
+                    SHOWER_CABINET_TARGET_ID,
                 }
             )
         )
@@ -550,7 +565,7 @@ class ScenarioControlCoordinator:
                 )
             if entity_id in self._small_corridor_entity_ids():
                 await self.async_handle_small_corridor_change()
-            if entity_id in self._shower_entity_ids():
+            if entity_id in self._shower_entity_ids() and not self._shower_external():
                 await self.async_handle_shower_change()
             if entity_id in self._toilet_entity_ids():
                 await self.async_handle_toilet_change()
@@ -590,7 +605,10 @@ class ScenarioControlCoordinator:
                 recovery=True,
                 allow_activation=False,
             )
-            await self.async_handle_shower_change(recovery=True, allow_activation=False)
+            if not self._shower_external():
+                await self.async_handle_shower_change(
+                    recovery=True, allow_activation=False
+                )
             await self.async_handle_toilet_change(recovery=True, allow_activation=False)
             await self.async_handle_bathroom_change(recovery=True, allow_activation=False)
             await self.async_handle_office_change(recovery=True)
@@ -1876,6 +1894,10 @@ class ScenarioControlCoordinator:
         if record is None:
             return
         if str(record.get("transition", "")).endswith("failed"):
+            return
+        if self._scenario_external(scenario_id):
+            # A transferred room has exactly one writer outside this
+            # coordinator; a leftover timer must never command it again.
             return
         deadline = record.get("deadlineMs")
         if type(deadline) is not int or self._now_ms() < deadline:

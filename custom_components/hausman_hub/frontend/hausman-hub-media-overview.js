@@ -1,8 +1,8 @@
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.282";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.282";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.282";
-import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.282";
-import { renderMediaSide } from "./hausman-hub-media-side.js?v=1.52.282";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.283";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.283";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.283";
+import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.283";
+import { renderMediaSide } from "./hausman-hub-media-side.js?v=1.52.283";
 
 function mediaOverviewNormalized(value) { return String(value || "").trim().toLocaleLowerCase("ru"); }
 function mediaOverviewKey(device) { return device.physicalId || device.id || device.entityId; }

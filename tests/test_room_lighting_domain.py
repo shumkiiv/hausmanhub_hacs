@@ -870,3 +870,60 @@ def test_auxiliary_fan_requires_exactly_two_explicit_lights(lights: list[str]) -
     payload["auxiliary"]["fan"]["lightTargets"] = lights  # type: ignore[index]
     with pytest.raises(RoomLightingViolation):
         config_from_payload(payload)
+
+
+def _shower_payload() -> dict[str, object]:
+    payload = _bathroom_payload()
+    payload["roomId"] = "room_demo_shower"
+    payload["auxiliary"] = {  # type: ignore[assignment]
+        "exhaust": {
+            "targetId": "aux_demo_bathroom_fan",
+            "humidityThreshold": 55,
+            "presenceRunSeconds": 120,
+            "absenceSeconds": 300,
+            "fanOffSeconds": 300,
+        }
+    }
+    return payload
+
+
+def test_exhaust_policy_round_trip() -> None:
+    config = config_from_payload(_shower_payload())
+    assert config.auxiliary is not None
+    assert config.auxiliary.fan is None
+    assert config.auxiliary.exhaust is not None
+    assert config.auxiliary.exhaust.humidity_threshold == 55
+    assert config.auxiliary.exhaust.presence_run_seconds == 120
+    encoded = config.to_dict()
+    assert config_from_payload(encoded).to_dict() == encoded
+    assert encoded["auxiliary"]["exhaust"]["absenceSeconds"] == 300  # type: ignore[index]
+
+
+def test_exhaust_unknown_target_is_rejected() -> None:
+    payload = _shower_payload()
+    payload["auxiliary"]["exhaust"]["targetId"] = "aux_missing"  # type: ignore[index]
+    assert room_lighting_violations(payload)
+    with pytest.raises(RoomLightingViolation):
+        config_from_payload(payload)
+
+
+def test_auxiliary_requires_a_fan_or_exhaust_block() -> None:
+    payload = _bathroom_payload()
+    payload["auxiliary"] = {}  # type: ignore[assignment]
+    with pytest.raises(RoomLightingViolation):
+        config_from_payload(payload)
+
+
+def test_fan_and_exhaust_can_coexist() -> None:
+    payload = _bathroom_payload()
+    payload["auxiliary"]["exhaust"] = {  # type: ignore[index]
+        "targetId": "aux_demo_bathroom_fan",
+        "humidityThreshold": 55,
+        "presenceRunSeconds": 120,
+        "absenceSeconds": 300,
+        "fanOffSeconds": 300,
+    }
+    config = config_from_payload(payload)
+    assert config.auxiliary is not None
+    assert config.auxiliary.fan is not None
+    assert config.auxiliary.exhaust is not None

@@ -475,14 +475,49 @@ class AuxiliaryFanPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class AuxiliaryExhaustPolicy:
+    """Shower presence-and-humidity exhaust policy."""
+
+    target_id: str
+    humidity_threshold: int = 55
+    presence_run_seconds: int = 120
+    absence_seconds: int = 300
+    fan_off_seconds: int = 300
+
+    def __post_init__(self) -> None:
+        _stable_id(self.target_id, "auxiliary exhaust target id")
+        _integer(
+            self.humidity_threshold,
+            "auxiliary exhaust humidity threshold",
+            minimum=1,
+            maximum=100,
+        )
+        for label, value in (
+            ("presence run", self.presence_run_seconds),
+            ("absence", self.absence_seconds),
+            ("fan off", self.fan_off_seconds),
+        ):
+            _integer(value, f"auxiliary exhaust {label} seconds", minimum=1, maximum=3600)
+
+
+@dataclass(frozen=True, slots=True)
 class AuxiliaryPolicy:
     """Auxiliary actuator policy block of one room configuration."""
 
-    fan: AuxiliaryFanPolicy
+    fan: AuxiliaryFanPolicy | None = None
+    exhaust: AuxiliaryExhaustPolicy | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.fan, AuxiliaryFanPolicy):
-            raise RoomLightingViolation("auxiliary policy requires a fan block")
+        if self.fan is None and self.exhaust is None:
+            raise RoomLightingViolation(
+                "auxiliary policy requires a fan or exhaust block"
+            )
+        if self.fan is not None and not isinstance(self.fan, AuxiliaryFanPolicy):
+            raise RoomLightingViolation("auxiliary fan block is invalid")
+        if self.exhaust is not None and not isinstance(
+            self.exhaust, AuxiliaryExhaustPolicy
+        ):
+            raise RoomLightingViolation("auxiliary exhaust block is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1024,17 +1059,27 @@ class RoomLightingConfig:
                     "illumination sensor is not selected as an illuminance sensor"
                 )
         if self.auxiliary is not None:
-            if self.devices.auxiliary(self.auxiliary.fan.target_id) is None:
-                violations.append(
-                    "auxiliary fan references an unknown auxiliary target: "
-                    f"{self.auxiliary.fan.target_id}"
-                )
-            for light_target in self.auxiliary.fan.light_targets:
-                if light_target not in target_ids:
+            fan_policy = self.auxiliary.fan
+            if fan_policy is not None:
+                if self.devices.auxiliary(fan_policy.target_id) is None:
                     violations.append(
-                        "auxiliary fan references an unknown light target: "
-                        f"{light_target}"
+                        "auxiliary fan references an unknown auxiliary target: "
+                        f"{fan_policy.target_id}"
                     )
+                for light_target in fan_policy.light_targets:
+                    if light_target not in target_ids:
+                        violations.append(
+                            "auxiliary fan references an unknown light target: "
+                            f"{light_target}"
+                        )
+            exhaust_policy = self.auxiliary.exhaust
+            if exhaust_policy is not None and (
+                self.devices.auxiliary(exhaust_policy.target_id) is None
+            ):
+                violations.append(
+                    "auxiliary exhaust references an unknown auxiliary target: "
+                    f"{exhaust_policy.target_id}"
+                )
         return tuple(violations)
 
     def effective_auto_adopt(self, override: bool | None) -> bool:
@@ -1091,19 +1136,30 @@ class RoomLightingConfig:
                 "restoreOwnershipAfterRestart": self.behaviors.restore_ownership_after_restart,
             }
         if self.auxiliary is not None:
-            fan_payload: dict[str, object] = {
-                "targetId": self.auxiliary.fan.target_id,
-                "humidityThreshold": self.auxiliary.fan.humidity_threshold,
-                "dayOffSeconds": self.auxiliary.fan.day_off_seconds,
-                "quietStart": self.auxiliary.fan.quiet_start,
-                "dayStart": self.auxiliary.fan.day_start,
-                "nightStart": self.auxiliary.fan.night_start,
-            }
-            if self.auxiliary.fan.light_targets:
-                fan_payload["lightTargets"] = list(
-                    self.auxiliary.fan.light_targets
-                )
-            payload["auxiliary"] = {"fan": fan_payload}
+            auxiliary_payload: dict[str, object] = {}
+            fan = self.auxiliary.fan
+            if fan is not None:
+                fan_payload: dict[str, object] = {
+                    "targetId": fan.target_id,
+                    "humidityThreshold": fan.humidity_threshold,
+                    "dayOffSeconds": fan.day_off_seconds,
+                    "quietStart": fan.quiet_start,
+                    "dayStart": fan.day_start,
+                    "nightStart": fan.night_start,
+                }
+                if fan.light_targets:
+                    fan_payload["lightTargets"] = list(fan.light_targets)
+                auxiliary_payload["fan"] = fan_payload
+            exhaust = self.auxiliary.exhaust
+            if exhaust is not None:
+                auxiliary_payload["exhaust"] = {
+                    "targetId": exhaust.target_id,
+                    "humidityThreshold": exhaust.humidity_threshold,
+                    "presenceRunSeconds": exhaust.presence_run_seconds,
+                    "absenceSeconds": exhaust.absence_seconds,
+                    "fanOffSeconds": exhaust.fan_off_seconds,
+                }
+            payload["auxiliary"] = auxiliary_payload
         if self.profile is not None:
             payload["profile"] = self.profile
         return payload
@@ -1377,25 +1433,43 @@ def _auxiliary_target_from_payload(payload: object) -> AuxiliaryTarget:
 
 def _auxiliary_policy_from_payload(payload: object) -> AuxiliaryPolicy:
     data = _as_dict(payload, "auxiliary policy")
-    fan = _as_dict(_require(data, "fan", "auxiliary fan policy"), "auxiliary fan policy")
-    light_targets = fan.get("lightTargets")
-    if light_targets is not None:
-        if not isinstance(light_targets, (list, tuple)):
-            raise RoomLightingViolation(
-                "auxiliary fan light targets must be a list"
-            )
-        light_targets = tuple(light_targets)
-    return AuxiliaryPolicy(
-        fan=AuxiliaryFanPolicy(
-            target_id=_require(fan, "targetId", "auxiliary fan target id"),
+    fan_payload = data.get("fan")
+    exhaust_payload = data.get("exhaust")
+
+    fan: AuxiliaryFanPolicy | None = None
+    if fan_payload is not None:
+        fan_data = _as_dict(fan_payload, "auxiliary fan policy")
+        light_targets = fan_data.get("lightTargets")
+        if light_targets is not None:
+            if not isinstance(light_targets, (list, tuple)):
+                raise RoomLightingViolation(
+                    "auxiliary fan light targets must be a list"
+                )
+            light_targets = tuple(light_targets)
+        fan = AuxiliaryFanPolicy(
+            target_id=_require(fan_data, "targetId", "auxiliary fan target id"),
             light_targets=light_targets or (),
-            humidity_threshold=fan.get("humidityThreshold", 65),
-            day_off_seconds=fan.get("dayOffSeconds", 1800),
-            quiet_start=fan.get("quietStart", "06:00"),
-            day_start=fan.get("dayStart", "08:00"),
-            night_start=fan.get("nightStart", "22:00"),
+            humidity_threshold=fan_data.get("humidityThreshold", 65),
+            day_off_seconds=fan_data.get("dayOffSeconds", 1800),
+            quiet_start=fan_data.get("quietStart", "06:00"),
+            day_start=fan_data.get("dayStart", "08:00"),
+            night_start=fan_data.get("nightStart", "22:00"),
         )
-    )
+
+    exhaust: AuxiliaryExhaustPolicy | None = None
+    if exhaust_payload is not None:
+        exhaust_data = _as_dict(exhaust_payload, "auxiliary exhaust policy")
+        exhaust = AuxiliaryExhaustPolicy(
+            target_id=_require(
+                exhaust_data, "targetId", "auxiliary exhaust target id"
+            ),
+            humidity_threshold=exhaust_data.get("humidityThreshold", 55),
+            presence_run_seconds=exhaust_data.get("presenceRunSeconds", 120),
+            absence_seconds=exhaust_data.get("absenceSeconds", 300),
+            fan_off_seconds=exhaust_data.get("fanOffSeconds", 300),
+        )
+
+    return AuxiliaryPolicy(fan=fan, exhaust=exhaust)
 
 
 def _devices_from_payload(payload: object) -> Devices:

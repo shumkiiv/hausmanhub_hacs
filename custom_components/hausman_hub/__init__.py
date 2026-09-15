@@ -604,6 +604,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     scenario_service.set_executor(scenario_executor)
     from .application.scenario_control_coordinator import (
+        SHOWER_SCENARIO_ID,
         ScenarioControlCoordinator,
         TAMBUR_SCENARIO_ID,
     )
@@ -654,7 +655,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # generic event and schedule adapters keep the transferred scenario
     # excluded as well: a manual trigger would run its managed flow and
     # replay the stale recorded action as a second command source.
-    externally_managed_scenarios = frozenset({TAMBUR_SCENARIO_ID})
+    externally_managed_scenarios = frozenset(
+        {TAMBUR_SCENARIO_ID, SHOWER_SCENARIO_ID}
+    )
     scenario_control_coordinator.set_externally_managed_scenarios(
         externally_managed_scenarios
     )

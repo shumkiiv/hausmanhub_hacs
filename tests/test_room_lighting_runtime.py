@@ -36,6 +36,8 @@ from custom_components.hausman_hub.domain.room_lighting import (
 from custom_components.hausman_hub.domain.room_lighting_engine import (
     LightAction,
     PlannedCommand,
+    RoomLightingContext,
+    SensorSnapshot,
     decision_target,
     evaluate_room_lighting,
 )
@@ -2164,19 +2166,139 @@ def _three_light_bathroom_payload(*, explicit_lights: bool) -> dict[str, object]
 
 
 def _runtime_with_shadow(
-    hass: _FakeHass, payload: dict[str, object]
+    hass: _FakeHass,
+    payload: dict[str, object],
+    *,
+    executor: object | None = None,
+    now_ms: object | None = None,
 ) -> tuple[RoomLightingRuntime, RoomLightingShadowService]:
     shadow = RoomLightingShadowService(_MemoryShadowStore())
     runtime = RoomLightingRuntime(
         hass,
         _ConfigService(config_from_payload(payload)),
         shadow,
-        now_ms=lambda: _NOW_MS,
+        executor=executor,
+        now_ms=now_ms or (lambda: _NOW_MS),
         track_state_changes=lambda hass, entities, callback: (lambda: None),
         track_interval=lambda hass, callback, interval: (lambda: None),
         listen_bus=lambda hass, event_type, callback: (lambda: None),
     )
     return runtime, shadow
+
+
+def _shower_payload(*, commands_enabled: bool = False) -> dict[str, object]:
+    payload = _config_payload(commands_enabled=commands_enabled)
+    payload["roomId"] = "room_demo_shower"
+    payload["devices"]["sensors"].append(  # type: ignore[index]
+        {
+            "id": "sensor_demo_shower_humidity",
+            "name": "Влажность душевой",
+            "kind": "humidity",
+            "entityId": "sensor.demo_shower_humidity",
+            "autoAdoptOverride": None,
+        }
+    )
+    payload["devices"]["auxiliaries"] = [  # type: ignore[index]
+        {
+            "id": "aux_shower_fan",
+            "name": "Вытяжка душевой",
+            "kind": "fan",
+            "entityId": "switch.demo_shower_fan",
+            "autoAdoptOverride": None,
+        }
+    ]
+    payload["auxiliary"] = {  # type: ignore[index]
+        "exhaust": {
+            "targetId": "aux_shower_fan",
+            "humidityThreshold": 55,
+            "presenceRunSeconds": 120,
+            "absenceSeconds": 300,
+            "fanOffSeconds": 300,
+        }
+    }
+    return payload
+
+
+async def test_shower_exhaust_turns_the_fan_on_with_humid_air() -> None:
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    hass.states.set("sensor.demo_shower_humidity", "70", last_changed=_NOW_DT)
+    hass.states.set("switch.demo_shower_fan", "off", last_changed=_NOW_DT)
+    executor = _SpyExecutor()
+    runtime, _shadow = _runtime_with_shadow(
+        hass, _shower_payload(commands_enabled=True), executor=executor
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        actions = [(command.target_id, command.action) for command in executor.calls]
+        assert ("aux_shower_fan", LightAction.TURN_ON) in actions
+    finally:
+        await runtime.stop()
+
+
+async def test_shower_exhaust_shadow_journals_without_command() -> None:
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("sensor.demo_shower_humidity", "70", last_changed=_NOW_DT)
+    hass.states.set("switch.demo_shower_fan", "off", last_changed=_NOW_DT)
+    executor = _SpyExecutor()
+    runtime, shadow = _runtime_with_shadow(
+        hass, _shower_payload(commands_enabled=False), executor=executor
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        assert executor.calls == []
+        entries = shadow.journal_payload()["entries"]
+        exhaust = [entry for entry in entries if "showerExhaust" in entry]
+        assert exhaust
+        assert exhaust[-1]["showerExhaust"]["action"] == "turn_on"
+        assert exhaust[-1]["mode"] == "shadow"
+    finally:
+        await runtime.stop()
+
+
+async def test_shower_exhaust_full_timer_chain() -> None:
+    """Dry presence runs the fan after 120 s; absence stops it after 300 s."""
+
+    hass = _FakeHass()
+    clock = [_NOW_MS]
+    hass.states.set("binary_sensor.demo_presence", "on", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    hass.states.set("sensor.demo_shower_humidity", "40", last_changed=_NOW_DT)
+    hass.states.set("switch.demo_shower_fan", "off", last_changed=_NOW_DT)
+    runtime, _shadow = _runtime_with_shadow(
+        hass,
+        _shower_payload(commands_enabled=True),
+        now_ms=lambda: clock[0],
+    )
+
+    def fan_services() -> list[str]:
+        return [
+            service
+            for _domain, service, data in hass.services.calls
+            if data.get("entity_id") == "switch.demo_shower_fan"
+        ]
+
+    await runtime.start(hass, "entry")
+    try:
+        # The room lights are separately controlled; the fan waits 120 s of
+        # dry presence before it is switched on.
+        assert fan_services() == []
+        clock[0] += 120_000
+        await runtime.async_process()
+        assert fan_services()[-1] == "turn_on"
+
+        # Presence is gone: the owned, dry fan stops only after 300 s.
+        hass.states.set("binary_sensor.demo_presence", "off")
+        await runtime.async_process()
+        clock[0] += 300_000
+        await runtime.async_process()
+        assert fan_services()[-1] == "turn_off"
+    finally:
+        await runtime.stop()
 
 
 async def test_auxiliary_shadow_uses_explicit_fan_lights_with_three_room_lights() -> None:
@@ -2289,3 +2411,89 @@ async def test_curve_room_in_shadow_dispatches_nothing() -> None:
         assert executor.calls == []
     finally:
         await runtime.stop()
+
+
+async def test_curve_unknown_presence_does_not_accumulate_absence() -> None:
+    hass = _FakeHass()
+    runtime = _make_runtime(
+        hass,
+        payload=_curve_payload(commands_enabled=False),
+        now_ms=lambda: _NOW_MS,
+    )
+    config = config_from_payload(_curve_payload(commands_enabled=False))
+
+    def context(state: SensorState, moment: int) -> RoomLightingContext:
+        return RoomLightingContext(
+            now=moment,
+            timezone=_TZ,
+            sunrise=time(7, 0),
+            sunset=time(19, 0),
+            sensors=(
+                SensorSnapshot(
+                    "sensor_demo_presence",
+                    SensorKind.PRESENCE,
+                    state,
+                    last_changed=moment,
+                ),
+            ),
+        )
+
+    base = _NOW_MS
+    assert runtime._observe_curve_presence(  # type: ignore[attr-defined]
+        config, context(SensorState.OFF, base), base
+    ) == (False, 0)
+    _, absence = runtime._observe_curve_presence(  # type: ignore[attr-defined]
+        config, context(SensorState.OFF, base + 600_000), base + 600_000
+    )
+    assert absence == 600
+    # A lost sensor is not absence: the gap is dropped, not inherited.
+    assert runtime._observe_curve_presence(  # type: ignore[attr-defined]
+        config, context(SensorState.UNKNOWN, base + 1_200_000), base + 1_200_000
+    ) == (False, 0)
+    _, restarted = runtime._observe_curve_presence(  # type: ignore[attr-defined]
+        config, context(SensorState.OFF, base + 1_800_000), base + 1_800_000
+    )
+    assert restarted == 0
+    # Presence observed again restarts the 12-second confirmation.
+    confirmed_now, _ = runtime._observe_curve_presence(  # type: ignore[attr-defined]
+        config, context(SensorState.ON, base + 1_860_000), base + 1_860_000
+    )
+    assert confirmed_now is False
+    confirmed_after, _ = runtime._observe_curve_presence(  # type: ignore[attr-defined]
+        config, context(SensorState.ON, base + 1_872_000), base + 1_872_000
+    )
+    assert confirmed_after is True
+
+
+async def test_curve_stale_presence_is_not_presence() -> None:
+    hass = _FakeHass()
+    runtime = _make_runtime(
+        hass,
+        payload=_curve_payload(commands_enabled=False),
+        now_ms=lambda: _NOW_MS,
+    )
+
+    def context(state: SensorState, age_ms: int) -> RoomLightingContext:
+        return RoomLightingContext(
+            now=_NOW_MS,
+            timezone=_TZ,
+            sunrise=time(7, 0),
+            sunset=time(19, 0),
+            sensors=(
+                SensorSnapshot(
+                    "sensor_demo_presence",
+                    SensorKind.PRESENCE,
+                    state,
+                    last_changed=_NOW_MS - age_ms,
+                ),
+            ),
+        )
+
+    fresh = runtime._curve_presence_state(  # type: ignore[attr-defined]
+        context(SensorState.ON, 10_000)
+    )
+    stale = runtime._curve_presence_state(  # type: ignore[attr-defined]
+        context(SensorState.ON, 3_600_000)
+    )
+    assert fresh is SensorState.ON
+    assert stale is SensorState.UNKNOWN

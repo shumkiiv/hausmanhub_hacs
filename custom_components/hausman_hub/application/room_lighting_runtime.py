@@ -17,6 +17,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
 from datetime import timedelta
 import logging
+import math
 import time
 from typing import TYPE_CHECKING
 
@@ -28,6 +29,16 @@ from ..domain.room_lighting import (
     room_lighting_entity_collisions,
 )
 from ..domain.room_lighting_auxiliary import evaluate_bathroom_exhaust
+from ..domain.shower_exhaust import (
+    SHOWER_ABSENCE_TIMER,
+    SHOWER_PRESENCE_TIMER,
+    ShowerExhaustObservation,
+    ShowerExhaustPolicy,
+    ShowerFanAction,
+    ShowerTimer,
+    evaluate_shower_exhaust,
+    evaluate_shower_exhaust_due,
+)
 from ..domain.room_lighting_engine import (
     DecisionReason,
     LightAction,
@@ -44,6 +55,7 @@ from ..domain.room_lighting_ownership import (
     OwnershipSource,
     OwnershipViolation,
     SensorState,
+    has_proven_auto_ownership,
 )
 from .room_lighting_ha_executor import RoomLightingHaExecutor
 from .room_lighting_ha_state import RoomLightingHaStateProvider
@@ -64,6 +76,7 @@ _LOGGER = logging.getLogger(__name__)
 
 EVENT_CALL_SERVICE = "call_service"
 CURVE_PRESENCE_CONFIRM_MS = 12_000
+CURVE_SENSOR_FRESHNESS_MS = 300_000
 DEFAULT_INTERVAL_SECONDS = 60
 MAX_OWNERSHIP_RECORDS = 500
 OWNERSHIP_STORAGE_VERSION = 1
@@ -440,6 +453,7 @@ class RoomLightingRuntime:
         self._unobserved_since: int | None = None
         self._absence: AbsenceState = {}
         self._curve_presence: dict[str, dict[str, int | None]] = {}
+        self._shower_exhaust: dict[str, dict[str, int | None]] = {}
         self._state_provider = state_provider or RoomLightingHaStateProvider(
             now_ms=now_ms,
             ownership_provider=lambda config: self._ownership.snapshots_for(
@@ -1191,6 +1205,9 @@ class RoomLightingRuntime:
             except Exception:  # noqa: BLE001 - journal failure must not dispatch
                 _LOGGER.warning("room lighting journal write failed")
         await self._record_auxiliary_shadow(config, moment)
+        await self._process_shower_exhaust(
+            config, context, moment, enabled=enabled
+        )
         if not enabled:
             _LOGGER.debug(
                 "room lighting shadow decision journaled for %s", config.room_id
@@ -1231,10 +1248,16 @@ class RoomLightingRuntime:
             confirmed = moment - int(tracker["since"]) >= CURVE_PRESENCE_CONFIRM_MS
             return confirmed, int(tracker.get("absence") or 0)
         tracker["since"] = None
+        if present is not SensorState.OFF:
+            # An unknown, unavailable or stale presence is not absence. The
+            # unobserved interval is not counted at all: after the fault the
+            # proven-absence window starts fresh instead of inheriting the gap.
+            tracker["last_seen"] = None
+            tracker["absence"] = 0
+            return False, 0
         if tracker["last_seen"] is None:
-            if present is SensorState.OFF:
-                # No proven presence yet after start: do not invent an absence.
-                tracker["last_seen"] = moment
+            # No proven presence yet after start: do not invent an absence.
+            tracker["last_seen"] = moment
             return False, 0
         absence = max(0, (moment - int(tracker["last_seen"])) // 1000)
         tracker["absence"] = absence
@@ -1247,10 +1270,223 @@ class RoomLightingRuntime:
         ]
         if not relevant:
             return SensorState.UNKNOWN
-        if any(sensor.state is SensorState.ON for sensor in relevant):
+        # Only a fresh presence counts, exactly like the deterministic engine:
+        # a sensor that stopped updating is neither presence nor absence.
+        if any(
+            sensor.state is SensorState.ON
+            and context.now - sensor.last_changed <= CURVE_SENSOR_FRESHNESS_MS
+            for sensor in relevant
+        ):
             return SensorState.ON
         if all(sensor.state is SensorState.OFF for sensor in relevant):
             return SensorState.OFF
+        return SensorState.UNKNOWN
+
+    async def _process_shower_exhaust(
+        self,
+        config: RoomLightingConfig,
+        context: RoomLightingContext,
+        moment: int,
+        *,
+        enabled: bool,
+    ) -> None:
+        """Evaluate the shower exhaust fan and apply its own timers.
+
+        The fan is presence-and-humidity led. The light absence handling stays
+        with the room engine, so this path keeps separate presence and absence
+        timers and never touches the lights. Unknown or lost sensors are never
+        treated as absence, and the fan is only switched off while the runtime
+        owns it.
+        """
+
+        if self._hass is None or config.auxiliary is None:
+            return
+        exhaust = config.auxiliary.exhaust
+        if exhaust is None:
+            return
+        target = config.devices.auxiliary(exhaust.target_id)
+        if target is None or target.entity_id is None:
+            return
+        policy = ShowerExhaustPolicy(
+            humidity_threshold=exhaust.humidity_threshold,
+            presence_run_seconds=exhaust.presence_run_seconds,
+            absence_seconds=exhaust.absence_seconds,
+            fan_off_seconds=exhaust.fan_off_seconds,
+        )
+        tracker = self._shower_exhaust.setdefault(
+            config.room_id,
+            {
+                "presence_deadline": None,
+                "absence_started": None,
+                "absence_deadline": None,
+            },
+        )
+        presence = self._curve_presence_state(context)
+        elapsed: int | None = None
+        if tracker["absence_started"] is not None:
+            elapsed = max(
+                0, (moment - int(tracker["absence_started"])) // 1000
+            )
+
+        due_kind: str | None = None
+        if (
+            tracker["presence_deadline"] is not None
+            and moment >= int(tracker["presence_deadline"])
+        ):
+            due_kind = SHOWER_PRESENCE_TIMER
+            tracker["presence_deadline"] = None
+        elif (
+            tracker["absence_deadline"] is not None
+            and moment >= int(tracker["absence_deadline"])
+        ):
+            due_kind = SHOWER_ABSENCE_TIMER
+
+        records = self._ownership.snapshots_for(
+            config.room_id, frozenset({exhaust.target_id})
+        )
+        observation = ShowerExhaustObservation(
+            presence=presence,
+            humidity=self._humidity_value(config),
+            fan=self._entity_sensor_state(target.entity_id),
+            fan_owned=has_proven_auto_ownership(records, exhaust.target_id),
+            lights_owned_on=self._lights_owned_on(config),
+            pending_timer=due_kind,
+            elapsed_seconds=elapsed,
+        )
+        if due_kind is not None:
+            decision = evaluate_shower_exhaust_due(
+                observation, timer_kind=due_kind, policy=policy
+            )
+        else:
+            decision = evaluate_shower_exhaust(observation, policy)
+
+        if decision.action is not None and enabled:
+            await self._dispatch_exhaust(config, target, decision.action, moment)
+
+        self._apply_shower_timers(tracker, observation, decision, moment)
+
+        recorder = getattr(self._shadow, "async_record_exhaust", None)
+        if callable(recorder):
+            try:
+                await recorder(
+                    at=moment,
+                    room_id=config.room_id,
+                    observation=observation,
+                    decision=decision,
+                    enabled=enabled,
+                )
+            except Exception:  # noqa: BLE001 - journal failure must not dispatch
+                _LOGGER.warning("shower exhaust journal write failed")
+
+    @staticmethod
+    def _apply_shower_timers(
+        tracker: dict[str, int | None],
+        observation: ShowerExhaustObservation,
+        decision: object,
+        moment: int,
+    ) -> None:
+        arm_timer = getattr(decision, "arm_timer", None)
+        arm_seconds = getattr(decision, "arm_seconds", None)
+        if observation.presence is SensorState.ON:
+            tracker["absence_started"] = None
+            tracker["absence_deadline"] = None
+            if arm_timer is ShowerTimer.PRESENCE:
+                if tracker["presence_deadline"] is None:
+                    tracker["presence_deadline"] = moment + int(
+                        arm_seconds or 0
+                    ) * 1000
+            else:
+                tracker["presence_deadline"] = None
+            return
+        if observation.presence is not SensorState.OFF:
+            # Unknown presence: never fire the presence timer and keep the
+            # absence clock frozen.
+            tracker["presence_deadline"] = None
+            return
+        tracker["presence_deadline"] = None
+        if arm_timer is ShowerTimer.ABSENCE:
+            if tracker["absence_started"] is None:
+                tracker["absence_started"] = moment
+            tracker["absence_deadline"] = moment + int(arm_seconds or 0) * 1000
+        else:
+            tracker["absence_started"] = None
+            tracker["absence_deadline"] = None
+
+    async def _dispatch_exhaust(
+        self,
+        config: RoomLightingConfig,
+        target: object,
+        action: ShowerFanAction,
+        moment: int,
+    ) -> None:
+        target_id = target.id  # type: ignore[attr-defined]
+        entity_id = target.entity_id  # type: ignore[attr-defined]
+        command = PlannedCommand(
+            target_id,
+            (
+                LightAction.TURN_ON
+                if action is ShowerFanAction.TURN_ON
+                else LightAction.TURN_OFF
+            ),
+            reason=DecisionReason.SCHEDULE,
+        )
+        if self._command_conflicts_with_reserved_writer(config, command):
+            _LOGGER.warning(
+                "shower exhaust dispatch refused: target is owned by a controller"
+            )
+            return
+        self._executing_actions[entity_id] = _planned_service_name(command)
+        try:
+            receipt = await self._executor.execute(  # type: ignore[attr-defined]
+                self._hass, command
+            )
+        except Exception:  # noqa: BLE001 - a failed command is not a crash
+            _LOGGER.warning("shower exhaust command failed")
+            receipt = None
+        finally:
+            self._executing_actions.pop(entity_id, None)
+        if _receipt_confirmed(receipt):
+            self._ownership.record_auto(
+                config.room_id, target_id, moment, confirmed=True
+            )
+            self._schedule_ownership_save()
+            await self._persist_ownership()
+
+    def _lights_owned_on(self, config: RoomLightingConfig) -> bool:
+        for target in config.devices.light_targets:
+            if target.entity_id is None or not self._entity_is_on(target.entity_id):
+                continue
+            records = self._ownership.snapshots_for(
+                config.room_id, frozenset({target.id})
+            )
+            if has_proven_auto_ownership(records, target.id):
+                return True
+        return False
+
+    def _humidity_value(self, config: RoomLightingConfig) -> float | None:
+        if self._hass is None:
+            return None
+        for sensor in config.devices.sensors:
+            if sensor.kind is not SensorKind.HUMIDITY or sensor.entity_id is None:
+                continue
+            state = self._hass.states.get(sensor.entity_id)
+            raw = getattr(state, "state", None)
+            try:
+                value = float(str(raw))
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value):
+                return value
+        return None
+
+    def _entity_sensor_state(self, entity_id: str) -> SensorState:
+        raw = self._entity_state(entity_id)
+        if raw == "on":
+            return SensorState.ON
+        if raw == "off":
+            return SensorState.OFF
+        if raw == "unavailable":
+            return SensorState.UNAVAILABLE
         return SensorState.UNKNOWN
 
     async def _record_auxiliary_shadow(
@@ -1509,6 +1745,16 @@ class RoomLightingRuntime:
                     targets_by_entity.setdefault(
                         target.entity_id,
                         (config.room_id, target.id),
+                    )
+            for auxiliary in config.devices.auxiliaries:
+                targets[auxiliary.id] = auxiliary
+                if auxiliary.entity_id:
+                    rooms_by_entity.setdefault(auxiliary.entity_id, set()).add(
+                        config.room_id
+                    )
+                    targets_by_entity.setdefault(
+                        auxiliary.entity_id,
+                        (config.room_id, auxiliary.id),
                     )
         self._rooms_by_entity = rooms_by_entity
         self._targets_by_entity = targets_by_entity

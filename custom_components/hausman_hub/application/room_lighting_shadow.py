@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from ..domain.room_lighting import RoomLightingConfig
 from ..domain.room_lighting_auxiliary import BathroomDecision, BathroomObservation
+from ..domain.shower_exhaust import ShowerExhaustDecision, ShowerExhaustObservation
 from ..domain.room_lighting_engine import (
     RoomLightingContext,
     RoomLightingDecision,
@@ -186,6 +187,48 @@ class RoomLightingShadowService:
         )
         self._entries = self._entries[-MAX_JOURNAL_ENTRIES:]
         await self._save_if_due(False)
+
+    async def async_record_exhaust(
+        self,
+        *,
+        at: int,
+        room_id: str,
+        observation: ShowerExhaustObservation,
+        decision: ShowerExhaustDecision,
+        enabled: bool = False,
+    ) -> None:
+        """Journal one shower exhaust decision with its honest command flag."""
+
+        if not self._loaded:
+            await self.async_load()
+        mode = "live" if enabled else "shadow"
+        self._entries.append(
+            {
+                "at": at,
+                "roomId": room_id,
+                "mode": mode,
+                "commandsEnabled": enabled,
+                "showerExhaust": {
+                    "presence": observation.presence.value,
+                    "humidity": observation.humidity,
+                    "fan": observation.fan.value,
+                    "fanOwned": observation.fan_owned,
+                    "lightsOwnedOn": observation.lights_owned_on,
+                    "pendingTimer": observation.pending_timer,
+                    "transition": decision.transition.value,
+                    "action": (
+                        decision.action.value if decision.action is not None else None
+                    ),
+                    "armTimer": (
+                        decision.arm_timer.value if decision.arm_timer is not None else None
+                    ),
+                    "armSeconds": decision.arm_seconds,
+                    "blocked": decision.blocked,
+                },
+            }
+        )
+        self._entries = self._entries[-MAX_JOURNAL_ENTRIES:]
+        await self._save_if_due(enabled)
 
     async def async_flush(self) -> None:
         """Force a write, for example before shutdown."""

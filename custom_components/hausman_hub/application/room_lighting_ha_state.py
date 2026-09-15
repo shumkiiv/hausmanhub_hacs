@@ -343,6 +343,8 @@ class RoomLightingHaStateProvider:
         if config.auxiliary is None:
             return None
         fan_policy = config.auxiliary.fan
+        if fan_policy is None:
+            return None
         fan_target = config.devices.auxiliary(fan_policy.target_id)
         if fan_target is None or fan_target.entity_id is None:
             return None

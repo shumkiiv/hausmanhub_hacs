@@ -1414,3 +1414,46 @@ def test_curve_room_respects_a_recent_manual_action() -> None:
     assert main is not None
     assert main.commands == ()
     assert main.skips[0].reason is SkipReason.MANUAL_OWNERSHIP
+
+
+def test_curve_room_manual_block_releases_after_the_protection_window() -> None:
+    now = _at(14, 0)
+    decision = evaluate_curve_room(
+        _config(profile="day_curve"),
+        _ctx(
+            now,
+            lights=(
+                _light("light_main", SensorState.ON, now - 1000, brightness=60, color=2700),
+            ),
+            ownership=(
+                OwnershipSnapshot(
+                    "light_main", OwnershipSource.MANUAL, True, now - 700_000
+                ),
+            ),
+        ),
+        presence_confirmed=False,
+        absence_seconds=None,
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.commands  # the curve resumes after the manual window
+
+
+def test_curve_room_holds_the_light_on_unknown_presence() -> None:
+    now = _at(12, 0)
+    decision = evaluate_curve_room(
+        _config(profile="day_curve"),
+        _ctx(
+            now,
+            presence=SensorState.UNKNOWN,
+            lights=(
+                _light("light_main", SensorState.ON, now - 1000, brightness=50, color=2700),
+            ),
+        ),
+        presence_confirmed=False,
+        absence_seconds=None,
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.commands == ()
+    assert main.skips[0].reason is SkipReason.SENSOR_UNKNOWN

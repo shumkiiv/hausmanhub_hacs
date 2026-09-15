@@ -373,6 +373,48 @@ def test_transferred_tambur_is_neither_coordinator_owner_nor_reserved() -> None:
     assert SHOWER_MAIN_TARGET_ID in coordinator.command_target_ids
 
 
+@pytest.mark.asyncio
+async def test_transferred_room_due_timer_never_dispatches() -> None:
+    now = [datetime(2026, 9, 7, 12, tzinfo=ZoneInfo("Asia/Omsk"))]
+    clock = [0]
+    coordinator, service, _states, _priority, _store = await make_room_coordinator(
+        now=now,
+        clock=clock,
+        overrides={SHOWER_PRESENCE_TARGET_ID: "on", SHOWER_HUMIDITY_TARGET_ID: "40"},
+    )
+    coordinator.set_externally_managed_scenarios(frozenset({SHOWER_SCENARIO_ID}))
+    # Simulate an armed timer that survived the hand-over.
+    coordinator._shower["timerKind"] = "shower_presence"
+    coordinator._shower["deadlineMs"] = 0
+    transition_before = coordinator._shower["transition"]
+    before = len(service.actions)
+
+    await coordinator.async_reconcile_zone_due(SHOWER_SCENARIO_ID)
+
+    assert len(service.actions) == before
+    # The transferred record must not be rearmed or rewritten at all.
+    assert coordinator._shower["transition"] == transition_before
+    assert coordinator._shower["deadlineMs"] == 0
+
+
+def test_transferred_shower_is_neither_coordinator_owner_nor_reserved() -> None:
+    coordinator = object.__new__(ScenarioControlCoordinator)
+    coordinator.set_externally_managed_scenarios(frozenset({SHOWER_SCENARIO_ID}))
+
+    assert SHOWER_SCENARIO_ID not in coordinator.owned_scenario_ids
+    assert not {
+        SHOWER_PRESENCE_TARGET_ID,
+        SHOWER_HUMIDITY_TARGET_ID,
+        SHOWER_MAIN_TARGET_ID,
+        SHOWER_EXTRA_TARGET_ID,
+        SHOWER_FAN_TARGET_ID,
+        SHOWER_CABINET_TARGET_ID,
+    }.intersection(coordinator.command_target_ids)
+    # Other rooms keep their writer.
+    assert TAMBUR_SCENARIO_ID in coordinator.owned_scenario_ids
+    assert TOILET_MAIN_TARGET_ID in coordinator.command_target_ids
+
+
 def test_transferred_scenario_ids_are_reported_for_adapter_exclusions() -> None:
     coordinator = object.__new__(ScenarioControlCoordinator)
     coordinator.set_externally_managed_scenarios(frozenset({TAMBUR_SCENARIO_ID}))

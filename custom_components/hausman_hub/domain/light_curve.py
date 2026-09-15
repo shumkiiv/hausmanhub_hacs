@@ -37,6 +37,7 @@ class LightCurveViolation(ValueError):
 
 class CurveReason(StrEnum):
     OFF = "off"
+    UNKNOWN = "unknown"
     MORNING = "morning"
     RAMP = "ramp"
     DAY = "day"
@@ -144,6 +145,7 @@ class LightCurveDecision:
     color_temperature: int | None = None
     fade_seconds: int = 0
     mirror_on: bool = False
+    hold: bool = False
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -153,6 +155,7 @@ class LightCurveDecision:
             "colorTemperature": self.color_temperature,
             "fadeSeconds": self.fade_seconds,
             "mirrorOn": self.mirror_on,
+            "hold": self.hold,
         }
 
 
@@ -255,6 +258,18 @@ def evaluate_light_curve(
             color_temperature=None,
             fade_seconds=profile.mode_fade_seconds,
             mirror_on=mirror_on,
+        )
+
+    # An unknown, unavailable or stale presence is neither presence nor
+    # absence: the curve must not force the mode level, so the current
+    # brightness is held until a fresh reading appears.
+    if context.presence not in (SensorState.ON, SensorState.OFF):
+        return LightCurveDecision(
+            reason=CurveReason.UNKNOWN,
+            chandelier_on=True,
+            fade_seconds=0,
+            mirror_on=mirror_on,
+            hold=True,
         )
 
     # Presence never changes the colour or the time mode. Confirmed presence

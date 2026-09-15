@@ -178,4 +178,12 @@ def test_decision_payload_is_stable() -> None:
         "colorTemperature": None,
         "fadeSeconds": PROFILE.mode_fade_seconds,
         "mirrorOn": True,
+        "hold": False,
     }
+
+
+def test_unknown_presence_holds_the_current_light() -> None:
+    decision = evaluate_light_curve(PROFILE, _ctx(12, 0, presence=SensorState.UNKNOWN))
+    assert decision.hold is True
+    assert decision.reason is CurveReason.UNKNOWN
+    assert decision.brightness_percent is None

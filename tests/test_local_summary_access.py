@@ -4282,7 +4282,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.282", panel.payload["integration_version"])
+        self.assertEqual("1.52.283", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -8608,6 +8608,11 @@ class LocalSummaryAccessTest(unittest.TestCase):
             response = await asyncio.wait_for(view.post(request), timeout=2.5)
             elapsed = time.monotonic() - started
             self.assertTrue(service_entered.is_set())
+            # The mode writer runs concurrently with the safe turn-off. Give
+            # the loop a bounded chance to enter it instead of relying on the
+            # exact scheduling of a single pass; the safe return itself is
+            # asserted through the elapsed bound below.
+            await asyncio.wait_for(writer_entered.wait(), timeout=1.0)
             self.assertTrue(writer_entered.is_set())
             mode_state["revision"] = 2
             release_writer.set()
