@@ -498,7 +498,31 @@ def evaluate_curve_room(
 
 
 def _curve_manual_blocked(context: RoomLightingContext, target_id: str) -> bool:
-    return _proven_manual_ownership(context.ownership, target_id)
+    """Whether a confirmed manual action still outranks the room curve.
+
+    A missing or unowned record never blocks the configured curve (for example
+    right after a writer hand-over). A confirmed manual action blocks it until
+    the shared manual-off protection window releases, so a person keeps
+    priority without freezing the target forever.
+    """
+
+    latest = latest_ownership(context.ownership, target_id)
+    if (
+        latest is None
+        or not latest.confirmed
+        or latest.source is not OwnershipSource.MANUAL
+    ):
+        return False
+    return not release_expired_manual(
+        context.ownership,
+        target_id,
+        now=context.now,
+        minimum_interval_seconds=context.protection.minimum_interval_seconds,
+        stable_absence_seconds=context.protection.stable_absence_seconds,
+        absence_confirmed=context.protection.absence_confirmed,
+        absence_since=context.protection.absence_since,
+        release_mode=context.protection.release_mode,
+    )
 
 
 def _curve_main_decision(

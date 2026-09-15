@@ -1371,3 +1371,46 @@ def test_curve_room_requires_the_profile() -> None:
             presence_confirmed=False,
             absence_seconds=None,
         )
+
+
+def test_curve_room_is_not_blocked_without_ownership_records() -> None:
+    now = _at(14, 0)
+    decision = evaluate_curve_room(
+        _config(profile="day_curve"),
+        _ctx(
+            now,
+            lights=(
+                _light("light_main", SensorState.ON, now - 1000, brightness=100, color=3000),
+            ),
+        ),
+        presence_confirmed=False,
+        absence_seconds=None,
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.commands == ()
+    assert main.skips[0].reason is SkipReason.IDEMPOTENT
+
+
+def test_curve_room_respects_a_recent_manual_action() -> None:
+    now = _at(14, 0)
+    decision = evaluate_curve_room(
+        _config(profile="day_curve"),
+        _ctx(
+            now,
+            lights=(
+                _light("light_main", SensorState.ON, now - 1000, brightness=60, color=2700),
+            ),
+            ownership=(
+                OwnershipSnapshot(
+                    "light_main", OwnershipSource.MANUAL, True, now - 5_000
+                ),
+            ),
+        ),
+        presence_confirmed=False,
+        absence_seconds=None,
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.commands == ()
+    assert main.skips[0].reason is SkipReason.MANUAL_OWNERSHIP
