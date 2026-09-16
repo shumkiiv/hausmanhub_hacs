@@ -77,6 +77,7 @@ _LOGGER = logging.getLogger(__name__)
 
 EVENT_CALL_SERVICE = "call_service"
 CURVE_PRESENCE_CONFIRM_MS = 15_000
+CURVE_MOTION_CONFIRM_WINDOW_MS = 20_000
 ENTRY_WAKEUP_GRACE_MS = 5_000
 CURVE_SENSOR_FRESHNESS_MS = 300_000
 DEFAULT_INTERVAL_SECONDS = 60
@@ -491,6 +492,7 @@ class RoomLightingRuntime:
         self._unobserved_since: int | None = None
         self._absence: AbsenceState = {}
         self._curve_presence: dict[str, dict[str, int | None]] = {}
+        self._curve_motion: dict[str, dict[str, int | None]] = {}
         self._shower_exhaust: dict[str, dict[str, int | None]] = {}
         self._state_provider = state_provider or RoomLightingHaStateProvider(
             now_ms=now_ms,
@@ -1296,17 +1298,27 @@ class RoomLightingRuntime:
                 if entry_wakeup:
                     curve_presence = SensorState.ON
                     confirmed, absence_seconds = True, 0
+                    motion_preview = False
+                    motion_rejected = False
                 else:
-                    curve_presence = self._curve_presence_state(context)
+                    curve_presence = self._curve_sensor_state(
+                        context, frozenset({SensorKind.PRESENCE})
+                    )
                     confirmed, absence_seconds = self._observe_curve_presence(
                         config, context, moment, presence=curve_presence
                     )
+                    motion_preview, motion_rejected, motion_confirmed = (
+                        self._curve_motion_phase(config, context, moment, curve_presence)
+                    )
+                    confirmed = confirmed or motion_confirmed
                 decision = evaluate_curve_room(
                     config,
                     context,
                     presence=curve_presence,
                     presence_confirmed=confirmed,
                     absence_seconds=absence_seconds,
+                    motion_preview=motion_preview,
+                    motion_rejected=motion_rejected,
                 )
             else:
                 decision = evaluate_room_lighting(config, context)
@@ -1381,6 +1393,54 @@ class RoomLightingRuntime:
         tracker["absence"] = absence
         return False, absence
 
+    def _curve_motion_phase(
+        self,
+        config: RoomLightingConfig,
+        context: RoomLightingContext,
+        moment: int,
+        presence: SensorState,
+    ) -> tuple[bool, bool, bool]:
+        """Return preview, rejection and confirmation for a motion trial.
+
+        Motion starts a single 20-second preview. A fresh dedicated presence
+        observation during that window promotes the curve immediately. Without
+        it, the curve reverses to its time-of-day minimum. Another trial needs
+        a real motion-off before a new motion-on, so a stuck sensor cannot keep
+        restarting the lamp.
+        """
+
+        motion = self._curve_sensor_state(context, frozenset({SensorKind.MOTION}))
+        tracker = self._curve_motion.setdefault(
+            config.room_id, {"started": None, "deadline": None}
+        )
+        if motion is not SensorState.ON:
+            if motion is SensorState.OFF:
+                tracker["started"] = None
+                tracker["deadline"] = None
+            return False, False, False
+        if tracker["started"] is None:
+            deadline = moment + CURVE_MOTION_CONFIRM_WINDOW_MS
+            tracker["started"] = moment
+            tracker["deadline"] = deadline
+            self._create_task(self._async_process_motion_deadline(config.room_id, deadline))
+        deadline = int(tracker["deadline"] or moment)
+        if presence is SensorState.ON:
+            return False, False, moment <= deadline
+        if moment < deadline:
+            return True, False, False
+        return False, True, False
+
+    async def _async_process_motion_deadline(self, room_id: str, deadline: int) -> None:
+        """Re-evaluate at the end of the motion confirmation window."""
+
+        await asyncio.sleep(max(0, deadline - self._now_ms()) / 1000)
+        if not self._running:
+            return
+        tracker = self._curve_motion.get(room_id)
+        if tracker is None or tracker.get("deadline") != deadline:
+            return
+        await self.async_process((room_id,))
+
     @staticmethod
     def _curve_presence_state(context: RoomLightingContext) -> SensorState:
         """Classify the room presence for the day curve.
@@ -1393,9 +1453,15 @@ class RoomLightingRuntime:
         unknown or unavailable sensor still fails closed.
         """
 
-        relevant = [
-            sensor for sensor in context.sensors if sensor.kind in _PRESENCE_KINDS
-        ]
+        return RoomLightingRuntime._curve_sensor_state(context, _PRESENCE_KINDS)
+
+    @staticmethod
+    def _curve_sensor_state(
+        context: RoomLightingContext, kinds: frozenset[SensorKind]
+    ) -> SensorState:
+        """Classify one explicit set of fresh binary occupancy sensors."""
+
+        relevant = [sensor for sensor in context.sensors if sensor.kind in kinds]
         if not relevant:
             return SensorState.UNKNOWN
         fresh_on = False
@@ -2026,6 +2092,7 @@ class RoomLightingRuntime:
 
     def _create_task(self, coroutine: object) -> None:
         if self._hass is None:
+            _discard_coroutine(coroutine)
             return
         create = getattr(self._hass, "async_create_task", None)
         loop = getattr(self._hass, "loop", None)

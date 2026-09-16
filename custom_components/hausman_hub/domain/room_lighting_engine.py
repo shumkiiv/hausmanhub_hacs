@@ -446,6 +446,8 @@ def evaluate_curve_room(
     presence_confirmed: bool,
     absence_seconds: int | None,
     presence: SensorState | None = None,
+    motion_preview: bool = False,
+    motion_rejected: bool = False,
     profile: LightCurveProfile | None = None,
 ) -> RoomLightingDecision:
     """Day-curve decisions for the room's main and mirror targets.
@@ -497,6 +499,8 @@ def evaluate_curve_room(
             mirror=mirror.state if mirror is not None else SensorState.UNKNOWN,
             presence_confirmed=presence_confirmed,
             absence_seconds=absence_seconds,
+            motion_preview=motion_preview,
+            motion_rejected=motion_rejected,
         ),
     )
 

@@ -2613,6 +2613,53 @@ async def test_curve_presence_confirms_after_fifteen_seconds() -> None:
     assert runtime._observe_curve_presence(config, context, now[0]) == (True, 0)  # type: ignore[attr-defined]
 
 
+def test_curve_motion_preview_requires_presence_within_twenty_seconds() -> None:
+    payload = _curve_payload(commands_enabled=False)
+    payload["devices"]["sensors"].append(  # type: ignore[index]
+        {
+            "id": "motion_demo",
+            "name": "Движение",
+            "kind": "motion",
+            "entityId": "binary_sensor.demo_motion",
+            "autoAdoptOverride": None,
+        }
+    )
+    now = [_NOW_MS]
+    runtime = _make_runtime(
+        _FakeHass(), payload=payload, now_ms=lambda: now[0]
+    )
+    runtime._hass = None  # type: ignore[attr-defined]  # no real-time task in this unit test
+    config = config_from_payload(payload)
+
+    def context(presence: SensorState) -> RoomLightingContext:
+        return RoomLightingContext(
+            now=now[0], timezone=_TZ, sunrise=time(7, 0), sunset=time(19, 0),
+            sensors=(
+                SensorSnapshot("presence_demo", SensorKind.PRESENCE, presence, now[0]),
+                SensorSnapshot("motion_demo", SensorKind.MOTION, SensorState.ON, now[0]),
+            ),
+        )
+
+    assert runtime._curve_motion_phase(  # type: ignore[attr-defined]
+        config, context(SensorState.OFF), now[0], SensorState.OFF
+    ) == (True, False, False)
+    now[0] += 15_000
+    assert runtime._curve_motion_phase(  # type: ignore[attr-defined]
+        config, context(SensorState.ON), now[0], SensorState.ON
+    ) == (False, False, True)
+
+    other = _make_runtime(_FakeHass(), payload=payload, now_ms=lambda: now[0])
+    other._hass = None  # type: ignore[attr-defined]
+    now[0] = _NOW_MS
+    assert other._curve_motion_phase(  # type: ignore[attr-defined]
+        config, context(SensorState.OFF), now[0], SensorState.OFF
+    ) == (True, False, False)
+    now[0] += 20_000
+    assert other._curve_motion_phase(  # type: ignore[attr-defined]
+        config, context(SensorState.OFF), now[0], SensorState.OFF
+    ) == (False, True, False)
+
+
 @pytest.mark.parametrize("confirmed", [False, True])
 async def test_curve_day_handover_waits_for_observed_confirmed_main(confirmed) -> None:
     hass = _FakeHass()

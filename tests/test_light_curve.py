@@ -133,6 +133,27 @@ def test_absence_after_sunset_fades_toward_five_percent() -> None:
     assert decision.brightness_percent == 5
 
 
+def test_motion_preview_rises_slowly_only_to_intermediate_level() -> None:
+    decision = evaluate_light_curve(
+        PROFILE,
+        replace(_ctx(14, 0, presence=SensorState.OFF), motion_preview=True),
+    )
+    assert decision.reason is CurveReason.MOTION_PREVIEW
+    assert decision.brightness_percent == 30
+    assert decision.fade_seconds == 20
+
+
+def test_unconfirmed_motion_reverses_to_daytime_minimum() -> None:
+    context = _ctx(14, 0, presence=SensorState.OFF)
+    decision = evaluate_light_curve(
+        PROFILE,
+        replace(context, motion_rejected=True),
+    )
+    assert decision.reason is CurveReason.MOTION_REJECTED
+    assert decision.brightness_percent == 15
+    assert decision.fade_seconds == 20
+
+
 def test_confirmed_presence_returns_to_mode_maximum_in_ten_seconds() -> None:
     decision = evaluate_light_curve(
         PROFILE,

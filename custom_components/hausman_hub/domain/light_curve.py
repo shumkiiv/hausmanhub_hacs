@@ -6,16 +6,17 @@ time mode; motion and presence may only return a reduced brightness:
 
 * ``00:00`` .. ``07:00`` - everything off.
 * ``07:00`` .. ``max(sunrise, 09:00)`` - mirror on, independent of presence.
-* ``max(sunrise, 09:00)`` .. ``12:00`` - chandelier on at 5%, ramp to 100%,
+* ``max(sunrise, 09:00)`` .. ``12:00`` - chandelier on at 15%, ramp to 100%,
   colour moves to the day-neutral value.
 * ``12:00`` .. ``sunset - 60 min`` - 100% at the neutral colour.
 * ``sunset - 60 min`` .. ``22:00`` - brightness fades to 5%, colour warms.
 * ``22:00`` .. ``23:00`` - 5% warm.
 * ``23:00`` .. ``00:00`` - chandelier off, mirror light on.
-* 5 minutes without motion or presence start a 5-minute fade to 5%; presence
-  confirmed for 15 seconds fades from the actual current brightness back to
-  the maximum of the current time mode over 10 seconds, without changing the
-  colour or the time mode.
+* Motion starts a 20-second preview toward 30%. A dedicated presence sensor
+  observed within that window fades to the current time-mode maximum over 10
+  seconds. Without confirmation, the preview fades to the applicable minimum.
+* 5 minutes without motion or presence start a 5-minute fade to the applicable
+  minimum. The morning-side minimum is 15%, after sunset it is 5%.
 
 The engine is pure: it never reads Home Assistant, never sends a command and
 returns the desired state plus the fade the caller should apply. All numeric
@@ -46,6 +47,8 @@ class CurveReason(StrEnum):
     LATE_EVENING = "late_evening"
     NIGHT = "night"
     ABSENCE = "absence"
+    MOTION_PREVIEW = "motion_preview"
+    MOTION_REJECTED = "motion_rejected"
     PRESENCE_RETURN = "presence_return"
 
 
@@ -68,6 +71,9 @@ class LightCurveProfile:
     absence_start_seconds: int = 300
     absence_fade_seconds: int = 300
     presence_confirm_seconds: int = 15
+    motion_preview_percent: int = 30
+    motion_preview_fade_seconds: int = 20
+    motion_rejected_fade_seconds: int = 20
     return_fade_seconds: int = 10
     mode_fade_seconds: int = 20
 
@@ -85,6 +91,7 @@ class LightCurveProfile:
         if not (
             0 <= self.morning_min_percent < self.day_max_percent <= 100
             and 0 <= self.evening_min_percent < self.day_max_percent
+            and 0 <= self.motion_preview_percent <= 100
         ):
             raise LightCurveViolation("day curve brightness bounds are invalid")
         if not 0 < self.warm_kelvin < self.neutral_kelvin:
@@ -94,6 +101,8 @@ class LightCurveProfile:
             ("absence start", self.absence_start_seconds),
             ("absence fade", self.absence_fade_seconds),
             ("presence confirmation", self.presence_confirm_seconds),
+            ("motion preview fade", self.motion_preview_fade_seconds),
+            ("motion rejected fade", self.motion_rejected_fade_seconds),
             ("return fade", self.return_fade_seconds),
             ("mode fade", self.mode_fade_seconds),
         ):
@@ -120,6 +129,8 @@ class LightCurveContext:
     mirror: SensorState
     presence_confirmed: bool = False
     absence_seconds: int | None = None
+    motion_preview: bool = False
+    motion_rejected: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.now, dt_time) or not isinstance(self.sunrise, dt_time):
@@ -134,6 +145,10 @@ class LightCurveContext:
             raise LightCurveViolation("day curve mirror state is invalid")
         if type(self.presence_confirmed) is not bool:
             raise LightCurveViolation("day curve presence confirmation is invalid")
+        if type(self.motion_preview) is not bool or type(self.motion_rejected) is not bool:
+            raise LightCurveViolation("day curve motion phase is invalid")
+        if self.motion_preview and self.motion_rejected:
+            raise LightCurveViolation("day curve motion phase conflicts")
         if self.absence_seconds is not None and (
             type(self.absence_seconds) is not int or self.absence_seconds < 0
         ):
@@ -276,6 +291,26 @@ def evaluate_light_curve(
             brightness_percent=None,
             color_temperature=None,
             fade_seconds=profile.mode_fade_seconds,
+            mirror_on=mirror_on,
+        )
+
+    if context.motion_rejected:
+        return LightCurveDecision(
+            reason=CurveReason.MOTION_REJECTED,
+            chandelier_on=True,
+            brightness_percent=minimum_percent,
+            color_temperature=mode_kelvin,
+            fade_seconds=profile.motion_rejected_fade_seconds,
+            mirror_on=mirror_on,
+        )
+
+    if context.motion_preview:
+        return LightCurveDecision(
+            reason=CurveReason.MOTION_PREVIEW,
+            chandelier_on=True,
+            brightness_percent=min(mode_brightness, profile.motion_preview_percent),
+            color_temperature=mode_kelvin,
+            fade_seconds=profile.motion_preview_fade_seconds,
             mirror_on=mirror_on,
         )
 
