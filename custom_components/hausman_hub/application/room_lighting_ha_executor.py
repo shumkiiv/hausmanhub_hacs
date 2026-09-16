@@ -62,6 +62,21 @@ class RoomLightingHaExecutor:
 
     def __init__(self, targets: Mapping[str, LightTarget] | None = None) -> None:
         self._targets: dict[str, LightTarget] = dict(targets or {})
+        self._active_context_ids: set[str] = set()
+
+    def owns_service_context(self, context: object) -> bool:
+        """Recognize only our exact in-flight call, never a matching action."""
+        return getattr(context, "id", None) in self._active_context_ids
+
+    async def _call(self, hass, domain: str, service: str, data: dict) -> None:
+        context = _new_service_context()
+        self._active_context_ids.add(context.id)
+        try:
+            await hass.services.async_call(
+                domain, service, data, blocking=True, context=context
+            )
+        finally:
+            self._active_context_ids.discard(context.id)
 
     def update_targets(self, targets: Mapping[str, LightTarget]) -> None:
         self._targets = dict(targets)
@@ -87,7 +102,7 @@ class RoomLightingHaExecutor:
         domain, service, data = _service_call(
             command, target, min_kelvin=min_kelvin, max_kelvin=max_kelvin
         )
-        await hass.services.async_call(domain, service, data, blocking=True)
+        await self._call(hass, domain, service, data)
         state_after = _read_back(hass, target)
         return RoomLightingReceipt(
             target_id=command.target_id,
@@ -104,16 +119,22 @@ class RoomLightingHaExecutor:
         if not isinstance(entity_id, str) or not entity_id:
             return False
         try:
-            await hass.services.async_call(
+            await self._call(
+                hass,
                 _SWITCH_DOMAIN,
                 "turn_on",
                 {"entity_id": entity_id},
-                blocking=True,
             )
         except Exception:  # noqa: BLE001 - a failed power call must not crash
             return False
         state = hass.states.get(entity_id)
         return state is not None and str(getattr(state, "state", "")).lower() == "on"
+
+
+def _new_service_context():
+    from homeassistant.core import Context
+
+    return Context()
 
 
 def _service_call(

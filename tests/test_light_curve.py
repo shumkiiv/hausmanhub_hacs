@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import time
 
 import pytest
@@ -47,12 +48,12 @@ def test_night_turns_chandelier_off_and_mirror_on() -> None:
     assert decision.mirror_on is True
 
     after = evaluate_light_curve(PROFILE, _ctx(0, 15))
-    assert after.mirror_on is True
+    assert after.mirror_on is False
     assert after.chandelier_on is False
 
 
 def test_after_night_until_morning_both_off() -> None:
-    for hour, minute in ((0, 45), (5, 0), (8, 59)):
+    for hour, minute in ((0, 0), (0, 45), (5, 0), (6, 59)):
         decision = evaluate_light_curve(PROFILE, _ctx(hour, minute))
         assert decision.chandelier_on is False, (hour, minute)
         assert decision.mirror_on is False, (hour, minute)
@@ -183,7 +184,30 @@ def test_decision_payload_is_stable() -> None:
 
 
 def test_unknown_presence_holds_the_current_light() -> None:
-    decision = evaluate_light_curve(PROFILE, _ctx(12, 0, presence=SensorState.UNKNOWN))
+    decision = evaluate_light_curve(PROFILE, replace(
+        _ctx(12, 0, presence=SensorState.UNKNOWN), chandelier=SensorState.ON,
+    ))
     assert decision.hold is True
     assert decision.reason is CurveReason.UNKNOWN
     assert decision.brightness_percent is None
+    assert decision.color_temperature == PROFILE.neutral_kelvin
+
+
+@pytest.mark.parametrize("presence", list(SensorState))
+def test_mirror_morning_schedule_does_not_require_presence(presence) -> None:
+    for hour, minute in ((7, 0), (8, 59)):
+        decision = evaluate_light_curve(PROFILE, _ctx(hour, minute, presence=presence))
+        assert decision.mirror_on is True
+        assert decision.chandelier_on is False
+    day = evaluate_light_curve(PROFILE, _ctx(9, 0, presence=presence))
+    assert day.chandelier_on is True
+    assert day.mirror_on is False
+
+
+@pytest.mark.parametrize("presence", [SensorState.UNKNOWN, SensorState.UNAVAILABLE])
+def test_unknown_presence_starts_scheduled_day_at_minimum_not_maximum(presence) -> None:
+    decision = evaluate_light_curve(PROFILE, _ctx(12, 0, presence=presence, absence_seconds=900))
+    assert decision.chandelier_on is True
+    assert decision.brightness_percent == PROFILE.morning_min_percent
+    assert decision.color_temperature == PROFILE.neutral_kelvin
+    assert decision.hold is False

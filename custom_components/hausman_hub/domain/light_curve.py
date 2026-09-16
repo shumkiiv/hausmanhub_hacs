@@ -4,13 +4,14 @@ The owner-supplied algorithm ("Алгоритм_освещения_тамбур�
 lighting mode by time of day, sunrise and sunset. Presence never switches the
 time mode; motion and presence may only return a reduced brightness:
 
-* ``00:30`` .. ``max(sunrise, 09:00)`` - everything off.
+* ``00:00`` .. ``07:00`` - everything off.
+* ``07:00`` .. ``max(sunrise, 09:00)`` - mirror on, independent of presence.
 * ``max(sunrise, 09:00)`` .. ``12:00`` - chandelier on at 5%, ramp to 100%,
   colour moves to the day-neutral value.
 * ``12:00`` .. ``sunset - 60 min`` - 100% at the neutral colour.
 * ``sunset - 60 min`` .. ``22:00`` - brightness fades to 5%, colour warms.
 * ``22:00`` .. ``23:00`` - 5% warm.
-* ``23:00`` .. ``00:30`` - chandelier off, mirror light on.
+* ``23:00`` .. ``00:00`` - chandelier off, mirror light on.
 * 5 minutes without motion or presence start a 5-minute fade to 5%; presence
   confirmed for 15 seconds fades from the actual current brightness back to
   the maximum of the current time mode over 10 seconds, without changing the
@@ -56,7 +57,8 @@ class LightCurveProfile:
     day_start: dt_time = dt_time(12, 0)
     evening_end: dt_time = dt_time(22, 0)
     night_start: dt_time = dt_time(23, 0)
-    night_end: dt_time = dt_time(0, 30)
+    night_end: dt_time = dt_time(0, 0)
+    mirror_morning_start: dt_time = dt_time(7, 0)
     evening_lead_minutes: int = 60
     morning_min_percent: int = 5
     day_max_percent: int = 100
@@ -75,6 +77,7 @@ class LightCurveProfile:
             ("evening end", self.evening_end),
             ("night start", self.night_start),
             ("night end", self.night_end),
+            ("mirror morning start", self.mirror_morning_start),
         ):
             if not isinstance(value, dt_time):
                 raise LightCurveViolation(f"day curve {label} is invalid")
@@ -248,7 +251,10 @@ def evaluate_light_curve(
     reason, mode_on, mode_brightness, mode_kelvin = _mode_at(
         profile, now, sunrise, sunset
     )
-    mirror_on = night
+    morning = max(_minutes(profile.morning_start), sunrise)
+    mirror_on = night or _minutes(profile.mirror_morning_start) <= now < morning
+    if mirror_on and not night:
+        reason = CurveReason.MORNING
 
     if not mode_on:
         return LightCurveDecision(
@@ -260,16 +266,23 @@ def evaluate_light_curve(
             mirror_on=mirror_on,
         )
 
-    # An unknown, unavailable or stale presence is neither presence nor
-    # absence: the curve must not force the mode level, so the current
-    # brightness is held until a fresh reading appears.
+    # Occupancy adjusts brightness, never the time mode. With unknown presence
+    # retain an already-on level; a scheduled start uses the minimum, not an
+    # invented occupied-room maximum. Colour still follows the time mode.
     if context.presence not in (SensorState.ON, SensorState.OFF):
         return LightCurveDecision(
             reason=CurveReason.UNKNOWN,
             chandelier_on=True,
-            fade_seconds=0,
+            brightness_percent=(
+                profile.morning_min_percent
+                if (context.chandelier is SensorState.OFF
+                    or context.mirror is SensorState.ON) else None
+            ),
+            color_temperature=mode_kelvin,
+            fade_seconds=profile.mode_fade_seconds,
             mirror_on=mirror_on,
-            hold=True,
+            hold=(context.chandelier is not SensorState.OFF
+                  and context.mirror is not SensorState.ON),
         )
 
     # Presence never changes the colour or the time mode. Confirmed presence

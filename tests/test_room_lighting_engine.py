@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from dataclasses import replace
 
 from datetime import datetime, time, timezone
 
@@ -1305,7 +1306,9 @@ def test_curve_room_turns_mirror_on_and_chandelier_off_at_night() -> None:
             now,
             lights=(
                 _light("light_main", SensorState.ON, now - 1000, brightness=60, color=3000),
+                _light("light_mirror", SensorState.OFF, now - 1000),
             ),
+            ownership=(_auto("light_main", now - 2000),),
         ),
         presence_confirmed=False,
         absence_seconds=None,
@@ -1327,6 +1330,7 @@ def test_curve_room_morning_ramp_sets_brightness_and_warm_colour() -> None:
             lights=(
                 _light("light_main", SensorState.ON, now - 1000, brightness=20, color=2200),
             ),
+            ownership=(_auto("light_main", now - 2000),),
         ),
         presence_confirmed=False,
         absence_seconds=None,
@@ -1353,6 +1357,7 @@ def test_curve_room_absence_fades_to_five_percent() -> None:
             lights=(
                 _light("light_main", SensorState.ON, now - 1000, brightness=100, color=3000),
             ),
+            ownership=(_auto("light_main", now - 2000),),
         ),
         presence_confirmed=False,
         absence_seconds=450,
@@ -1373,7 +1378,7 @@ def test_curve_room_requires_the_profile() -> None:
         )
 
 
-def test_curve_room_is_not_blocked_without_ownership_records() -> None:
+def test_curve_room_on_light_without_ownership_stays_manual() -> None:
     now = _at(14, 0)
     decision = evaluate_curve_room(
         _config(profile="day_curve"),
@@ -1389,7 +1394,21 @@ def test_curve_room_is_not_blocked_without_ownership_records() -> None:
     main = decision_target(decision, "light_main")
     assert main is not None
     assert main.commands == ()
-    assert main.skips[0].reason is SkipReason.IDEMPOTENT
+    assert main.skips[0].reason is SkipReason.MANUAL_OWNERSHIP
+
+
+def test_curve_mirror_only_profile_can_end_night() -> None:
+    now = _at(14)
+    config = _config(profile="day_curve")
+    config = replace(config, schedule=(), devices=replace(
+        config.devices,
+        light_targets=tuple(t for t in config.devices.light_targets if t.id == "light_mirror"),
+    ))
+    decision = evaluate_curve_room(config, _ctx(
+        now, lights=(_light("light_mirror", SensorState.ON, now - 1000),),
+        ownership=(OwnershipSnapshot("light_mirror", OwnershipSource.AUTO, True, now - 1000),),
+    ), presence_confirmed=False, absence_seconds=None)
+    assert any(command.action is LightAction.TURN_OFF for command in decision.commands)
 
 
 def test_curve_room_respects_a_recent_manual_action() -> None:
@@ -1416,7 +1435,7 @@ def test_curve_room_respects_a_recent_manual_action() -> None:
     assert main.skips[0].reason is SkipReason.MANUAL_OWNERSHIP
 
 
-def test_curve_room_manual_block_releases_after_the_protection_window() -> None:
+def test_curve_room_manual_on_never_releases_just_on_a_timer() -> None:
     now = _at(14, 0)
     decision = evaluate_curve_room(
         _config(profile="day_curve"),
@@ -1436,10 +1455,11 @@ def test_curve_room_manual_block_releases_after_the_protection_window() -> None:
     )
     main = decision_target(decision, "light_main")
     assert main is not None
-    assert main.commands  # the curve resumes after the manual window
+    assert main.commands == ()
+    assert main.skips[0].reason is SkipReason.MANUAL_OWNERSHIP
 
 
-def test_curve_room_holds_the_light_on_unknown_presence() -> None:
+def test_curve_room_unknown_presence_holds_brightness_but_updates_day_colour() -> None:
     now = _at(12, 0)
     decision = evaluate_curve_room(
         _config(profile="day_curve"),
@@ -1449,14 +1469,157 @@ def test_curve_room_holds_the_light_on_unknown_presence() -> None:
             lights=(
                 _light("light_main", SensorState.ON, now - 1000, brightness=50, color=2700),
             ),
+            ownership=(_auto("light_main", now - 2000),),
         ),
         presence_confirmed=False,
         absence_seconds=None,
     )
     main = decision_target(decision, "light_main")
     assert main is not None
-    assert main.commands == ()
-    assert main.skips[0].reason is SkipReason.SENSOR_UNKNOWN
+    assert len(main.commands) == 1
+    assert main.commands[0].action is LightAction.SET_COLOR_TEMPERATURE
+    assert main.commands[0].color_temperature == 3000
+
+
+def test_day_transition_with_unknown_presence_starts_main_before_mirror_off() -> None:
+    now = _at(12)
+    decision = evaluate_curve_room(
+        _config(profile="day_curve"),
+        _ctx(now, presence=SensorState.UNKNOWN,
+             lights=(_light("light_main", SensorState.OFF, now),
+                     _light("light_mirror", SensorState.ON, now - 1000)),
+             ownership=(_auto("light_mirror", now - 2000),)),
+        presence_confirmed=False, absence_seconds=None,
+    )
+    main = decision_target(decision, "light_main")
+    mirror = decision_target(decision, "light_mirror")
+    assert any(command.action is LightAction.TURN_ON for command in main.commands)
+    assert any(command.brightness == 5 for command in main.commands)
+    assert mirror.commands == ()
+
+
+@pytest.mark.parametrize("brightness,color", [(5, 2200), (100, 2700)])
+def test_day_transition_keeps_mirror_until_main_profile_confirmed(brightness, color) -> None:
+    now = _at(12)
+    decision = evaluate_curve_room(
+        _config(profile="day_curve"),
+        _ctx(now, lights=(_light("light_main", SensorState.ON, now - 1000, brightness, color),
+                          _light("light_mirror", SensorState.ON, now - 1000)),
+             ownership=(_auto("light_main", now - 2000), _auto("light_mirror", now - 2000))),
+        presence_confirmed=False, absence_seconds=None,
+    )
+    assert decision_target(decision, "light_main").commands
+    assert decision_target(decision, "light_mirror").commands == ()
+
+
+def test_day_transition_turns_off_auto_mirror_after_main_confirmation() -> None:
+    now = _at(12)
+    decision = evaluate_curve_room(
+        _config(profile="day_curve"),
+        _ctx(now, lights=(_light("light_main", SensorState.ON, now - 1000, 100, 3000),
+                          _light("light_mirror", SensorState.ON, now - 1000)),
+             ownership=(_auto("light_main", now - 2000), _auto("light_mirror", now - 2000))),
+        presence_confirmed=False, absence_seconds=None,
+    )
+    assert decision_target(decision, "light_main").commands == ()
+    assert decision_target(decision, "light_mirror").commands[0].action is LightAction.TURN_OFF
+
+
+@pytest.mark.parametrize("owned", [False, True])
+def test_day_transition_never_takes_over_manual_mirror(owned) -> None:
+    now = _at(12)
+    records = (OwnershipSnapshot("light_mirror", OwnershipSource.MANUAL, True, now - 700_000),) if owned else ()
+    decision = evaluate_curve_room(
+        _config(profile="day_curve"),
+        _ctx(now, lights=(_light("light_main", SensorState.OFF, now),
+                          _light("light_mirror", SensorState.ON, now - 1000)), ownership=records),
+        presence_confirmed=False, absence_seconds=None,
+    )
+    assert decision.commands == ()
+
+
+def test_released_manual_off_peers_do_not_deadlock_day_presence() -> None:
+    now = _at(10)
+    targets = ("light_main", "light_main_2")
+    decision = evaluate_room_lighting(
+        _peer_config(),
+        _ctx(now, lights=tuple(_light(target, SensorState.OFF, now - 30_000) for target in targets),
+             ownership=tuple(OwnershipSnapshot(target, OwnershipSource.MANUAL, True, now - 30_000) for target in targets),
+             protection=ProtectionSnapshot(active=True, started_at=now - 30_000,
+                                           minimum_interval_seconds=15, release_mode="timer_only")),
+    )
+    assert {command.target_id for command in decision.commands if command.action is LightAction.TURN_ON} == set(targets)
+
+
+@pytest.mark.parametrize("state", [SensorState.ON, SensorState.UNKNOWN, SensorState.UNAVAILABLE])
+def test_unreleased_manual_peer_still_blocks_day_transition(state) -> None:
+    now = _at(10)
+    decision = evaluate_room_lighting(
+        _peer_config(),
+        _ctx(now, lights=(_light("light_main", SensorState.OFF, now),
+                          _light("light_main_2", state, now)),
+             ownership=(OwnershipSnapshot("light_main_2", OwnershipSource.MANUAL, True, now - 30_000),),
+             protection=ProtectionSnapshot(minimum_interval_seconds=15, release_mode="timer_only")),
+    )
+    assert decision.commands == ()
+
+
+@pytest.mark.parametrize("mode,age,presence,absence", [
+    ("timer_only", 10_000, SensorState.ON, False),
+    ("timer_only", 30_000, SensorState.OFF, False),
+    ("timer_only", 30_000, SensorState.UNKNOWN, False),
+    ("timer_and_absence", 30_000, SensorState.ON, False),
+])
+def test_manual_peer_release_requires_all_configured_conditions(mode, age, presence, absence) -> None:
+    now = _at(10)
+    targets = ("light_main", "light_main_2")
+    decision = evaluate_room_lighting(
+        _peer_config(),
+        _ctx(now, presence=presence,
+             lights=tuple(_light(target, SensorState.OFF, now - age) for target in targets),
+             ownership=tuple(OwnershipSnapshot(target, OwnershipSource.MANUAL, True, now - age) for target in targets),
+             protection=ProtectionSnapshot(active=True, started_at=now - age,
+                 minimum_interval_seconds=15, release_mode=mode, absence_confirmed=absence)),
+    )
+    assert decision.commands == ()
+
+
+@pytest.mark.parametrize("brightness", [None, 0])
+def test_unknown_presence_does_not_extinguish_mirror_with_unlit_main(brightness) -> None:
+    now = _at(12)
+    decision = evaluate_curve_room(
+        _config(profile="day_curve"),
+        _ctx(now, presence=SensorState.UNKNOWN,
+             lights=(_light("light_main", SensorState.ON, now, brightness, 3000),
+                     _light("light_mirror", SensorState.ON, now)),
+             ownership=(_auto("light_main", now - 1000), _auto("light_mirror", now - 1000))),
+        presence_confirmed=False, absence_seconds=None,
+    )
+    assert decision_target(decision, "light_mirror").commands == ()
+
+
+def test_curve_restart_does_not_adopt_pre_restart_on_source() -> None:
+    now = _at(12)
+    decision = evaluate_curve_room(
+        _config(profile="day_curve"),
+        _ctx(now, lights=(_light("light_main", SensorState.OFF, now),
+                          _light("light_mirror", SensorState.ON, now)),
+             ownership=(_auto("light_mirror", now - 2000),), unobserved_since=now - 1000),
+        presence_confirmed=False, absence_seconds=None,
+    )
+    assert decision.commands == ()
+
+
+def test_curve_unknown_target_is_not_treated_as_off() -> None:
+    now = _at(12)
+    decision = evaluate_curve_room(
+        _config(profile="day_curve"),
+        _ctx(now, lights=(_light("light_main", SensorState.UNAVAILABLE, now),
+                          _light("light_mirror", SensorState.ON, now)),
+             ownership=(_auto("light_mirror", now - 1000),)),
+        presence_confirmed=False, absence_seconds=None,
+    )
+    assert decision.commands == ()
 
 
 def test_stale_presence_on_does_not_block_absence_off() -> None:

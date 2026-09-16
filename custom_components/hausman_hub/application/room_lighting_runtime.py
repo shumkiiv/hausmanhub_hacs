@@ -47,6 +47,7 @@ from ..domain.room_lighting_engine import (
     RoomLightingDecision,
     RoomLightingContext,
     bathroom_auxiliary_inputs,
+    curve_profile_block_reason,
     evaluate_curve_room,
     evaluate_room_lighting,
 )
@@ -651,7 +652,8 @@ class RoomLightingRuntime:
         context = await self._state_provider.build_context(
             self._hass, config, self._now_ms() if now is None else now
         )
-        return replace(context, away=self._away)
+        self._observe_absence(config, context)
+        return replace(context, away=self._away, protection=self._protection_for(config))
 
     async def async_context_for(
         self, config: RoomLightingConfig
@@ -829,6 +831,9 @@ class RoomLightingRuntime:
             return
         service = str(data.get("service") or "")
         service_data = data.get("service_data")
+        owns_context = getattr(self._executor, "owns_service_context", None)
+        if callable(owns_context) and owns_context(getattr(event, "context", None)):
+            return
         for entity_id in _entity_ids(service_data):
             power_room = self._power_by_entity.get(entity_id)
             if power_room is not None:
@@ -839,13 +844,6 @@ class RoomLightingRuntime:
                 continue
             room_id, target_id = target
             moment = self._now_ms()
-            expected = self._executing_actions.get(entity_id)
-            if expected is not None and expected == service:
-                # A command this runtime is actively issuing never grants
-                # automatic ownership here. Only a confirmed read-back receipt
-                # in ``_dispatch`` may record AUTO; until then automation has
-                # no right to the target.
-                continue
             # Conservative and intentional: any other light/switch call is
             # attributed to a person even when the caller is another
             # automation (Node-RED, a scene or a script). Manual intent must
@@ -905,9 +903,6 @@ class RoomLightingRuntime:
 
         config = self._configs.get(room_id)
         if config is None:
-            return
-        if self._executing_actions.get(entity_id) == service:
-            # This runtime is issuing the power call itself.
             return
         if service == "turn_on":
             # Powering a room is not itself evidence that a person selected a
@@ -1181,7 +1176,6 @@ class RoomLightingRuntime:
         # A single broken room must never crash setup or stop the other rooms.
         try:
             context = await self._build_context(config, moment)
-            self._observe_absence(config, context)
             if config.profile == "day_curve":
                 curve_presence = self._curve_presence_state(context)
                 confirmed, absence_seconds = self._observe_curve_presence(
@@ -1567,9 +1561,31 @@ class RoomLightingRuntime:
             absence_proven=protection.absence_confirmed,
             absence_since=protection.absence_since,
         )
+        failed_curve_targets: set[str] = set()
         for command in decision.commands:
             if not self._running:
                 return
+            if config.profile == "day_curve":
+                # Each awaited device call can be interleaved with a manual
+                # action or a failed transition. Re-evaluate from current
+                # evidence before sending the next step, especially mirror OFF.
+                current = await self._build_context(config, self._now_ms())
+                if (
+                    command.target_id in failed_curve_targets
+                    or curve_profile_block_reason(config, current) is not None
+                ):
+                    continue
+                if command.action is LightAction.TURN_OFF:
+                    presence = self._curve_presence_state(current)
+                    confirmed, absence_seconds = self._observe_curve_presence(
+                        config, current, current.now, presence=presence
+                    )
+                    refreshed = evaluate_curve_room(
+                        config, current, presence=presence,
+                        presence_confirmed=confirmed, absence_seconds=absence_seconds,
+                    )
+                    if command not in refreshed.commands:
+                        continue
             if self._command_conflicts_with_reserved_writer(config, command):
                 _LOGGER.warning(
                     "room lighting dispatch refused: target is owned by a controller"
@@ -1605,6 +1621,16 @@ class RoomLightingRuntime:
                         "skipping the target command"
                     )
                     continue
+                if config.profile == "day_curve":
+                    current = await self._build_context(config, self._now_ms())
+                    if curve_profile_block_reason(config, current) is not None:
+                        continue
+            # Power-on and context reads can yield to another controller.
+            # Its newly acquired reservation must win before target dispatch.
+            if not self._running:
+                return
+            if self._command_conflicts_with_reserved_writer(config, command):
+                continue
             target = config.devices.target(command.target_id)
             entity_id = target.entity_id if target is not None else None
             if entity_id is not None:
@@ -1625,6 +1651,8 @@ class RoomLightingRuntime:
                     config.room_id, command.target_id, moment, confirmed=True
                 )
                 self._schedule_ownership_save()
+            elif config.profile == "day_curve":
+                failed_curve_targets.add(command.target_id)
         await self._persist_ownership()
 
     # -- helpers -----------------------------------------------------------
@@ -1826,12 +1854,19 @@ class RoomLightingRuntime:
             self._absence.pop(config.room_id, None)
             return
         off_times: list[int] = []
+        if any(sensor.state in {SensorState.UNKNOWN, SensorState.UNAVAILABLE}
+               for sensor in relevant):
+            self._absence.pop(config.room_id, None)
+            return
+        if config.profile == "day_curve" and any(
+            sensor.state is SensorState.ON
+            and context.now - sensor.last_changed > CURVE_SENSOR_FRESHNESS_MS
+            for sensor in relevant
+        ):
+            self._absence.pop(config.room_id, None)
+            return
         for sensor in relevant:
-            if sensor.state in {
-                SensorState.UNKNOWN,
-                SensorState.UNAVAILABLE,
-                SensorState.ON,
-            }:
+            if sensor.state is SensorState.ON:
                 # Presence returned: keep the earlier confirmed absence so the
                 # manual protection can still release on this new presence.
                 return

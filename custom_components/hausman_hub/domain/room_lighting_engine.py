@@ -363,10 +363,13 @@ def evaluate_room_lighting(
         target.id
         for target in config.devices.light_targets
         if (not target.auto_control and _light_on(context, target.id))
-        or resolve_manual_ownership(
-            context.ownership,
-            target.id,
-            light_on=_light_on(context, target.id),
+        or (
+            resolve_manual_ownership(
+                context.ownership, target.id, light_on=_light_on(context, target.id)
+            )
+            and not _manual_off_released(
+                context, target.id, presence, absence_proven, absence_since
+            )
         )
     }
 
@@ -472,6 +475,15 @@ def evaluate_curve_room(
     )
     chandelier = context.light(main_target.id) if main_target is not None else None
     mirror = context.light(mirror_target.id) if mirror_target is not None else None
+    blocked = curve_profile_block_reason(config, context)
+    if blocked is not None:
+        return RoomLightingDecision(
+            room_id=config.room_id, evaluated_at=context.now, mode=MODE_SHADOW,
+            targets=tuple(
+                _unchanged(item.id, Skip(item.id, blocked))
+                for item in (main_target, mirror_target) if item is not None
+            ),
+        )
     curve = evaluate_light_curve(
         profile or LightCurveProfile(),
         LightCurveContext(
@@ -489,10 +501,36 @@ def evaluate_curve_room(
     )
 
     targets: list[TargetDecision] = []
+    main_decision = None
     if main_target is not None:
-        targets.append(_curve_main_decision(main_target, curve, context))
+        main_decision = _curve_main_decision(main_target, curve, context)
+        targets.append(main_decision)
     if mirror_target is not None:
-        targets.append(_curve_mirror_decision(mirror_target, curve, context))
+        # Two observed phases: establish the main state and settings first,
+        # then remove the automatically-owned mirror on a later evaluation.
+        # A plan or an accepted command is not a confirmed replacement light.
+        waiting_for_main = (
+            main_target is not None
+            and curve.chandelier_on and _light_on(context, mirror_target.id)
+            and (
+                not main_target.auto_control
+                or not _light_on(context, main_target.id)
+                or (
+                    main_target.brightness
+                    and (chandelier is None or chandelier.brightness is None
+                         or chandelier.brightness <= 0)
+                )
+                or not has_proven_auto_ownership(context.ownership, main_target.id)
+                or main_decision is None or bool(main_decision.commands)
+                or any(skip.reason is not SkipReason.IDEMPOTENT for skip in main_decision.skips)
+            )
+        )
+        targets.append(
+            _unchanged(mirror_target.id, Skip(
+                mirror_target.id, SkipReason.UNOBSERVED,
+                "Ожидается подтверждение дневного источника и его настроек",
+            )) if waiting_for_main else _curve_mirror_decision(mirror_target, curve, context)
+        )
     return RoomLightingDecision(
         room_id=config.room_id,
         evaluated_at=context.now,
@@ -502,25 +540,53 @@ def evaluate_curve_room(
 
 
 def _curve_manual_blocked(context: RoomLightingContext, target_id: str) -> bool:
-    """Whether a confirmed manual action still outranks the room curve.
+    """Never expire manual ON; release OFF only by the configured evidence."""
 
-    A missing or unowned record never blocks the configured curve (for example
-    right after a writer hand-over). A confirmed manual action blocks it only
-    for the room's manual-protection window, so a person keeps priority while
-    the curve can never be frozen forever: without a time bound a manual
-    switch-on would block the curve for good because the release evidence for
-    an already-on light cannot be proven.
-    """
-
+    light = context.light(target_id)
+    if light is not None and light.state is SensorState.ON:
+        return not has_proven_auto_ownership(context.ownership, target_id)
     latest = latest_ownership(context.ownership, target_id)
-    if (
-        latest is None
-        or not latest.confirmed
-        or latest.source is not OwnershipSource.MANUAL
-    ):
+    if latest is None or latest.source is not OwnershipSource.MANUAL:
         return False
-    window = max(0, context.protection.minimum_interval_seconds) * 1000
-    return context.now - latest.at < window
+    return not (
+        light is not None and light.state is SensorState.OFF
+        and release_expired_manual(
+            context.ownership, target_id, now=context.now,
+            minimum_interval_seconds=context.protection.minimum_interval_seconds,
+            stable_absence_seconds=context.protection.stable_absence_seconds,
+            absence_confirmed=context.protection.absence_confirmed,
+            absence_since=context.protection.absence_since,
+            release_mode=context.protection.release_mode,
+        )
+    )
+
+
+def curve_profile_block_reason(
+    config: RoomLightingConfig, context: RoomLightingContext,
+) -> SkipReason | None:
+    """One manual source protects the whole interchangeable curve profile."""
+
+    if context.away:
+        return SkipReason.MANUAL_PROTECTION
+    if context.protection.blocks_auto_on(
+        now=context.now, absence_proven=context.protection.absence_confirmed,
+        absence_since=context.protection.absence_since,
+    ):
+        return SkipReason.MANUAL_PROTECTION
+    for target in config.devices.light_targets:
+        if _curve_manual_blocked(context, target.id):
+            return SkipReason.MANUAL_OWNERSHIP
+        light = context.light(target.id)
+        if light is not None and light.state is SensorState.ON:
+            if not target.auto_control:
+                return SkipReason.MANUAL_MODE
+            latest = latest_ownership(context.ownership, target.id)
+            if (
+                context.unobserved_since is not None and latest is not None
+                and context.unobserved_since > latest.at
+            ):
+                return SkipReason.UNOBSERVED
+    return None
 
 
 def _curve_main_decision(
@@ -529,7 +595,9 @@ def _curve_main_decision(
     target_id = target.id  # type: ignore[attr-defined]
     light = context.light(target_id)
     light_on = light is not None and light.state is SensorState.ON
-    if getattr(curve, "hold", False):
+    if not target.auto_control:  # type: ignore[attr-defined]
+        return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_MODE))
+    if light is None or light.state in (SensorState.UNKNOWN, SensorState.UNAVAILABLE):
         return _unchanged(target_id, Skip(target_id, SkipReason.SENSOR_UNKNOWN))
     if _curve_manual_blocked(context, target_id):
         return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_OWNERSHIP))
@@ -610,6 +678,11 @@ def _curve_mirror_decision(
 ) -> TargetDecision:
     target_id = target.id  # type: ignore[attr-defined]
     light_on = _light_on(context, target_id)
+    if not target.auto_control:  # type: ignore[attr-defined]
+        return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_MODE))
+    light = context.light(target_id)
+    if light is None or light.state in (SensorState.UNKNOWN, SensorState.UNAVAILABLE):
+        return _unchanged(target_id, Skip(target_id, SkipReason.SENSOR_UNKNOWN))
     if _curve_manual_blocked(context, target_id):
         return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_OWNERSHIP))
     if curve.mirror_on and not light_on:  # type: ignore[attr-defined]
@@ -658,6 +731,28 @@ def _proven_manual_ownership(
         latest is not None
         and latest.confirmed
         and latest.source is OwnershipSource.MANUAL
+    )
+
+
+def _manual_off_released(
+    context: RoomLightingContext, target_id: str, presence: SensorState,
+    absence_proven: bool, absence_since: int | None,
+) -> bool:
+    """Shared target/peer release: unknown is not a confirmed OFF state."""
+
+    light = context.light(target_id)
+    return (
+        light is not None and light.state is SensorState.OFF
+        and presence is SensorState.ON
+        and release_expired_manual(
+            context.ownership, target_id, now=context.now,
+            minimum_interval_seconds=context.protection.minimum_interval_seconds,
+            stable_absence_seconds=context.protection.stable_absence_seconds,
+            absence_confirmed=context.protection.absence_confirmed or absence_proven,
+            absence_since=(context.protection.absence_since
+                           if context.protection.absence_since is not None else absence_since),
+            release_mode=context.protection.release_mode,
+        )
     )
 
 
@@ -774,19 +869,8 @@ def _evaluate_target(
         else absence_since
     )
     if manual:
-        released = (
-            not light_on
-            and presence is SensorState.ON
-            and release_expired_manual(
-                context.ownership,
-                target_id,
-                now=context.now,
-                minimum_interval_seconds=context.protection.minimum_interval_seconds,
-                stable_absence_seconds=context.protection.stable_absence_seconds,
-                absence_confirmed=effective_absence,
-                absence_since=effective_absence_since,
-                release_mode=context.protection.release_mode,
-            )
+        released = _manual_off_released(
+            context, target_id, presence, absence_proven, absence_since
         )
         if not released and not (
             schedule_off_entry
