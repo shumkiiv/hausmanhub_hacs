@@ -8,6 +8,7 @@ directly: with per-room ``commandsEnabled=false`` the executor is never called.
 from __future__ import annotations
 
 import asyncio
+import importlib
 from datetime import datetime, time, timezone
 import logging
 import pytest
@@ -18,8 +19,12 @@ from uuid import uuid4
 
 @pytest.fixture(autouse=True)
 def _service_context_factory(monkeypatch):
+    executor_module = importlib.import_module(
+        "custom_components.hausman_hub.application.room_lighting_ha_executor"
+    )
     monkeypatch.setattr(
-        "custom_components.hausman_hub.application.room_lighting_ha_executor._new_service_context",
+        executor_module,
+        "_new_service_context",
         lambda: SimpleNamespace(id=uuid4().hex),
     )
 
