@@ -221,6 +221,25 @@ def test_invalid_enums_are_rejected() -> None:
     with pytest.raises(RoomLightingViolation):
         config_from_payload(payload)
 
+
+def test_entry_sensor_requires_a_lock_entity() -> None:
+    payload = _payload()
+    payload["devices"]["sensors"].append(  # type: ignore[index]
+        {
+            "id": "sensor_demo_lock",
+            "name": "Умный замок",
+            "kind": "entry",
+            "entityId": "lock.demo_entry",
+            "autoAdoptOverride": None,
+        }
+    )
+    config = config_from_payload(payload)
+    assert config.devices.sensors[-1].kind.value == "entry"
+
+    payload["devices"]["sensors"][-1]["entityId"] = "binary_sensor.demo_entry"  # type: ignore[index]
+    with pytest.raises(RoomLightingViolation):
+        config_from_payload(payload)
+
     payload = _payload()
     payload["switchBindings"][0]["action"] = "set_mood"  # type: ignore[index]
     with pytest.raises(RoomLightingViolation):

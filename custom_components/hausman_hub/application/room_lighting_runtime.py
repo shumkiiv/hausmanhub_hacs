@@ -76,7 +76,8 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by the test shim
 _LOGGER = logging.getLogger(__name__)
 
 EVENT_CALL_SERVICE = "call_service"
-CURVE_PRESENCE_CONFIRM_MS = 15_000
+CURVE_PRESENCE_CONFIRM_MS = 8_000
+ENTRY_WAKEUP_GRACE_MS = 5_000
 CURVE_SENSOR_FRESHNESS_MS = 300_000
 DEFAULT_INTERVAL_SECONDS = 60
 MAX_OWNERSHIP_RECORDS = 500
@@ -108,6 +109,14 @@ AbsenceState = dict[str, tuple[bool, int | None]]
 
 def _default_now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _is_unlock_event(data: Mapping[str, object]) -> bool:
+    """Return true only for an observed lock transition to ``unlocked``."""
+
+    new_state = getattr(data.get("new_state"), "state", None)
+    old_state = getattr(data.get("old_state"), "state", None)
+    return str(new_state).lower() == "unlocked" and str(old_state).lower() != "unlocked"
 
 
 class RoomLightingOwnershipJournal:
@@ -506,6 +515,8 @@ class RoomLightingRuntime:
         self._interval_seconds = max(1, int(interval_seconds))
         self._configs: dict[str, RoomLightingConfig] = {}
         self._rooms_by_entity: EntityRooms = {}
+        self._entry_by_entity: EntityRooms = {}
+        self._entry_wakeup_until: dict[str, int] = {}
         self._targets_by_entity: dict[str, tuple[str, str]] = {}
         self._power_by_entity: dict[str, str] = {}
         self._target_last_state: dict[str, str] = {}
@@ -775,6 +786,11 @@ class RoomLightingRuntime:
         rooms = self._rooms_by_entity.get(entity_id)
         if not rooms:
             return
+        entry_rooms = self._entry_by_entity.get(entity_id, set())
+        if entry_rooms and _is_unlock_event(data):
+            until = self._now_ms() + ENTRY_WAKEUP_GRACE_MS
+            for room_id in entry_rooms:
+                self._entry_wakeup_until[room_id] = until
         self._observe_target_transition(entity_id)
         self._observe_power_transition(entity_id)
         self._create_task(self.async_process(sorted(rooms)))
@@ -1276,10 +1292,15 @@ class RoomLightingRuntime:
         try:
             context = await self._build_context(config, moment)
             if config.profile == "day_curve":
-                curve_presence = self._curve_presence_state(context)
-                confirmed, absence_seconds = self._observe_curve_presence(
-                    config, context, moment, presence=curve_presence
-                )
+                entry_wakeup = self._entry_wakeup_until.get(config.room_id, 0) >= moment
+                if entry_wakeup:
+                    curve_presence = SensorState.ON
+                    confirmed, absence_seconds = True, 0
+                else:
+                    curve_presence = self._curve_presence_state(context)
+                    confirmed, absence_seconds = self._observe_curve_presence(
+                        config, context, moment, presence=curve_presence
+                    )
                 decision = evaluate_curve_room(
                     config,
                     context,
@@ -1867,6 +1888,7 @@ class RoomLightingRuntime:
 
     def _rebuild_index(self) -> None:
         rooms_by_entity: EntityRooms = {}
+        entry_by_entity: EntityRooms = {}
         targets_by_entity: dict[str, tuple[str, str]] = {}
         power_by_entity: dict[str, str] = {}
         targets: dict[str, object] = {}
@@ -1880,6 +1902,10 @@ class RoomLightingRuntime:
                     rooms_by_entity.setdefault(sensor.entity_id, set()).add(
                         config.room_id
                     )
+                    if sensor.kind is SensorKind.ENTRY:
+                        entry_by_entity.setdefault(sensor.entity_id, set()).add(
+                            config.room_id
+                        )
             power = config.devices.power_switch
             if power is not None and power.entity_id:
                 # A power switch changes the effective state of every target in
@@ -1909,6 +1935,7 @@ class RoomLightingRuntime:
                         (config.room_id, auxiliary.id),
                     )
         self._rooms_by_entity = rooms_by_entity
+        self._entry_by_entity = entry_by_entity
         self._targets_by_entity = targets_by_entity
         self._power_by_entity = power_by_entity
         update = getattr(self._executor, "update_targets", None)

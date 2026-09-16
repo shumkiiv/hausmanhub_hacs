@@ -2545,6 +2545,74 @@ async def test_curve_room_in_shadow_dispatches_nothing() -> None:
         await runtime.stop()
 
 
+async def test_curve_room_unlock_event_wakes_profile_immediately() -> None:
+    hass = _FakeHass()
+    now = [int(datetime(2026, 9, 11, 12, 30, tzinfo=_TZ).timestamp() * 1000)]
+    now_dt = datetime.fromtimestamp(now[0] / 1000, _TZ)
+    hass.states.set("light.demo_main", "on", {"brightness": 13}, last_changed=now_dt)
+    hass.states.set("light.demo_mirror", "off", last_changed=now_dt)
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=now_dt)
+    hass.states.set("lock.demo_entry", "locked", last_changed=now_dt)
+    payload = _curve_payload(commands_enabled=False)
+    payload["devices"]["sensors"].append(  # type: ignore[index]
+        {
+            "id": "sensor_demo_lock",
+            "name": "Умный замок",
+            "kind": "entry",
+            "entityId": "lock.demo_entry",
+            "autoAdoptOverride": None,
+        }
+    )
+    runtime = _make_runtime(
+        hass,
+        payload=payload,
+        now_ms=lambda: now[0],
+    )
+    await runtime.start(hass, "entry")
+    try:
+        runtime._ownership.record_auto(_ROOM_ID, "light_main", now[0], confirmed=True)  # type: ignore[attr-defined]
+        runtime._curve_presence[_ROOM_ID] = {"since": None, "last_seen": now[0] - 301_000}  # type: ignore[attr-defined]
+        await runtime.async_process()
+        hass.states.set("lock.demo_entry", "unlocked", last_changed=now_dt)
+        runtime._state_event(
+            SimpleNamespace(
+                data={
+                    "entity_id": "lock.demo_entry",
+                    "old_state": SimpleNamespace(state="locked"),
+                    "new_state": SimpleNamespace(state="unlocked"),
+                }
+            )
+        )
+        await asyncio.gather(*hass.tasks)
+        entry = runtime._shadow.journal_payload()["entries"][-1]  # type: ignore[attr-defined]
+        assert any(
+            command["targetId"] == "light_main"
+            and command["action"] == LightAction.SET_BRIGHTNESS.value
+            and command["brightness"] == 100
+            for command in entry["commands"]
+        )
+    finally:
+        await runtime.stop()
+
+
+async def test_curve_presence_confirms_after_eight_seconds() -> None:
+    hass = _FakeHass()
+    now = [_NOW_MS]
+    runtime = _make_runtime(hass, payload=_curve_payload(commands_enabled=False), now_ms=lambda: now[0])
+    config = config_from_payload(_curve_payload(commands_enabled=False))
+    context = RoomLightingContext(
+        now=now[0], timezone=_TZ, sunrise=time(7, 0), sunset=time(19, 0),
+        sensors=(SensorSnapshot("sensor_demo_presence", SensorKind.PRESENCE, SensorState.ON, now[0]),),
+    )
+    assert runtime._observe_curve_presence(config, context, now[0]) == (False, 0)  # type: ignore[attr-defined]
+    now[0] += 8_000
+    context = RoomLightingContext(
+        now=now[0], timezone=_TZ, sunrise=time(7, 0), sunset=time(19, 0),
+        sensors=(SensorSnapshot("sensor_demo_presence", SensorKind.PRESENCE, SensorState.ON, now[0]),),
+    )
+    assert runtime._observe_curve_presence(config, context, now[0]) == (True, 0)  # type: ignore[attr-defined]
+
+
 @pytest.mark.parametrize("confirmed", [False, True])
 async def test_curve_day_handover_waits_for_observed_confirmed_main(confirmed) -> None:
     hass = _FakeHass()

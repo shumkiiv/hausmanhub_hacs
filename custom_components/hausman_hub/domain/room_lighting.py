@@ -37,6 +37,7 @@ _STABLE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _TIME_OF_DAY = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
 _BINARY_SENSOR = re.compile(r"^binary_sensor\.[a-z0-9_]+$")
 _LUX_SENSOR = re.compile(r"^sensor\.[a-z0-9_]+$")
+_LOCK_ENTITY = re.compile(r"^lock\.[a-z0-9_]+$")
 _LIGHT_ENTITY = re.compile(r"^light\.[a-z0-9_]+$")
 _SWITCH_ENTITY = re.compile(r"^switch\.[a-z0-9_]+$")
 _AUXILIARY_ENTITY = re.compile(r"^(?:switch|fan)\.[a-z0-9_]+$")
@@ -59,6 +60,7 @@ class SensorKind(StrEnum):
     MOTION = "motion"
     ILLUMINANCE = "illuminance"
     HUMIDITY = "humidity"
+    ENTRY = "entry"
 
 
 class LightKind(StrEnum):
@@ -267,6 +269,8 @@ class RoomSensor:
             if self.kind in (SensorKind.ILLUMINANCE, SensorKind.HUMIDITY):
                 # Lux and humidity sensors live on the sensor domain.
                 pattern = _LUX_SENSOR
+            elif self.kind is SensorKind.ENTRY:
+                pattern = _LOCK_ENTITY
             else:
                 pattern = _BINARY_SENSOR
             if pattern.fullmatch(self.entity_id) is None:
