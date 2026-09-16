@@ -60,7 +60,8 @@ class LightCurveProfile:
     night_end: dt_time = dt_time(0, 0)
     mirror_morning_start: dt_time = dt_time(7, 0)
     evening_lead_minutes: int = 60
-    morning_min_percent: int = 5
+    morning_min_percent: int = 15
+    evening_min_percent: int = 5
     day_max_percent: int = 100
     warm_kelvin: int = 2200
     neutral_kelvin: int = 3000
@@ -83,6 +84,7 @@ class LightCurveProfile:
                 raise LightCurveViolation(f"day curve {label} is invalid")
         if not (
             0 <= self.morning_min_percent < self.day_max_percent <= 100
+            and 0 <= self.evening_min_percent < self.day_max_percent
         ):
             raise LightCurveViolation("day curve brightness bounds are invalid")
         if not 0 < self.warm_kelvin < self.neutral_kelvin:
@@ -183,6 +185,16 @@ def _ratio(now: int, start: int, end: int) -> float:
     return (now - start) / span
 
 
+def _minimum_percent(profile: LightCurveProfile, now: int, sunset: int) -> int:
+    """Return the occupancy fade floor for the current solar side of the day."""
+
+    return (
+        profile.evening_min_percent
+        if now >= sunset
+        else profile.morning_min_percent
+    )
+
+
 def _mode_at(
     profile: LightCurveProfile, now: int, sunrise: int, sunset: int
 ) -> tuple[CurveReason, bool, float, int]:
@@ -219,7 +231,7 @@ def _mode_at(
     if now < evening:
         ratio = _ratio(now, evening_start, evening)
         brightness = profile.day_max_percent - (
-            profile.day_max_percent - profile.morning_min_percent
+            profile.day_max_percent - profile.evening_min_percent
         ) * ratio
         kelvin = round(
             profile.neutral_kelvin
@@ -227,7 +239,7 @@ def _mode_at(
         )
         reason = CurveReason.EVENING if now < sunset else CurveReason.LATE_EVENING
         return reason, True, brightness, kelvin
-    return CurveReason.LATE_EVENING, True, float(profile.morning_min_percent), profile.warm_kelvin
+    return CurveReason.LATE_EVENING, True, float(profile.evening_min_percent), profile.warm_kelvin
 
 
 def evaluate_light_curve(
@@ -251,6 +263,7 @@ def evaluate_light_curve(
     reason, mode_on, mode_brightness, mode_kelvin = _mode_at(
         profile, now, sunrise, sunset
     )
+    minimum_percent = _minimum_percent(profile, now, sunset)
     morning = max(_minutes(profile.morning_start), sunrise)
     mirror_on = night or _minutes(profile.mirror_morning_start) <= now < morning
     if mirror_on and not night:
@@ -274,7 +287,7 @@ def evaluate_light_curve(
             reason=CurveReason.UNKNOWN,
             chandelier_on=True,
             brightness_percent=(
-                profile.morning_min_percent
+                minimum_percent
                 if (context.chandelier is SensorState.OFF
                     or context.mirror is SensorState.ON) else None
             ),
@@ -306,7 +319,7 @@ def evaluate_light_curve(
             / max(1, profile.absence_fade_seconds),
         )
         target = mode_brightness - (
-            mode_brightness - profile.morning_min_percent
+            mode_brightness - minimum_percent
         ) * progress
         remaining = max(
             1,

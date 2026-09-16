@@ -59,18 +59,18 @@ def test_after_night_until_morning_both_off() -> None:
         assert decision.mirror_on is False, (hour, minute)
 
 
-def test_morning_starts_at_five_percent() -> None:
+def test_morning_starts_at_fifteen_percent() -> None:
     decision = evaluate_light_curve(PROFILE, _ctx(9, 0))
     assert decision.reason is CurveReason.RAMP
     assert decision.chandelier_on is True
-    assert decision.brightness_percent == 5
+    assert decision.brightness_percent == 15
     assert decision.color_temperature == PROFILE.warm_kelvin
 
 
 def test_morning_ramp_reaches_full_at_noon() -> None:
     ten = evaluate_light_curve(PROFILE, _ctx(10, 0))
     assert ten.reason is CurveReason.RAMP
-    assert ten.brightness_percent == 37  # 5 + 95 * 60/180
+    assert ten.brightness_percent == 43  # 15 + 85 * 60/180
 
     noon = evaluate_light_curve(PROFILE, _ctx(12, 0))
     assert noon.reason is CurveReason.DAY
@@ -109,15 +109,15 @@ def test_late_evening_holds_five_percent_warm() -> None:
     assert decision.color_temperature == PROFILE.warm_kelvin
 
 
-def test_absence_fades_toward_five_percent() -> None:
+def test_absence_before_sunset_fades_toward_fifteen_percent() -> None:
     # 7.5 minutes without presence: half of the five-minute fade remains.
     decision = evaluate_light_curve(PROFILE, _ctx(14, 0, absence_seconds=450))
     assert decision.reason is CurveReason.ABSENCE
-    assert decision.brightness_percent == 52  # 100 - 95/2
+    assert decision.brightness_percent == 58  # 100 - 85/2
     assert decision.fade_seconds == 150
 
     settled = evaluate_light_curve(PROFILE, _ctx(14, 0, absence_seconds=600))
-    assert settled.brightness_percent == 5
+    assert settled.brightness_percent == 15
     assert settled.fade_seconds == 0
 
 
@@ -125,6 +125,12 @@ def test_absence_before_five_minutes_holds_the_mode_level() -> None:
     decision = evaluate_light_curve(PROFILE, _ctx(14, 0, absence_seconds=120))
     assert decision.reason is CurveReason.DAY
     assert decision.brightness_percent == 100
+
+
+def test_absence_after_sunset_fades_toward_five_percent() -> None:
+    decision = evaluate_light_curve(PROFILE, _ctx(20, 0, absence_seconds=600))
+    assert decision.reason is CurveReason.ABSENCE
+    assert decision.brightness_percent == 5
 
 
 def test_confirmed_presence_returns_to_mode_maximum_in_ten_seconds() -> None:
@@ -162,6 +168,8 @@ def test_unconfirmed_presence_holds_the_reduced_level() -> None:
 def test_profile_validation() -> None:
     with pytest.raises(LightCurveViolation):
         LightCurveProfile(morning_min_percent=100)
+    with pytest.raises(LightCurveViolation):
+        LightCurveProfile(evening_min_percent=100)
     with pytest.raises(LightCurveViolation):
         LightCurveProfile(warm_kelvin=3000, neutral_kelvin=2200)
     with pytest.raises(LightCurveViolation):
