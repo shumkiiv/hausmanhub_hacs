@@ -149,7 +149,10 @@ def _service_call(
     assert entity_id is not None  # narrowed by the caller
     data: dict[str, object] = {"entity_id": entity_id}
     if command.action is LightAction.TURN_OFF:
-        if command.fade_seconds:
+        # ``transition`` belongs to the light service schema.  Passing it to
+        # switch.turn_off makes Home Assistant reject the whole command, so a
+        # non-dimmable target is always switched immediately.
+        if domain == _LIGHT_DOMAIN and command.fade_seconds:
             data["transition"] = command.fade_seconds
         return domain, "turn_off", data
     if domain == _LIGHT_DOMAIN:

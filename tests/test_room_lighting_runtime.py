@@ -1563,6 +1563,34 @@ async def test_executor_keeps_kelvin_for_normal_target() -> None:
     assert hass.services.calls[-1][2]["color_temp_kelvin"] == 2200
 
 
+async def test_executor_never_sends_light_transition_to_switch() -> None:
+    hass = _FakeHass()
+    hass.states.set("switch.demo_spots", "on")
+    executor = RoomLightingHaExecutor(
+        {
+            "spots": LightTarget(
+                id="spots",
+                name="Точки",
+                kind=LightKind.SWITCH,
+                brightness=False,
+                color_temperature=False,
+                entity_id="switch.demo_spots",
+            )
+        }
+    )
+
+    await executor.execute(
+        hass,
+        PlannedCommand("spots", LightAction.TURN_OFF, fade_seconds=20),
+    )
+
+    assert hass.services.calls[-1] == (
+        "switch",
+        "turn_off",
+        {"entity_id": "switch.demo_spots"},
+    )
+
+
 async def test_inverted_target_observation_is_logical_and_idempotent() -> None:
     payload = _config_payload()
     payload["devices"]["light_targets"][0]["colorTempInverted"] = True  # type: ignore[index]
