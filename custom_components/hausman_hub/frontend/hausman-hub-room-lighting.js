@@ -11,7 +11,7 @@
  * visible form only offers readable names and catalog devices.
  */
 
-import { apiErrorMessage, resolveApiError } from "./hausman-hub-error-taxonomy.js?v=1.52.287";
+import { apiErrorMessage, resolveApiError } from "./hausman-hub-error-taxonomy.js?v=1.52.288";
 
 export const ROOM_LIGHTING_SECTIONS = [
   ["overview", "Обзор"],
@@ -58,6 +58,7 @@ const SWITCH_ACTIONS = [
   ["turn_off", "Выключить"],
   ["toggle", "Переключить"],
   ["set_max", "На максимум"],
+  ["return_to_auto", "Вернуть в автоуправление"],
 ];
 const SCHEDULE_MODES = [
   ["on_presence", "По присутствию"],
@@ -935,6 +936,23 @@ function renderSwitchBindings(panel, roomId, store, deps) {
     ], {
       advanced: [
         renderTargets(deps, binding.targets, (value) => { binding.targets = value; markDirty(panel, roomId); }),
+        numberInput(deps, "Яркость, %", binding.brightness, (value) => {
+          binding.brightness = value;
+          markDirty(panel, roomId);
+        }, { min: 1, max: 100, nullable: true }),
+        numberInput(deps, "Оттенок, K", binding.colorTemperature, (value) => {
+          binding.colorTemperature = value;
+          markDirty(panel, roomId);
+        }, { min: 1000, max: 10000, nullable: true }),
+        numberInput(deps, "Шаг последовательности", binding.sequenceIndex, (value) => {
+          binding.sequenceIndex = value;
+          if (value == null) binding.sequenceWindowSeconds = undefined;
+          markDirty(panel, roomId);
+        }, { min: 1, max: 16, nullable: true }),
+        numberInput(deps, "Окно повторного нажатия, с", binding.sequenceWindowSeconds, (value) => {
+          binding.sequenceWindowSeconds = value;
+          markDirty(panel, roomId);
+        }, { min: 1, max: 30, nullable: true }),
       ],
       technical: [
         field(deps, "ID выключателя", textInput(deps, binding.switchId, (value) => {

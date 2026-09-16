@@ -81,7 +81,11 @@ CURVE_SENSOR_FRESHNESS_MS = 300_000
 DEFAULT_INTERVAL_SECONDS = 60
 MAX_OWNERSHIP_RECORDS = 500
 OWNERSHIP_STORAGE_VERSION = 1
-DEVICE_TRIGGER_DEDUP_MS = 2_000
+# MQTT can replay one event, but a person can deliberately make a second press
+# within the three-second configurable sequence window.  A short transport
+# deduplication guard preserves the former protection without eating the next
+# human press.
+DEVICE_TRIGGER_DEDUP_MS = 250
 # Window in which a state change caused by our own command is not mistaken for
 # a person switching the light. Device reports can arrive a few seconds after
 # the service call, so the marker must outlive the immediate call.
@@ -295,6 +299,30 @@ class RoomLightingOwnershipJournal:
             self._dirty = True
         return tuple(cleared)
 
+    def return_room_to_automatic(
+        self, room_id: str, target_ids: Iterable[str], at: int
+    ) -> tuple[str, ...]:
+        """Apply an explicit whole-room return to automatic control.
+
+        This is deliberately distinct from the settings action above.  A user
+        can assign it only to a confirmed physical switch gesture, so clearing
+        the manual-off record is safe and remains auditable as AUTO ownership.
+        """
+
+        returned: list[str] = []
+        for target_id in sorted(set(target_ids)):
+            key = (room_id, target_id)
+            had_manual = key in self._manual_off or (
+                bool(self._records.get(key))
+                and self._records[key][-1].source is OwnershipSource.MANUAL
+            )
+            self._manual_off.pop(key, None)
+            self._records.pop(key, None)
+            self.record_auto(room_id, target_id, at, confirmed=True)
+            if had_manual:
+                returned.append(target_id)
+        return tuple(returned)
+
     def to_payload(self) -> dict[str, object]:
         return {
             "version": OWNERSHIP_STORAGE_VERSION,
@@ -474,6 +502,7 @@ class RoomLightingRuntime:
         self._reserved_target_ids = frozenset(reserved_target_ids)
         self._reserved_entity_ids_provider = reserved_entity_ids_provider
         self._device_trigger_seen: dict[tuple[str, str, str], int] = {}
+        self._device_trigger_sequence: dict[tuple[str, str, str], tuple[int, int]] = {}
         self._interval_seconds = max(1, int(interval_seconds))
         self._configs: dict[str, RoomLightingConfig] = {}
         self._rooms_by_entity: EntityRooms = {}
@@ -681,6 +710,28 @@ class RoomLightingRuntime:
             if cleared:
                 await self._persist_ownership()
             return cleared
+
+    async def async_return_room_to_automatic(self, room_id: str) -> tuple[str, ...]:
+        """Explicitly return a whole room to auto control without a device call.
+
+        Unlike the narrow settings action, a physical switch that is configured
+        as "return to auto" is an unambiguous user intent.  It may clear a
+        manual-off protection, but never changes a lamp by itself.  The normal
+        room evaluation that follows still decides whether any physical command
+        is appropriate.
+        """
+
+        async with self._lock:
+            config = self._configs.get(room_id)
+            if config is None:
+                raise ValueError("room lighting configuration is unavailable")
+            target_ids = tuple(target.id for target in config.devices.light_targets)
+            returned = self._ownership.return_room_to_automatic(
+                room_id, target_ids, self._now_ms()
+            )
+            if target_ids:
+                await self._persist_ownership()
+            return returned
 
     async def async_execute_command(
         self, config: RoomLightingConfig, command: PlannedCommand
@@ -1092,6 +1143,15 @@ class RoomLightingRuntime:
             )
             return
         self._device_trigger_seen[dedup_key] = moment
+        sequence_bindings = tuple(
+            binding for binding in bindings if binding.sequence_index is not None
+        )
+        if sequence_bindings:
+            bindings = list(
+                self._next_sequence_bindings(
+                    config.room_id, switch_id, subtype, moment, sequence_bindings
+                )
+            )
         enabled = self._room_commands_enabled(config)
         for binding in bindings:
             target_ids = _binding_target_ids(config, binding)
@@ -1103,6 +1163,17 @@ class RoomLightingRuntime:
                 ",".join(target_ids),
                 enabled,
             )
+            if binding.action is SwitchAction.RETURN_TO_AUTO:
+                returned = await self.async_return_room_to_automatic(config.room_id)
+                _LOGGER.info(
+                    "room lighting device trigger %s/%s returned room to auto targets=%s",
+                    device_id,
+                    subtype,
+                    ",".join(returned),
+                )
+                if self._running:
+                    await self.async_process((config.room_id,))
+                continue
             # A press is a manual intent regardless of the command flag.
             for target_id in target_ids:
                 target = config.devices.target(target_id)
@@ -1118,6 +1189,34 @@ class RoomLightingRuntime:
             if not enabled or not self._running:
                 continue
             await self._execute_binding(config, binding, target_ids)
+
+    def _next_sequence_bindings(
+        self,
+        room_id: str,
+        switch_id: str,
+        subtype: str,
+        moment: int,
+        bindings: Sequence[SwitchBinding],
+    ) -> tuple[SwitchBinding, ...]:
+        """Select the next configurable press-sequence step for one trigger."""
+
+        window_ms = min(
+            int(binding.sequence_window_seconds or 0) for binding in bindings
+        ) * 1000
+        key = (room_id, switch_id, subtype)
+        previous = self._device_trigger_sequence.get(key)
+        count = 1
+        if previous is not None and moment - previous[0] <= window_ms:
+            count = previous[1] + 1
+        maximum = max(int(binding.sequence_index or 0) for binding in bindings)
+        selected_index = min(count, maximum)
+        self._device_trigger_sequence[key] = (
+            moment,
+            0 if count >= maximum else count,
+        )
+        return tuple(
+            binding for binding in bindings if binding.sequence_index == selected_index
+        )
 
     async def _execute_binding(
         self,
@@ -1146,7 +1245,7 @@ class RoomLightingRuntime:
                     self._hass, command
                 )
             except Exception:  # noqa: BLE001 - a failed press is not a crash
-                _LOGGER.warning("room lighting binding command failed")
+                _LOGGER.exception("room lighting binding command failed")
 
     # -- evaluation --------------------------------------------------------
 
@@ -1641,7 +1740,7 @@ class RoomLightingRuntime:
                     self._hass, command
                 )
             except Exception:  # noqa: BLE001 - a failed command is not a crash
-                _LOGGER.warning("room lighting command failed")
+                _LOGGER.exception("room lighting command failed")
                 receipt = None
             finally:
                 if entity_id is not None:
@@ -2022,7 +2121,11 @@ def _binding_command(
     action = binding.action
     if action is SwitchAction.TURN_ON:
         return PlannedCommand(
-            target_id, LightAction.TURN_ON, reason=DecisionReason.PRESENCE
+            target_id,
+            LightAction.TURN_ON,
+            brightness=binding.brightness,
+            color_temperature=binding.color_temperature,
+            reason=DecisionReason.PRESENCE,
         )
     if action is SwitchAction.TURN_OFF:
         return PlannedCommand(
@@ -2033,11 +2136,15 @@ def _binding_command(
             return PlannedCommand(
                 target_id,
                 LightAction.SET_BRIGHTNESS,
-                brightness=100,
+                brightness=binding.brightness or 100,
+                color_temperature=binding.color_temperature,
                 reason=DecisionReason.PRESENCE,
             )
         return PlannedCommand(
-            target_id, LightAction.TURN_ON, reason=DecisionReason.PRESENCE
+            target_id,
+            LightAction.TURN_ON,
+            color_temperature=binding.color_temperature,
+            reason=DecisionReason.PRESENCE,
         )
     if action is SwitchAction.TOGGLE:
         entity_id = getattr(target, "entity_id", None)

@@ -1209,6 +1209,92 @@ async def test_device_trigger_duplicate_event_does_not_toggle_twice() -> None:
         await runtime.stop()
 
 
+async def test_device_trigger_sequence_selects_progressive_configured_steps() -> None:
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    api = _FakeDeviceAutomationApi()
+    executor = _SpyExecutor()
+    clock = _Clock(_NOW_MS)
+    payload = _trigger_config_payload()
+    payload["switchBindings"] = [  # type: ignore[index]
+        {
+            "switchId": "sw_mirror",
+            "triggerSubtype": "1_single",
+            "action": "turn_on",
+            "sequenceIndex": 1,
+            "sequenceWindowSeconds": 3,
+            "targets": {"lightTargets": ["light_main"], "groupIds": [], "roles": []},
+        },
+        {
+            "switchId": "sw_mirror",
+            "triggerSubtype": "1_single",
+            "action": "set_max",
+            "brightness": 100,
+            "colorTemperature": 4000,
+            "sequenceIndex": 2,
+            "sequenceWindowSeconds": 3,
+            "targets": {"lightTargets": ["light_main"], "groupIds": [], "roles": []},
+        },
+    ]
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=True,
+        executor=executor,
+        now_ms=clock,
+        payload=payload,
+        device_automation_api=api,
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        _, action, _ = api.attached[0]
+        await action({}, None)  # type: ignore[operator]
+        clock.value += 500
+        await action({}, None)  # type: ignore[operator]
+        assert [call.action for call in executor.calls] == [
+            LightAction.TURN_ON,
+            LightAction.SET_BRIGHTNESS,
+        ]
+        assert executor.calls[-1].brightness == 100
+        assert executor.calls[-1].color_temperature == 4000
+        clock.value += 3_100
+        await action({}, None)  # type: ignore[operator]
+        assert executor.calls[-1].action is LightAction.TURN_ON
+    finally:
+        await runtime.stop()
+
+
+async def test_device_trigger_return_to_auto_clears_manual_off_without_calling_light() -> None:
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    api = _FakeDeviceAutomationApi()
+    executor = _SpyExecutor()
+    payload = _trigger_config_payload(action="return_to_auto")
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=False,
+        executor=executor,
+        payload=payload,
+        device_automation_api=api,
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        runtime._ownership.record_manual(  # type: ignore[attr-defined]
+            _ROOM_ID, "light_main", _NOW_MS, confirmed=True, turned_off=True
+        )
+        _, action, _ = api.attached[0]
+        await action({}, None)  # type: ignore[operator]
+        assert executor.calls == []
+        assert runtime._ownership.last_manual_off_at(_ROOM_ID, {"light_main"}) is None  # type: ignore[attr-defined]
+        ownership = runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"})  # type: ignore[attr-defined]
+        assert ownership[-1].source is OwnershipSource.AUTO
+    finally:
+        await runtime.stop()
+
+
 async def test_device_trigger_shadow_toggle_off_marks_manual_off() -> None:
     hass = _FakeHass()
     hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)

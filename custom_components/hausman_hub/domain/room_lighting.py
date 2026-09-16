@@ -112,6 +112,7 @@ class SwitchAction(StrEnum):
     TURN_OFF = "turn_off"
     TOGGLE = "toggle"
     SET_MAX = "set_max"
+    RETURN_TO_AUTO = "return_to_auto"
 
 
 class ReleaseMode(StrEnum):
@@ -713,6 +714,10 @@ class SwitchBinding:
     button: Button | None = None
     press_type: PressType | None = None
     trigger_subtype: str | None = None
+    brightness: int | None = None
+    color_temperature: int | None = None
+    sequence_index: int | None = None
+    sequence_window_seconds: int | None = None
 
     def __post_init__(self) -> None:
         _stable_id(self.switch_id, "binding switch id")
@@ -741,6 +746,33 @@ class SwitchBinding:
             raise RoomLightingViolation(
                 "binding requires either button+pressType or a trigger subtype"
             )
+        if self.brightness is not None:
+            _integer(self.brightness, "binding brightness", minimum=1, maximum=100)
+        if self.color_temperature is not None:
+            object.__setattr__(
+                self,
+                "color_temperature",
+                _optional_kelvin(self.color_temperature, "binding colour temperature"),
+            )
+        if self.sequence_index is not None:
+            _integer(
+                self.sequence_index, "binding sequence index", minimum=1, maximum=16
+            )
+            if self.sequence_window_seconds is None:
+                raise RoomLightingViolation(
+                    "binding sequence index requires a sequence window"
+                )
+        if self.sequence_window_seconds is not None:
+            _integer(
+                self.sequence_window_seconds,
+                "binding sequence window seconds",
+                minimum=1,
+                maximum=30,
+            )
+            if self.sequence_index is None:
+                raise RoomLightingViolation(
+                    "binding sequence window requires a sequence index"
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1051,6 +1083,22 @@ class RoomLightingConfig:
                         f"switch binding uses an unconfirmed press type: {binding.press_type.value}"
                     )
             check_targets(binding.targets, f"switch binding {binding.switch_id}")
+            for target_id in binding.targets.light_targets:
+                target = self.devices.target(target_id)
+                if binding.brightness is not None and target is not None and not target.brightness:
+                    violations.append(
+                        f"switch binding {binding.switch_id} sets brightness on an "
+                        f"unregulated target: {target_id}"
+                    )
+                if (
+                    binding.color_temperature is not None
+                    and target is not None
+                    and not target.color_temperature
+                ):
+                    violations.append(
+                        f"switch binding {binding.switch_id} sets colour temperature on an "
+                        f"unregulated target: {target_id}"
+                    )
 
         if self.illumination is not None:
             illuminance = self.devices.illuminance_entity_ids
@@ -1304,6 +1352,14 @@ def _binding_to_payload(binding: SwitchBinding) -> dict[str, object]:
         payload["pressType"] = binding.press_type.value
     if binding.trigger_subtype is not None:
         payload["triggerSubtype"] = binding.trigger_subtype
+    if binding.brightness is not None:
+        payload["brightness"] = binding.brightness
+    if binding.color_temperature is not None:
+        payload["colorTemperature"] = binding.color_temperature
+    if binding.sequence_index is not None:
+        payload["sequenceIndex"] = binding.sequence_index
+    if binding.sequence_window_seconds is not None:
+        payload["sequenceWindowSeconds"] = binding.sequence_window_seconds
     return payload
 
 
@@ -1540,6 +1596,10 @@ def _binding_from_payload(payload: object) -> SwitchBinding:
         trigger_subtype=data.get("triggerSubtype"),
         action=_require(data, "action", "binding action"),
         targets=_targets_from_payload(data.get("targets")),
+        brightness=data.get("brightness"),
+        color_temperature=data.get("colorTemperature"),
+        sequence_index=data.get("sequenceIndex"),
+        sequence_window_seconds=data.get("sequenceWindowSeconds"),
     )
 
 
