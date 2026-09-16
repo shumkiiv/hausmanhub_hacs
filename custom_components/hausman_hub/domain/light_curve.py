@@ -13,7 +13,7 @@ time mode; motion and presence may only return a reduced brightness:
 * ``22:00`` .. ``23:00`` - 5% warm.
 * ``23:00`` .. ``00:00`` - chandelier off, mirror light on.
 * 5 minutes without motion or presence start a 5-minute fade to 5%; presence
-  confirmed for 8 seconds fades from the actual current brightness back to
+  confirmed for 15 seconds fades from the actual current brightness back to
   the maximum of the current time mode over 10 seconds, without changing the
   colour or the time mode.
 
@@ -66,7 +66,7 @@ class LightCurveProfile:
     neutral_kelvin: int = 3000
     absence_start_seconds: int = 300
     absence_fade_seconds: int = 300
-    presence_confirm_seconds: int = 8
+    presence_confirm_seconds: int = 15
     return_fade_seconds: int = 10
     mode_fade_seconds: int = 20
 

@@ -2595,7 +2595,7 @@ async def test_curve_room_unlock_event_wakes_profile_immediately() -> None:
         await runtime.stop()
 
 
-async def test_curve_presence_confirms_after_eight_seconds() -> None:
+async def test_curve_presence_confirms_after_fifteen_seconds() -> None:
     hass = _FakeHass()
     now = [_NOW_MS]
     runtime = _make_runtime(hass, payload=_curve_payload(commands_enabled=False), now_ms=lambda: now[0])
@@ -2605,7 +2605,7 @@ async def test_curve_presence_confirms_after_eight_seconds() -> None:
         sensors=(SensorSnapshot("sensor_demo_presence", SensorKind.PRESENCE, SensorState.ON, now[0]),),
     )
     assert runtime._observe_curve_presence(config, context, now[0]) == (False, 0)  # type: ignore[attr-defined]
-    now[0] += 8_000
+    now[0] += 15_000
     context = RoomLightingContext(
         now=now[0], timezone=_TZ, sunrise=time(7, 0), sunset=time(19, 0),
         sensors=(SensorSnapshot("sensor_demo_presence", SensorKind.PRESENCE, SensorState.ON, now[0]),),

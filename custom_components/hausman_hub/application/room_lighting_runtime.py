@@ -76,7 +76,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by the test shim
 _LOGGER = logging.getLogger(__name__)
 
 EVENT_CALL_SERVICE = "call_service"
-CURVE_PRESENCE_CONFIRM_MS = 8_000
+CURVE_PRESENCE_CONFIRM_MS = 15_000
 ENTRY_WAKEUP_GRACE_MS = 5_000
 CURVE_SENSOR_FRESHNESS_MS = 300_000
 DEFAULT_INTERVAL_SECONDS = 60
