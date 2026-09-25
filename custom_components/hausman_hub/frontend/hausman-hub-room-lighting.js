@@ -232,11 +232,6 @@ export async function refreshRoomLighting(panel, roomId, force = false) {
   if (store.loading || (store.loaded && !force)) return;
   store.loading = true;
   store.error = "";
-  store.conflict = false;
-  store.conflictMessage = "";
-  store.templateDraft = false;
-  store.appliedTemplateId = null;
-  store.preview = null;
   rerender(panel, roomId);
   try {
     const [config, templates, catalog, status] = await Promise.all([
@@ -254,6 +249,11 @@ export async function refreshRoomLighting(panel, roomId, force = false) {
     store.catalog = catalog && Array.isArray(catalog.devices) ? catalog.devices : [];
     store.status = status && typeof status === "object" ? status : null;
     store.loaded = true;
+    store.conflict = false;
+    store.conflictMessage = "";
+    store.templateDraft = false;
+    store.appliedTemplateId = null;
+    store.preview = null;
   } catch (error) {
     store.error = lightingErrorMessage(error);
   } finally {
@@ -264,7 +264,7 @@ export async function refreshRoomLighting(panel, roomId, force = false) {
 
 async function saveRoomLighting(panel, roomId) {
   const store = lightingState(panel, roomId);
-  if (!store.draft || store.saving) return;
+  if (!store.draft || store.saving || store.applying || (store.templateDraft && store.conflict)) return;
   store.saving = true;
   store.error = "";
   store.notice = "";
@@ -341,13 +341,10 @@ async function carryLocalEditsOntoFreshConfig(panel, roomId) {
 
 async function applyTemplate(panel, roomId, templateId) {
   const store = lightingState(panel, roomId);
+  if (store.applying) return;
   store.applying = templateId;
   store.error = "";
   store.notice = "";
-  store.conflict = false;
-  store.conflictMessage = "";
-  store.templateDraft = false;
-  store.appliedTemplateId = templateId;
   rerender(panel, roomId);
   try {
     // For a configured room the template route returns the exact revision of
@@ -364,6 +361,9 @@ async function applyTemplate(panel, roomId, templateId) {
     // visibly dirty and can enable Save without a revision-upgrading GET.
     store.draft = draft;
     store.templateDraft = true;
+    store.conflict = false;
+    store.conflictMessage = "";
+    store.appliedTemplateId = templateId;
     store.preview = null;
     store.templateBaseline = clone(applied && typeof applied === "object" ? applied : draft);
     store.loaded = true;
@@ -631,9 +631,11 @@ function renderConflict(panel, roomId, store, deps) {
     void refreshRoomLighting(panel, roomId, true);
   }));
   if (store.templateDraft) {
-    actions.appendChild(button(deps, "Применить шаблон к свежей версии", () => {
+    const reapply = button(deps, "Применить шаблон к свежей версии", () => {
       void applyTemplate(panel, roomId, store.appliedTemplateId);
-    }, "is-primary"));
+    }, "is-primary");
+    reapply.disabled = Boolean(store.applying);
+    actions.appendChild(reapply);
   } else {
     actions.appendChild(button(deps, "Сохранить мои правки", () => {
       void saveRoomLighting(panel, roomId);
@@ -1399,7 +1401,7 @@ function renderSaveBar(panel, roomId, store, deps) {
   setData(deps, forceAuto, "data-testid", "room-lighting:force-auto");
   bar.appendChild(forceAuto);
   const save = button(deps, store.saving ? "Сохранение…" : "Сохранить", () => { void saveRoomLighting(panel, roomId); }, "is-primary");
-  save.disabled = store.saving || store.templateDraft && store.conflict || !store.draft || !dirty;
+  save.disabled = store.saving || Boolean(store.applying) || (store.templateDraft && store.conflict) || !store.draft || !dirty;
   setData(deps, save, "data-testid", "room-lighting:save");
   bar.appendChild(save);
   if (store.notice) {
