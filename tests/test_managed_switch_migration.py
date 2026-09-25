@@ -330,6 +330,48 @@ def test_protected_topology_load_fails_closed_for_split_identity() -> None:
     assert service.healthy is False
 
 
+@pytest.mark.parametrize(
+    ("catalog_resolver", "entity_validator"),
+    [
+        (
+            lambda _target: (_ for _ in ()).throw(RuntimeError("catalog unavailable")),
+            None,
+        ),
+        (
+            lambda _target: type(
+                "Device", (), {"target_id": "target.one", "entity_id": "light.one"}
+            )(),
+            lambda _entity: (_ for _ in ()).throw(RuntimeError("entity unavailable")),
+        ),
+    ],
+    ids=("catalog-resolver", "entity-validator"),
+)
+def test_protected_topology_load_fails_closed_when_runtime_callback_crashes(
+    catalog_resolver, entity_validator,
+) -> None:
+    payload = {
+        "version": 1,
+        "revision": 1,
+        "updatedAt": "2026-09-25T00:00:00+00:00",
+        "bindings": [{
+            "role": "managed.test.light",
+            "targetId": "target.one",
+            "entityId": "light.one",
+        }],
+    }
+    service = ProtectedTopologyService(
+        Store(payload),
+        catalog_resolver=catalog_resolver,
+        entity_validator=entity_validator,
+    )
+
+    with pytest.raises(ProtectedTopologyStorageError, match="storage invalid"):
+        asyncio.run(service.async_load())
+
+    assert service.healthy is False
+    assert service.readiness(("managed.test.light",))["ready"] is False
+
+
 def test_protected_topology_load_keeps_legacy_identity_only_when_proven() -> None:
     payload = {
         "version": 1,

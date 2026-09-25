@@ -361,7 +361,10 @@ class ProtectedTopologyService:
             return
         try:
             self._load_payload(payload)
-        except ProtectedTopologyViolation as error:
+        except Exception as error:  # noqa: BLE001
+            # Catalog and entity callbacks cross the Home Assistant boundary.
+            # Their failures must not leave a partially initialized resolver
+            # available to a later migration attempt.
             self._healthy = False
             self._loaded = True
             raise ProtectedTopologyStorageError("protected topology storage invalid") from error
