@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import types
 import unittest
@@ -284,6 +285,115 @@ class RoomLightingServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(created.to_dict()["devices"], preserved.to_dict()["devices"])
         self.assertEqual(created.to_dict()["switchBindings"], preserved.to_dict()["switchBindings"])
         self.assertEqual(created.to_dict()["auxiliary"], preserved.to_dict()["auxiliary"])
+
+    async def test_concurrent_template_create_preserves_first_physical_config(self) -> None:
+        """A queued template create must re-read after the physical create commits."""
+
+        class YieldingStore:
+            def __init__(self) -> None:
+                self.configs: dict[str, object] = {}
+                self.first_read_started = asyncio.Event()
+                self.release_first_read = asyncio.Event()
+                self.read_count = 0
+
+            async def async_get(self, room_id: str) -> object | None:
+                self.read_count += 1
+                if self.read_count == 1:
+                    self.first_read_started.set()
+                    await self.release_first_read.wait()
+                return self.configs.get(room_id)
+
+            async def async_load_all(self) -> tuple[object, ...]:
+                return tuple(self.configs.values())
+
+            async def async_upsert(self, config: object) -> None:
+                self.configs[config.room_id] = config  # type: ignore[attr-defined]
+
+        room_id = "room_demo_entry"
+        store = YieldingStore()
+        service = RoomLightingService(store)
+        draft_payload = _payload(room_id, name="Шаблон")
+        draft_payload["version"] = TEMPLATE_CREATE_ONLY_VERSION
+        draft = config_from_payload(draft_payload)
+
+        physical = _payload(room_id, name="Физическая настройка")
+        physical["devices"]["light_targets"][0]["entityId"] = "switch.physical_main"  # type: ignore[index]
+        physical["devices"]["wireless_switches"] = [  # type: ignore[index]
+            {
+                "id": "sw_physical",
+                "name": "Физический выключатель",
+                "entityId": "sensor.physical_action",
+                "buttons": ["left"],
+                "pressTypes": ["single"],
+            }
+        ]
+        physical["devices"]["auxiliaries"] = [  # type: ignore[index]
+            {
+                "id": "aux_physical_fan",
+                "name": "Физическая вытяжка",
+                "kind": "fan",
+                "entityId": "switch.physical_fan",
+                "autoAdoptOverride": None,
+            }
+        ]
+        physical["switchBindings"] = [
+            {
+                "switchId": "sw_physical",
+                "button": "left",
+                "pressType": "single",
+                "action": "toggle",
+                "targets": {"lightTargets": ["light_demo_a"], "groupIds": [], "roles": []},
+            }
+        ]
+        physical["auxiliary"] = {
+            "fan": {
+                "targetId": "aux_physical_fan",
+                "humidityThreshold": 70,
+                "dayOffSeconds": 900,
+                "quietStart": "06:00",
+                "dayStart": "08:00",
+                "nightStart": "22:00",
+            }
+        }
+
+        physical_task = asyncio.create_task(
+            service.async_put_config(config_from_payload(physical))
+        )
+        await store.first_read_started.wait()
+
+        template_started = asyncio.Event()
+
+        async def put_template() -> object:
+            template_started.set()
+            return await service.async_put_config(draft)
+
+        template_task = asyncio.create_task(put_template())
+        await template_started.wait()
+        self.assertTrue(service._lock.locked())
+        self.assertEqual(1, store.read_count)
+        self.assertFalse(template_task.done())
+
+        store.release_first_read.set()
+        physical_result, template_result = await asyncio.gather(
+            physical_task, template_task, return_exceptions=True
+        )
+        self.assertNotIsInstance(physical_result, BaseException)
+        self.assertIsInstance(template_result, RoomLightingRevisionConflict)
+        assert not isinstance(physical_result, BaseException)
+        assert isinstance(template_result, RoomLightingRevisionConflict)
+        self.assertEqual(TEMPLATE_CREATE_ONLY_VERSION, template_result.expected_revision)
+        self.assertEqual(1, template_result.actual_revision)
+
+        preserved = await service.async_get_config(room_id)
+        self.assertIsNotNone(preserved)
+        assert preserved is not None
+        self.assertEqual(1, preserved.version)
+        self.assertEqual(physical_result.to_dict()["devices"], preserved.to_dict()["devices"])
+        self.assertEqual(
+            physical_result.to_dict()["switchBindings"],
+            preserved.to_dict()["switchBindings"],
+        )
+        self.assertEqual(physical_result.to_dict()["auxiliary"], preserved.to_dict()["auxiliary"])
 
     async def test_apply_template_keeps_room_auxiliary_policy_with_devices(self) -> None:
         room_id = "room_demo_bathroom"
