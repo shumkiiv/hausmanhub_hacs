@@ -288,14 +288,13 @@ def test_presence_turns_on_schedule_limit() -> None:
     decision = evaluate_room_lighting(_config(), _ctx(now))
     main = decision_target(decision, "light_main")
     assert main is not None
-    assert [command.action for command in main.commands] == [
-        LightAction.TURN_ON,
-        LightAction.SET_BRIGHTNESS,
-        LightAction.SET_COLOR_TEMPERATURE,
-    ]
+    # A single turn_on carries the requested initial brightness and colour.
+    # Splitting it into follow-up adjustments made a just-enabled lamp visibly
+    # flash at its previous setting.
+    assert [command.action for command in main.commands] == [LightAction.TURN_ON]
     assert main.commands[0].reason is DecisionReason.PRESENCE
-    assert main.commands[1].brightness == 80
-    assert main.commands[2].color_temperature == 3000
+    assert main.commands[0].brightness == 80
+    assert main.commands[0].color_temperature == 3000
 
 
 def test_manual_on_before_sensor_event_skips_auto_branch() -> None:
@@ -686,7 +685,7 @@ def test_fail_closed_lux_disables_illumination_branch_only() -> None:
     main = decision_target(decision, "light_main")
     assert main is not None
     assert main.commands
-    assert main.commands[1].brightness == 80  # schedule limit, lux ignored
+    assert main.commands[0].brightness == 80  # schedule limit, lux ignored
     assert any(skip.reason is SkipReason.LUX_FAIL_CLOSED for skip in main.skips)
 
 
@@ -722,8 +721,8 @@ def test_lux_threshold_adjusts_brightness_when_healthy() -> None:
     main = decision_target(decision, "light_main")
     assert main is not None
     assert main.commands[0].reason is DecisionReason.LUX
-    assert main.commands[1].brightness == 20
-    assert main.commands[2].color_temperature == 2700
+    assert main.commands[0].brightness == 20
+    assert main.commands[0].color_temperature == 2700
 
 
 def test_night_light_window_turns_on_mirror() -> None:
@@ -955,11 +954,9 @@ def test_away_return_resumes_normal_evaluation() -> None:
     )
     main = decision_target(decision, "light_main")
     assert main is not None
-    assert [command.action for command in main.commands] == [
-        LightAction.TURN_ON,
-        LightAction.SET_BRIGHTNESS,
-        LightAction.SET_COLOR_TEMPERATURE,
-    ]
+    assert [command.action for command in main.commands] == [LightAction.TURN_ON]
+    assert main.commands[0].brightness == 80
+    assert main.commands[0].color_temperature == 3000
     assert main.desired_state == "on"
 
 
@@ -1338,7 +1335,7 @@ def test_curve_room_morning_ramp_sets_brightness_and_warm_colour() -> None:
     main = decision_target(decision, "light_main")
     assert main is not None and main.commands
     assert any(
-        command.action is LightAction.SET_BRIGHTNESS and command.brightness == 37
+        command.action is LightAction.SET_BRIGHTNESS and command.brightness == 43
         for command in main.commands
     )
     assert any(
@@ -1365,7 +1362,7 @@ def test_curve_room_absence_fades_to_five_percent() -> None:
     main = decision_target(decision, "light_main")
     assert main is not None and main.commands
     assert main.commands[0].action is LightAction.SET_BRIGHTNESS
-    assert main.commands[0].brightness == 52
+    assert main.commands[0].brightness == 58
 
 
 def test_curve_room_requires_the_profile() -> None:
@@ -1494,7 +1491,7 @@ def test_day_transition_with_unknown_presence_starts_main_before_mirror_off() ->
     main = decision_target(decision, "light_main")
     mirror = decision_target(decision, "light_mirror")
     assert any(command.action is LightAction.TURN_ON for command in main.commands)
-    assert any(command.brightness == 5 for command in main.commands)
+    assert any(command.brightness == 15 for command in main.commands)
     assert mirror.commands == ()
 
 

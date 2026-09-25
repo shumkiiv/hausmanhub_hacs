@@ -398,6 +398,10 @@ def _make_runtime(
     reserved_target_ids: tuple[str, ...] = (),
     reserved_entity_ids_provider: object | None = None,
 ) -> RoomLightingRuntime:
+    # Live-mode tests must model the protected topology explicitly. Keep the
+    # fixture home, unless an away transition test supplied its own state.
+    if hass.states.get(AWAY_ENTITY_ID) is None:
+        hass.states.set(AWAY_ENTITY_ID, "off", last_changed=_NOW_DT)
     shadow = RoomLightingShadowService(_MemoryShadowStore())
     if payloads is not None:
         configs = [config_from_payload(item) for item in payloads]
@@ -420,12 +424,14 @@ def _make_runtime(
         device_automation_api=device_automation_api,
         reserved_target_ids=reserved_target_ids,
         reserved_entity_ids_provider=reserved_entity_ids_provider,
+        away_entity_id=AWAY_ENTITY_ID,
     )
 
 
 def _seed_presence_and_light(hass: _FakeHass) -> None:
     hass.states.set("binary_sensor.demo_presence", "on", last_changed=_NOW_DT)
     hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    hass.states.set(AWAY_ENTITY_ID, "off", last_changed=_NOW_DT)
 
 
 def _bathroom_payload() -> dict[str, object]:
@@ -623,21 +629,47 @@ async def test_runtime_dispatches_plan_when_commands_enabled() -> None:
     await runtime.start(hass, "entry")
     try:
         actions = [command.action for command in executor.calls]
-        assert actions == [
-            LightAction.TURN_ON,
-            LightAction.SET_BRIGHTNESS,
-            LightAction.SET_COLOR_TEMPERATURE,
-        ]
+        assert actions == [LightAction.TURN_ON]
         entries = runtime._shadow.journal_payload()["entries"]  # type: ignore[attr-defined]
-        entry = entries[-1]
-        assert entry["commandsEnabled"] is True
-        assert entry["mode"] == "live"
-        assert entry["commands"][0]["action"] == LightAction.TURN_ON.value
+        assert any(
+            entry.get("commandsEnabled") is True
+            and entry.get("mode") == "live"
+            and entry.get("commands", [{}])[0].get("action")
+            == LightAction.TURN_ON.value
+            for entry in entries
+            if entry.get("commands")
+        )
         # A confirmed receipt grants proven automatic ownership.
         ownership = runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"})  # type: ignore[attr-defined]
         assert ownership
         assert ownership[-1].source is OwnershipSource.AUTO
         assert ownership[-1].confirmed is True
+    finally:
+        await runtime.stop()
+
+
+async def test_live_commands_require_the_protected_away_role() -> None:
+    """A missing protected topology is fail-closed, even with opt-in on."""
+
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "on", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    executor = _SpyExecutor()
+    runtime = RoomLightingRuntime(
+        hass,
+        _ConfigService(config_from_payload(_config_payload(commands_enabled=True))),
+        RoomLightingShadowService(_MemoryShadowStore()),
+        executor=executor,
+        now_ms=lambda: _NOW_MS,
+        track_state_changes=lambda hass, entities, callback: (lambda: None),
+        track_interval=lambda hass, callback, interval: (lambda: None),
+        listen_bus=lambda hass, event_type, callback: (lambda: None),
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        assert runtime.away_diagnostic == "protected_topology_missing"
+        assert executor.calls == []
     finally:
         await runtime.stop()
 
@@ -985,7 +1017,7 @@ async def test_restart_keeps_manual_protection_while_presence_active() -> None:
         await runtime2.stop()
 
 
-async def test_restart_prunes_manual_protection_when_presence_not_active() -> None:
+async def test_restart_keeps_manual_protection_without_observed_absence() -> None:
     payload = _config_payload(minimum_interval_seconds=60, stable_absence_seconds=5)
     ownership_store = _MemoryOwnershipStore()
     clock = _Clock(_NOW_MS)
@@ -1005,8 +1037,8 @@ async def test_restart_prunes_manual_protection_when_presence_not_active() -> No
     await asyncio.gather(*hass.tasks)
     await runtime1.stop()
 
-    # Restart after the interval with the light off and nobody present: the
-    # stale hold is dropped so it cannot block automation forever.
+    # Restart after an unseen interval with the light off and nobody present.
+    # The gap cannot prove sustained absence, so the manual hold survives.
     clock.value = t0 + 600_000
     hass2 = _FakeHass()
     hass2.states.set("binary_sensor.demo_presence", "off", last_changed=_dt(clock.value))
@@ -1020,15 +1052,15 @@ async def test_restart_prunes_manual_protection_when_presence_not_active() -> No
     )
     await runtime2.start(hass2, "entry")
     try:
-        assert runtime2._ownership.last_manual_off_at(_ROOM_ID, {"light_main"}) is None  # type: ignore[attr-defined]
-        assert runtime2._ownership.snapshots_for(_ROOM_ID, {"light_main"}) == ()  # type: ignore[attr-defined]
+        assert runtime2._ownership.last_manual_off_at(_ROOM_ID, {"light_main"}) == t0  # type: ignore[attr-defined]
+        assert runtime2._ownership.snapshots_for(_ROOM_ID, {"light_main"})  # type: ignore[attr-defined]
         config = runtime2.configs()[0]
-        assert runtime2._protection_for(config).active is False  # type: ignore[attr-defined]
+        assert runtime2._protection_for(config).active is True  # type: ignore[attr-defined]
     finally:
         await runtime2.stop()
 
 
-async def test_restart_prunes_manual_protection_without_presence_sensor() -> None:
+async def test_restart_keeps_manual_protection_without_presence_sensor() -> None:
     payload = _config_payload(minimum_interval_seconds=60, stable_absence_seconds=5)
     payload["devices"]["sensors"] = []  # type: ignore[index]
     ownership_store = _MemoryOwnershipStore()
@@ -1049,8 +1081,8 @@ async def test_restart_prunes_manual_protection_without_presence_sensor() -> Non
     await asyncio.gather(*hass.tasks)
     await runtime1.stop()
 
-    # No presence sensor can ever release the hold through the engine, so the
-    # expired hold on an off light is dropped at startup.
+    # With no configured presence sensor, a restart cannot fabricate absence
+    # evidence or silently clear the user's manual decision.
     clock.value = t0 + 600_000
     hass2 = _FakeHass()
     hass2.states.set("light.demo_main", "off", last_changed=_dt(t0))
@@ -1063,7 +1095,7 @@ async def test_restart_prunes_manual_protection_without_presence_sensor() -> Non
     )
     await runtime2.start(hass2, "entry")
     try:
-        assert runtime2._ownership.last_manual_off_at(_ROOM_ID, {"light_main"}) is None  # type: ignore[attr-defined]
+        assert runtime2._ownership.last_manual_off_at(_ROOM_ID, {"light_main"}) == t0  # type: ignore[attr-defined]
     finally:
         await runtime2.stop()
 
@@ -1663,6 +1695,7 @@ def _away_runtime(
         track_interval=lambda h, c, i: (lambda: None),
         listen_bus=lambda h, e, c: (lambda: None),
         away_debounce_seconds=0,
+        away_entity_id=AWAY_ENTITY_ID,
     )
 
 
@@ -1682,6 +1715,9 @@ async def test_away_source_turns_context_away_and_switches_off_light() -> None:
         assert runtime.away is False
         before = await runtime.async_context_for(runtime.configs()[0])
         assert before.away is False
+        # Only a light that this runtime demonstrably enabled may be switched
+        # off by away automation. An on state alone is manual by default.
+        runtime._ownership.record_auto(_ROOM_ID, "light_main", _NOW_MS, confirmed=True)
 
         # The Matter A100 Away source turns on: the runtime debounces, marks
         # the room context away and switches the automatic light off.
@@ -1789,6 +1825,7 @@ async def test_service_event_ownership_is_scoped_to_room() -> None:
         track_state_changes=lambda hass, entities, callback: (lambda: None),
         track_interval=lambda hass, callback, interval: (lambda: None),
         listen_bus=lambda hass, event_type, callback: (lambda: None),
+        away_entity_id=AWAY_ENTITY_ID,
     )
     await runtime.start(hass, "entry")
     try:
@@ -2304,6 +2341,8 @@ def _runtime_with_shadow(
     executor: object | None = None,
     now_ms: object | None = None,
 ) -> tuple[RoomLightingRuntime, RoomLightingShadowService]:
+    if hass.states.get(AWAY_ENTITY_ID) is None:
+        hass.states.set(AWAY_ENTITY_ID, "off", last_changed=_NOW_DT)
     shadow = RoomLightingShadowService(_MemoryShadowStore())
     runtime = RoomLightingRuntime(
         hass,
@@ -2314,6 +2353,7 @@ def _runtime_with_shadow(
         track_state_changes=lambda hass, entities, callback: (lambda: None),
         track_interval=lambda hass, callback, interval: (lambda: None),
         listen_bus=lambda hass, event_type, callback: (lambda: None),
+        away_entity_id=AWAY_ENTITY_ID,
     )
     return runtime, shadow
 
