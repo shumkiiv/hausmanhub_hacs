@@ -443,6 +443,46 @@ class RoomLightingApiTest(unittest.TestCase):
 
         asyncio.run(flow())
 
+    def test_template_create_draft_rejects_same_version_concurrent_create(self) -> None:
+        async def flow() -> None:
+            room_id = "room_demo_entry"
+            draft = await self.apply_view.post(
+                _json_request(
+                    self.api.ROOM_LIGHTING_TEMPLATE_APPLY_PATH.format(room_id=room_id),
+                    {"templateId": "day_profile", "keepDevices": True},
+                    room_id=room_id,
+                )
+            )
+            self.assertEqual(200, draft.status)
+            self.assertEqual(9007199254740991, draft.payload["version"])
+
+            physical = _config_payload(room_id, name="Физическая настройка")
+            physical["devices"]["light_targets"][0]["entityId"] = "light.physical_main"
+            created = await self.config_view.put(
+                _json_request(self._config_path(room_id), physical, room_id=room_id)
+            )
+            self.assertEqual(200, created.status)
+            self.assertEqual(1, created.payload["version"])
+
+            stale = await self.config_view.put(
+                _json_request(self._config_path(room_id), draft.payload, room_id=room_id)
+            )
+            self.assertEqual(409, stale.status)
+            self.assertEqual("revision_conflict", stale.payload["code"])
+            self.assertEqual(9007199254740991, stale.payload["details"]["expectedRevision"])
+            self.assertEqual(1, stale.payload["details"]["actualRevision"])
+
+            current = await self.config_view.get(
+                _request(self._config_path(room_id), room_id=room_id)
+            )
+            self.assertEqual(1, current.payload["version"])
+            self.assertEqual(
+                "light.physical_main",
+                current.payload["devices"]["light_targets"][0]["entityId"],
+            )
+
+        asyncio.run(flow())
+
     def test_apply_template_keeps_saved_devices_and_remaps_schedule(self) -> None:
         async def flow() -> None:
             room_id = "room_demo_entry"

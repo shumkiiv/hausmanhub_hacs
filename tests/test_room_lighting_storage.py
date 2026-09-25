@@ -9,6 +9,8 @@ from unittest.mock import MagicMock, patch
 
 from custom_components.hausman_hub.application.room_lighting_service import (
     DEFAULT_TEMPLATE_ID,
+    TEMPLATE_CREATE_ONLY_VERSION,
+    RoomLightingRevisionConflict,
     RoomLightingService,
 )
 from custom_components.hausman_hub.domain.room_lighting import (
@@ -220,6 +222,31 @@ class RoomLightingServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(DEFAULT_TEMPLATE_ID, config.template_id)
         self.assertTrue(config.schedule)
         self.assertEqual("room_off", config.away_behavior.mode.value)
+
+    async def test_template_create_draft_cannot_overwrite_concurrent_room(self) -> None:
+        room_id = "room_demo_entry"
+        draft = await self.service.async_apply_template(
+            DEFAULT_TEMPLATE_ID, room_id=room_id, keep_devices=False
+        )
+        self.assertEqual(TEMPLATE_CREATE_ONLY_VERSION, draft.version)
+
+        physical = _payload(room_id, name="Физическая настройка")
+        physical["devices"]["light_targets"][0]["entityId"] = "switch.physical_main"  # type: ignore[index]
+        created = await self.service.async_put_config(config_from_payload(physical))
+        self.assertEqual(1, created.version)
+
+        with self.assertRaises(RoomLightingRevisionConflict) as conflict:
+            await self.service.async_put_config(draft)
+        self.assertEqual(TEMPLATE_CREATE_ONLY_VERSION, conflict.exception.expected_revision)
+        self.assertEqual(1, conflict.exception.actual_revision)
+
+        preserved = await self.service.async_get_config(room_id)
+        self.assertIsNotNone(preserved)
+        assert preserved is not None
+        self.assertEqual(1, preserved.version)
+        self.assertEqual(
+            "switch.physical_main", preserved.devices.light_targets[0].entity_id
+        )
 
     async def test_apply_template_keeps_room_auxiliary_policy_with_devices(self) -> None:
         room_id = "room_demo_bathroom"

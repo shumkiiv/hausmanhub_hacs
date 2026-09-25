@@ -24,6 +24,7 @@ from ..domain.room_lighting import (
 )
 
 DEFAULT_TEMPLATE_ID = "day_profile"
+TEMPLATE_CREATE_ONLY_VERSION = 9007199254740991
 
 _OVERLAY_KEYS = frozenset(
     {
@@ -184,6 +185,18 @@ class RoomLightingStorageError(RuntimeError):
     """Room lighting configuration storage did not durably save."""
 
 
+class RoomLightingRevisionConflict(RoomLightingViolation):
+    """A configuration write did not match the locked room revision."""
+
+    def __init__(self, expected_revision: int, actual_revision: int) -> None:
+        self.expected_revision = expected_revision
+        self.actual_revision = actual_revision
+        super().__init__(
+            f"room lighting revision conflict: expected {expected_revision}, "
+            f"actual {actual_revision}"
+        )
+
+
 class RoomLightingService:
     """Validate, version and persist room lighting configurations only."""
 
@@ -197,8 +210,13 @@ class RoomLightingService:
     async def async_list_configs(self) -> tuple[RoomLightingConfig, ...]:
         return await self._store.async_load_all()  # type: ignore[attr-defined]
 
-    async def async_put_config(self, config: RoomLightingConfig) -> RoomLightingConfig:
-        """Validate, bump the version on a real change and persist."""
+    async def async_put_config(
+        self,
+        config: RoomLightingConfig,
+        *,
+        expected_version: int | None = None,
+    ) -> RoomLightingConfig:
+        """Validate and atomically compare, version and persist a configuration."""
 
         if not isinstance(config, RoomLightingConfig):
             raise RoomLightingViolation("room lighting config is required")
@@ -206,6 +224,18 @@ class RoomLightingService:
             violations = room_lighting_violations(config)
             if violations:
                 raise RoomLightingViolation("; ".join(violations))
+            existing = await self._store.async_get(config.room_id)  # type: ignore[attr-defined]
+            if config.version == TEMPLATE_CREATE_ONLY_VERSION:
+                if existing is not None:
+                    raise RoomLightingRevisionConflict(
+                        TEMPLATE_CREATE_ONLY_VERSION, existing.version
+                    )
+            elif (
+                expected_version is not None
+                and existing is not None
+                and expected_version != existing.version
+            ):
+                raise RoomLightingRevisionConflict(expected_version, existing.version)
             others = tuple(
                 existing
                 for existing in await self.async_list_configs()
@@ -214,7 +244,6 @@ class RoomLightingService:
             collisions = room_lighting_entity_collisions((config, *others))
             if collisions:
                 raise RoomLightingViolation("; ".join(collisions))
-            existing = await self._store.async_get(config.room_id)  # type: ignore[attr-defined]
             if existing is not None and not _changed(existing, config):
                 return existing
             version = 1 if existing is None else existing.version + 1
@@ -263,32 +292,36 @@ class RoomLightingService:
             for key, value in overrides.items():
                 if key in _OVERLAY_KEYS:
                     payload[key] = deepcopy(value)
-        if keep_devices and room_id is not None:
-            stored = await self._store.async_get(room_id)  # type: ignore[attr-defined]
-            if stored is not None:
-                kept_stored_devices = True
-                if overrides is not None and "devices" in overrides:
-                    raise RoomLightingViolation(
-                        "template devices override conflicts with keepDevices"
-                    )
-                stored_payload = stored.to_dict()
-                payload["devices"] = stored_payload["devices"]
-                # The draft must carry the exact revision of the device
-                # snapshot it preserves. A later GET must not silently turn a
-                # stale template draft into an overwrite of another edit.
-                payload["version"] = stored_payload["version"]
-                payload["updatedAt"] = stored_payload["updatedAt"]
-                if overrides is None or "switchBindings" not in overrides:
-                    payload["switchBindings"] = deepcopy(stored_payload["switchBindings"])
-                # Keep the kept devices and their auxiliary policy together:
-                # the fan policy references a device from this list. A
-                # template-level policy is dropped so a kept fan device never
-                # survives without its thresholds.
-                payload.pop("auxiliary", None)
-                if stored_payload.get("auxiliary") is not None:
-                    payload["auxiliary"] = stored_payload["auxiliary"]
-                if overrides is None or "schedule" not in overrides:
-                    _remap_template_schedule(template, payload, stored_payload["devices"])
+        if room_id is not None:
+            async with self._lock:
+                stored = await self._store.async_get(room_id)  # type: ignore[attr-defined]
+                if stored is None:
+                    # This transient token is converted to ordinary version 1
+                    # by async_put_config after its locked absence check.
+                    payload["version"] = TEMPLATE_CREATE_ONLY_VERSION
+                elif keep_devices:
+                    kept_stored_devices = True
+                    if overrides is not None and "devices" in overrides:
+                        raise RoomLightingViolation(
+                            "template devices override conflicts with keepDevices"
+                        )
+                    stored_payload = stored.to_dict()
+                    payload["devices"] = stored_payload["devices"]
+                    # The draft carries the exact revision of the device snapshot
+                    # it preserves, so a stale PUT cannot overwrite another edit.
+                    payload["version"] = stored_payload["version"]
+                    payload["updatedAt"] = stored_payload["updatedAt"]
+                    if overrides is None or "switchBindings" not in overrides:
+                        payload["switchBindings"] = deepcopy(stored_payload["switchBindings"])
+                    # Keep the kept devices and their auxiliary policy together:
+                    # the fan policy references a device from this list. A
+                    # template-level policy is dropped so a kept fan device never
+                    # survives without its thresholds.
+                    payload.pop("auxiliary", None)
+                    if stored_payload.get("auxiliary") is not None:
+                        payload["auxiliary"] = stored_payload["auxiliary"]
+                    if overrides is None or "schedule" not in overrides:
+                        _remap_template_schedule(template, payload, stored_payload["devices"])
         config = config_from_payload(payload)
         if kept_stored_devices:
             _validate_selected_target_capabilities(config)

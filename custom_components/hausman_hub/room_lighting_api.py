@@ -29,6 +29,7 @@ from .application.room_lighting_live_test import (
 from .application.room_lighting_service import (
     DEFAULT_TEMPLATE_ID,
     ROOM_LIGHTING_TEMPLATES,
+    RoomLightingRevisionConflict,
     RoomLightingService,
     RoomLightingStorageError,
 )
@@ -90,9 +91,6 @@ DATA_ROOM_LIGHTING_RUNTIME = "room_lighting_runtime"
 _ROOM_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _CORRELATION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 MAX_CONFIG_BODY_BYTES = 256 * 1024
-_PUT_LOCK = asyncio.Lock()
-
-
 def register_room_lighting_api(hass: HomeAssistant, entry_id: str) -> None:
     """Refresh the service on every setup and register fixed views once."""
 
@@ -236,24 +234,24 @@ class RoomLightingConfigView(_RoomLightingView):
             config = config_from_payload(payload)
         except RoomLightingViolation as error:
             return self._invalid(error)
-        async with _PUT_LOCK:
-            stored = await service.async_get_config(room_id)
-            if stored is not None and payload.get("version") != stored.version:
-                return self._error(
-                    "revision_conflict",
-                    details={
-                        "expectedRevision": payload.get("version"),
-                        "actualRevision": stored.version,
-                    },
-                )
-            try:
-                saved = await service.async_put_config(config)
-            except RoomLightingViolation as error:
-                return self._invalid(error)
-            except RoomLightingStorageError:
-                return self._unavailable()
-            except Exception:
-                return self._error("internal_error")
+        try:
+            saved = await service.async_put_config(
+                config, expected_version=config.version
+            )
+        except RoomLightingRevisionConflict as error:
+            return self._error(
+                "revision_conflict",
+                details={
+                    "expectedRevision": error.expected_revision,
+                    "actualRevision": error.actual_revision,
+                },
+            )
+        except RoomLightingViolation as error:
+            return self._invalid(error)
+        except RoomLightingStorageError:
+            return self._unavailable()
+        except Exception:
+            return self._error("internal_error")
         return self.json(saved.to_dict(), headers=NO_STORE_HEADERS)
 
 
