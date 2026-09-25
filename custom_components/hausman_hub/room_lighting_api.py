@@ -24,6 +24,7 @@ from .application.room_lighting_live_test import (
     LIVE_TEST_MAX_RUNS,
     RoomLightingLiveTestRunner,
     cancelled_trace,
+    failed_trace,
 )
 from .application.room_lighting_service import (
     DEFAULT_TEMPLATE_ID,
@@ -509,7 +510,12 @@ class RoomLightingLiveTestsView(_RoomLightingView):
                     context_provider=context_provider,
                 )
             except Exception:  # noqa: BLE001 - background task must not crash the loop
-                return
+                trace = failed_trace(
+                    correlation_id=correlation_id,
+                    room_id=room_id,
+                    mode=mode,
+                    started_at=started_at,
+                )
             entry["trace"] = trace
 
         entry["task"] = asyncio.ensure_future(_run())

@@ -754,6 +754,8 @@ async def test_generic_command_fails_closed_when_configured_away_is_untrusted() 
     assert receipt == {
         "confirmed": False,
         "blocked": True,
+        "sent": False,
+        "sendOutcome": "not_sent",
         "reason": "away_sensor_unavailable",
     }
     assert executor.calls == []
@@ -940,6 +942,8 @@ async def test_reserved_target_blocks_direct_command_without_executor_call() -> 
     assert receipt == {
         "confirmed": False,
         "blocked": True,
+        "sent": False,
+        "sendOutcome": "not_sent",
         "reason": "reserved_command_target",
     }
     assert executor.calls == []

@@ -305,6 +305,143 @@ async def test_real_run_dispatches_and_is_schema_valid() -> None:
     _validate_schema(trace.to_payload())
 
 
+@pytest.mark.parametrize(
+    ("receipt", "commands_sent", "status", "reason", "detail"),
+    (
+        ({"confirmed": True}, 1, "passed", "none", None),
+        (
+            {"confirmed": True, "sent": True},
+            1,
+            "passed",
+            "none",
+            None,
+        ),
+        (
+            {
+                "confirmed": False,
+                "sent": True,
+                "sendOutcome": "sent",
+                "reason": "unconfirmed",
+            },
+            1,
+            "failed",
+            "unknown",
+            "unconfirmed",
+        ),
+        (
+            {
+                "confirmed": True,
+                "sent": False,
+                "sendOutcome": "not_sent",
+                "reason": "not_sent",
+            },
+            0,
+            "failed",
+            "unknown",
+            "not_sent",
+        ),
+        (
+            {
+                "blocked": True,
+                "confirmed": False,
+                "sent": True,
+                "sendOutcome": "sent",
+                "reason": "away_sensor_unavailable",
+            },
+            0,
+            "failed",
+            "sensor_unavailable",
+            "away_sensor_unavailable",
+        ),
+        (
+            {
+                "confirmed": False,
+                "sent": False,
+                "sendOutcome": "uncertain",
+                "reason": "transport_unknown",
+            },
+            0,
+            "failed",
+            "unknown",
+            "transport_unknown",
+        ),
+        (
+            {
+                "confirmed": True,
+                "sent": True,
+                "sendOutcome": "not_sent",
+                "reason": "contradictory_receipt",
+            },
+            0,
+            "failed",
+            "unknown",
+            "contradictory_receipt",
+        ),
+    ),
+)
+async def test_real_run_interprets_legacy_and_explicit_receipts(
+    receipt: dict[str, object],
+    commands_sent: int,
+    status: str,
+    reason: str,
+    detail: str | None,
+) -> None:
+    class ReceiptExecutor:
+        async def __call__(self, command: object) -> dict[str, object]:
+            del command
+            return receipt
+
+    trace = await RoomLightingLiveTestRunner(sleep=_no_sleep).run(
+        _config(),
+        mode="real",
+        correlation_id="live-receipt-001",
+        executor=ReceiptExecutor(),
+        context_factory=_context_factory(),
+    )
+
+    assert trace.status == status
+    assert trace.reason == reason
+    if status == "passed":
+        assert trace.commands_sent > commands_sent
+    else:
+        assert trace.commands_sent == commands_sent
+        assert trace.steps[-1].status == "failed"
+        assert trace.steps[-1].detail == detail
+    _validate_schema(trace.to_payload())
+
+
+async def test_real_run_counts_a_proven_command_before_a_later_failure() -> None:
+    class MixedExecutor:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def __call__(self, command: object) -> dict[str, object]:
+            del command
+            self.calls += 1
+            if self.calls == 1:
+                return {"confirmed": True, "sent": True, "sendOutcome": "sent"}
+            return {
+                "confirmed": False,
+                "sent": False,
+                "sendOutcome": "uncertain",
+                "reason": "transport_unknown",
+            }
+
+    trace = await RoomLightingLiveTestRunner(sleep=_no_sleep).run(
+        _config(),
+        mode="real",
+        correlation_id="live-mixed-001",
+        executor=MixedExecutor(),
+        context_factory=_context_factory(),
+    )
+
+    assert trace.status == "failed"
+    assert trace.reason == "unknown"
+    assert trace.commands_sent == 1
+    assert trace.steps[-1].detail == "transport_unknown"
+    _validate_schema(trace.to_payload())
+
+
 async def test_real_mode_requires_executor() -> None:
     with pytest.raises(RoomLightingLiveTestViolation):
         await RoomLightingLiveTestRunner(sleep=_no_sleep).run(

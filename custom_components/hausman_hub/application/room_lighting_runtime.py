@@ -1088,14 +1088,10 @@ class RoomLightingRuntime:
         """Execute one planned command through the shared HA executor."""
 
         if self._hass is None:
-            return {"confirmed": False}
+            return self._blocked_command_receipt("runtime_unavailable")
         away_block = self._automatic_away_block_reason()
         if away_block is not None:
-            return {
-                "confirmed": False,
-                "blocked": True,
-                "reason": away_block,
-            }
+            return self._blocked_command_receipt(away_block)
         dependencies = self._power_dependencies()
         decision = self._exact_power_decision(config, dependencies)
         exact_dependencies = decision.projection if decision.active else None
@@ -1103,28 +1099,22 @@ class RoomLightingRuntime:
             # The same fail-safe as the automatic dispatch: a claimed topology
             # that the live map does not reproduce blocks only the affected
             # target; a corrupt protected store remains a room-wide block.
-            return {
-                "confirmed": False,
-                "blocked": True,
-                "reason": "exact_power_topology_incomplete",
-                "power": {
+            return self._blocked_command_receipt(
+                "exact_power_topology_incomplete",
+                power={
                     "missingDependencies": list(decision.missing),
                     "wrongDependencies": list(decision.wrong),
                     "extraDependencies": list(decision.extra),
                     "diagnostics": list(decision.diagnostics),
                 },
-            }
+            )
         if self._command_conflicts_with_reserved_writer(
             config, command, dependencies=exact_dependencies
         ):
             _LOGGER.warning(
                 "room lighting command refused: target is owned by a controller"
             )
-            return {
-                "confirmed": False,
-                "blocked": True,
-                "reason": "reserved_command_target",
-            }
+            return self._blocked_command_receipt("reserved_command_target")
         receipt = await self._executor.execute(  # type: ignore[attr-defined]
             self._hass, command
         )
@@ -1132,6 +1122,22 @@ class RoomLightingRuntime:
         if callable(to_payload):
             return dict(to_payload())
         return {"confirmed": bool(getattr(receipt, "confirmed", False))}
+
+    @staticmethod
+    def _blocked_command_receipt(
+        reason: str,
+        **extra: object,
+    ) -> dict[str, object]:
+        """Return an honest pre-executor receipt for direct runtime callers."""
+
+        return {
+            "blocked": True,
+            "confirmed": False,
+            "sent": False,
+            "sendOutcome": "not_sent",
+            "reason": reason,
+            **extra,
+        }
 
     def configs(self) -> tuple[RoomLightingConfig, ...]:
         return tuple(self._configs.values())

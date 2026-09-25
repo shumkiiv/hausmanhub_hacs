@@ -538,6 +538,109 @@ class RoomLightingApiTest(unittest.TestCase):
 
         asyncio.run(flow())
 
+    def test_live_test_real_away_block_is_failed_and_never_counts_a_command(self) -> None:
+        """A runtime pre-executor Away block is a terminal real-test failure."""
+
+        class _AwayBlockedExecutor:
+            def __init__(self) -> None:
+                self.calls: list[object] = []
+
+            async def __call__(self, command: object) -> dict[str, object]:
+                self.calls.append(command)
+                return {
+                    "blocked": True,
+                    "confirmed": False,
+                    "sent": False,
+                    "sendOutcome": "not_sent",
+                    "reason": "away_sensor_unavailable",
+                }
+
+        async def flow() -> None:
+            room_id = "room_demo_entry"
+            executor = _AwayBlockedExecutor()
+            self.hass.data["hausman_hub"][self.api.DATA_ROOM_LIGHTING_EXECUTOR] = executor
+            await self.config_view.put(
+                _json_request(
+                    self._config_path(room_id), _config_payload(room_id), room_id=room_id
+                )
+            )
+            response = await self.live_view.post(
+                _json_request(
+                    self.api.ROOM_LIGHTING_LIVE_TESTS_PATH.format(room_id=room_id),
+                    {"mode": "real", "correlationId": "live-api-away-block-1"},
+                    room_id=room_id,
+                )
+            )
+            self.assertEqual(202, response.status)
+            registry = self.hass.data["hausman_hub"][
+                self.api.DATA_ROOM_LIGHTING_LIVE_TESTS
+            ]
+            await registry["live-api-away-block-1"]["task"]
+            path = self.api.ROOM_LIGHTING_LIVE_TEST_PATH.format(
+                room_id=room_id, correlation_id="live-api-away-block-1"
+            )
+            result = await self.live_result_view.get(
+                _request(path, room_id=room_id, correlation_id="live-api-away-block-1")
+            )
+            self.assertEqual(200, result.status)
+            _validate("room-lighting-live-test.schema.json", result.payload)
+            trace = result.payload["result"]
+            self.assertEqual("failed", trace["status"])
+            self.assertEqual("sensor_unavailable", trace["reason"])
+            self.assertEqual(0, trace["commands_sent"])
+            self.assertEqual(
+                "away_sensor_unavailable", result.payload["steps"][-1]["detail"]
+            )
+            self.assertEqual(1, len(executor.calls))
+
+        asyncio.run(flow())
+
+    def test_live_test_background_exception_publishes_terminal_failed_trace(self) -> None:
+        """Unexpected runner failures must not leave a polling client pending."""
+
+        async def broken_run(*_args, **_kwargs):
+            raise RuntimeError("unexpected runner failure")
+
+        async def flow() -> None:
+            room_id = "room_demo_entry"
+            await self.config_view.put(
+                _json_request(
+                    self._config_path(room_id), _config_payload(room_id), room_id=room_id
+                )
+            )
+            original = self.api.RoomLightingLiveTestRunner.run
+            self.api.RoomLightingLiveTestRunner.run = broken_run
+            try:
+                response = await self.live_view.post(
+                    _json_request(
+                        self.api.ROOM_LIGHTING_LIVE_TESTS_PATH.format(room_id=room_id),
+                        {"mode": "safe", "correlationId": "live-api-failure-1"},
+                        room_id=room_id,
+                    )
+                )
+                self.assertEqual(202, response.status)
+                registry = self.hass.data["hausman_hub"][
+                    self.api.DATA_ROOM_LIGHTING_LIVE_TESTS
+                ]
+                await registry["live-api-failure-1"]["task"]
+            finally:
+                self.api.RoomLightingLiveTestRunner.run = original
+
+            path = self.api.ROOM_LIGHTING_LIVE_TEST_PATH.format(
+                room_id=room_id, correlation_id="live-api-failure-1"
+            )
+            result = await self.live_result_view.get(
+                _request(path, room_id=room_id, correlation_id="live-api-failure-1")
+            )
+            self.assertEqual(200, result.status)
+            _validate("room-lighting-live-test.schema.json", result.payload)
+            trace = result.payload["result"]
+            self.assertEqual("failed", trace["status"])
+            self.assertEqual("unknown", trace["reason"])
+            self.assertEqual(0, trace["commands_sent"])
+
+        asyncio.run(flow())
+
     def test_live_test_cancel(self) -> None:
         async def flow() -> None:
             room_id = "room_demo_entry"

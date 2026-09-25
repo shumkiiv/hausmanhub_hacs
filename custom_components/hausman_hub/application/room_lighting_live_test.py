@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import time as dt_time, timezone
 import inspect
 import time
-from typing import Callable
+from typing import Callable, Mapping
 
 from ..domain.room_lighting import RoomLightingConfig, ScheduleMode, SensorKind
 from ..domain.room_lighting_engine import (
@@ -353,6 +353,29 @@ def cancelled_trace(
     )
 
 
+def failed_trace(
+    *,
+    correlation_id: str,
+    room_id: str,
+    mode: str,
+    started_at: int,
+) -> LiveTestTrace:
+    """Build a terminal fallback when the background runner itself fails."""
+
+    return LiveTestTrace(
+        correlation_id=correlation_id,
+        mode=mode,
+        room_id=room_id,
+        started_at=started_at,
+        duration_seconds=LIVE_TEST_DURATION_SECONDS,
+        steps=(),
+        status="failed",
+        reason="unknown",
+        finished_at=int(time.time()),
+        commands_sent=0,
+    )
+
+
 ContextFactory = Callable[[LiveTestStage], RoomLightingContext]
 ContextProvider = Callable[[], "RoomLightingContext | object"]
 
@@ -417,8 +440,32 @@ class RoomLightingLiveTestRunner:
                     if cancel_event is not None and cancel_event.is_set():
                         cancelled = True
                         break
-                    await _dispatch(executor, command)
-                    commands_sent += 1
+                    try:
+                        receipt = await _dispatch(executor, command)
+                    except Exception:  # noqa: BLE001 - terminal trace, never pending
+                        receipt = {
+                            "confirmed": False,
+                            "reason": "dispatch_outcome_uncertain",
+                        }
+                    sent_count, successful, failure_reason, detail = _live_dispatch_outcome(
+                        receipt
+                    )
+                    commands_sent += sent_count
+                    if not successful:
+                        steps.append(
+                            LiveTestStep(
+                                index=stage.order,
+                                stage=stage.stage,
+                                comment=f"{stage.title}: {stage.comment}",
+                                offset_seconds=min(offset, LIVE_TEST_DURATION_SECONDS),
+                                status="failed",
+                                detail=detail,
+                            )
+                        )
+                        status, reason = "failed", failure_reason
+                        break
+                if status == "failed":
+                    break
                 if cancelled:
                     break
             comment = f"{stage.title}: {stage.comment}"
@@ -478,9 +525,63 @@ async def _dispatch(executor: object, command: PlannedCommand) -> dict[str, obje
     result = executor(command)  # type: ignore[operator]
     if inspect.isawaitable(result):
         result = await result
-    if isinstance(result, dict):
+    if isinstance(result, Mapping):
         return result
-    return {"targetId": command.target_id, "action": command.action.value, "confirmed": True}
+    return {
+        "targetId": command.target_id,
+        "action": command.action.value,
+        "confirmed": False,
+        "reason": "dispatch_outcome_uncertain",
+    }
+
+
+def _live_dispatch_outcome(
+    receipt: Mapping[str, object],
+) -> tuple[int, bool, str, str]:
+    """Accept only a proven send, retaining compatibility with old receipts."""
+
+    raw_reason = receipt.get("reason")
+    detail = str(raw_reason) if isinstance(raw_reason, str) and raw_reason else "unknown"
+    blocked = receipt.get("blocked") is True
+    explicit_send = "sent" in receipt or "sendOutcome" in receipt
+    confirmed = receipt.get("confirmed") is True
+    sent = receipt.get("sent") is True
+    outcome = receipt.get("sendOutcome")
+
+    if blocked:
+        return 0, False, _live_failure_reason(detail), detail
+    if not explicit_send:
+        if confirmed:
+            # Historic executor receipts only contained confirmed=true.
+            return 1, True, "none", detail
+        return 0, False, _live_failure_reason(detail), detail
+    if sent and outcome in {None, "sent"} and confirmed:
+        return 1, True, "none", detail
+    # A contradictory explicit outcome is not evidence that a command crossed
+    # the executor boundary. A known send without confirmation still counts as
+    # an attempted command, but the run remains failed.
+    sent_count = 1 if sent and outcome in {None, "sent"} else 0
+    if sent and outcome != "sent":
+        detail = detail if detail != "unknown" else "contradictory_receipt"
+    elif sent and not confirmed:
+        detail = detail if detail != "unknown" else "unconfirmed"
+    elif outcome == "uncertain":
+        detail = detail if detail != "unknown" else "uncertain"
+    elif outcome == "not_sent":
+        detail = detail if detail != "unknown" else "not_sent"
+    elif not confirmed:
+        detail = detail if detail != "unknown" else "unconfirmed"
+    return sent_count, False, _live_failure_reason(detail), detail
+
+
+def _live_failure_reason(raw_reason: str) -> str:
+    """Map internal diagnostics to the existing v1 result reason enum."""
+
+    if raw_reason == "protected_topology_missing" or raw_reason.startswith("away_sensor_"):
+        return "sensor_unavailable"
+    if raw_reason.endswith("_unavailable"):
+        return "device_unavailable"
+    return "unknown"
 
 
 def _default_context(config: RoomLightingConfig, now_ms: int) -> RoomLightingContext:
