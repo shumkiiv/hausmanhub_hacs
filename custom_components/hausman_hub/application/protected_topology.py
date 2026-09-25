@@ -350,36 +350,38 @@ class ProtectedTopologyService:
         return self._revision
 
     async def async_load(self) -> None:
-        # Until every stored value and runtime callback has been checked, no
-        # old binding may remain usable after a reload attempt.
-        self._healthy = False
-        try:
-            payload = await self._store.async_load()
-        except Exception as error:  # noqa: BLE001
-            self._clear_unhealthy_state()
-            self._loaded = True
-            raise ProtectedTopologyStorageError("protected topology storage unavailable") from error
-        if payload is None:
-            self._revision = 0
-            self._updated_at = _timestamp(self._now)
-            self._bindings = {}
-            self._migration_expectations = {
-                key: () for key in _MIGRATION_EXPECTATION_KEYS
-            }
+        async with self._lock:
+            # Until every stored value and runtime callback has been checked, no
+            # old binding may remain usable after a reload attempt. Sharing the
+            # write lock prevents this authoritative read from racing a save.
+            self._healthy = False
+            try:
+                payload = await self._store.async_load()
+            except Exception as error:  # noqa: BLE001
+                self._clear_unhealthy_state()
+                self._loaded = True
+                raise ProtectedTopologyStorageError("protected topology storage unavailable") from error
+            if payload is None:
+                self._revision = 0
+                self._updated_at = _timestamp(self._now)
+                self._bindings = {}
+                self._migration_expectations = {
+                    key: () for key in _MIGRATION_EXPECTATION_KEYS
+                }
+                self._loaded = True
+                self._healthy = True
+                return
+            try:
+                self._load_payload(payload)
+            except Exception as error:  # noqa: BLE001
+                # Catalog and entity callbacks cross the Home Assistant boundary.
+                # Their failures must not leave a partially initialized resolver
+                # available to a later migration attempt.
+                self._clear_unhealthy_state()
+                self._loaded = True
+                raise ProtectedTopologyStorageError("protected topology storage invalid") from error
             self._loaded = True
             self._healthy = True
-            return
-        try:
-            self._load_payload(payload)
-        except Exception as error:  # noqa: BLE001
-            # Catalog and entity callbacks cross the Home Assistant boundary.
-            # Their failures must not leave a partially initialized resolver
-            # available to a later migration attempt.
-            self._clear_unhealthy_state()
-            self._loaded = True
-            raise ProtectedTopologyStorageError("protected topology storage invalid") from error
-        self._loaded = True
-        self._healthy = True
 
     def _load_payload(self, payload: object) -> None:
         if not isinstance(payload, Mapping) or not {
@@ -524,10 +526,6 @@ class ProtectedTopologyService:
         migration_expectations: object | None = None,
     ) -> dict[str, object]:
         self._require_loaded()
-        if not self._healthy:
-            raise ProtectedTopologyViolation(
-                "protected topology storage is unhealthy", storage=True
-            )
         if type(expected_revision) is not int or expected_revision < 0:
             raise ProtectedTopologyViolation("protected topology revision is invalid")
         if not isinstance(bindings, list) or len(bindings) > 128:
@@ -539,6 +537,12 @@ class ProtectedTopologyService:
         parsed_expectations = _migration_expectations_from_payload(migration_expectations)
         self._validate_runtime_bindings(parsed)
         async with self._lock:
+            # The value may have changed while this request waited for a
+            # previous save. Re-check it while owning the same lock as writes.
+            if not self._healthy:
+                raise ProtectedTopologyViolation(
+                    "protected topology storage is unhealthy", storage=True
+                )
             if expected_revision != self._revision:
                 raise ProtectedTopologyViolation("protected topology revision is stale", stale=True)
             next_revision = self._revision + 1

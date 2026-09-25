@@ -575,6 +575,53 @@ def test_protected_topology_blocks_writes_after_uncertain_committed_save_until_r
     assert service.healthy is True
 
 
+def test_protected_topology_queued_write_rechecks_unhealthy_state_under_lock() -> None:
+    class CommitThenRaiseStore(Store):
+        def __init__(self) -> None:
+            super().__init__()
+            self.first_save_started = asyncio.Event()
+            self.release_first_save = asyncio.Event()
+
+        async def async_save(self, value):
+            self.save_attempts += 1
+            if self.save_attempts == 1:
+                self.first_save_started.set()
+                await self.release_first_save.wait()
+                self.value = value
+                raise OSError("save outcome is uncertain")
+            self.saved.append(value)
+            self.value = value
+
+    async def exercise() -> None:
+        store = CommitThenRaiseStore()
+        service = ProtectedTopologyService(store, entity_validator=lambda _entity: True)
+        await service.async_load()
+        first = asyncio.create_task(service.async_replace(
+            0, [{"role": "managed.test.first", "entityId": "light.one"}]
+        ))
+        await store.first_save_started.wait()
+        second = asyncio.create_task(service.async_replace(
+            0, [{"role": "managed.test.second", "entityId": "light.two"}]
+        ))
+        await asyncio.sleep(0)
+        store.release_first_save.set()
+
+        with pytest.raises(ProtectedTopologyViolation, match="storage save failed"):
+            await first
+        with pytest.raises(ProtectedTopologyViolation, match="storage is unhealthy"):
+            await second
+        assert store.save_attempts == 1
+        assert store.value["revision"] == 1
+
+        await service.async_load()
+        result = await service.async_replace(
+            1, [{"role": "managed.test.third", "entityId": "light.three"}]
+        )
+        assert result["revision"] == 2
+
+    asyncio.run(exercise())
+
+
 def test_protected_topology_runtime_callback_disappearance_is_redacted_not_raised() -> None:
     available = {"value": True}
     calls = {"count": 0}
