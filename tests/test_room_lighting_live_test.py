@@ -306,12 +306,12 @@ async def test_real_run_dispatches_and_is_schema_valid() -> None:
 
 
 @pytest.mark.parametrize(
-    ("receipt", "commands_sent", "status", "reason", "detail"),
+    ("receipt", "expected_commands_sent", "status", "reason", "detail"),
     (
-        ({"confirmed": True}, 1, "passed", "none", None),
+        ({"confirmed": True}, 18, "passed", "none", None),
         (
             {"confirmed": True, "sent": True},
-            1,
+            18,
             "passed",
             "none",
             None,
@@ -322,6 +322,17 @@ async def test_real_run_dispatches_and_is_schema_valid() -> None:
                 "sent": True,
                 "sendOutcome": "sent",
                 "reason": "unconfirmed",
+            },
+            1,
+            "failed",
+            "unknown",
+            "unconfirmed",
+        ),
+        (
+            {
+                "confirmed": False,
+                "sent": True,
+                "sendOutcome": "sent",
             },
             1,
             "failed",
@@ -381,7 +392,7 @@ async def test_real_run_dispatches_and_is_schema_valid() -> None:
 )
 async def test_real_run_interprets_legacy_and_explicit_receipts(
     receipt: dict[str, object],
-    commands_sent: int,
+    expected_commands_sent: int,
     status: str,
     reason: str,
     detail: str | None,
@@ -401,10 +412,8 @@ async def test_real_run_interprets_legacy_and_explicit_receipts(
 
     assert trace.status == status
     assert trace.reason == reason
-    if status == "passed":
-        assert trace.commands_sent > commands_sent
-    else:
-        assert trace.commands_sent == commands_sent
+    assert trace.commands_sent == expected_commands_sent
+    if status != "passed":
         assert trace.steps[-1].status == "failed"
         assert trace.steps[-1].detail == detail
     _validate_schema(trace.to_payload())

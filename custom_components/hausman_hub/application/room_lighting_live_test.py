@@ -561,10 +561,10 @@ def _live_dispatch_outcome(
     # the executor boundary. A known send without confirmation still counts as
     # an attempted command, but the run remains failed.
     sent_count = 1 if sent and outcome in {None, "sent"} else 0
-    if sent and outcome != "sent":
-        detail = detail if detail != "unknown" else "contradictory_receipt"
-    elif sent and not confirmed:
+    if sent and outcome in {None, "sent"} and not confirmed:
         detail = detail if detail != "unknown" else "unconfirmed"
+    elif sent and outcome != "sent":
+        detail = detail if detail != "unknown" else "contradictory_receipt"
     elif outcome == "uncertain":
         detail = detail if detail != "unknown" else "uncertain"
     elif outcome == "not_sent":
