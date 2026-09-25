@@ -60,12 +60,21 @@ def test_manifest_marks_only_snapshot_managed_scenarios_as_replacements() -> Non
 
 
 class Store:
-    def __init__(self, value=None, *, fail_save=False, fail_save_at=None, return_false=False):
+    def __init__(
+        self,
+        value=None,
+        *,
+        fail_save=False,
+        fail_save_at=None,
+        return_false=False,
+        commit_then_raise=False,
+    ):
         self.value = value
         self.saved = []
         self.fail_save = fail_save
         self.fail_save_at = fail_save_at
         self.return_false = return_false
+        self.commit_then_raise = commit_then_raise
         self.save_attempts = 0
 
     async def async_load(self):
@@ -79,6 +88,8 @@ class Store:
             return False
         self.saved.append(value)
         self.value = value
+        if self.commit_then_raise:
+            raise OSError("save outcome is uncertain")
 
 
 class Service:
@@ -530,6 +541,38 @@ def test_protected_topology_failed_save_preserves_memory_but_marks_it_unhealthy(
     assert service.payload == before
     assert service.healthy is False
     assert service.readiness(("managed.test.light",))["ready"] is False
+
+
+def test_protected_topology_blocks_writes_after_uncertain_committed_save_until_reload() -> None:
+    store = Store()
+    service = ProtectedTopologyService(store, entity_validator=lambda _entity: True)
+    asyncio.run(service.async_load())
+    asyncio.run(service.async_replace(
+        0, [{"role": "managed.test.light", "entityId": "light.one"}]
+    ))
+    store.commit_then_raise = True
+
+    with pytest.raises(ProtectedTopologyViolation, match="storage save failed"):
+        asyncio.run(service.async_replace(
+            1, [{"role": "managed.test.other", "entityId": "light.two"}]
+        ))
+
+    assert store.value["revision"] == 2
+    save_attempts = store.save_attempts
+    with pytest.raises(ProtectedTopologyViolation, match="storage is unhealthy"):
+        asyncio.run(service.async_replace(
+            1, [{"role": "managed.test.third", "entityId": "light.three"}]
+        ))
+    assert store.save_attempts == save_attempts
+
+    store.commit_then_raise = False
+    asyncio.run(service.async_load())
+    result = asyncio.run(service.async_replace(
+        2, [{"role": "managed.test.third", "entityId": "light.three"}]
+    ))
+
+    assert result["revision"] == 3
+    assert service.healthy is True
 
 
 def test_protected_topology_runtime_callback_disappearance_is_redacted_not_raised() -> None:

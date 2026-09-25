@@ -524,6 +524,10 @@ class ProtectedTopologyService:
         migration_expectations: object | None = None,
     ) -> dict[str, object]:
         self._require_loaded()
+        if not self._healthy:
+            raise ProtectedTopologyViolation(
+                "protected topology storage is unhealthy", storage=True
+            )
         if type(expected_revision) is not int or expected_revision < 0:
             raise ProtectedTopologyViolation("protected topology revision is invalid")
         if not isinstance(bindings, list) or len(bindings) > 128:
