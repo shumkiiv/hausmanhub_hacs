@@ -112,6 +112,7 @@ test("шаблон сохраняет версию ответа POST до поп
 
   await screen.getByRole("button", { name: /Применить:/ }).first().click();
   await expect(screen.locator('[data-testid="room-lighting:save-state"]')).toContainText("Не сохранено");
+  await expect(screen.locator('[data-testid="room-lighting:save"]')).toBeEnabled();
 
   const result = await page.evaluate(() => {
     const host = document.querySelector("hausman-hub-panel");
@@ -125,6 +126,20 @@ test("шаблон сохраняет версию ответа POST до поп
   expect(result.post).toBe(1);
   expect(result.configGets).toBe(0);
   expect(result.version).toBe(3);
+
+  await page.evaluate(() => {
+    const harness = document.querySelector("hausman-hub-panel")._roomLightingHarness;
+    harness.config.version = 4;
+    harness.config.devices.light_targets[0].entityId = "light.office_new_binding";
+  });
+  await screen.locator('[data-testid="room-lighting:save"]').click();
+  await expect(screen.locator('[data-testid="room-lighting:conflict"]')).toBeVisible();
+  await expect(screen.getByRole("button", { name: "Применить шаблон к свежей версии" })).toBeVisible();
+  await expect(screen.locator('[data-testid="room-lighting:save"]')).toBeDisabled();
+  await expect.poll(() => page.evaluate(() => {
+    const store = document.querySelector("hausman-hub-panel")._roomLighting.byRoom.office;
+    return store.config.devices.light_targets[0].entityId;
+  })).toBe("light.office_new_binding");
 });
 
 test("технические идентификаторы видны только внутри раскрытого блока", async ({ page }) => {

@@ -146,6 +146,8 @@ function lightingState(panel, roomId) {
       notice: "",
       conflict: false,
       conflictMessage: "",
+      templateDraft: false,
+      appliedTemplateId: null,
       config: null,
       draft: null,
       templates: [],
@@ -232,6 +234,8 @@ export async function refreshRoomLighting(panel, roomId, force = false) {
   store.error = "";
   store.conflict = false;
   store.conflictMessage = "";
+  store.templateDraft = false;
+  store.appliedTemplateId = null;
   store.preview = null;
   rerender(panel, roomId);
   try {
@@ -274,6 +278,8 @@ async function saveRoomLighting(panel, roomId) {
     }
     store.config = saved;
     store.draft = clone(saved);
+    store.templateDraft = false;
+    store.appliedTemplateId = null;
     store.preview = null;
     store.notice = "Сохранено. Черновик стал текущей версией.";
   } catch (error) {
@@ -303,6 +309,17 @@ async function carryLocalEditsOntoFreshConfig(panel, roomId) {
     store.error = "";
     return;
   }
+  if (store.templateDraft) {
+    // A template draft carries physical bindings from the exact POST snapshot.
+    // Never merge those bindings into a newer room after a 409. Keep the draft
+    // only for inspection and require a new template application to remap it.
+    store.config = fresh;
+    store.preview = null;
+    store.error = "";
+    store.notice = "";
+    store.conflictMessage = `Настройки изменились на другом клиенте. Шаблон не сохранён: свежая версия ${fresh.version} загружена. Примените шаблон заново к актуальным устройствам.`;
+    return;
+  }
   const carried = clone(fresh);
   changed.forEach((key) => {
     if (Object.prototype.hasOwnProperty.call(localDraft, key)) {
@@ -329,6 +346,8 @@ async function applyTemplate(panel, roomId, templateId) {
   store.notice = "";
   store.conflict = false;
   store.conflictMessage = "";
+  store.templateDraft = false;
+  store.appliedTemplateId = templateId;
   rerender(panel, roomId);
   try {
     // For a configured room the template route returns the exact revision of
@@ -340,8 +359,11 @@ async function applyTemplate(panel, roomId, templateId) {
     });
     const draft = clone(applied);
     if (!draft) throw new Error("шаблон вернул пустой документ");
-    store.config = clone(applied);
+    // Keep the pre-POST config as the comparison baseline. The returned draft
+    // carries the POST snapshot revision, while its template changes remain
+    // visibly dirty and can enable Save without a revision-upgrading GET.
     store.draft = draft;
+    store.templateDraft = true;
     store.preview = null;
     store.templateBaseline = clone(applied && typeof applied === "object" ? applied : draft);
     store.loaded = true;
@@ -608,9 +630,15 @@ function renderConflict(panel, roomId, store, deps) {
   actions.appendChild(button(deps, "Загрузить свежую версию без моих правок", () => {
     void refreshRoomLighting(panel, roomId, true);
   }));
-  actions.appendChild(button(deps, "Сохранить мои правки", () => {
-    void saveRoomLighting(panel, roomId);
-  }, "is-primary"));
+  if (store.templateDraft) {
+    actions.appendChild(button(deps, "Применить шаблон к свежей версии", () => {
+      void applyTemplate(panel, roomId, store.appliedTemplateId);
+    }, "is-primary"));
+  } else {
+    actions.appendChild(button(deps, "Сохранить мои правки", () => {
+      void saveRoomLighting(panel, roomId);
+    }, "is-primary"));
+  }
   block.appendChild(actions);
   return block;
 }
@@ -1371,7 +1399,7 @@ function renderSaveBar(panel, roomId, store, deps) {
   setData(deps, forceAuto, "data-testid", "room-lighting:force-auto");
   bar.appendChild(forceAuto);
   const save = button(deps, store.saving ? "Сохранение…" : "Сохранить", () => { void saveRoomLighting(panel, roomId); }, "is-primary");
-  save.disabled = store.saving || !store.draft || !dirty;
+  save.disabled = store.saving || store.templateDraft && store.conflict || !store.draft || !dirty;
   setData(deps, save, "data-testid", "room-lighting:save");
   bar.appendChild(save);
   if (store.notice) {
