@@ -61,6 +61,7 @@ test("черновик переживает неудачное сохранен�
   const screen = await openEditor(page, panel);
   const name = screen.locator('[data-testid="room-lighting:name"]');
   await name.fill("Кабинет · черновик");
+  await name.press("Tab");
   await expect(screen.locator('[data-testid="room-lighting:save-state"]')).toContainText("Не сохранено");
 
   await setHarness(page, { failPut: true });
@@ -77,6 +78,7 @@ test("конфликт версии переносит локальные пра
   const screen = await openEditor(page, panel);
   const name = screen.locator('[data-testid="room-lighting:name"]');
   await name.fill("Кабинет · локальная правка");
+  await name.press("Tab");
 
   await page.evaluate(() => {
     const harness = document.querySelector("hausman-hub-panel")._roomLightingHarness;
