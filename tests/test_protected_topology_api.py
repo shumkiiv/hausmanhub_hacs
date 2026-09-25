@@ -84,4 +84,3 @@ class ProtectedTopologyReadinessApiTest(unittest.TestCase):
                     )
                 )
                 self.assertEqual(400, response.status)
-
