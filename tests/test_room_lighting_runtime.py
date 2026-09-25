@@ -397,11 +397,13 @@ def _make_runtime(
     device_automation_api: object | None = None,
     reserved_target_ids: tuple[str, ...] = (),
     reserved_entity_ids_provider: object | None = None,
+    seed_away: bool = True,
+    away_entity_id: str | None = AWAY_ENTITY_ID,
 ) -> RoomLightingRuntime:
     # Live-mode tests must model the protected topology explicitly. Keep the
     # fixture home, unless an away transition test supplied its own state.
-    if hass.states.get(AWAY_ENTITY_ID) is None:
-        hass.states.set(AWAY_ENTITY_ID, "off", last_changed=_NOW_DT)
+    if seed_away and away_entity_id and hass.states.get(away_entity_id) is None:
+        hass.states.set(away_entity_id, "off", last_changed=_NOW_DT)
     shadow = RoomLightingShadowService(_MemoryShadowStore())
     if payloads is not None:
         configs = [config_from_payload(item) for item in payloads]
@@ -424,7 +426,7 @@ def _make_runtime(
         device_automation_api=device_automation_api,
         reserved_target_ids=reserved_target_ids,
         reserved_entity_ids_provider=reserved_entity_ids_provider,
-        away_entity_id=AWAY_ENTITY_ID,
+        away_entity_id=away_entity_id,
     )
 
 
@@ -693,6 +695,224 @@ async def test_live_commands_require_the_protected_away_role() -> None:
     try:
         assert runtime.away_diagnostic == "protected_topology_missing"
         assert executor.calls == []
+    finally:
+        await runtime.stop()
+
+
+@pytest.mark.parametrize("state", [None, "unknown", "unavailable", "invalid"])
+async def test_automatic_commands_fail_closed_when_configured_away_is_untrusted(
+    state: str | None,
+) -> None:
+    """A configured Away entity must still report a trusted on/off state."""
+
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "on", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    if state is not None:
+        hass.states.set(AWAY_ENTITY_ID, state, last_changed=_NOW_DT)
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=True,
+        executor=executor,
+        seed_away=False,
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        assert runtime.away_diagnostic == "away_sensor_unavailable"
+        assert executor.calls == []
+        assert runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"}) == ()  # type: ignore[attr-defined]
+        decision = runtime._shadow.journal_payload()["entries"][-1]  # type: ignore[attr-defined]
+        assert decision["dispatchBlockReason"] == "away_sensor_unavailable"
+    finally:
+        await runtime.stop()
+
+
+async def test_generic_command_fails_closed_when_configured_away_is_untrusted() -> None:
+    """The generic path has no manual origin and is therefore automatic-safe."""
+
+    hass = _FakeHass()
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=True,
+        executor=executor,
+        seed_away=False,
+    )
+    config = config_from_payload(_config_payload(commands_enabled=True))
+
+    receipt = await runtime.async_execute_command(
+        config, PlannedCommand("light_main", LightAction.TURN_ON)
+    )
+
+    assert receipt == {
+        "confirmed": False,
+        "blocked": True,
+        "reason": "away_sensor_unavailable",
+    }
+    assert executor.calls == []
+
+
+@pytest.mark.parametrize("valid_state", ["off", "on"])
+async def test_automatic_commands_stop_after_valid_away_becomes_untrusted(
+    valid_state: str,
+) -> None:
+    """The permit is evaluated again after a previously valid Away reading."""
+
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    hass.states.set(AWAY_ENTITY_ID, valid_state, last_changed=_NOW_DT)
+    executor = _SpyExecutor()
+    runtime = _make_runtime(hass, commands_enabled=True, executor=executor)
+
+    await runtime.start(hass, "entry")
+    try:
+        assert runtime.away_diagnostic is None
+        assert executor.calls == []
+        hass.states.set(AWAY_ENTITY_ID, "unavailable", last_changed=_NOW_DT)
+        hass.states.set("binary_sensor.demo_presence", "on", last_changed=_NOW_DT)
+        await runtime.async_process()
+        assert runtime.away_diagnostic == "away_sensor_unavailable"
+        assert executor.calls == []
+        assert runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"}) == ()  # type: ignore[attr-defined]
+    finally:
+        await runtime.stop()
+
+
+async def test_manual_switch_binding_stays_available_when_away_is_untrusted() -> None:
+    """A physical press is a separate, explicitly manual command path."""
+
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    hass.states.set(AWAY_ENTITY_ID, "unavailable", last_changed=_NOW_DT)
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=True,
+        executor=executor,
+        payload=_trigger_config_payload(action="turn_on"),
+        seed_away=False,
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        await runtime._handle_device_trigger(
+            runtime.configs()[0], "device_demo_mirror", "sw_mirror", "1_single"
+        )
+        assert [command.action for command in executor.calls] == [LightAction.TURN_ON]
+    finally:
+        await runtime.stop()
+
+
+async def test_manual_switch_binding_stays_available_without_away_mapping() -> None:
+    """A missing protected mapping blocks automation, not an attributable press."""
+
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=True,
+        executor=executor,
+        payload=_trigger_config_payload(action="turn_on"),
+        seed_away=False,
+        away_entity_id=None,
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        assert runtime.away_diagnostic == "protected_topology_missing"
+        assert executor.calls == []
+        await runtime._handle_device_trigger(
+            runtime.configs()[0], "device_demo_mirror", "sw_mirror", "1_single"
+        )
+        assert [command.action for command in executor.calls] == [LightAction.TURN_ON]
+    finally:
+        await runtime.stop()
+
+
+async def test_automatic_dispatch_rechecks_away_after_pending_write(monkeypatch) -> None:
+    """Away failure between intent and executor must close the automatic send."""
+
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    executor = _SpyExecutor()
+    runtime = _make_runtime(hass, commands_enabled=True, executor=executor)
+    original = runtime._persist_pending_target_dispatch  # type: ignore[attr-defined]
+
+    async def invalidate_away(**kwargs):
+        saved = await original(**kwargs)
+        hass.states.set(AWAY_ENTITY_ID, "unavailable", last_changed=_NOW_DT)
+        return saved
+
+    monkeypatch.setattr(runtime, "_persist_pending_target_dispatch", invalidate_away)
+    await runtime.start(hass, "entry")
+    try:
+        assert runtime.away_diagnostic == "away_sensor_unavailable"
+        assert executor.calls == []
+        assert runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"}) == ()  # type: ignore[attr-defined]
+        dispatch = runtime._shadow.journal_payload()["entries"][-1]["dispatch"][0]  # type: ignore[attr-defined]
+        assert dispatch["reason"] == "away_sensor_unavailable"
+        assert dispatch["sent"] is False
+    finally:
+        await runtime.stop()
+
+
+async def test_late_away_failure_blocks_each_remaining_automatic_target(monkeypatch) -> None:
+    """A late Away failure cannot grant ownership to another planned target."""
+
+    payload = _config_payload(commands_enabled=True)
+    payload["devices"]["light_targets"].append(  # type: ignore[index]
+        {
+            "id": "light_second",
+            "name": "Второй свет",
+            "kind": "light",
+            "entityId": "light.demo_second",
+            "role": None,
+            "groupId": None,
+            "brightness": True,
+            "color_temperature": True,
+            "autoAdoptOverride": None,
+        }
+    )
+    payload["schedule"][0]["targets"]["lightTargets"] = [  # type: ignore[index]
+        "light_main", "light_second"
+    ]
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    hass.states.set("light.demo_second", "off", last_changed=_NOW_DT)
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, payload=payload
+    )
+    original = runtime._persist_pending_target_dispatch  # type: ignore[attr-defined]
+
+    async def invalidate_away(**kwargs):
+        saved = await original(**kwargs)
+        hass.states.set(AWAY_ENTITY_ID, "unavailable", last_changed=_NOW_DT)
+        return saved
+
+    monkeypatch.setattr(runtime, "_persist_pending_target_dispatch", invalidate_away)
+    await runtime.start(hass, "entry")
+    try:
+        assert executor.calls == []
+        assert runtime._ownership.snapshots_for(  # type: ignore[attr-defined]
+            _ROOM_ID, {"light_main", "light_second"}
+        ) == ()
+        dispatches = [
+            item["dispatch"][0]
+            for item in runtime._shadow.journal_payload()["entries"]  # type: ignore[attr-defined]
+            if "dispatch" in item
+        ]
+        assert {item["targetId"] for item in dispatches} == {
+            "light_main", "light_second"
+        }
+        assert {item["reason"] for item in dispatches} == {"away_sensor_unavailable"}
     finally:
         await runtime.stop()
 
@@ -2480,6 +2700,28 @@ async def test_shower_exhaust_turns_the_fan_on_with_humid_air() -> None:
     try:
         actions = [(command.target_id, command.action) for command in executor.calls]
         assert ("aux_shower_fan", LightAction.TURN_ON) in actions
+    finally:
+        await runtime.stop()
+
+
+async def test_shower_exhaust_fails_closed_when_away_is_untrusted() -> None:
+    """The automatic fan path shares the protected Away permit."""
+
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    hass.states.set("sensor.demo_shower_humidity", "70", last_changed=_NOW_DT)
+    hass.states.set("switch.demo_shower_fan", "off", last_changed=_NOW_DT)
+    executor = _SpyExecutor()
+    runtime, _shadow = _runtime_with_shadow(
+        hass, _shower_payload(commands_enabled=True), executor=executor
+    )
+    hass.states.set(AWAY_ENTITY_ID, "unavailable", last_changed=_NOW_DT)
+
+    await runtime.start(hass, "entry")
+    try:
+        assert runtime.away_diagnostic == "away_sensor_unavailable"
+        assert executor.calls == []
     finally:
         await runtime.stop()
 

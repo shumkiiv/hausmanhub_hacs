@@ -35,6 +35,10 @@ from ..domain.room_lighting import (
     room_lighting_entity_collisions,
 )
 from ..domain.room_lighting_auxiliary import evaluate_bathroom_exhaust
+from ..domain.protected_away import (
+    ProtectedAwayObservation,
+    classify_protected_away,
+)
 from ..domain.shower_exhaust import (
     SHOWER_ABSENCE_TIMER,
     SHOWER_PRESENCE_TIMER,
@@ -805,18 +809,35 @@ class RoomLightingRuntime:
         self._refresh_exact_power_index()
 
     def _room_commands_enabled(self, config: RoomLightingConfig) -> bool:
-        """Physical commands are a per-room, persisted opt-in (default shadow)."""
+        """Whether a room permits explicitly manual physical commands.
 
-        if not bool(config.commands_enabled):
-            return False
-        if self._away_entity_id is None:
+        A device-trigger binding is an attributable physical press. It must not
+        inherit the automatic Away fail-closed permit, which protects only
+        unattended light and exhaust actions.
+        """
+
+        return bool(config.commands_enabled)
+
+    def _automatic_away_block_reason(self) -> str | None:
+        """Return the fail-closed reason for an unattended command, if any."""
+
+        observation = self._protected_away_observation()
+        if observation.diagnostic == "protected_topology_missing":
             if not self._away_missing_warned:
                 self._away_missing_warned = True
                 _LOGGER.warning(
                     "room lighting commands are disabled: protected away sensor role is missing"
                 )
-            return False
-        return True
+        self._away_diagnostic = observation.diagnostic
+        return observation.command_block_reason
+
+    def _automatic_commands_enabled(self, config: RoomLightingConfig) -> bool:
+        """Permit only automatic commands with a trusted protected Away state."""
+
+        return (
+            self._room_commands_enabled(config)
+            and self._automatic_away_block_reason() is None
+        )
 
     async def start(
         self, hass: HomeAssistant, entry_id: str
@@ -1068,6 +1089,13 @@ class RoomLightingRuntime:
 
         if self._hass is None:
             return {"confirmed": False}
+        away_block = self._automatic_away_block_reason()
+        if away_block is not None:
+            return {
+                "confirmed": False,
+                "blocked": True,
+                "reason": away_block,
+            }
         dependencies = self._power_dependencies()
         decision = self._exact_power_decision(config, dependencies)
         exact_dependencies = decision.projection if decision.active else None
@@ -1178,19 +1206,21 @@ class RoomLightingRuntime:
         self._schedule_ownership_save()
 
     def _current_away_state(self, hass: HomeAssistant) -> bool | None:
-        if self._away_entity_id is None:
-            self._away_diagnostic = "protected_topology_missing"
-            return None
-        state = hass.states.get(self._away_entity_id)
-        raw = str(getattr(state, "state", "")).lower()
-        if raw == "on":
-            self._away_diagnostic = None
-            return True
-        if raw == "off":
-            self._away_diagnostic = None
-            return False
-        self._away_diagnostic = "away_sensor_unavailable"
-        return None
+        del hass
+        observation = self._protected_away_observation()
+        self._away_diagnostic = observation.diagnostic
+        return observation.is_away
+
+    def _protected_away_observation(self) -> ProtectedAwayObservation:
+        """Read the HA boundary once, then apply the pure Away classifier."""
+
+        if self._away_entity_id is None or self._hass is None:
+            return classify_protected_away(self._away_entity_id, None)
+        state = self._hass.states.get(self._away_entity_id)
+        return classify_protected_away(
+            self._away_entity_id,
+            getattr(state, "state", None),
+        )
 
     @_ha_callback
     def _away_event(self, event: object) -> None:
@@ -1811,7 +1841,12 @@ class RoomLightingRuntime:
         except Exception:  # noqa: BLE001 - isolation per room is deliberate
             _LOGGER.warning("room lighting evaluation failed; skipping the room")
             return
-        enabled = self._room_commands_enabled(config)
+        enabled = self._automatic_commands_enabled(config)
+        dispatch_block_reason = (
+            self._automatic_away_block_reason()
+            if self._room_commands_enabled(config)
+            else None
+        )
         operation_id = self._new_operation_id(config, moment)
         config_version = int(config.version)
         record = getattr(self._shadow, "async_record", None)
@@ -1822,6 +1857,7 @@ class RoomLightingRuntime:
                     commands_enabled=enabled,
                     operation_id=operation_id,
                     config_version=config_version,
+                    dispatch_block_reason=dispatch_block_reason,
                 )
             except Exception:  # noqa: BLE001 - journal failure must not dispatch
                 _LOGGER.warning("room lighting journal write failed")
@@ -2267,6 +2303,7 @@ class RoomLightingRuntime:
         else:
             decision = evaluate_shower_exhaust(observation, policy)
 
+        enabled = enabled and self._automatic_commands_enabled(config)
         if decision.action is not None and enabled:
             await self._dispatch_exhaust(config, target, decision.action, moment)
 
@@ -2340,6 +2377,12 @@ class RoomLightingRuntime:
         if self._command_conflicts_with_reserved_writer(config, command):
             _LOGGER.warning(
                 "shower exhaust dispatch refused: target is owned by a controller"
+            )
+            return
+        away_block = self._automatic_away_block_reason()
+        if away_block is not None:
+            _LOGGER.warning(
+                "shower exhaust dispatch refused: %s", away_block
             )
             return
         self._executing_actions[entity_id] = _planned_service_name(command)
@@ -2481,6 +2524,11 @@ class RoomLightingRuntime:
                 receipt["operationId"] = operation_id
             if config_version is not None:
                 receipt["configVersion"] = config_version
+            away_block = self._automatic_away_block_reason()
+            if away_block is not None:
+                receipt["reason"] = away_block
+                receipts.append(receipt)
+                continue
             if permission is not None and not self._dispatch_permission_valid(permission):
                 receipt["reason"] = "dispatch_permission_stale"
                 receipts.append(receipt)
@@ -3310,6 +3358,9 @@ class RoomLightingRuntime:
 
         if not self._running:
             return "runtime_stopped"
+        away_block = self._automatic_away_block_reason()
+        if away_block is not None:
+            return away_block
         if permission is not None and not self._dispatch_permission_valid(permission):
             return "permission_stale"
         if self._command_conflicts_with_reserved_writer(
@@ -3405,6 +3456,10 @@ class RoomLightingRuntime:
         if self._is_reserved_target_or_entity(None, source_entity_id):
             detail["reason"] = "power_source_reserved"
             return False, detail
+        away_block = self._automatic_away_block_reason()
+        if away_block is not None:
+            detail["reason"] = away_block
+            return False, detail
         evidence_revision = self._power_evidence_revision(source_entity_id)
         detail["evidenceRevision"] = evidence_revision
         if self._power_attempt_blocked(source_entity_id):
@@ -3450,6 +3505,10 @@ class RoomLightingRuntime:
             config_version=config_version,
         ):
             detail["reason"] = "power_pending_persistence_failed"
+            return False, detail
+        away_block = self._automatic_away_block_reason()
+        if away_block is not None:
+            detail["reason"] = away_block
             return False, detail
         self._executing_actions[source_entity_id] = "turn_on"
         self._command_grace[source_entity_id] = ("turn_on", self._now_ms())
@@ -3570,6 +3629,10 @@ class RoomLightingRuntime:
         ensure_power = getattr(self._executor, "async_power_on", None)
         if not callable(ensure_power) or self._hass is None:
             return False, detail
+        away_block = self._automatic_away_block_reason()
+        if away_block is not None:
+            detail["reason"] = away_block
+            return False, detail
         evidence_revision = self._power_evidence_revision(power_entity)
         detail["evidenceRevision"] = evidence_revision
         if self._power_attempt_blocked(power_entity):
@@ -3589,6 +3652,10 @@ class RoomLightingRuntime:
             config_version=config_version,
         ):
             detail["reason"] = "power_pending_persistence_failed"
+            return False, detail
+        away_block = self._automatic_away_block_reason()
+        if away_block is not None:
+            detail["reason"] = away_block
             return False, detail
         self._executing_actions[power_entity] = "turn_on"
         self._command_grace[power_entity] = ("turn_on", self._now_ms())

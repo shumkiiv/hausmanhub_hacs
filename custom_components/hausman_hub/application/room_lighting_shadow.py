@@ -219,6 +219,7 @@ class RoomLightingShadowService:
         commands_enabled: bool = False,
         operation_id: str | None = None,
         config_version: int | None = None,
+        dispatch_block_reason: str | None = None,
     ) -> None:
         """Journal an already computed decision with the honest command flag.
 
@@ -256,6 +257,8 @@ class RoomLightingShadowService:
             entry["operationId"] = operation_id
         if config_version is not None:
             entry["configVersion"] = config_version
+        if dispatch_block_reason is not None:
+            entry["dispatchBlockReason"] = dispatch_block_reason
         async with self._lock:
             await self._ensure_loaded_locked()
             snapshot = self._snapshot_locked()
