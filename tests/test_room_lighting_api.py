@@ -426,7 +426,7 @@ class RoomLightingApiTest(unittest.TestCase):
 
         asyncio.run(flow())
 
-    def test_apply_template_returns_valid_config_without_null_entity(self) -> None:
+    def test_apply_template_without_saved_room_keeps_unbound_template(self) -> None:
         async def flow() -> None:
             room_id = "room_demo_entry"
             response = await self.apply_view.post(
@@ -439,7 +439,38 @@ class RoomLightingApiTest(unittest.TestCase):
             self.assertEqual(200, response.status)
             _validate("room-lighting-config.schema.json", response.payload)
             for target in response.payload["devices"]["light_targets"]:
-                self.assertNotIn(None, [target.get("entityId")])
+                self.assertIsNone(target.get("entityId"))
+
+        asyncio.run(flow())
+
+    def test_apply_template_keeps_saved_devices_and_remaps_schedule(self) -> None:
+        async def flow() -> None:
+            room_id = "room_demo_entry"
+            saved = _config_payload(room_id)
+            saved["switchBindings"] = []
+            put = await self.config_view.put(
+                _json_request(self._config_path(room_id), saved, room_id=room_id)
+            )
+            self.assertEqual(200, put.status)
+
+            response = await self.apply_view.post(
+                _json_request(
+                    self.api.ROOM_LIGHTING_TEMPLATE_APPLY_PATH.format(room_id=room_id),
+                    {"templateId": "day_profile", "keepDevices": True},
+                    room_id=room_id,
+                )
+            )
+
+            self.assertEqual(200, response.status)
+            _validate("room-lighting-config.schema.json", response.payload)
+            self.assertEqual(
+                "light.demo_main",
+                response.payload["devices"]["light_targets"][0]["entityId"],
+            )
+            self.assertEqual(
+                ["light_main"],
+                response.payload["schedule"][0]["targets"]["lightTargets"],
+            )
 
         asyncio.run(flow())
 

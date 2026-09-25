@@ -265,8 +265,14 @@ class RoomLightingService:
         if keep_devices and room_id is not None:
             stored = await self._store.async_get(room_id)  # type: ignore[attr-defined]
             if stored is not None:
+                if overrides is not None and "devices" in overrides:
+                    raise RoomLightingViolation(
+                        "template devices override conflicts with keepDevices"
+                    )
                 stored_payload = stored.to_dict()
                 payload["devices"] = stored_payload["devices"]
+                if overrides is None or "switchBindings" not in overrides:
+                    payload["switchBindings"] = deepcopy(stored_payload["switchBindings"])
                 # Keep the kept devices and their auxiliary policy together:
                 # the fan policy references a device from this list. A
                 # template-level policy is dropped so a kept fan device never
@@ -274,7 +280,114 @@ class RoomLightingService:
                 payload.pop("auxiliary", None)
                 if stored_payload.get("auxiliary") is not None:
                     payload["auxiliary"] = stored_payload["auxiliary"]
-        return config_from_payload(payload)
+                if overrides is None or "schedule" not in overrides:
+                    _remap_template_schedule(template, payload, stored_payload["devices"])
+        config = config_from_payload(payload)
+        _validate_selected_target_capabilities(config)
+        return config
+
+
+def _remap_template_schedule(
+    template: Mapping[str, object], payload: dict[str, object], devices: object
+) -> None:
+    """Map built-in template direct targets onto explicitly kept devices.
+
+    An exact target ID is retained. Otherwise only a single kept target with
+    the same role is safe to select. Group and role selectors remain unchanged
+    and are validated by the configuration domain against the kept devices.
+    """
+
+    schedule = payload.get("schedule")
+    template_devices = template.get("devices")
+    if not isinstance(schedule, list) or not isinstance(template_devices, Mapping):
+        return
+    template_targets = template_devices.get("light_targets")
+    if not isinstance(template_targets, list) or not isinstance(devices, Mapping):
+        raise RoomLightingViolation("kept room devices cannot remap template schedule")
+    kept_targets = devices.get("light_targets")
+    if not isinstance(kept_targets, list):
+        raise RoomLightingViolation("kept room light targets cannot remap template schedule")
+
+    by_id = {
+        item.get("id"): item
+        for item in kept_targets
+        if isinstance(item, Mapping) and isinstance(item.get("id"), str)
+    }
+    template_by_id = {
+        item.get("id"): item
+        for item in template_targets
+        if isinstance(item, Mapping) and isinstance(item.get("id"), str)
+    }
+    for entry in schedule:
+        if not isinstance(entry, Mapping):
+            continue
+        targets = entry.get("targets")
+        if not isinstance(targets, Mapping):
+            continue
+        direct_targets = targets.get("lightTargets")
+        if not isinstance(direct_targets, list):
+            continue
+        remapped: list[object] = []
+        for target_id in direct_targets:
+            if not isinstance(target_id, str) or target_id in by_id:
+                remapped.append(target_id)
+                continue
+            source = template_by_id.get(target_id)
+            role = source.get("role") if isinstance(source, Mapping) else None
+            candidates = [
+                item
+                for item in kept_targets
+                if isinstance(item, Mapping) and item.get("role") == role and role is not None
+            ]
+            if len(candidates) != 1 or not isinstance(candidates[0].get("id"), str):
+                entry_id = entry.get("id", "unknown")
+                raise RoomLightingViolation(
+                    f"template schedule entry {entry_id} cannot safely map target: {target_id}"
+                )
+            remapped.append(candidates[0]["id"])
+        targets["lightTargets"] = remapped
+
+
+def _validate_selected_target_capabilities(config: RoomLightingConfig) -> None:
+    """Reject brightness/CCT settings unsupported by any selected target."""
+
+    def selected(targets: object) -> tuple[object, ...]:
+        direct = set(targets.light_targets)
+        groups = set(targets.group_ids)
+        roles = set(targets.roles)
+        return tuple(
+            target
+            for target in config.devices.light_targets
+            if target.id in direct
+            or target.group_id in groups
+            or target.role in roles
+        )
+
+    for entry in config.schedule:
+        for target in selected(entry.targets):
+            if entry.how.brightness is not None and not target.brightness:
+                raise RoomLightingViolation(
+                    f"schedule entry {entry.id} sets brightness on an "
+                    f"unregulated target: {target.id}"
+                )
+            if entry.how.color_temperature is not None and not target.color_temperature:
+                raise RoomLightingViolation(
+                    f"schedule entry {entry.id} sets colour temperature on an "
+                    f"unregulated target: {target.id}"
+                )
+
+    for binding in config.switch_bindings:
+        for target in selected(binding.targets):
+            if binding.brightness is not None and not target.brightness:
+                raise RoomLightingViolation(
+                    f"switch binding {binding.switch_id} sets brightness on an "
+                    f"unregulated target: {target.id}"
+                )
+            if binding.color_temperature is not None and not target.color_temperature:
+                raise RoomLightingViolation(
+                    f"switch binding {binding.switch_id} sets colour temperature on an "
+                    f"unregulated target: {target.id}"
+                )
 
 
 def _changed(existing: RoomLightingConfig, candidate: RoomLightingConfig) -> bool:

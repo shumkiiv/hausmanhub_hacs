@@ -13,6 +13,7 @@ from custom_components.hausman_hub.application.room_lighting_service import (
 )
 from custom_components.hausman_hub.domain.room_lighting import (
     ROOM_LIGHTING_STORAGE_VERSION,
+    RoomLightingViolation,
     config_from_payload,
 )
 
@@ -264,6 +265,116 @@ class RoomLightingServiceTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(replaced.auxiliary)
         self.assertEqual((), replaced.devices.auxiliaries)
+
+    async def test_apply_template_keeps_bindings_and_remaps_unique_main_target(self) -> None:
+        room_id = "room_demo_entry"
+        payload = _payload(room_id)
+        payload["devices"]["light_targets"][0]["id"] = "light_main"  # type: ignore[index]
+        payload["devices"]["light_targets"][0]["kind"] = "light"  # type: ignore[index]
+        payload["devices"]["light_targets"][0]["entityId"] = "light.demo_a"  # type: ignore[index]
+        payload["devices"]["light_targets"][0]["brightness"] = True  # type: ignore[index]
+        payload["devices"]["light_targets"][0]["color_temperature"] = True  # type: ignore[index]
+        payload["devices"]["wireless_switches"] = [  # type: ignore[index]
+            {
+                "id": "sw_wall",
+                "name": "Выключатель",
+                "entityId": "sensor.demo_wall_action",
+                "buttons": ["left"],
+                "pressTypes": ["single"],
+            }
+        ]
+        payload["switchBindings"] = [
+            {
+                "switchId": "sw_wall",
+                "button": "left",
+                "pressType": "single",
+                "action": "toggle",
+                "targets": {"lightTargets": ["light_main"], "groupIds": [], "roles": []},
+            }
+        ]
+        stored = await self.service.async_put_config(config_from_payload(payload))
+
+        kept = await self.service.async_apply_template(
+            DEFAULT_TEMPLATE_ID, room_id=room_id, keep_devices=True
+        )
+
+        self.assertEqual(stored.to_dict()["devices"], kept.to_dict()["devices"])
+        self.assertEqual(stored.switch_bindings, kept.switch_bindings)
+        self.assertEqual(
+            ("light_main",), kept.schedule[0].targets.light_targets
+        )
+
+    async def test_apply_template_rejects_ambiguous_or_incompatible_kept_targets(self) -> None:
+        room_id = "room_demo_entry"
+        payload = _payload(room_id)
+        second = dict(payload["devices"]["light_targets"][0])  # type: ignore[index]
+        second["id"] = "light_demo_b"
+        second["entityId"] = "switch.demo_b"
+        payload["devices"]["light_targets"].append(second)  # type: ignore[index]
+        await self.service.async_put_config(config_from_payload(payload))
+
+        with self.assertRaisesRegex(RoomLightingViolation, "cannot safely map target"):
+            await self.service.async_apply_template(
+                DEFAULT_TEMPLATE_ID, room_id=room_id, keep_devices=True
+            )
+
+    async def test_apply_template_rejects_devices_override_when_kept_room_exists(self) -> None:
+        room_id = "room_demo_entry"
+        await self.service.async_put_config(config_from_payload(_payload(room_id)))
+
+        with self.assertRaisesRegex(RoomLightingViolation, "devices override conflicts"):
+            await self.service.async_apply_template(
+                DEFAULT_TEMPLATE_ID,
+                {"devices": _payload(room_id)["devices"]},
+                room_id=room_id,
+                keep_devices=True,
+            )
+
+    async def test_apply_template_validates_remapped_target_capabilities(self) -> None:
+        room_id = "room_demo_entry"
+        payload = _payload(room_id)
+        payload["devices"]["light_targets"][0]["id"] = "light_main"  # type: ignore[index]
+        payload["devices"]["light_targets"][0]["kind"] = "light"  # type: ignore[index]
+        payload["devices"]["light_targets"][0]["entityId"] = "light.demo_a"  # type: ignore[index]
+        await self.service.async_put_config(config_from_payload(payload))
+
+        with self.assertRaisesRegex(RoomLightingViolation, "sets brightness"):
+            await self.service.async_apply_template(
+                DEFAULT_TEMPLATE_ID, room_id=room_id, keep_devices=True
+            )
+
+    async def test_apply_template_does_not_remap_explicit_schedule_or_bindings(self) -> None:
+        room_id = "room_demo_entry"
+        await self.service.async_put_config(config_from_payload(_payload(room_id)))
+        schedule = (await self.service.async_apply_template(DEFAULT_TEMPLATE_ID)).to_dict()[
+            "schedule"
+        ]
+        schedule[0]["targets"]["lightTargets"] = ["light_demo_main"]  # type: ignore[index]
+
+        with self.assertRaisesRegex(RoomLightingViolation, "unknown light target"):
+            await self.service.async_apply_template(
+                DEFAULT_TEMPLATE_ID,
+                {"schedule": schedule, "switchBindings": []},
+                room_id=room_id,
+                keep_devices=True,
+            )
+
+    async def test_apply_template_validates_role_selected_target_capabilities(self) -> None:
+        room_id = "room_demo_entry"
+        await self.service.async_put_config(config_from_payload(_payload(room_id)))
+        schedule = (await self.service.async_apply_template(DEFAULT_TEMPLATE_ID)).to_dict()[
+            "schedule"
+        ]
+        for entry in schedule:
+            entry["targets"] = {"lightTargets": [], "groupIds": [], "roles": ["main"]}
+
+        with self.assertRaisesRegex(RoomLightingViolation, "sets brightness"):
+            await self.service.async_apply_template(
+                DEFAULT_TEMPLATE_ID,
+                {"schedule": schedule},
+                room_id=room_id,
+                keep_devices=True,
+            )
 
     async def test_operations_never_call_home_assistant_services(self) -> None:
         config = config_from_payload(_payload(room_id="room_demo_entry"))
