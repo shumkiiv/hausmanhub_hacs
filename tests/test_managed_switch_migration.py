@@ -60,11 +60,12 @@ def test_manifest_marks_only_snapshot_managed_scenarios_as_replacements() -> Non
 
 
 class Store:
-    def __init__(self, value=None, *, fail_save=False, fail_save_at=None):
+    def __init__(self, value=None, *, fail_save=False, fail_save_at=None, return_false=False):
         self.value = value
         self.saved = []
         self.fail_save = fail_save
         self.fail_save_at = fail_save_at
+        self.return_false = return_false
         self.save_attempts = 0
 
     async def async_load(self):
@@ -74,6 +75,8 @@ class Store:
         self.save_attempts += 1
         if self.fail_save or self.save_attempts == self.fail_save_at:
             raise OSError("verified save failed")
+        if self.return_false:
+            return False
         self.saved.append(value)
         self.value = value
 
@@ -326,33 +329,29 @@ def test_protected_topology_load_fails_closed_for_split_identity() -> None:
 
 
 @pytest.mark.parametrize(
-    ("catalog_resolver", "entity_validator"),
+    ("binding", "catalog_resolver", "entity_validator"),
     [
         (
+            {"targetId": "target.one"},
             lambda _target: (_ for _ in ()).throw(RuntimeError("catalog unavailable")),
             None,
         ),
         (
-            lambda _target: type(
-                "Device", (), {"target_id": "target.one", "entity_id": "light.one"}
-            )(),
+            {"entityId": "light.one"},
+            None,
             lambda _entity: (_ for _ in ()).throw(RuntimeError("entity unavailable")),
         ),
     ],
     ids=("catalog-resolver", "entity-validator"),
 )
 def test_protected_topology_load_fails_closed_when_runtime_callback_crashes(
-    catalog_resolver, entity_validator,
+    binding, catalog_resolver, entity_validator,
 ) -> None:
     payload = {
         "version": 1,
         "revision": 1,
         "updatedAt": "2026-09-25T00:00:00+00:00",
-        "bindings": [{
-            "role": "managed.test.light",
-            "targetId": "target.one",
-            "entityId": "light.one",
-        }],
+        "bindings": [{"role": "managed.test.light", **binding}],
     }
     service = ProtectedTopologyService(
         Store(payload),
@@ -462,6 +461,23 @@ def test_protected_topology_replace_rejects_binding_without_validator_before_wri
     assert service.readiness(("managed.test.light",))["ready"] is False
 
 
+def test_protected_topology_replace_converts_callback_error_before_write() -> None:
+    store = Store()
+    service = ProtectedTopologyService(
+        store,
+        entity_validator=lambda _entity: (_ for _ in ()).throw(RuntimeError("registry failed")),
+    )
+    asyncio.run(service.async_load())
+
+    with pytest.raises(ProtectedTopologyViolation, match="entity is unavailable"):
+        asyncio.run(service.async_replace(
+            0, [{"role": "managed.test.light", "entityId": "light.one"}]
+        ))
+
+    assert store.save_attempts == 0
+    assert service.healthy is True
+
+
 @pytest.mark.parametrize(
     ("binding", "callbacks"),
     (
@@ -490,6 +506,73 @@ def test_protected_topology_load_accepts_single_identity_with_its_runtime_valida
 
     assert service.healthy is True
     assert service.readiness(("managed.test.light",))["ready"] is True
+
+
+@pytest.mark.parametrize("return_false", (False, True))
+def test_protected_topology_failed_save_preserves_memory_but_marks_it_unhealthy(return_false) -> None:
+    store = Store(fail_save=not return_false, return_false=return_false)
+    validator = lambda _entity: True
+    service = ProtectedTopologyService(store, entity_validator=validator)
+    asyncio.run(service.async_load())
+
+    with pytest.raises(ProtectedTopologyViolation, match="storage save failed"):
+        asyncio.run(service.async_replace(
+            0, [{"role": "managed.test.light", "entityId": "light.one"}]
+        ))
+
+    assert service.revision == 0
+    assert service.payload["bindings"] == []
+    assert service.healthy is False
+    assert service.readiness(("managed.test.light",))["ready"] is False
+
+
+def test_protected_topology_runtime_callback_disappearance_is_redacted_not_raised() -> None:
+    available = {"value": True}
+    calls = {"count": 0}
+
+    def validator(_entity):
+        calls["count"] += 1
+        if not available["value"]:
+            raise RuntimeError("Home Assistant entity registry disappeared")
+        return True
+
+    service = ProtectedTopologyService(Store(), entity_validator=validator)
+    asyncio.run(service.async_load())
+    asyncio.run(service.async_replace(
+        0, [{"role": "managed.test.light", "entityId": "light.one"}]
+    ))
+    assert calls["count"] == 2  # write validation and returned redacted status
+
+    available["value"] = False
+    readiness = service.readiness(("managed.test.light",))
+
+    assert readiness["ready"] is False
+    assert readiness["roles"] == [{
+        "role": "managed.test.light",
+        "configured": False,
+        "missingReason": "entity_unavailable",
+    }]
+
+
+def test_protected_topology_successful_save_returns_redacted_status_when_callback_degrades() -> None:
+    calls = {"count": 0}
+
+    def validator(_entity):
+        calls["count"] += 1
+        return calls["count"] == 1
+
+    store = Store()
+    service = ProtectedTopologyService(store, entity_validator=validator)
+    asyncio.run(service.async_load())
+
+    result = asyncio.run(service.async_replace(
+        0, [{"role": "managed.test.light", "entityId": "light.one"}]
+    ))
+
+    assert store.value is not None
+    assert service.revision == 1
+    assert service.healthy is True
+    assert result["ready"] is False
 
 
 def _protected_managed_switch_expectation(release):

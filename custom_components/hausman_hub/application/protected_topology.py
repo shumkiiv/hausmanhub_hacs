@@ -450,7 +450,7 @@ class ProtectedTopologyService:
         if binding is None:
             return None
         if binding.target_id is not None:
-            return binding.target_id
+            return self._resolved_target(binding.target_id)
         if binding.entity_id is not None:
             return self._target_from_public_entity(binding.entity_id)
         return None
@@ -461,21 +461,19 @@ class ProtectedTopologyService:
             return None
         binding = self._bindings.get(role)
         if binding is not None and binding.entity_id is not None:
-            return binding.entity_id
+            return (
+                binding.entity_id
+                if self._validated_entity(binding.entity_id)
+                else None
+            )
         target_id = self.target_id(role)
-        resolver = self._catalog_resolver
-        device = resolver(target_id) if callable(resolver) and isinstance(target_id, str) else None
+        device = self._catalog_device(target_id) if isinstance(target_id, str) else None
         entity_id = getattr(device, "entity_id", None)
         return entity_id if isinstance(entity_id, str) and entity_id else None
 
     def _target_from_public_entity(self, entity_id: str) -> str | None:
         target_id = _stable_target_id_from_entity(entity_id)
-        resolver = self._catalog_resolver
-        if callable(resolver):
-            device = resolver(target_id)
-            if getattr(device, "target_id", None) != target_id:
-                return None
-        return target_id
+        return self._resolved_target(target_id)
 
     def targets_for_roles(self, roles: tuple[str, ...]) -> tuple[str, ...]:
         self._require_loaded()
@@ -539,7 +537,6 @@ class ProtectedTopologyService:
         async with self._lock:
             if expected_revision != self._revision:
                 raise ProtectedTopologyViolation("protected topology revision is stale", stale=True)
-            previous = self.payload
             next_revision = self._revision + 1
             updated_at = _timestamp(self._now)
             stored = {
@@ -555,12 +552,11 @@ class ProtectedTopologyService:
                 saved = await self._store.async_save(deepcopy(stored))
             except Exception as error:  # noqa: BLE001
                 self._healthy = False
-                self._load_payload(previous)
                 raise ProtectedTopologyViolation(
                     "protected topology storage save failed", storage=True
                 ) from error
             if saved is False:
-                self._load_payload(previous)
+                self._healthy = False
                 raise ProtectedTopologyViolation(
                     "protected topology storage save failed", storage=True
                 )
@@ -572,29 +568,49 @@ class ProtectedTopologyService:
         return self.redacted_document()
 
     def _validate_runtime_bindings(self, bindings: list[ProtectedRoleBinding]) -> None:
-        resolver = self._catalog_resolver
-        entity_validator = self._entity_validator
         for binding in bindings:
+            if binding.target_id is not None and binding.entity_id is not None:
+                raise ProtectedTopologyViolation("protected topology target identity is invalid")
             if binding.target_id is not None:
-                if not callable(resolver):
+                if not callable(self._catalog_resolver):
                     raise ProtectedTopologyViolation(
                         "protected topology target validation is unavailable"
                     )
-                device = resolver(binding.target_id)
-                if getattr(device, "target_id", None) != binding.target_id:
+                if self._resolved_target(binding.target_id) is None:
                     raise ProtectedTopologyViolation("protected topology target is unavailable")
-                if (
-                    binding.entity_id is not None
-                    and getattr(device, "entity_id", None) != binding.entity_id
-                ):
-                    raise ProtectedTopologyViolation("protected topology target identity is invalid")
             if binding.entity_id is not None:
-                if not callable(entity_validator):
+                if not callable(self._entity_validator):
                     raise ProtectedTopologyViolation(
                         "protected topology entity validation is unavailable"
                     )
-                if not entity_validator(binding.entity_id):
+                if not self._validated_entity(binding.entity_id):
                     raise ProtectedTopologyViolation("protected topology entity is unavailable")
+
+    def _catalog_device(self, target_id: str) -> object | None:
+        """Call the Home Assistant catalog boundary without exposing its failures."""
+
+        resolver = self._catalog_resolver
+        if not callable(resolver):
+            return None
+        try:
+            return resolver(target_id)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _resolved_target(self, target_id: str) -> str | None:
+        device = self._catalog_device(target_id)
+        return target_id if getattr(device, "target_id", None) == target_id else None
+
+    def _validated_entity(self, entity_id: str) -> bool:
+        """Call the Home Assistant entity boundary without exposing its failures."""
+
+        validator = self._entity_validator
+        if not callable(validator):
+            return False
+        try:
+            return validator(entity_id) is True
+        except Exception:  # noqa: BLE001
+            return False
 
     def _require_loaded(self) -> None:
         if not self._loaded:
