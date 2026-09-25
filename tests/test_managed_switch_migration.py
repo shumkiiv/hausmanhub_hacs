@@ -265,23 +265,14 @@ def test_release_source_reader_rejects_nonregular_file_without_reading(tmp_path)
 
 
 def test_protected_manifest_cannot_replace_release_source_metadata() -> None:
-    release = MIGRATION_MANIFEST[0]
+    expectations = [
+        _protected_managed_switch_expectation(item) for item in MIGRATION_MANIFEST
+    ]
+    expectations[0]["sourceFile"] = "../../outside.js"
 
     class Topology:
         def migration_expectations(self, _kind):
-            return ({
-                "scenarioId": release.scenario_id,
-                "legacyRevision": release.legacy_revision,
-                "legacySourceHash": release.legacy_source_hash,
-                "legacyTopology": release.legacy_topology,
-                "legacyInputRoles": ["managed.test.old"],
-                "inputRoles": ["managed.test.new"],
-                "newSourceHash": release.new_source_hash,
-                "sourceFile": "../../outside.js",
-                "operation": release.operation,
-                "expectedRevision": release.expected_revision,
-                "activationReady": release.activation_ready,
-            },)
+            return tuple(expectations)
 
         def targets_for_roles(self, roles):
             return tuple(f"target.{index}" for index, _role in enumerate(roles))
@@ -328,6 +319,10 @@ def test_protected_topology_load_fails_closed_for_split_identity() -> None:
         asyncio.run(service.async_load())
 
     assert service.healthy is False
+    assert service.target_id("managed.test.light") is None
+    assert service.entity_id("managed.test.light") is None
+    assert service.targets_for_roles(("managed.test.light",)) == ()
+    assert service.migration_expectations("managedSwitches") == ()
 
 
 @pytest.mark.parametrize(
@@ -372,7 +367,7 @@ def test_protected_topology_load_fails_closed_when_runtime_callback_crashes(
     assert service.readiness(("managed.test.light",))["ready"] is False
 
 
-def test_protected_topology_load_keeps_legacy_identity_only_when_proven() -> None:
+def test_protected_topology_load_rejects_legacy_dual_identity_even_when_equal() -> None:
     payload = {
         "version": 1,
         "revision": 1,
@@ -383,15 +378,93 @@ def test_protected_topology_load_keeps_legacy_identity_only_when_proven() -> Non
             "entityId": "light.one",
         }],
     }
-    device = type("Device", (), {"target_id": "target.one", "entity_id": "light.one"})()
-    service = ProtectedTopologyService(
-        Store(payload), catalog_resolver=lambda _target: device,
-    )
+    service = ProtectedTopologyService(Store(payload))
 
+    with pytest.raises(ProtectedTopologyStorageError, match="storage invalid"):
+        asyncio.run(service.async_load())
+
+    assert service.healthy is False
+
+
+def test_protected_topology_load_clears_all_state_after_late_expectation_error() -> None:
+    payload = {
+        "version": 1,
+        "revision": 7,
+        "updatedAt": "2026-09-25T00:00:00+00:00",
+        "bindings": [{
+            "role": "managed.test.light",
+            "entityId": "light.one",
+        }],
+        "migrationExpectations": {"managedSwitches": [{}]},
+    }
+    service = ProtectedTopologyService(Store(payload))
+
+    with pytest.raises(ProtectedTopologyStorageError, match="storage invalid"):
+        asyncio.run(service.async_load())
+
+    assert service.healthy is False
+    assert service.payload["bindings"] == []
+    assert service.migration_expectations("managedSwitches") == ()
+    assert service.target_id("managed.test.light") is None
+
+
+def test_protected_topology_empty_readiness_is_not_ready() -> None:
+    service = ProtectedTopologyService(Store())
     asyncio.run(service.async_load())
 
-    assert service.healthy is True
-    assert service.target_id("managed.test.light") == "target.one"
+    readiness = service.readiness(())
+
+    assert readiness["roles"] == []
+    assert readiness["ready"] is False
+
+
+def _protected_managed_switch_expectation(release):
+    return {
+        "scenarioId": release.scenario_id,
+        "legacyRevision": release.legacy_revision,
+        "legacySourceHash": release.legacy_source_hash,
+        "legacyTopology": release.legacy_topology,
+        "legacyInputRoles": ["managed.test.old"],
+        "inputRoles": ["managed.test.new"],
+        "newSourceHash": release.new_source_hash,
+        "sourceFile": release.source_file,
+        "operation": release.operation,
+        "expectedRevision": release.expected_revision,
+        "activationReady": release.activation_ready,
+    }
+
+
+@pytest.mark.parametrize("shape", ("missing", "extra"))
+def test_protected_manifest_rejects_wrong_scenario_cardinality_before_role_resolution(shape) -> None:
+    expectations = tuple(_protected_managed_switch_expectation(item) for item in MIGRATION_MANIFEST)
+    if shape == "missing":
+        expectations = expectations[:-1]
+    else:
+        expectations = (*expectations, expectations[-1])
+
+    class Topology:
+        def migration_expectations(self, _kind):
+            return expectations
+
+        def targets_for_roles(self, _roles):
+            raise AssertionError("roles must not resolve for an invalid scenario set")
+
+    with pytest.raises(ManagedSwitchMigrationConflict, match="scenario set is invalid"):
+        managed_switch_manifest_from_protected_topology(Topology())
+
+
+def test_protected_manifest_requires_approved_role_order_after_release_validation() -> None:
+    expectations = tuple(_protected_managed_switch_expectation(item) for item in MIGRATION_MANIFEST)
+
+    class Topology:
+        def migration_expectations(self, _kind):
+            return expectations
+
+        def targets_for_roles(self, _roles):
+            raise AssertionError("role order is not approved, so roles must not resolve")
+
+    with pytest.raises(ManagedSwitchMigrationConflict, match="role order is not approved"):
+        managed_switch_manifest_from_protected_topology(Topology())
 
 
 def test_migration_persists_prepared_before_cas_and_completed_after() -> None:

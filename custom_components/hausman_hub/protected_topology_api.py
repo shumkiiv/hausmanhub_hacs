@@ -13,6 +13,7 @@ from .application.protected_topology import (
     PROTECTED_TOPOLOGY_REPLACE_CONTRACT,
     ProtectedTopologyService,
     ProtectedTopologyViolation,
+    _valid_role,
 )
 from .climate_api import (
     DOMAIN,
@@ -148,9 +149,15 @@ class ProtectedTopologyReadinessView(_ProtectedTopologyView):
             }:
                 raise ValueError
             roles = payload.get("roles") if isinstance(payload, dict) else None
-            if not isinstance(roles, list) or any(not isinstance(role, str) for role in roles):
+            if (
+                not isinstance(roles, list)
+                or not roles
+                or len(roles) > 64
+                or len(roles) != len(set(roles))
+            ):
                 raise ValueError
-        except (ValueError, TypeError):
+            tuple(_valid_role(role) for role in roles)
+        except (ValueError, TypeError, ProtectedTopologyViolation):
             return self.json_message(
                 "Protected topology readiness request is invalid.",
                 HTTPStatus.BAD_REQUEST,

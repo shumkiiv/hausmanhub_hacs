@@ -702,24 +702,20 @@ def managed_switch_manifest_from_protected_topology(
     targets_getter = getattr(protected_topology, "targets_for_roles", None)
     if not callable(expectations_getter) or not callable(targets_getter):
         raise ManagedSwitchMigrationConflict("protected managed topology is unavailable")
-    release_by_scenario = {item.scenario_id: item for item in MIGRATION_MANIFEST}
-    entries: list[ManagedSwitchMigrationEntry] = []
-    for item in expectations_getter("managedSwitches"):
+    expectations = expectations_getter("managedSwitches")
+    if not isinstance(expectations, tuple) or len(expectations) != len(MIGRATION_MANIFEST):
+        raise ManagedSwitchMigrationConflict("protected managed topology scenario set is invalid")
+    expected_scenarios = tuple(item.scenario_id for item in MIGRATION_MANIFEST)
+    supplied_scenarios = tuple(
+        item.get("scenarioId") if isinstance(item, Mapping) else None
+        for item in expectations
+    )
+    if supplied_scenarios != expected_scenarios:
+        raise ManagedSwitchMigrationConflict("protected managed topology scenario order is invalid")
+    for item, release in zip(expectations, MIGRATION_MANIFEST, strict=True):
         if not isinstance(item, Mapping):
             raise ManagedSwitchMigrationConflict("protected managed topology is invalid")
-        legacy_roles = tuple(str(role) for role in item.get("legacyInputRoles", ()))
-        input_roles = tuple(str(role) for role in item.get("inputRoles", ()))
-        legacy_targets = targets_getter(legacy_roles)
-        input_targets = targets_getter(input_roles)
         if (
-            len(legacy_targets) != len(legacy_roles)
-            or len(input_targets) != len(input_roles)
-            or not legacy_targets
-            or not input_targets
-        ):
-            raise ManagedSwitchMigrationConflict("protected managed topology is incomplete")
-        release = release_by_scenario.get(item.get("scenarioId"))
-        if release is None or (
             item.get("legacyRevision") != release.legacy_revision
             or item.get("legacySourceHash") != release.legacy_source_hash
             or item.get("legacyTopology") != release.legacy_topology
@@ -730,28 +726,13 @@ def managed_switch_manifest_from_protected_topology(
             or item.get("activationReady") != release.activation_ready
         ):
             raise ManagedSwitchMigrationConflict("protected managed topology differs from release manifest")
-        entries.append(
-            ManagedSwitchMigrationEntry(
-                scenario_id=str(item["scenarioId"]),
-                legacy_revision=int(item["legacyRevision"]),
-                legacy_source_hash=str(item["legacySourceHash"]),
-                legacy_topology=str(item["legacyTopology"]),
-                legacy_input_target_ids=tuple(legacy_targets),
-                input_target_ids=tuple(input_targets),
-                new_source_hash=str(item["newSourceHash"]),
-                source_file=str(item["sourceFile"]),
-                operation=str(item["operation"]),
-                expected_revision=(
-                    None
-                    if item.get("expectedRevision") is None
-                    else int(item["expectedRevision"])
-                ),
-                activation_ready=bool(item["activationReady"]),
-            )
-        )
-    if not entries:
-        raise ManagedSwitchMigrationConflict("protected managed topology is missing")
-    return tuple(entries)
+    # The release manifest intentionally does not prescribe per-home
+    # legacy/input role order. Resolving an unapproved tuple could wire a
+    # controller to a different device, so no protected image may pass until
+    # that mapping has a separately reviewed source of truth.
+    raise ManagedSwitchMigrationConflict(
+        "protected managed topology role order is not approved"
+    )
 
 
 class ManagedSwitchStartupCoordinator:

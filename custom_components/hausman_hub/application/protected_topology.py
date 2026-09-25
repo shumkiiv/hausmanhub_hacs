@@ -196,8 +196,11 @@ def _binding_from_payload(value: object) -> ProtectedRoleBinding:
     role = _valid_role(value.get("role"))
     target_id = _valid_target(value.get("targetId"))
     entity_id = _valid_entity(value.get("entityId"))
-    if target_id is None and entity_id is None:
-        raise ProtectedTopologyViolation("protected topology binding is empty")
+    # A role has one authoritative identity.  Accepting both fields, even when
+    # they currently describe the same device, creates a second identity that
+    # can drift between persistence, the catalog and a later migration.
+    if (target_id is None) == (entity_id is None):
+        raise ProtectedTopologyViolation("protected topology binding identity is invalid")
     return ProtectedRoleBinding(role, target_id, entity_id)
 
 
@@ -347,17 +350,24 @@ class ProtectedTopologyService:
         return self._revision
 
     async def async_load(self) -> None:
+        # Until every stored value and runtime callback has been checked, no
+        # old binding may remain usable after a reload attempt.
+        self._healthy = False
         try:
             payload = await self._store.async_load()
         except Exception as error:  # noqa: BLE001
-            self._healthy = False
+            self._clear_unhealthy_state()
             self._loaded = True
             raise ProtectedTopologyStorageError("protected topology storage unavailable") from error
         if payload is None:
             self._revision = 0
             self._updated_at = _timestamp(self._now)
             self._bindings = {}
+            self._migration_expectations = {
+                key: () for key in _MIGRATION_EXPECTATION_KEYS
+            }
             self._loaded = True
+            self._healthy = True
             return
         try:
             self._load_payload(payload)
@@ -365,10 +375,11 @@ class ProtectedTopologyService:
             # Catalog and entity callbacks cross the Home Assistant boundary.
             # Their failures must not leave a partially initialized resolver
             # available to a later migration attempt.
-            self._healthy = False
+            self._clear_unhealthy_state()
             self._loaded = True
             raise ProtectedTopologyStorageError("protected topology storage invalid") from error
         self._loaded = True
+        self._healthy = True
 
     def _load_payload(self, payload: object) -> None:
         if not isinstance(payload, Mapping) or not {
@@ -392,13 +403,17 @@ class ProtectedTopologyService:
             if binding.role in parsed:
                 raise ProtectedTopologyViolation("protected topology role is duplicated")
             parsed[binding.role] = binding
+        # Parse and validate all independently supplied state before replacing
+        # the live resolver.  A malformed expectation must never leave fresh
+        # bindings paired with stale migration expectations.
+        expectations = _migration_expectations_from_payload(
+            payload.get("migrationExpectations")
+        )
         self._validate_runtime_bindings(list(parsed.values()))
         self._revision = revision
         self._updated_at = updated_at
         self._bindings = parsed
-        self._migration_expectations = _migration_expectations_from_payload(
-            payload.get("migrationExpectations")
-        )
+        self._migration_expectations = expectations
 
     @property
     def payload(self) -> dict[str, object]:
@@ -419,12 +434,16 @@ class ProtectedTopologyService:
 
     def migration_expectations(self, kind: str) -> tuple[dict[str, object], ...]:
         self._require_loaded()
+        if not self._healthy:
+            return ()
         if kind not in _MIGRATION_EXPECTATION_KEYS:
             return ()
         return tuple(deepcopy(item) for item in self._migration_expectations.get(kind, ()))
 
     def target_id(self, role: str) -> str | None:
         self._require_loaded()
+        if not self._healthy:
+            return None
         if role == ROLE_SHARED_SUN:
             return self._target_from_public_entity("sun.sun")
         binding = self._bindings.get(role)
@@ -438,6 +457,8 @@ class ProtectedTopologyService:
 
     def entity_id(self, role: str) -> str | None:
         self._require_loaded()
+        if not self._healthy:
+            return None
         binding = self._bindings.get(role)
         if binding is not None and binding.entity_id is not None:
             return binding.entity_id
@@ -457,6 +478,9 @@ class ProtectedTopologyService:
         return target_id
 
     def targets_for_roles(self, roles: tuple[str, ...]) -> tuple[str, ...]:
+        self._require_loaded()
+        if not self._healthy:
+            return ()
         values: list[str] = []
         for role in roles:
             target_id = self.target_id(role)
@@ -486,7 +510,7 @@ class ProtectedTopologyService:
         return {
             "contract": {"name": PROTECTED_TOPOLOGY_CONTRACT, "version": 1},
             "revision": self._revision,
-            "ready": self._healthy and all(bool(item["configured"]) for item in roles),
+            "ready": bool(roles) and self._healthy and all(bool(item["configured"]) for item in roles),
             "healthy": self._healthy,
             "roles": roles,
         }
@@ -560,8 +584,6 @@ class ProtectedTopologyService:
                     and getattr(device, "entity_id", None) != binding.entity_id
                 ):
                     raise ProtectedTopologyViolation("protected topology target identity is invalid")
-            elif binding.target_id is not None and binding.entity_id is not None:
-                raise ProtectedTopologyViolation("protected topology target identity is unavailable")
             if binding.entity_id is not None and callable(entity_validator):
                 if not entity_validator(binding.entity_id):
                     raise ProtectedTopologyViolation("protected topology entity is unavailable")
@@ -569,6 +591,17 @@ class ProtectedTopologyService:
     def _require_loaded(self) -> None:
         if not self._loaded:
             raise ProtectedTopologyStorageError("protected topology service is not loaded")
+
+    def _clear_unhealthy_state(self) -> None:
+        """Forget untrusted state after a failed read before any caller can use it."""
+
+        self._revision = 0
+        self._updated_at = ""
+        self._bindings = {}
+        self._migration_expectations = {
+            key: () for key in _MIGRATION_EXPECTATION_KEYS
+        }
+        self._healthy = False
 
 
 def role_targets_payload(
