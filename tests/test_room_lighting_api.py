@@ -474,6 +474,48 @@ class RoomLightingApiTest(unittest.TestCase):
 
         asyncio.run(flow())
 
+    def test_template_draft_rejects_concurrent_device_update(self) -> None:
+        async def flow() -> None:
+            room_id = "room_demo_entry"
+            initial = await self.config_view.put(
+                _json_request(
+                    self._config_path(room_id), _config_payload(room_id), room_id=room_id
+                )
+            )
+            self.assertEqual(200, initial.status)
+
+            draft = await self.apply_view.post(
+                _json_request(
+                    self.api.ROOM_LIGHTING_TEMPLATE_APPLY_PATH.format(room_id=room_id),
+                    {"templateId": "day_profile", "keepDevices": True},
+                    room_id=room_id,
+                )
+            )
+            self.assertEqual(200, draft.status)
+            self.assertEqual(initial.payload["version"], draft.payload["version"])
+            self.assertEqual(initial.payload["updatedAt"], draft.payload["updatedAt"])
+
+            concurrent = _config_payload(room_id, name="Новое устройство")
+            concurrent["version"] = initial.payload["version"]
+            concurrent["devices"]["light_targets"][0]["entityId"] = "light.demo_new"
+            updated = await self.config_view.put(
+                _json_request(self._config_path(room_id), concurrent, room_id=room_id)
+            )
+            self.assertEqual(200, updated.status)
+
+            stale = await self.config_view.put(
+                _json_request(self._config_path(room_id), draft.payload, room_id=room_id)
+            )
+            self.assertEqual(409, stale.status)
+            self.assertEqual("revision_conflict", stale.payload["code"])
+
+            current = await self.config_view.get(
+                _request(self._config_path(room_id), room_id=room_id)
+            )
+            self.assertEqual("light.demo_new", current.payload["devices"]["light_targets"][0]["entityId"])
+
+        asyncio.run(flow())
+
     def test_live_test_safe_is_background_and_command_free(self) -> None:
         async def flow() -> None:
             room_id = "room_demo_entry"

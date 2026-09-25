@@ -498,7 +498,6 @@ return msg;`;
             if (method === "POST" && action === "templates/apply") {
               const applied = cloneHarnessValue(harness.config);
               applied.templateId = payload.templateId;
-              applied.version = 1;
               return applied;
             }
           }

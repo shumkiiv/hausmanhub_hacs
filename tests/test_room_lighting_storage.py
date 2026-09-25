@@ -376,6 +376,25 @@ class RoomLightingServiceTest(unittest.IsolatedAsyncioTestCase):
                 keep_devices=True,
             )
 
+    async def test_apply_template_rejects_manual_only_exact_or_role_target(self) -> None:
+        room_id = "room_demo_entry"
+        payload = _payload(room_id)
+        payload["devices"]["light_targets"][0]["id"] = "light_demo_main"  # type: ignore[index]
+        payload["devices"]["light_targets"][0]["autoControl"] = False  # type: ignore[index]
+        await self.service.async_put_config(config_from_payload(payload))
+
+        with self.assertRaisesRegex(RoomLightingViolation, "maps manual-only target"):
+            await self.service.async_apply_template(
+                DEFAULT_TEMPLATE_ID, room_id=room_id, keep_devices=True
+            )
+
+        payload["devices"]["light_targets"][0]["id"] = "light_kept_main"  # type: ignore[index]
+        await self.service.async_put_config(config_from_payload(payload))
+        with self.assertRaisesRegex(RoomLightingViolation, "maps manual-only target"):
+            await self.service.async_apply_template(
+                DEFAULT_TEMPLATE_ID, room_id=room_id, keep_devices=True
+            )
+
     async def test_operations_never_call_home_assistant_services(self) -> None:
         config = config_from_payload(_payload(room_id="room_demo_entry"))
         await self.service.async_put_config(config)

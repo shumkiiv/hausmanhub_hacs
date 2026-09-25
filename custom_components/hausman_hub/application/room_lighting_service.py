@@ -271,6 +271,11 @@ class RoomLightingService:
                     )
                 stored_payload = stored.to_dict()
                 payload["devices"] = stored_payload["devices"]
+                # The draft must carry the exact revision of the device
+                # snapshot it preserves. A later GET must not silently turn a
+                # stale template draft into an overwrite of another edit.
+                payload["version"] = stored_payload["version"]
+                payload["updatedAt"] = stored_payload["updatedAt"]
                 if overrides is None or "switchBindings" not in overrides:
                     payload["switchBindings"] = deepcopy(stored_payload["switchBindings"])
                 # Keep the kept devices and their auxiliary policy together:
@@ -329,7 +334,15 @@ def _remap_template_schedule(
             continue
         remapped: list[object] = []
         for target_id in direct_targets:
-            if not isinstance(target_id, str) or target_id in by_id:
+            if not isinstance(target_id, str):
+                remapped.append(target_id)
+                continue
+            entry_id = entry.get("id", "unknown")
+            if target_id in by_id:
+                if by_id[target_id].get("autoControl") is False:
+                    raise RoomLightingViolation(
+                        f"template schedule entry {entry_id} maps manual-only target: {target_id}"
+                    )
                 remapped.append(target_id)
                 continue
             source = template_by_id.get(target_id)
@@ -340,9 +353,13 @@ def _remap_template_schedule(
                 if isinstance(item, Mapping) and item.get("role") == role and role is not None
             ]
             if len(candidates) != 1 or not isinstance(candidates[0].get("id"), str):
-                entry_id = entry.get("id", "unknown")
                 raise RoomLightingViolation(
                     f"template schedule entry {entry_id} cannot safely map target: {target_id}"
+                )
+            if candidates[0].get("autoControl") is False:
+                raise RoomLightingViolation(
+                    f"template schedule entry {entry_id} maps manual-only target: "
+                    f"{candidates[0]['id']}"
                 )
             remapped.append(candidates[0]["id"])
         targets["lightTargets"] = remapped

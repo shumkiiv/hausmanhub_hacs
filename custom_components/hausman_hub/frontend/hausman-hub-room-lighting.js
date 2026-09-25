@@ -331,25 +331,16 @@ async function applyTemplate(panel, roomId, templateId) {
   store.conflictMessage = "";
   rerender(panel, roomId);
   try {
-    // The template route builds a draft; it is not a stored version. Re-read
-    // the stored document so version/updatedAt come from the server instead of
-    // being invented on the client.
+    // For a configured room the template route returns the exact revision of
+    // the stored device snapshot it kept. Do not re-read here: a concurrent
+    // edit must leave this draft stale and let its PUT fail with a 409.
     const applied = await panel._hass.callApi("POST", lightingApi(roomId, "/templates/apply"), {
       templateId,
       keepDevices: true,
     });
-    const stored = await panel._hass.callApi("GET", lightingApi(roomId, "/config")).catch((error) => {
-      if (error && (error.status === 404 || error.status_code === 404)) return null;
-      throw error;
-    });
-    const draft = clone(applied && typeof applied === "object" ? applied : stored);
+    const draft = clone(applied);
     if (!draft) throw new Error("шаблон вернул пустой документ");
-    if (stored && typeof stored === "object") {
-      draft.version = stored.version;
-      draft.updatedAt = stored.updatedAt;
-      if (typeof stored.roomId === "string" && stored.roomId) draft.roomId = stored.roomId;
-    }
-    store.config = stored && typeof stored === "object" ? stored : null;
+    store.config = clone(applied);
     store.draft = draft;
     store.preview = null;
     store.templateBaseline = clone(applied && typeof applied === "object" ? applied : draft);

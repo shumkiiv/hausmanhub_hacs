@@ -105,6 +105,28 @@ test("конфликт версии переносит локальные пра
   await expect(conflict).toHaveCount(0);
 });
 
+test("шаблон сохраняет версию ответа POST до попытки сохранения", async ({ page }) => {
+  const panel = await openLighting(page);
+  const screen = await openEditor(page, panel);
+  await page.evaluate(() => { window.__hausmanHubHarnessCalls = []; });
+
+  await screen.getByRole("button", { name: /Применить:/ }).first().click();
+  await expect(screen.locator('[data-testid="room-lighting:save-state"]')).toContainText("Не сохранено");
+
+  const result = await page.evaluate(() => {
+    const host = document.querySelector("hausman-hub-panel");
+    const store = host._roomLighting.byRoom.office;
+    return {
+      version: store.draft.version,
+      post: window.__hausmanHubHarnessCalls.filter((call) => call.method === "POST" && call.path.endsWith("templates/apply")).length,
+      configGets: window.__hausmanHubHarnessCalls.filter((call) => call.method === "GET" && call.path.endsWith("/lighting/config")).length,
+    };
+  });
+  expect(result.post).toBe(1);
+  expect(result.configGets).toBe(0);
+  expect(result.version).toBe(3);
+});
+
 test("технические идентификаторы видны только внутри раскрытого блока", async ({ page }) => {
   const panel = await openLighting(page);
   const screen = await openEditor(page, panel);
