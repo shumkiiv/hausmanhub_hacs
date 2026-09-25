@@ -622,6 +622,52 @@ def test_protected_topology_queued_write_rechecks_unhealthy_state_under_lock() -
     asyncio.run(exercise())
 
 
+def test_protected_topology_queued_write_revalidates_callbacks_under_lock() -> None:
+    class HeldSaveStore(Store):
+        def __init__(self) -> None:
+            super().__init__()
+            self.first_save_started = asyncio.Event()
+            self.release_first_save = asyncio.Event()
+
+        async def async_save(self, value):
+            self.save_attempts += 1
+            if self.save_attempts == 1:
+                self.first_save_started.set()
+                await self.release_first_save.wait()
+            self.saved.append(value)
+            self.value = value
+
+    async def exercise() -> None:
+        available = {"value": True}
+
+        def validator(_entity):
+            if not available["value"]:
+                raise RuntimeError("entity registry disappeared")
+            return True
+
+        store = HeldSaveStore()
+        service = ProtectedTopologyService(store, entity_validator=validator)
+        await service.async_load()
+        first = asyncio.create_task(service.async_replace(
+            0, [{"role": "managed.test.first", "entityId": "light.one"}]
+        ))
+        await store.first_save_started.wait()
+        second = asyncio.create_task(service.async_replace(
+            1, [{"role": "managed.test.second", "entityId": "light.two"}]
+        ))
+        await asyncio.sleep(0)
+        available["value"] = False
+        store.release_first_save.set()
+
+        await first
+        with pytest.raises(ProtectedTopologyViolation, match="entity is unavailable"):
+            await second
+        assert store.save_attempts == 1
+        assert store.value["revision"] == 1
+
+    asyncio.run(exercise())
+
+
 def test_protected_topology_runtime_callback_disappearance_is_redacted_not_raised() -> None:
     available = {"value": True}
     calls = {"count": 0}

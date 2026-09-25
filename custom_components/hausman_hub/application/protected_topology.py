@@ -535,7 +535,6 @@ class ProtectedTopologyService:
         if len(roles) != len(set(roles)):
             raise ProtectedTopologyViolation("protected topology role is duplicated")
         parsed_expectations = _migration_expectations_from_payload(migration_expectations)
-        self._validate_runtime_bindings(parsed)
         async with self._lock:
             # The value may have changed while this request waited for a
             # previous save. Re-check it while owning the same lock as writes.
@@ -545,6 +544,7 @@ class ProtectedTopologyService:
                 )
             if expected_revision != self._revision:
                 raise ProtectedTopologyViolation("protected topology revision is stale", stale=True)
+            self._validate_runtime_bindings(parsed)
             next_revision = self._revision + 1
             updated_at = _timestamp(self._now)
             stored = {
