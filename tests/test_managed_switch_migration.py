@@ -4,6 +4,7 @@ import asyncio
 import copy
 import hashlib
 import json
+import os
 
 import pytest
 
@@ -23,7 +24,9 @@ from custom_components.hausman_hub.application.managed_switch_migration import (
 from custom_components.hausman_hub.application.protected_topology import (
     ProtectedRoleBinding,
     ProtectedTopologyService,
+    ProtectedTopologyStorageError,
     ProtectedTopologyViolation,
+    _valid_source_file,
 )
 
 
@@ -238,11 +241,23 @@ def test_manifest_contains_exact_eight_protected_scenarios_and_sources() -> None
 def test_release_source_reader_rejects_symlink(tmp_path) -> None:
     source = tmp_path / "release.js"
     source.write_text("safe", encoding="utf-8")
-    link = tmp_path / "link.js"
+    link = tmp_path / MIGRATION_MANIFEST[0].source_file
     link.symlink_to(source)
     entry = ManagedSwitchMigrationEntry(
         "scenario", 0, "a" * 64, "topology", ("old",), ("new",),
-        hashlib.sha256(b"safe").hexdigest(), "link.js",
+        hashlib.sha256(b"safe").hexdigest(), link.name,
+    )
+
+    with pytest.raises(ManagedSwitchMigrationConflict, match="source is unavailable"):
+        _entries_with_sources((entry,), root=tmp_path)
+
+
+def test_release_source_reader_rejects_nonregular_file_without_reading(tmp_path) -> None:
+    fifo = tmp_path / MIGRATION_MANIFEST[0].source_file
+    os.mkfifo(fifo)
+    entry = ManagedSwitchMigrationEntry(
+        "scenario", 0, "a" * 64, "topology", ("old",), ("new",),
+        "a" * 64, fifo.name,
     )
 
     with pytest.raises(ManagedSwitchMigrationConflict, match="source is unavailable"):
@@ -275,6 +290,12 @@ def test_protected_manifest_cannot_replace_release_source_metadata() -> None:
         managed_switch_manifest_from_protected_topology(Topology())
 
 
+def test_protected_topology_accepts_only_release_source_basenames() -> None:
+    assert _valid_source_file(MIGRATION_MANIFEST[0].source_file) == MIGRATION_MANIFEST[0].source_file
+    with pytest.raises(ProtectedTopologyViolation, match="source file is invalid"):
+        _valid_source_file("/outside.js")
+
+
 def test_protected_binding_rejects_split_target_and_entity_identity() -> None:
     device = type("Device", (), {"target_id": "target.one", "entity_id": "light.one"})()
     service = ProtectedTopologyService(
@@ -285,6 +306,50 @@ def test_protected_binding_rejects_split_target_and_entity_identity() -> None:
         service._validate_runtime_bindings(  # noqa: SLF001
             [ProtectedRoleBinding("managed.test.light", "target.one", "light.two")]
         )
+
+
+def test_protected_topology_load_fails_closed_for_split_identity() -> None:
+    payload = {
+        "version": 1,
+        "revision": 1,
+        "updatedAt": "2026-09-25T00:00:00+00:00",
+        "bindings": [{
+            "role": "managed.test.light",
+            "targetId": "target.one",
+            "entityId": "light.two",
+        }],
+    }
+    device = type("Device", (), {"target_id": "target.one", "entity_id": "light.one"})()
+    service = ProtectedTopologyService(
+        Store(payload), catalog_resolver=lambda _target: device,
+    )
+
+    with pytest.raises(ProtectedTopologyStorageError, match="storage invalid"):
+        asyncio.run(service.async_load())
+
+    assert service.healthy is False
+
+
+def test_protected_topology_load_keeps_legacy_identity_only_when_proven() -> None:
+    payload = {
+        "version": 1,
+        "revision": 1,
+        "updatedAt": "2026-09-25T00:00:00+00:00",
+        "bindings": [{
+            "role": "managed.test.light",
+            "targetId": "target.one",
+            "entityId": "light.one",
+        }],
+    }
+    device = type("Device", (), {"target_id": "target.one", "entity_id": "light.one"})()
+    service = ProtectedTopologyService(
+        Store(payload), catalog_resolver=lambda _target: device,
+    )
+
+    asyncio.run(service.async_load())
+
+    assert service.healthy is True
+    assert service.target_id("managed.test.light") == "target.one"
 
 
 def test_migration_persists_prepared_before_cas_and_completed_after() -> None:

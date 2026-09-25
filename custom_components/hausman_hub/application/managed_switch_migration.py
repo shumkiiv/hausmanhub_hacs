@@ -10,6 +10,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import stat
 from typing import TYPE_CHECKING, Mapping
 
 from .native_automation_migration import NativeAutomationNotReady
@@ -194,6 +195,8 @@ FULL_MIGRATION_MANIFEST: tuple[ManagedSwitchMigrationEntry, ...] = (
     ),
 )
 MIGRATION_MANIFEST = FULL_MIGRATION_MANIFEST
+_RELEASE_SOURCE_FILES = frozenset(item.source_file for item in MIGRATION_MANIFEST)
+_MAX_RELEASE_SOURCE_BYTES = 512 * 1024
 LEGACY_MANAGED_SWITCHES = {
     item.scenario_id: (item.legacy_revision, item.legacy_source_hash)
     for item in FULL_MIGRATION_MANIFEST
@@ -614,29 +617,35 @@ def _receipt(state: str) -> dict[str, object]:
     }
 
 
-def _safe_release_source(root: Path, source_file: str) -> str:
+def _safe_release_source(root: Path, source_file: str) -> bytes:
     """Read one bounded release asset without resolving a symlink."""
 
-    relative = Path(source_file)
-    if relative.is_absolute() or ".." in relative.parts:
+    if (
+        source_file not in _RELEASE_SOURCE_FILES
+        or Path(source_file).name != source_file
+    ):
         raise ManagedSwitchMigrationConflict("release-owned source is unavailable")
-    candidate = root / relative
+    candidate = root / source_file
     try:
-        candidate.relative_to(root)
-        descriptor = os.open(candidate, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+    except AttributeError as error:
+        raise ManagedSwitchMigrationConflict("release-owned source is unavailable") from error
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(candidate, flags)
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise ManagedSwitchMigrationConflict("release-owned source is unavailable")
+        with os.fdopen(descriptor, "rb") as handle:
+            descriptor = None
+            source_bytes = handle.read(_MAX_RELEASE_SOURCE_BYTES + 1)
     except (OSError, ValueError) as error:
         raise ManagedSwitchMigrationConflict("release-owned source is unavailable") from error
-    try:
-        with os.fdopen(descriptor, "rb") as handle:
-            source_bytes = handle.read(512 * 1024 + 1)
-    except OSError as error:
-        raise ManagedSwitchMigrationConflict("release-owned source is unavailable") from error
-    if len(source_bytes) > 512 * 1024:
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+    if len(source_bytes) > _MAX_RELEASE_SOURCE_BYTES:
         raise ManagedSwitchMigrationConflict("release-owned source exceeds safe bound")
-    try:
-        return source_bytes.decode("utf-8")
-    except UnicodeDecodeError as error:
-        raise ManagedSwitchMigrationConflict("release-owned source is invalid") from error
+    return source_bytes
 
 
 def _entries_with_sources(
@@ -647,9 +656,13 @@ def _entries_with_sources(
     root = (root or Path(__file__).resolve().parents[1] / "managed_scenarios").resolve()
     entries: list[ManagedSwitchMigrationEntry] = []
     for item in manifest:
-        source = _safe_release_source(root, item.source_file)
-        if hashlib.sha256(source.encode()).hexdigest() != item.new_source_hash:
+        source_bytes = _safe_release_source(root, item.source_file)
+        if hashlib.sha256(source_bytes).hexdigest() != item.new_source_hash:
             raise ManagedSwitchMigrationConflict("release-owned source hash mismatch")
+        try:
+            source = source_bytes.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise ManagedSwitchMigrationConflict("release-owned source is invalid") from error
         entries.append(
             ManagedSwitchMigrationEntry(
                 item.scenario_id, item.legacy_revision, item.legacy_source_hash,

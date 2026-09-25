@@ -81,7 +81,16 @@ _ROLE_RE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*){1,7}$")
 _TARGET_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 _ENTITY_RE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
-_SOURCE_FILE_RE = re.compile(r"^[a-z0-9_/-]+\.js$")
+_RELEASE_MANAGED_SWITCH_SOURCE_FILES = frozenset({
+    "shower_controller.js",
+    "small_corridor_controller.js",
+    "tambur_controller.js",
+    "toilet_controller.js",
+    "bathroom_controller.js",
+    "storage_controller.js",
+    "cabinet_controller.js",
+    "curtains_controller.js",
+})
 _MIGRATION_EXPECTATION_KEYS = {
     "nativeAutomations",
     "managedSwitches",
@@ -153,7 +162,7 @@ def _valid_hash(value: object) -> str:
 
 
 def _valid_source_file(value: object) -> str:
-    if not isinstance(value, str) or _SOURCE_FILE_RE.fullmatch(value) is None:
+    if not isinstance(value, str) or value not in _RELEASE_MANAGED_SWITCH_SOURCE_FILES:
         raise ProtectedTopologyViolation("protected topology source file is invalid")
     return value
 
@@ -380,6 +389,7 @@ class ProtectedTopologyService:
             if binding.role in parsed:
                 raise ProtectedTopologyViolation("protected topology role is duplicated")
             parsed[binding.role] = binding
+        self._validate_runtime_bindings(list(parsed.values()))
         self._revision = revision
         self._updated_at = updated_at
         self._bindings = parsed
