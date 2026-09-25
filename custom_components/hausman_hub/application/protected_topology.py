@@ -575,7 +575,11 @@ class ProtectedTopologyService:
         resolver = self._catalog_resolver
         entity_validator = self._entity_validator
         for binding in bindings:
-            if binding.target_id is not None and callable(resolver):
+            if binding.target_id is not None:
+                if not callable(resolver):
+                    raise ProtectedTopologyViolation(
+                        "protected topology target validation is unavailable"
+                    )
                 device = resolver(binding.target_id)
                 if getattr(device, "target_id", None) != binding.target_id:
                     raise ProtectedTopologyViolation("protected topology target is unavailable")
@@ -584,7 +588,11 @@ class ProtectedTopologyService:
                     and getattr(device, "entity_id", None) != binding.entity_id
                 ):
                     raise ProtectedTopologyViolation("protected topology target identity is invalid")
-            if binding.entity_id is not None and callable(entity_validator):
+            if binding.entity_id is not None:
+                if not callable(entity_validator):
+                    raise ProtectedTopologyViolation(
+                        "protected topology entity validation is unavailable"
+                    )
                 if not entity_validator(binding.entity_id):
                     raise ProtectedTopologyViolation("protected topology entity is unavailable")
 

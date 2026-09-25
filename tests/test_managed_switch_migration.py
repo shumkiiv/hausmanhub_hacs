@@ -378,7 +378,7 @@ def test_protected_topology_load_rejects_legacy_dual_identity_even_when_equal() 
             "entityId": "light.one",
         }],
     }
-    service = ProtectedTopologyService(Store(payload))
+    service = ProtectedTopologyService(Store(payload), entity_validator=lambda _entity: True)
 
     with pytest.raises(ProtectedTopologyStorageError, match="storage invalid"):
         asyncio.run(service.async_load())
@@ -397,11 +397,12 @@ def test_protected_topology_load_clears_all_state_after_late_expectation_error()
         }],
         "migrationExpectations": {"managedSwitches": [{}]},
     }
-    service = ProtectedTopologyService(Store(payload))
+    service = ProtectedTopologyService(Store(payload), entity_validator=lambda _entity: True)
 
-    with pytest.raises(ProtectedTopologyStorageError, match="storage invalid"):
+    with pytest.raises(ProtectedTopologyStorageError, match="storage invalid") as caught:
         asyncio.run(service.async_load())
 
+    assert "managed switch expectation is invalid" in str(caught.value.__cause__)
     assert service.healthy is False
     assert service.payload["bindings"] == []
     assert service.migration_expectations("managedSwitches") == ()
@@ -416,6 +417,49 @@ def test_protected_topology_empty_readiness_is_not_ready() -> None:
 
     assert readiness["roles"] == []
     assert readiness["ready"] is False
+
+
+@pytest.mark.parametrize(
+    ("binding", "message"),
+    (
+        ({"targetId": "target.one"}, "target validation is unavailable"),
+        ({"entityId": "light.one"}, "entity validation is unavailable"),
+    ),
+)
+def test_protected_topology_load_rejects_binding_without_required_runtime_validator(
+    binding, message,
+) -> None:
+    payload = {
+        "version": 1,
+        "revision": 1,
+        "updatedAt": "2026-09-25T00:00:00+00:00",
+        "bindings": [{"role": "managed.test.light", **binding}],
+    }
+    service = ProtectedTopologyService(Store(payload))
+
+    with pytest.raises(ProtectedTopologyStorageError, match="storage invalid") as caught:
+        asyncio.run(service.async_load())
+
+    assert message in str(caught.value.__cause__)
+    assert service.healthy is False
+    assert service.readiness(("managed.test.light",))["ready"] is False
+    assert service.payload["bindings"] == []
+
+
+@pytest.mark.parametrize(
+    "binding",
+    ({"targetId": "target.one"}, {"entityId": "light.one"}),
+)
+def test_protected_topology_replace_rejects_binding_without_validator_before_write(binding) -> None:
+    store = Store()
+    service = ProtectedTopologyService(store)
+    asyncio.run(service.async_load())
+
+    with pytest.raises(ProtectedTopologyViolation, match="validation is unavailable"):
+        asyncio.run(service.async_replace(0, [{"role": "managed.test.light", **binding}]))
+
+    assert store.saved == []
+    assert service.readiness(("managed.test.light",))["ready"] is False
 
 
 def _protected_managed_switch_expectation(release):
