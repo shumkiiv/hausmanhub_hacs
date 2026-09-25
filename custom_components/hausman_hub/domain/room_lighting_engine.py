@@ -342,13 +342,10 @@ def evaluate_room_lighting(
 ) -> RoomLightingDecision:
     """Compute the desired state and command plan without any side effect.
 
-    When the context is away and the room uses ``room_off``, every target is
-    switched off (reason ``away``), including ``autoControl=false`` manual-only
-    targets, without requiring proven automatic ownership, because the
-    deliberate departure is the evidence; nothing is turned on. Outside away,
-    ``autoControl=false`` targets stay manual-only: the engine never commands
-    them and only reports ``manual_mode``. On return (``away=False``) the
-    normal schedule/presence evaluation simply resumes.
+    When the context is away and the room uses ``room_off``, automatic targets
+    are switched off (reason ``away``). ``autoControl=false`` targets stay
+    manual-only on every path, including Away, and only report ``manual_mode``.
+    On return (``away=False``) normal schedule/presence evaluation resumes.
     """
 
     if not isinstance(config, RoomLightingConfig):
@@ -879,12 +876,15 @@ def _evaluate_target(
     light_brightness = light.brightness if light is not None else None
     light_color = light.color_temperature if light is not None else None
 
-    # Away is a deliberate "nobody is home" safe-off. It outranks schedule,
-    # presence, lux, protection, manual ownership and the per-target automatic
-    # control flag: every target, including ``autoControl=false`` manual-only
-    # ones, is switched off. This is the one path that intentionally commands a
-    # target without proven automatic ownership, because the deliberate
-    # departure itself is the evidence. Away never turns anything on.
+    # Manual-only targets are never commanded, including during Away. This
+    # guard must precede the Away branch because the published configuration
+    # contract excludes them from automatic control.
+    if not target.auto_control:  # type: ignore[attr-defined]
+        return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_MODE))
+
+    # Away is a deliberate "nobody is home" safe-off for automatic targets.
+    # It outranks schedule, presence, lux, protection and manual ownership.
+    # Away never turns anything on.
     if context.away and config.away_behavior.mode is AwayMode.ROOM_OFF:
         if not light_on:
             return _unchanged(target_id, Skip(target_id, SkipReason.IDEMPOTENT))
@@ -904,13 +904,6 @@ def _evaluate_target(
                 ),
             ),
         )
-
-    # Outside away, ``autoControl=false`` is a manual-only target: the engine
-    # never commands it and never publishes a desired state for it. It is
-    # journaled only as a skip so the decision still shows why the target
-    # stayed untouched.
-    if not target.auto_control:  # type: ignore[attr-defined]
-        return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_MODE))
 
     # A person already owns an interchangeable source of this profile. Leave
     # this target untouched instead of fighting the manual choice.

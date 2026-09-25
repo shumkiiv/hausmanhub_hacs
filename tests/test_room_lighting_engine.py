@@ -876,7 +876,7 @@ def test_manual_only_target_is_never_touched() -> None:
     assert any(skip.reason is SkipReason.MANUAL_MODE for skip in main_on.skips)
 
 
-def test_away_room_off_turns_off_all_targets_including_manual_only() -> None:
+def test_away_room_off_never_commands_manual_only_target() -> None:
     now = _at(10, 0)
     config = _config(away_mode="room_off", auto_control={"light_mirror": False})
     decision = evaluate_room_lighting(
@@ -898,15 +898,15 @@ def test_away_room_off_turns_off_all_targets_including_manual_only() -> None:
     assert [command.action for command in main.commands] == [LightAction.TURN_OFF]
     assert main.commands[0].reason is DecisionReason.AWAY
 
-    # Away outranks autoControl=false: the manual-only mirror goes off too.
+    # The manual-only mirror stays untouched even during Away.
     mirror = decision_target(decision, "light_mirror")
     assert mirror is not None
-    assert mirror.desired_state == "off"
-    assert [command.action for command in mirror.commands] == [LightAction.TURN_OFF]
-    assert mirror.commands[0].reason is DecisionReason.AWAY
+    assert mirror.desired_state == "unchanged"
+    assert mirror.commands == ()
+    assert any(skip.reason is SkipReason.MANUAL_MODE for skip in mirror.skips)
 
 
-def test_away_off_manual_only_target_is_idempotent() -> None:
+def test_away_off_manual_only_target_remains_manual() -> None:
     now = _at(10, 0)
     config = _config(away_mode="room_off", auto_control={"light_mirror": False})
     decision = evaluate_room_lighting(
@@ -920,7 +920,7 @@ def test_away_off_manual_only_target_is_idempotent() -> None:
     mirror = decision_target(decision, "light_mirror")
     assert mirror is not None
     assert mirror.commands == ()
-    assert any(skip.reason is SkipReason.IDEMPOTENT for skip in mirror.skips)
+    assert any(skip.reason is SkipReason.MANUAL_MODE for skip in mirror.skips)
 
 
 def test_away_off_is_idempotent_when_automatic_target_already_off() -> None:
