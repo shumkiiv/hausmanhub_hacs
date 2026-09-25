@@ -462,6 +462,36 @@ def test_protected_topology_replace_rejects_binding_without_validator_before_wri
     assert service.readiness(("managed.test.light",))["ready"] is False
 
 
+@pytest.mark.parametrize(
+    ("binding", "callbacks"),
+    (
+        (
+            {"targetId": "target.one"},
+            {"catalog_resolver": lambda _target: type("Device", (), {"target_id": "target.one"})()},
+        ),
+        (
+            {"entityId": "light.one"},
+            {"entity_validator": lambda _entity: True},
+        ),
+    ),
+)
+def test_protected_topology_load_accepts_single_identity_with_its_runtime_validator(
+    binding, callbacks,
+) -> None:
+    payload = {
+        "version": 1,
+        "revision": 1,
+        "updatedAt": "2026-09-25T00:00:00+00:00",
+        "bindings": [{"role": "managed.test.light", **binding}],
+    }
+    service = ProtectedTopologyService(Store(payload), **callbacks)
+
+    asyncio.run(service.async_load())
+
+    assert service.healthy is True
+    assert service.readiness(("managed.test.light",))["ready"] is True
+
+
 def _protected_managed_switch_expectation(release):
     return {
         "scenarioId": release.scenario_id,
