@@ -510,18 +510,24 @@ def test_protected_topology_load_accepts_single_identity_with_its_runtime_valida
 
 @pytest.mark.parametrize("return_false", (False, True))
 def test_protected_topology_failed_save_preserves_memory_but_marks_it_unhealthy(return_false) -> None:
-    store = Store(fail_save=not return_false, return_false=return_false)
+    store = Store()
     validator = lambda _entity: True
     service = ProtectedTopologyService(store, entity_validator=validator)
     asyncio.run(service.async_load())
+    asyncio.run(service.async_replace(
+        0, [{"role": "managed.test.light", "entityId": "light.one"}]
+    ))
+    before = service.payload
+    store.fail_save = not return_false
+    store.return_false = return_false
 
     with pytest.raises(ProtectedTopologyViolation, match="storage save failed"):
         asyncio.run(service.async_replace(
-            0, [{"role": "managed.test.light", "entityId": "light.one"}]
+            1, [{"role": "managed.test.other", "entityId": "light.two"}]
         ))
 
-    assert service.revision == 0
-    assert service.payload["bindings"] == []
+    assert service.revision == 1
+    assert service.payload == before
     assert service.healthy is False
     assert service.readiness(("managed.test.light",))["ready"] is False
 
