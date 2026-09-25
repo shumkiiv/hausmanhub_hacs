@@ -138,7 +138,7 @@ class HomeSummaryCountSensor(CoordinatorEntity[HomeSummaryCoordinator], SensorEn
         self._attr_translation_key = summary_key
         self._attr_unique_id = f"{entry_id}_{summary_key}"
         self._attr_icon = SUMMARY_SENSOR_ICONS[summary_key]
-        # Keep new installations away from generic names such as ``sensor.areas``.
+        # Keep new installations away from generic area sensor names.
         # Home Assistant preserves the existing registry name for current users.
         self.entity_id = f"{SENSOR_ENTITY_ID_PREFIX}_{summary_key}"
 

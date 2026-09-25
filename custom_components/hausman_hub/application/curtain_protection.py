@@ -26,6 +26,7 @@ CURTAIN_TARGET_IDS = (
     ALICE_CURTAIN_TARGET,
     OFFICE_CURTAIN_TARGET,
 )
+_CURTAIN_TARGET_SET = frozenset(CURTAIN_TARGET_IDS)
 _PROTECTION_VERSION = 2
 _INTENT_PHASES = frozenset({"reserved", "dispatch_intent", "unconfirmed"})
 
@@ -67,7 +68,7 @@ def valid_curtain_protection_payload(value: object) -> bool:
     if value.get("version") != _PROTECTION_VERSION:
         return False
     targets = value["targets"]
-    if set(targets) != set(CURTAIN_TARGET_IDS):
+    if len(targets) != 4:
         return False
     expected = {
         "targetId", "entityId", "generation", "cycleId",
@@ -122,7 +123,7 @@ def valid_curtain_protection_payload(value: object) -> bool:
 def _valid_v1_targets(targets: object) -> bool:
     """Accept the exact legacy image only long enough to migrate it safely."""
 
-    if not isinstance(targets, Mapping) or set(targets) != set(CURTAIN_TARGET_IDS):
+    if not isinstance(targets, Mapping) or len(targets) != 4:
         return False
     expected = {
         "targetId", "entityId", "generation", "confirmedAutomaticClose",
@@ -264,15 +265,29 @@ class CurtainProtectionCoordinator:
         *,
         catalog_resolver: Callable[[str], object | None],
         next_sunrise_ms: Callable[[], int | None],
+        target_ids: tuple[str, ...] | None = None,
         now_ms: Callable[[], int] | None = None,
     ) -> None:
         self._store = store
         self._catalog_resolver = catalog_resolver
         self._next_sunrise_ms = next_sunrise_ms
+        self._target_ids = tuple(
+            CURTAIN_TARGET_IDS if target_ids is None else target_ids
+        )
+        self._target_set = frozenset(self._target_ids)
+        self._role_targets = dict(
+            zip(("living", "kitchen", "room", "office"), self._target_ids, strict=False)
+        )
+        self._topology_reason: str | None = None
+        if len(self._target_ids) != 4 or len(self._target_set) != 4:
+            self._target_ids = ()
+            self._target_set = frozenset()
+            self._role_targets = {}
+            self._topology_reason = "protected_topology_missing"
         self._now_ms = now_ms or (lambda: time.time_ns() // 1_000_000)
         self._targets: dict[str, dict[str, object]] = {}
-        self._healthy = True
-        self._reason: str | None = None
+        self._healthy = self._topology_reason is None
+        self._reason: str | None = self._topology_reason
         self._lock = asyncio.Lock()
         self._trusted_sunrise_runs: dict[str, frozenset[str]] = {}
 
@@ -325,6 +340,10 @@ class CurtainProtectionCoordinator:
     async def async_load(self) -> None:
         """Load protection without making safe manual commands unavailable."""
 
+        if not self._target_ids:
+            self._targets = {}
+            self._mark_unhealthy(self._topology_reason or "protected_topology_missing")
+            return
         try:
             payload = await self._store.async_load()
         except Exception:  # noqa: BLE001
@@ -405,7 +424,7 @@ class CurtainProtectionCoordinator:
 
     def _initialize_empty(self) -> None:
         self._targets = {}
-        for target_id in CURTAIN_TARGET_IDS:
+        for target_id in self._target_ids:
             device = self._catalog_resolver(target_id)
             entity_id = getattr(device, "entity_id", None)
             self._targets[target_id] = _empty_record(
@@ -463,7 +482,7 @@ class CurtainProtectionCoordinator:
     ) -> CurtainProtectionDecision:
         """Latch manual intent or reject conflicting automatic close."""
 
-        if target_id not in CURTAIN_TARGET_IDS:
+        if target_id not in self._target_set:
             return CurtainProtectionDecision(True)
         opening = self._opening(
             action_id, requested if not automatic else applied, current_position
@@ -557,7 +576,7 @@ class CurtainProtectionCoordinator:
     ) -> CurtainProtectionDecision:
         """Revalidate the protection generation at the physical boundary."""
 
-        if target_id not in CURTAIN_TARGET_IDS:
+        if target_id not in self._target_set:
             return CurtainProtectionDecision(True)
         opening = self._opening(
             action_id, requested if not automatic else applied, current_position
@@ -670,7 +689,7 @@ class CurtainProtectionCoordinator:
     ) -> None:
         """Persist only attributable confirmed close or manual-open outcome."""
 
-        if dry_run or target_id not in CURTAIN_TARGET_IDS:
+        if dry_run or target_id not in self._target_set:
             return
         opening = self._opening(
             action_id, requested if not automatic else applied, current_position
@@ -747,7 +766,7 @@ class CurtainProtectionCoordinator:
     ) -> None:
         """Treat an unattributed opening after our close as manual intervention."""
 
-        if new_position <= old_position or target_id not in CURTAIN_TARGET_IDS:
+        if new_position <= old_position or target_id not in self._target_set:
             return
         async with self._lock:
             record = self._targets.get(target_id)
@@ -866,6 +885,7 @@ class CurtainProtectionCoordinator:
                 "ready": self._healthy,
                 "transition": "trusted_sunrise" if trusted else "curtain_snapshot",
                 "trustedSunrise": trusted,
+                "topology": {"roles": dict(self._role_targets)},
                 "targets": {
                     target_id: {
                         "entityId": record["entityId"],

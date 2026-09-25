@@ -1,0 +1,33 @@
+{
+  "contract": {
+    "name": "hausman-hub-room-power-migration-claim-status",
+    "version": 1
+  },
+  "roomId": "entry_hall",
+  "roomConfigVersion": 7,
+  "dependencyRevision": 4,
+  "claimRevision": 1,
+  "active": true,
+  "complete": true,
+  "ready": true,
+  "reloadRequired": false,
+  "saved": true,
+  "physicalCommandsSent": false,
+  "requestedTargetIds": [
+    "main_light",
+    "mirror_light"
+  ],
+  "claimableTargetIds": [
+    "main_light"
+  ],
+  "claimedTargetIds": [
+    "main_light"
+  ],
+  "independentTargetIds": [
+    "mirror_light"
+  ],
+  "unprovenTargetIds": [],
+  "extraTargetIds": [],
+  "diagnostics": [],
+  "updatedAt": "2026-09-17T09:00:00Z"
+}

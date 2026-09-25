@@ -38,6 +38,20 @@ from .electrical_breakers import (
 )
 from .intercom_release_obligation import IntercomReleaseObligation
 from .operation_journal import scenario_operation_receipt
+from .protected_topology import (
+    ROLE_CURTAIN_KITCHEN,
+    ROLE_CURTAIN_LIVING,
+    ROLE_CURTAIN_OFFICE,
+    ROLE_CURTAIN_ROOM,
+    ROLE_SHOWER_CABINET,
+    ROLE_TAMBUR_CHANDELIER,
+    ROLE_TAMBUR_MIRROR,
+    ROLE_TAMBUR_MOTION,
+    ROLE_TAMBUR_POINTS,
+    ROLE_TAMBUR_POWER,
+    ROLE_TAMBUR_PRESENCE_PRIMARY,
+    ROLE_TAMBUR_PRESENCE_SECONDARY,
+)
 from .scenario_consolidation_inventory import (
     REGISTRY_BASELINE_HASH,
     REGISTRY_CREATE_IDS,
@@ -103,12 +117,34 @@ _CURTAIN_MANUAL_WRAPPERS = {
     "scenario_manual_curtains_open": "open_cover",
     "scenario_manual_curtains_close": "close_cover",
 }
-_CURTAIN_MANUAL_TARGETS = (
-    ("entity_8746cfd7f6f7103d", "Шторы гостиная"),
-    ("entity_2da2065add6e2168", "Шторы кухня"),
-    ("entity_1e0b476b7d082cc0", "Шторы Алисы"),
-    ("entity_9164132c7692d6f5", "Шторы кабинет"),
+_CURTAIN_MANUAL_TARGET_ROLES = (
+    (ROLE_CURTAIN_LIVING, "Шторы гостиная"),
+    (ROLE_CURTAIN_KITCHEN, "Шторы кухня"),
+    (ROLE_CURTAIN_ROOM, "Шторы комнаты"),
+    (ROLE_CURTAIN_OFFICE, "Шторы рабочей комнаты"),
 )
+_CURTAIN_MANUAL_TARGETS = (
+    ("protected_curtain_living", "Шторы гостиная"),
+    ("protected_curtain_kitchen", "Шторы кухня"),
+    ("protected_curtain_room", "Шторы комнаты"),
+    ("protected_curtain_office", "Шторы рабочей комнаты"),
+)
+
+
+def _curtain_manual_targets(
+    resolver: Callable[[str], str | None] | None,
+) -> tuple[tuple[str, str], ...] | None:
+    targets: list[tuple[str, str]] = []
+    for role, name in _CURTAIN_MANUAL_TARGET_ROLES:
+        if not callable(resolver):
+            return None
+        target_id = resolver(role)
+        if not isinstance(target_id, str) or not target_id:
+            return None
+        targets.append((target_id, name))
+    if len({target_id for target_id, _name in targets}) != len(targets):
+        return None
+    return tuple(targets)
 
 
 def _registry_storage_hash(registry: ScenarioRegistry) -> str:
@@ -189,6 +225,7 @@ def _verify_approved_registry_transition(
     before: ScenarioRegistry,
     after: ScenarioRegistry,
     entries: tuple[object, ...],
+    topology_resolver: Callable[[str], str | None] | None = None,
 ) -> bool:
     """Verify the exact 58 -> 63 disposition and return finalization state."""
 
@@ -229,7 +266,7 @@ def _verify_approved_registry_transition(
                 "Disabled scenario changed outside its approved state fields.",
                 status=409,
             )
-    _verify_curtain_manual_wrappers(after)
+    _verify_curtain_manual_wrappers(after, topology_resolver)
     for scenario_id in REGISTRY_MANUAL_CURTAIN_UPDATE_IDS:
         original = before_payloads[scenario_id]
         updated = after_payloads[scenario_id]
@@ -272,7 +309,10 @@ def _verify_approved_registry_transition(
     return finalized
 
 
-def _updated_curtain_manual_wrappers(registry: ScenarioRegistry) -> ScenarioRegistry:
+def _updated_curtain_manual_wrappers(
+    registry: ScenarioRegistry,
+    topology_resolver: Callable[[str], str | None] | None = None,
+) -> ScenarioRegistry:
     """CAS-expand the two exact legacy wrappers without touching fixture input."""
 
     present = {
@@ -285,8 +325,11 @@ def _updated_curtain_manual_wrappers(registry: ScenarioRegistry) -> ScenarioRegi
     if present != set(_CURTAIN_MANUAL_WRAPPERS):
         raise ScenarioServiceError("Curtain manual wrapper is missing.", status=409)
     replacements: dict[str, Scenario] = {}
-    expected_legacy_targets = tuple(target for target, _name in _CURTAIN_MANUAL_TARGETS[:2])
-    expected_targets = tuple(target for target, _name in _CURTAIN_MANUAL_TARGETS)
+    resolved_targets = _curtain_manual_targets(topology_resolver)
+    if resolved_targets is None:
+        raise ScenarioServiceError("Curtain protected topology is missing.", status=409)
+    expected_legacy_targets = tuple(target for target, _name in resolved_targets[:2])
+    expected_targets = tuple(target for target, _name in resolved_targets)
     for scenario_id, action_id in _CURTAIN_MANUAL_WRAPPERS.items():
         scenario = registry.scenario(scenario_id)
         if scenario is None:
@@ -319,7 +362,7 @@ def _updated_curtain_manual_wrappers(registry: ScenarioRegistry) -> ScenarioRegi
                 action_title=title,
             )
             for index, (target_id, target_name) in enumerate(
-                _CURTAIN_MANUAL_TARGETS, start=1
+                resolved_targets, start=1
             )
         )
         replacements[scenario_id] = replace(
@@ -335,7 +378,10 @@ def _updated_curtain_manual_wrappers(registry: ScenarioRegistry) -> ScenarioRegi
     )
 
 
-def _verify_curtain_manual_wrappers(registry: ScenarioRegistry) -> None:
+def _verify_curtain_manual_wrappers(
+    registry: ScenarioRegistry,
+    topology_resolver: Callable[[str], str | None] | None = None,
+) -> None:
     present = {
         scenario_id
         for scenario_id in _CURTAIN_MANUAL_WRAPPERS
@@ -345,7 +391,10 @@ def _verify_curtain_manual_wrappers(registry: ScenarioRegistry) -> None:
         return
     if present != set(_CURTAIN_MANUAL_WRAPPERS):
         raise ScenarioServiceError("Curtain manual wrapper is missing.", status=409)
-    expected_targets = tuple(target for target, _name in _CURTAIN_MANUAL_TARGETS)
+    resolved_targets = _curtain_manual_targets(topology_resolver)
+    if resolved_targets is None:
+        raise ScenarioServiceError("Curtain protected topology is missing.", status=409)
+    expected_targets = tuple(target for target, _name in resolved_targets)
     for scenario_id, action_id in _CURTAIN_MANUAL_WRAPPERS.items():
         scenario = registry.scenario(scenario_id)
         if scenario is None or tuple(
@@ -360,6 +409,7 @@ def _apply_approved_registry_disposition(
     before: ScenarioRegistry,
     replacements: Mapping[str, Scenario],
     entries: tuple[object, ...],
+    topology_resolver: Callable[[str], str | None] | None = None,
 ) -> ScenarioRegistry:
     """Build the one approved apply image from the immutable 58-rule baseline."""
 
@@ -384,7 +434,7 @@ def _apply_approved_registry_disposition(
             if str(getattr(item, "scenario_id")) in REGISTRY_CREATE_IDS
         )
     )
-    migrated = _updated_curtain_manual_wrappers(migrated)
+    migrated = _updated_curtain_manual_wrappers(migrated, topology_resolver)
     updated_at = int(time.time() * 1000)
     migrated = ScenarioRegistry(
         scenarios=tuple(
@@ -399,7 +449,7 @@ def _apply_approved_registry_disposition(
             for scenario in migrated.scenarios
         )
     )
-    if _verify_approved_registry_transition(before, migrated, entries):
+    if _verify_approved_registry_transition(before, migrated, entries, topology_resolver):
         raise ScenarioServiceError(
             "Managed controllers activated before finalization.", status=409
         )
@@ -879,12 +929,18 @@ def _managed_switch_binding_trigger_matches(
     )
 
 
-def _managed_switch_phase_b_state_matches(scenario: Scenario) -> bool:
+def _managed_switch_phase_b_state_matches(
+    scenario: Scenario,
+    binding_manifest: tuple[object, ...] | None = None,
+) -> bool:
     from .managed_switch_binding_migration import (  # noqa: PLC0415
         BINDING_MIGRATION_MANIFEST,
     )
 
-    item = BINDING_MIGRATION_MANIFEST[0]
+    manifest = binding_manifest or BINDING_MIGRATION_MANIFEST
+    if len(manifest) != 1:
+        return False
+    item = manifest[0]
     return (
         scenario.id == item.scenario_id
         and scenario.revision == item.expected_revision + 1
@@ -950,6 +1006,7 @@ class ScenarioService:
         self._electrical_breaker_device_ids_resolver = (
             electrical_breaker_device_ids_resolver
         )
+        self._topology_resolver: Callable[[str], str | None] | None = None
         self._manual_action_pre_admission: (
             Callable[[str, str, str, object | None], Awaitable[None]] | None
         ) = None
@@ -970,6 +1027,13 @@ class ScenarioService:
         self._managed_switch_binding_migration_transaction: (
             _ManagedSwitchBindingMigrationTransaction | None
         ) = None
+        from .managed_switch_binding_migration import (  # noqa: PLC0415
+            BINDING_MIGRATION_MANIFEST,
+        )
+
+        self._managed_switch_binding_manifest: tuple[object, ...] = (
+            BINDING_MIGRATION_MANIFEST
+        )
         self._path_metrics = ScenarioPathMetrics()
         self._scenario_content_revision_key: tuple[tuple[str, int], ...] | None = None
         self._scenario_content_revision: str | None = None
@@ -1391,6 +1455,22 @@ class ScenarioService:
 
         self._smart_switch_receipt_consumer = consumer
 
+    def set_topology_resolver(
+        self, resolver: Callable[[str], str | None] | None
+    ) -> None:
+        """Wire protected role -> target resolution for direct smart-switch paths."""
+
+        if resolver is not None and not callable(resolver):
+            raise TypeError("topology resolver must be callable")
+        self._topology_resolver = resolver
+
+    def set_managed_switch_binding_manifest(
+        self, manifest: tuple[object, ...]
+    ) -> None:
+        """Wire the protected phase-B manifest used by managed migration CAS checks."""
+
+        self._managed_switch_binding_manifest = tuple(manifest)
+
     @property
     def catalog_readiness(self) -> dict[str, object]:
         """Return a redacted snapshot of startup catalog readiness."""
@@ -1754,7 +1834,7 @@ class ScenarioService:
                 )
             if registry_owned_after:
                 _verify_approved_registry_transition(
-                    previous_registry, registry, entries
+                    previous_registry, registry, entries, self._topology_resolver
                 )
             staging_active = bool(
                 self._managed_switch_create_staging
@@ -2315,7 +2395,7 @@ class ScenarioService:
                 )
             if registry_owned_after:
                 _verify_approved_registry_transition(
-                    previous_registry, registry, entries
+                    previous_registry, registry, entries, self._topology_resolver
                 )
 
             prepared: list[tuple[object, Scenario, ScenarioNodeRedMetadata, str, bool]] = []
@@ -2419,7 +2499,10 @@ class ScenarioService:
                 migrated_registry = (
                     (
                         scenario.revision == legacy_revision + 1
-                        or _managed_switch_phase_b_state_matches(scenario)
+                        or _managed_switch_phase_b_state_matches(
+                            scenario,
+                            self._managed_switch_binding_manifest,
+                        )
                     )
                     and metadata.source_hash == new_hash
                     and metadata.input_target_ids == new_inputs
@@ -2506,6 +2589,7 @@ class ScenarioService:
                         previous_registry,
                         replacements,
                         entries,
+                        self._topology_resolver,
                     )
                     registry_state = {
                         "state": "intent",
@@ -2543,7 +2627,7 @@ class ScenarioService:
                     self._scenario_content_revision_key = None
                     self._scenario_content_revision = None
                 finalized = _verify_approved_registry_transition(
-                    previous_registry, next_registry, entries
+                    previous_registry, next_registry, entries, self._topology_resolver
                 )
                 self._managed_switch_migration_transaction = (
                     _ManagedSwitchMigrationTransaction(
@@ -2606,67 +2690,154 @@ class ScenarioService:
 
         self._require_running()
         async with self._lock:
-            registry = self._ensure_loaded()
-            backend = self._node_red_backend
-            if backend is None:
-                raise ScenarioServiceError("Node-RED backend is unavailable.", status=503)
-            records: dict[str, dict[str, object]] = {}
-            read_source = getattr(backend, "async_read_source", None)
-            reconcile_create = getattr(
-                backend, "async_reconcile_created_release_source", None
+            return await self._async_capture_managed_switch_migration_locked(entries)
+
+    async def _async_capture_managed_switch_migration_locked(
+        self, entries: tuple[object, ...]
+    ) -> dict[str, object]:
+        registry = self._ensure_loaded()
+        backend = self._node_red_backend
+        if backend is None:
+            raise ScenarioServiceError("Node-RED backend is unavailable.", status=503)
+        records: dict[str, dict[str, object]] = {}
+        read_source = getattr(backend, "async_read_source", None)
+        reconcile_create = getattr(
+            backend, "async_reconcile_created_release_source", None
+        )
+        if not callable(read_source) or not callable(reconcile_create):
+            raise ScenarioServiceError(
+                "Managed source capture is unavailable.", status=503
             )
-            if not callable(read_source) or not callable(reconcile_create):
+        for item in entries:
+            scenario_id = str(getattr(item, "scenario_id", ""))
+            scenario = registry.scenario(scenario_id)
+            if scenario is None:
+                if getattr(item, "operation", "replace") != "create":
+                    raise ScenarioNotFoundError(scenario_id)
+                try:
+                    existing = await reconcile_create(
+                        scenario_id,
+                        str(getattr(item, "new_source_hash")),
+                    )
+                except NodeRedBackendError as error:
+                    raise ScenarioServiceError(
+                        "Managed create endpoint absence is ambiguous.",
+                        status=409,
+                    ) from error
+                if existing is not None:
+                    raise ScenarioServiceError(
+                        "Managed create endpoint already exists.",
+                        status=409,
+                    )
+                records[scenario_id] = {"state": "absent"}
+                continue
+            metadata = scenario.definition.node_red
+            if metadata is None or not metadata.flow_id:
+                raise ScenarioServiceError("Protected scenario topology is unavailable.", status=409)
+            evidence = await backend.async_verify_managed_topology(
+                scenario_id, metadata.flow_id
+            )
+            source = await read_source(scenario_id, metadata.flow_id)
+            if (
+                not isinstance(source, Mapping)
+                or source.get("source_hash") != evidence.get("source_hash")
+                or not isinstance(source.get("source"), str)
+            ):
                 raise ScenarioServiceError(
-                    "Managed source capture is unavailable.", status=503
+                    "Managed source capture changed.", status=409
                 )
-            for item in entries:
-                scenario_id = str(getattr(item, "scenario_id", ""))
-                scenario = registry.scenario(scenario_id)
-                if scenario is None:
-                    if getattr(item, "operation", "replace") != "create":
-                        raise ScenarioNotFoundError(scenario_id)
-                    try:
-                        existing = await reconcile_create(
-                            scenario_id,
-                            str(getattr(item, "new_source_hash")),
-                        )
-                    except NodeRedBackendError as error:
-                        raise ScenarioServiceError(
-                            "Managed create endpoint absence is ambiguous.",
-                            status=409,
-                        ) from error
-                    if existing is not None:
-                        raise ScenarioServiceError(
-                            "Managed create endpoint already exists.",
-                            status=409,
-                        )
-                    records[scenario_id] = {"state": "absent"}
+            records[scenario_id] = {
+                "state": "present",
+                "flowId": metadata.flow_id,
+                "sourceHash": evidence.get("source_hash"),
+                "source": source["source"],
+                "topology": evidence.get("topology"),
+            }
+        return {
+            "registry": registry.to_storage(),
+            "flows": records,
+        }
+
+    async def async_reconcile_completed_managed_switch_migration(
+        self,
+        entries: tuple[object, ...],
+        journal: Mapping[str, object],
+    ) -> dict[str, object]:
+        """Re-adopt a completed managed migration under a new manifest.
+
+        This is the only supported path for a stale ``completed`` receipt.  It
+        never writes a Node-RED flow and never sends a physical command: it
+        proves that the live registry and flows still equal the completed
+        ``after`` image, then updates only scenario input-target metadata that
+        the fresh protected topology changed.  Any drift, missing journal or
+        non-comparable manifest fails closed with ``409``.
+        """
+
+        self._require_running()
+        async with self._lock:
+            self._require_running()
+            previous_after = (
+                journal.get("after") if isinstance(journal, Mapping) else None
+            )
+            if not isinstance(previous_after, Mapping) or not isinstance(
+                previous_after.get("registry"), Mapping
+            ):
+                raise ScenarioServiceError(
+                    "Managed migration completed image is invalid.", status=409
+                )
+            current = self._ensure_loaded()
+            if current.to_storage() != previous_after["registry"]:
+                raise ScenarioServiceError(
+                    "Managed migration completed image drifted.", status=409
+                )
+            live = await self._async_capture_managed_switch_migration_locked(entries)
+            if live.get("flows") != previous_after.get("flows"):
+                raise ScenarioServiceError(
+                    "Managed migration completed flows drifted.", status=409
+                )
+            manifest = {
+                str(getattr(item, "scenario_id", "")): item for item in entries
+            }
+            changed: dict[str, Scenario] = {}
+            for scenario in current.scenarios:
+                item = manifest.get(scenario.id)
+                if item is None:
                     continue
                 metadata = scenario.definition.node_red
-                if metadata is None or not metadata.flow_id:
-                    raise ScenarioServiceError("Protected scenario topology is unavailable.", status=409)
-                evidence = await backend.async_verify_managed_topology(
-                    scenario_id, metadata.flow_id
-                )
-                source = await read_source(scenario_id, metadata.flow_id)
-                if (
-                    not isinstance(source, Mapping)
-                    or source.get("source_hash") != evidence.get("source_hash")
-                    or not isinstance(source.get("source"), str)
-                ):
+                if metadata is None:
                     raise ScenarioServiceError(
-                        "Managed source capture changed.", status=409
+                        "Managed migration scenario topology is unavailable.",
+                        status=409,
                     )
-                records[scenario_id] = {
-                    "state": "present",
-                    "flowId": metadata.flow_id,
-                    "sourceHash": evidence.get("source_hash"),
-                    "source": source["source"],
-                    "topology": evidence.get("topology"),
+                expected = tuple(getattr(item, "input_target_ids"))
+                if metadata.input_target_ids == expected:
+                    continue
+                changed[scenario.id] = replace(
+                    scenario,
+                    definition=replace(
+                        scenario.definition,
+                        node_red=replace(metadata, input_target_ids=expected),
+                    ),
+                    revision=scenario.revision + 1,
+                )
+            if not changed:
+                return {
+                    "registry": current.to_storage(),
+                    "flows": previous_after["flows"],
                 }
+            updated = ScenarioRegistry(
+                scenarios=tuple(
+                    changed.get(scenario.id, scenario)
+                    for scenario in current.scenarios
+                )
+            )
+            await self._async_save_managed_migration_registry(
+                updated, expected=current
+            )
+            self._registry = updated
             return {
-                "registry": registry.to_storage(),
-                "flows": records,
+                "registry": updated.to_storage(),
+                "flows": previous_after["flows"],
             }
 
     async def async_finalize_managed_switch_migration(
@@ -2699,6 +2870,7 @@ class ScenarioService:
                 transaction.previous_registry,
                 transaction.migrated_registry,
                 entries,
+                self._topology_resolver,
             )
             await self._async_verify_managed_switch_migration_locked(entries)
             if transaction.created_sources:
@@ -2777,6 +2949,7 @@ class ScenarioService:
                     transaction.previous_registry,
                     activated,
                     entries,
+                    self._topology_resolver,
                 ):
                     raise ScenarioServiceError(
                         "Managed controller activation is incomplete.", status=409
@@ -3075,7 +3248,7 @@ class ScenarioService:
                     "Managed migration before-image is invalid.", status=409
                 ) from error
         finalized = _verify_approved_registry_transition(
-            previous_registry, registry, entries
+            previous_registry, registry, entries, self._topology_resolver
         )
         if require_final is not None and finalized is not require_final:
             raise ScenarioServiceError(
@@ -3083,7 +3256,7 @@ class ScenarioService:
             )
 
         revisions: set[str] = set()
-        _verify_curtain_manual_wrappers(registry)
+        _verify_curtain_manual_wrappers(registry, self._topology_resolver)
         for item in entries:
             scenario_id = str(getattr(item, "scenario_id"))
             scenario = registry.scenario(scenario_id)
@@ -3135,7 +3308,10 @@ class ScenarioService:
             if (
                 (
                     scenario.revision != expected_revision
-                    and not _managed_switch_phase_b_state_matches(scenario)
+                    and not _managed_switch_phase_b_state_matches(
+                        scenario,
+                        self._managed_switch_binding_manifest,
+                    )
                 )
                 or scenario.definition.execution_backend
                 is not ScenarioExecutionBackend.NODE_RED
@@ -3188,13 +3364,9 @@ class ScenarioService:
     ) -> str:
         """CAS-update only the small-corridor manual trigger binding."""
 
-        from .managed_switch_binding_migration import (  # noqa: PLC0415
-            BINDING_MIGRATION_MANIFEST,
-        )
-
         self._require_running()
         async with self._lock:
-            if tuple(entries) != BINDING_MIGRATION_MANIFEST:
+            if len(entries) != 1:
                 raise ScenarioServiceError(
                     "Managed switch binding manifest is invalid.", status=500
                 )
@@ -3287,13 +3459,9 @@ class ScenarioService:
     ) -> str:
         """Verify the registry and Node-RED evidence after binding phase B."""
 
-        from .managed_switch_binding_migration import (  # noqa: PLC0415
-            BINDING_MIGRATION_MANIFEST,
-        )
-
         self._require_running()
         async with self._lock:
-            if tuple(entries) != BINDING_MIGRATION_MANIFEST:
+            if len(entries) != 1:
                 raise ScenarioServiceError(
                     "Managed switch binding manifest is invalid.", status=500
                 )
@@ -3527,6 +3695,19 @@ class ScenarioService:
         if self._stopping:
             raise ScenarioServiceError("Scenario service is stopping", status=503)
 
+    def _resolved_topology_target(self, role: str) -> str | None:
+        resolver = self._topology_resolver
+        target_id = resolver(role) if callable(resolver) else None
+        return target_id if isinstance(target_id, str) and target_id else None
+
+    def _resolved_topology_targets(
+        self, roles: tuple[str, ...]
+    ) -> tuple[str, ...] | None:
+        targets = tuple(self._resolved_topology_target(role) for role in roles)
+        if any(target_id is None for target_id in targets):
+            return None
+        return targets  # type: ignore[return-value]
+
     async def async_run_typed_intent(
         self,
         *,
@@ -3591,21 +3772,46 @@ class ScenarioService:
             if binding == "shower-cabinet"
             else "system-tambur-adaptive-controller"
         )
-        tambur_light_targets = (
-            "entity_71859313239a14e4",
-            "entity_cd0098e5ff95da46",
-            "entity_fbdf27871edb89bf",
+        shower_cabinet_target = self._resolved_topology_target(
+            ROLE_SHOWER_CABINET
         )
-        tambur_sensor_targets = (
-            "entity_156050daca86aa6c",
-            "entity_402b26d150a1ef3f",
-            "entity_10b78187426f8485",
+        tambur_light_targets = self._resolved_topology_targets(
+            (
+                ROLE_TAMBUR_CHANDELIER,
+                ROLE_TAMBUR_POINTS,
+                ROLE_TAMBUR_MIRROR,
+            )
         )
+        tambur_group_targets = self._resolved_topology_targets(
+            (ROLE_TAMBUR_CHANDELIER, ROLE_TAMBUR_POINTS)
+        )
+        tambur_sensor_targets = self._resolved_topology_targets(
+            (
+                ROLE_TAMBUR_MOTION,
+                ROLE_TAMBUR_PRESENCE_PRIMARY,
+                ROLE_TAMBUR_PRESENCE_SECONDARY,
+            )
+        )
+        tambur_power_target = self._resolved_topology_target(ROLE_TAMBUR_POWER)
+
+        async def topology_missing() -> object:
+            return await self._async_record_typed_intent_skip(
+                scenario_id,
+                correlation_id,
+                reason="protected_topology_missing",
+                binding=binding,
+                action=action,
+                trigger_id=trigger_id,
+                intent_receipt_id=intent_receipt_id,
+                raw_subtype=raw_subtype,
+                dedup_disposition=dedup_disposition,
+            )
+
         direct_user_intent = action
         if binding == "shower-cabinet":
-            cabinet_state = self._trusted_typed_target_state(
-                "entity_e7a7c61eec7bdff8"
-            )
+            if shower_cabinet_target is None:
+                return await topology_missing()
+            cabinet_state = self._trusted_typed_target_state(shower_cabinet_target)
             if cabinet_state is None:
                 return await self._async_record_typed_intent_skip(
                     scenario_id,
@@ -3623,7 +3829,9 @@ class ScenarioService:
             # A trusted power state is required. When it is off, the light's
             # configured power dependency turns it on first, so the pass-through
             # may enable the whole group instead of being blocked.
-            if self._trusted_typed_target_state("entity_b47991988cc6b9f3") is None:
+            if tambur_power_target is None or tambur_group_targets is None:
+                return await topology_missing()
+            if self._trusted_typed_target_state(tambur_power_target) is None:
                 return await self._async_record_typed_intent_skip(
                     scenario_id,
                     correlation_id,
@@ -3637,10 +3845,7 @@ class ScenarioService:
                 )
             group_states = tuple(
                 self._trusted_typed_target_state(target_id)
-                for target_id in (
-                    "entity_71859313239a14e4",
-                    "entity_cd0098e5ff95da46",
-                )
+                for target_id in tambur_group_targets
             )
             if any(state is None for state in group_states):
                 return await self._async_record_typed_intent_skip(
@@ -3659,6 +3864,8 @@ class ScenarioService:
                     "off" if "on" in group_states else "on"
                 )
             if direct_user_intent == "off":
+                if tambur_light_targets is None or tambur_sensor_targets is None:
+                    return await topology_missing()
                 protection = self._manual_light_off_protection
                 arm = getattr(
                     protection, "async_arm_release_owned_direct_off", None
@@ -3682,9 +3889,10 @@ class ScenarioService:
                 if inspect.isawaitable(armed):
                     await armed
         elif binding == "tambur-mirror-left":
-            mirror_state = self._trusted_typed_target_state(
-                "entity_fbdf27871edb89bf"
-            )
+            mirror_target = self._resolved_topology_target(ROLE_TAMBUR_MIRROR)
+            if mirror_target is None:
+                return await topology_missing()
+            mirror_state = self._trusted_typed_target_state(mirror_target)
             if mirror_state is None:
                 return await self._async_record_typed_intent_skip(
                     scenario_id,
@@ -3700,7 +3908,7 @@ class ScenarioService:
             resolved_action = "turn_off" if mirror_state == "on" else "turn_on"
             actions = (
                 {
-                    "targetId": "entity_fbdf27871edb89bf",
+                    "targetId": mirror_target,
                     "actionId": resolved_action,
                     "value": None,
                 },
@@ -3718,6 +3926,8 @@ class ScenarioService:
                 actions=actions,
             )
         else:
+            if tambur_light_targets is None or tambur_sensor_targets is None:
+                return await topology_missing()
             target_states = tuple(
                 self._trusted_typed_target_state(target_id)
                 for target_id in tambur_light_targets

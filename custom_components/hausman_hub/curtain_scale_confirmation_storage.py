@@ -5,7 +5,6 @@ from __future__ import annotations
 from homeassistant.helpers.storage import Store
 
 from .application.curtain_scale_confirmation import (
-    OFFICE_CURTAIN_ENTITY_ID,
     CurtainScaleIdentity,
     valid_curtain_scale_confirmation_payload,
 )
@@ -51,11 +50,12 @@ def resolve_office_curtain_identity(
     if not callable(catalog_resolver):
         return None
     device = catalog_resolver(target_id)
-    if getattr(device, "entity_id", None) != OFFICE_CURTAIN_ENTITY_ID:
+    entity_id = getattr(device, "entity_id", None)
+    if not isinstance(entity_id, str) or not entity_id:
         return None
     try:
         entities = entity_registry.async_get(hass)
-        entity = entities.async_get(OFFICE_CURTAIN_ENTITY_ID)
+        entity = entities.async_get(entity_id)
         unique_id = getattr(entity, "unique_id", None)
         device_id = getattr(entity, "device_id", None)
         if not isinstance(device_id, str) or not device_id:
@@ -69,10 +69,11 @@ def resolve_office_curtain_identity(
             return None
         return CurtainScaleIdentity.create(
             target_id=target_id,
-            entity_id=OFFICE_CURTAIN_ENTITY_ID,
+            entity_id=entity_id,
             entity_unique_id=unique_id,
             device_id=device_id,
             device_identifiers=getattr(registry_device, "identifiers", None),
+            office_target_id=target_id,
         )
     except (AttributeError, TypeError, ValueError):
         return None

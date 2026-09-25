@@ -101,6 +101,11 @@ from .application.device_power_dependencies import (
     DevicePowerDependencyService,
     DevicePowerDependencyServiceViolation,
 )
+from .application.room_power_migration import (
+    RoomPowerMigrationClaimService,
+    RoomPowerMigrationClaimViolation,
+    RoomPowerMigrationStorageError,
+)
 from .application.away_settings import (
     AwaySettingsService,
     AwaySettingsServiceViolation,
@@ -228,6 +233,12 @@ ADMIN_ENERGY_SETTINGS_PATH = "/api/hausman_hub/v1/admin/energy-settings"
 ADMIN_DEVICE_POWER_DEPENDENCIES_PATH = (
     "/api/hausman_hub/v1/admin/device-power-dependencies"
 )
+ADMIN_ROOM_POWER_MIGRATION_CLAIM_PREVIEW_PATH = (
+    "/api/hausman_hub/v1/admin/room-power-migration-claims/preview"
+)
+ADMIN_ROOM_POWER_MIGRATION_CLAIM_PATH = (
+    "/api/hausman_hub/v1/admin/room-power-migration-claims/{roomId}"
+)
 ADMIN_AWAY_SETTINGS_PATH = "/api/hausman_hub/v1/admin/away-settings"
 ADMIN_RESET_PATH = "/api/hausman_hub/v1/admin/reset"
 NO_STORE_HEADERS = {"Cache-Control": "no-store"}
@@ -291,6 +302,8 @@ def register_climate_api(
             EnergySettingsView(hass),
             ClimateSeasonSettingsView(hass),
             DevicePowerDependenciesView(hass),
+            RoomPowerMigrationClaimPreviewView(hass),
+            RoomPowerMigrationClaimView(hass),
             AwaySettingsView(hass),
             ClimateHomeView(hass),
             ClimateRuntimeView(hass),
@@ -1765,6 +1778,8 @@ class DevicePowerDependenciesView(_ClimateView):
                 payload["expectedRevision"], payload["dependencies"]
             )
         except DevicePowerDependencyServiceViolation as error:
+            if getattr(error, "storage", False):
+                return _api_error(self, "unavailable")
             return self.json_message(
                 (
                     "Зависимости уже изменились на другом клиенте. Обновите данные."
@@ -1780,6 +1795,121 @@ class DevicePowerDependenciesView(_ClimateView):
                 HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
             )
+        except Exception:
+            return _api_error(self, "unavailable")
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+
+class _RoomPowerMigrationClaimMixin(_ClimateView):
+    """Shared guards for the logical-only exact-power claim API."""
+
+    def _service(self) -> RoomPowerMigrationClaimService | None:
+        if self._runtime() is None:
+            return None
+        service = self._hass.data.get(DOMAIN, {}).get(
+            "room_power_migration_claim_service"
+        )
+        return service if isinstance(service, RoomPowerMigrationClaimService) else None
+
+    def _claim_error(self, error: RoomPowerMigrationClaimViolation) -> Any:
+        if error.stale:
+            return _api_error(self, "revision_conflict")
+        if error.not_found:
+            return _api_error(self, "not_found")
+        if error.unprocessable:
+            return _api_error(self, "unprocessable_entity")
+        return _api_error(self, "invalid_request")
+
+    def _publish_manifest(self, service: RoomPowerMigrationClaimService) -> None:
+        manifest = service.manifest
+        data = self._hass.data.setdefault(DOMAIN, {})
+        data["room_power_migration_manifest"] = manifest
+        runtime = data.get("room_lighting_runtime")
+        updater = getattr(runtime, "set_power_migration_manifest", None)
+        if callable(updater):
+            updater(manifest)
+
+
+class RoomPowerMigrationClaimPreviewView(_RoomPowerMigrationClaimMixin):
+    """Preview a room exact-power claim without mutating protected storage."""
+
+    url = ADMIN_ROOM_POWER_MIGRATION_CLAIM_PREVIEW_PATH
+    name = "api:hausman_hub:room_power_migration_claim_preview"
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, self.url):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        service = self._service()
+        if service is None:
+            return _api_error(self, "unavailable")
+        try:
+            payload = await _request_json(request, maximum_bytes=MAX_ACTION_BODY_BYTES)
+            result = await service.async_preview(payload)
+        except RoomPowerMigrationClaimViolation as error:
+            return self._claim_error(error)
+        except RoomPowerMigrationStorageError:
+            return _api_error(self, "unavailable")
+        except ValueError:
+            return _api_error(self, "invalid_request")
+        except Exception:
+            return _api_error(self, "internal_error")
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+
+class RoomPowerMigrationClaimView(_RoomPowerMigrationClaimMixin):
+    """Read or atomically save one logical exact-power room claim."""
+
+    url = ADMIN_ROOM_POWER_MIGRATION_CLAIM_PATH
+    name = "api:hausman_hub:room_power_migration_claim"
+
+    def _room_id(self, request: Any) -> str | None:
+        room_id = getattr(request, "match_info", {}).get("roomId")
+        if not isinstance(room_id, str):
+            return None
+        if not _is_exact_request(request, self.url.format(roomId=room_id)):
+            return None
+        return room_id
+
+    async def get(self, request: Any) -> Any:
+        room_id = self._room_id(request)
+        if room_id is None:
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        service = self._service()
+        if service is None:
+            return _api_error(self, "unavailable")
+        try:
+            result = await service.async_get_status(room_id)
+        except RoomPowerMigrationClaimViolation as error:
+            return self._claim_error(error)
+        except Exception:
+            return _api_error(self, "internal_error")
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+    async def put(self, request: Any) -> Any:
+        room_id = self._room_id(request)
+        if room_id is None:
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        service = self._service()
+        if service is None:
+            return _api_error(self, "unavailable")
+        try:
+            payload = await _request_json(request, maximum_bytes=MAX_ACTION_BODY_BYTES)
+            result = await service.async_save(room_id, payload)
+            self._publish_manifest(service)
+        except RoomPowerMigrationClaimViolation as error:
+            return self._claim_error(error)
+        except RoomPowerMigrationStorageError:
+            return _api_error(self, "unavailable")
+        except ValueError:
+            return _api_error(self, "invalid_request")
+        except Exception:
+            return _api_error(self, "internal_error")
         return self.json(result, headers=NO_STORE_HEADERS)
 
 

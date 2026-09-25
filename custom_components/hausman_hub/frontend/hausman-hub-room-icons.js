@@ -97,7 +97,7 @@ export function roomIconName(room) {
   if (containsAny(identity, ["toilet", "tualet", "туал", "mdi:wc", "сануз"])) return "toilet";
   if (containsAny(identity, ["bath", "vann", "ван", "shower", "dush", "душ"])) return "bathroom";
   if (containsAny(identity, ["bedroom", "spal", "спал", "mdi:bed"])) return "bedroom";
-  if (containsAny(identity, ["tambour", "tambur", "hall", "corridor", "koridor", "entry", "entrance", "тамбур", "прих", "корид", "door"])) return "hallway";
+  if (containsAny(identity, ["tambour", "tambur", "hall", "corridor", "koridor", "entry", "entrance", "прихожая", "прих", "корид", "door"])) return "hallway";
   if (containsAny(identity, ["terrace", "террас", "balcony", "балкон", "deck"])) return "terrace";
   if (containsAny(identity, ["spa", "спа", "hot-tub", "hottub", "сауна", "хамам"])) return "spa";
   if (containsAny(identity, ["office", "study", "work", "kabinet", "кабин", "desk"])) return "office";

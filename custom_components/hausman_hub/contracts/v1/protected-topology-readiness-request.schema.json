@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/protected-topology-readiness-request.schema.json",
+  "title": "HausmanHub protected topology readiness request v1",
+  "description": "Local-admin request that asks whether logical protected roles are configured. The response never returns private identifiers.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "roles"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-protected-topology-readiness-request"},
+        "version": {"const": 1}
+      }
+    },
+    "roles": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*){1,7}$"
+      }
+    }
+  }
+}

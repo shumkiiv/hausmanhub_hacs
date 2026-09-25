@@ -7,21 +7,21 @@ const controls = request.context && request.context.controls && typeof request.c
   ? request.context.controls : {};
 const controlState = controls.state && typeof controls.state === 'object' ? controls.state : {};
 const inputs = request.inputs && typeof request.inputs === 'object' ? request.inputs : {};
-const ID = Object.freeze({
-  chandelier: 'entity_71859313239a14e4',
-  points: 'entity_cd0098e5ff95da46',
-  mirror: 'entity_fbdf27871edb89bf',
-});
+const topology = controlState.topology && typeof controlState.topology === 'object' ? controlState.topology : {};
+const roles = topology.roles && typeof topology.roles === 'object' ? topology.roles : {};
+const ID = Object.freeze({chandelier: roles.chandelier, points: roles.points, mirror: roles.mirror});
 const NAME = Object.freeze({
-  [ID.chandelier]: 'Люстра тамбур',
+  [ID.chandelier]: 'Люстра тамбура',
   [ID.points]: 'Точки тамбура',
   [ID.mirror]: 'Подсветка зеркала тамбура',
 });
 const state = targetId => {
+  if (typeof targetId !== 'string' || !targetId) return null;
   const item = inputs[targetId];
   return item && item.state != null ? String(item.state) : null;
 };
 const deviceAction = (id, targetId, actionId, value) => {
+  if (typeof targetId !== 'string' || !targetId) return null;
   const action = {id, type: 'device_action', targetId, targetName: NAME[targetId], actionId};
   if (value !== null && value !== undefined) action.value = value;
   return action;
@@ -38,18 +38,18 @@ if (typedGroup) {
   const intent = String(trigger.direct_user_intent);
   branch = `direct_user_group_${String(trigger.typed_intent)}_${intent}`;
   if (intent === 'off') {
-    actions.push(deviceAction('chandelier_off', ID.chandelier, 'turn_off'));
-    actions.push(deviceAction('points_off', ID.points, 'turn_off'));
+    for (const action of [deviceAction('chandelier_off', ID.chandelier, 'turn_off'), deviceAction('points_off', ID.points, 'turn_off')]) if (action) actions.push(action);
   } else {
-    if (state(ID.chandelier) === 'off') actions.push(deviceAction('chandelier_on', ID.chandelier, 'turn_on'));
-    if (state(ID.points) === 'off') actions.push(deviceAction('points_on', ID.points, 'turn_on'));
+    if (state(ID.chandelier) === 'off') { const action = deviceAction('chandelier_on', ID.chandelier, 'turn_on'); if (action) actions.push(action); }
+    if (state(ID.points) === 'off') { const action = deviceAction('points_on', ID.points, 'turn_on'); if (action) actions.push(action); }
   }
 } else if (controlState.ready === true) {
   const action = controlState.action;
   if (action && typeof action === 'object' &&
       [ID.chandelier, ID.points, ID.mirror].includes(action.targetId) &&
       ['turn_on', 'turn_off', 'set_brightness_percent', 'set_color_temperature'].includes(action.actionId)) {
-    actions.push(deviceAction('server_action', action.targetId, action.actionId, action.value));
+    const planned = deviceAction('server_action', action.targetId, action.actionId, action.value);
+    if (planned) actions.push(planned);
   }
 }
 const evidence = controlState.evidence && typeof controlState.evidence === 'object'

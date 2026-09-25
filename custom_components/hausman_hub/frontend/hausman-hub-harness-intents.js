@@ -82,7 +82,7 @@ export const HARNESS_INTENT_RULES = [
   [".scenario-rule-card > .scenario-editor-field > input", "scenario-editor:rule-input", "ui-only"],
   [".scenario-rule-card > .scenario-editor-field > textarea", "scenario-editor:rule-textarea", "ui-only"],
   [".scenario-add-rule", "scenario-editor:add-rule", "ui-only"],
-  [".scenario-editor-footer-actions > button.secondary", "scenario-editor:cancel", "ui-only"],
+  [".scenario-editor-footer-actions > [data-role='secondary']", "scenario-editor:cancel", "ui-only"],
 
   [".settings-subnav > button", "settings:view", "ui-only"],
   [".settings-menu-card", "settings:card", "ui-only"],

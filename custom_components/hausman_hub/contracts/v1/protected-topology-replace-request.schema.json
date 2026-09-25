@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/protected-topology-replace-request.schema.json",
+  "title": "HausmanHub protected topology replace request v1",
+  "description": "Local-admin provisioning request for per-install protected topology. It may carry private Home Assistant entity ids and migration evidence, but this request is never returned by public readiness APIs and never sends physical commands.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "expectedRevision",
+    "bindings"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-protected-topology-replace-request"},
+        "version": {"const": 1}
+      }
+    },
+    "expectedRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "description": "Compare-and-set revision. A stale value must fail without partial write."
+    },
+    "bindings": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/role_binding"},
+      "description": "Logical role to private target/entity binding. Role names are safe to expose; values are local-only."
+    },
+    "migrationExpectations": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "nativeAutomations": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/native_automation_expectation"}
+        },
+        "managedSwitches": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/managed_switch_expectation"}
+        },
+        "managedSwitchBindings": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/managed_switch_binding_expectation"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "role": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*){1,7}$"
+    },
+    "stable_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+    },
+    "entity_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+\\.[a-z0-9_]+$"
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "role_list": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/role"}
+    },
+    "role_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role"],
+      "anyOf": [
+        {"required": ["targetId"]},
+        {"required": ["entityId"]}
+      ],
+      "properties": {
+        "role": {"$ref": "#/$defs/role"},
+        "targetId": {"$ref": "#/$defs/stable_id"},
+        "entityId": {"$ref": "#/$defs/entity_id"}
+      }
+    },
+    "native_automation_expectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "automationId",
+        "state",
+        "definitionHash",
+        "disposition"
+      ],
+      "properties": {
+        "role": {"$ref": "#/$defs/role"},
+        "automationId": {"$ref": "#/$defs/stable_id"},
+        "state": {"enum": ["on", "off"]},
+        "definitionHash": {"$ref": "#/$defs/hash"},
+        "disposition": {"enum": ["disable", "preserve"]}
+      }
+    },
+    "managed_switch_expectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scenarioId",
+        "operation",
+        "legacyRevision",
+        "legacySourceHash",
+        "legacyTopology",
+        "legacyInputRoles",
+        "inputRoles",
+        "newSourceHash",
+        "sourceFile",
+        "activationReady"
+      ],
+      "properties": {
+        "scenarioId": {"$ref": "#/$defs/stable_id"},
+        "operation": {"enum": ["replace", "create"]},
+        "expectedRevision": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "legacyRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "legacySourceHash": {"$ref": "#/$defs/hash"},
+        "legacyTopology": {"$ref": "#/$defs/stable_id"},
+        "legacyInputRoles": {"$ref": "#/$defs/role_list"},
+        "inputRoles": {"$ref": "#/$defs/role_list"},
+        "newSourceHash": {"$ref": "#/$defs/hash"},
+        "sourceFile": {
+          "type": "string",
+          "pattern": "^[a-z0-9_/-]+\\.js$"
+        },
+        "activationReady": {"type": "boolean"}
+      }
+    },
+    "managed_switch_binding_expectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scenarioId",
+        "expectedRevision",
+        "sourceHash",
+        "topology",
+        "inputRoles",
+        "triggerId",
+        "oldTargetRole",
+        "newTargetRole",
+        "newTargetName"
+      ],
+      "properties": {
+        "scenarioId": {"$ref": "#/$defs/stable_id"},
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "sourceHash": {"$ref": "#/$defs/hash"},
+        "topology": {"$ref": "#/$defs/stable_id"},
+        "inputRoles": {"$ref": "#/$defs/role_list"},
+        "triggerId": {"$ref": "#/$defs/stable_id"},
+        "oldTargetRole": {"$ref": "#/$defs/role"},
+        "newTargetRole": {"$ref": "#/$defs/role"},
+        "newTargetName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        }
+      }
+    }
+  }
+}

@@ -32,15 +32,19 @@ class HomeAssistantVoiceGateway:
         self,
         hass: Any,
         *,
-        away_entity_id: str = DEFAULT_AWAY_ENTITY_ID,
+        away_entity_id: str | None = DEFAULT_AWAY_ENTITY_ID,
         vendor_resilience: VendorCircuitBreaker | None = None,
     ) -> None:
         self._hass = hass
-        self._away_entity_id = away_entity_id
+        self._away_entity_id = (
+            away_entity_id.strip()
+            if isinstance(away_entity_id, str) and away_entity_id.strip()
+            else None
+        )
         self._vendor_resilience = vendor_resilience or VendorCircuitBreaker()
 
     @property
-    def away_entity_id(self) -> str:
+    def away_entity_id(self) -> str | None:
         return self._away_entity_id
 
     def _domain_states(self, domain: str) -> list[Any]:
@@ -88,6 +92,8 @@ class HomeAssistantVoiceGateway:
         )
 
     async def async_away_state(self) -> str | None:
+        if self._away_entity_id is None:
+            return None
         state = self._hass.states.get(self._away_entity_id)
         return getattr(state, "state", None)
 

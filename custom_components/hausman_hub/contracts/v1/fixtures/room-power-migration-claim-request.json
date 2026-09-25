@@ -1,0 +1,14 @@
+{
+  "contract": {
+    "name": "hausman-hub-room-power-migration-claim-request",
+    "version": 1
+  },
+  "roomId": "entry_hall",
+  "targetIds": [
+    "main_light",
+    "mirror_light"
+  ],
+  "expectedRoomConfigVersion": 7,
+  "expectedDependencyRevision": 4,
+  "expectedClaimRevision": 0
+}

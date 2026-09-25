@@ -19,8 +19,8 @@
       {
         "roomId": "shower",
         "profileId": "shower-main",
-        "lightIds": ["light.shower_main"],
-        "presenceSensorIds": ["binary_sensor.shower_presence"]
+        "lightIds": ["light.demo_003"],
+        "presenceSensorIds": ["binary_sensor.demo_002"]
       }
     ]
   }

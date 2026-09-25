@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/managed-switch-migration-status.schema.json",
+  "title": "HausmanHub managed-switch migration status v1",
+  "description": "Redacted managed-switch migration receipt state and recomputed manifest preview. It exposes only logical scenario ids, operations, public release source file names and content hashes; it never returns Home Assistant entity ids or target ids and sends no physical command.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "receipt",
+    "expectation",
+    "physicalCommandsSent"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-managed-switch-migration"},
+        "version": {"const": 1}
+      }
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "present",
+        "state",
+        "revision",
+        "manifestHash",
+        "supersededManifestHash",
+        "supersededState",
+        "matchesExpectation"
+      ],
+      "properties": {
+        "present": {"type": "boolean"},
+        "state": {
+          "type": ["string", "null"],
+          "enum": [null, "prepared", "completed", "superseded"]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "manifestHash": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "supersededManifestHash": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "supersededState": {
+          "type": ["string", "null"],
+          "enum": [null, "prepared", "completed", "superseded"]
+        },
+        "matchesExpectation": {"type": ["boolean", "null"]}
+      }
+    },
+    "expectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ready",
+        "reason",
+        "manifestHash",
+        "scenarioCount",
+        "operations",
+        "scenarios"
+      ],
+      "properties": {
+        "ready": {"type": "boolean"},
+        "reason": {
+          "type": ["string", "null"],
+          "pattern": "^[a-z0-9_]+$",
+          "maxLength": 80
+        },
+        "manifestHash": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "scenarioCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "operations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["replace", "create"],
+          "properties": {
+            "replace": {"type": "integer", "minimum": 0, "maximum": 64},
+            "create": {"type": "integer", "minimum": 0, "maximum": 64}
+          }
+        },
+        "scenarios": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["scenarioId", "operation", "sourceFile", "activationReady"],
+            "properties": {
+              "scenarioId": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+              },
+              "operation": {"enum": ["replace", "create"]},
+              "sourceFile": {
+                "type": "string",
+                "pattern": "^[a-z0-9_/-]+\\.js$"
+              },
+              "activationReady": {"type": "boolean"}
+            }
+          }
+        }
+      }
+    },
+    "physicalCommandsSent": {"const": false}
+  }
+}

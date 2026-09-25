@@ -1,0 +1,8 @@
+{
+  "contract": {
+    "name": "hausman-hub-managed-switch-migration-rearm-request",
+    "version": 1
+  },
+  "expectedReceiptRevision": 0,
+  "confirm": "re-arm"
+}

@@ -19,54 +19,91 @@ from ..domain.scenario_controls import (
     maximum_brightness,
     scenario_control_policy_to_payload,
 )
+from .protected_topology import (
+    ROLE_BATHROOM_FAN,
+    ROLE_BATHROOM_HUMIDITY,
+    ROLE_BATHROOM_LIGHT_PRIMARY,
+    ROLE_BATHROOM_LIGHT_SECONDARY,
+    ROLE_OFFICE_LIGHT,
+    ROLE_OFFICE_LUX,
+    ROLE_OFFICE_RELAY,
+    ROLE_SHARED_SUN,
+    ROLE_SHOWER_CABINET,
+    ROLE_SHOWER_EXTRA,
+    ROLE_SHOWER_FAN,
+    ROLE_SHOWER_HUMIDITY,
+    ROLE_SHOWER_MAIN,
+    ROLE_SHOWER_PRESENCE,
+    ROLE_SMALL_CHANDELIER,
+    ROLE_SMALL_LUX,
+    ROLE_SMALL_MOTION,
+    ROLE_SMALL_RELAY,
+    ROLE_STORAGE_LIGHT,
+    ROLE_STORAGE_MOTION,
+    ROLE_TAMBUR_CHANDELIER,
+    ROLE_TAMBUR_ENTRY,
+    ROLE_TAMBUR_MIRROR,
+    ROLE_TAMBUR_MOTION,
+    ROLE_TAMBUR_POINTS,
+    ROLE_TAMBUR_POWER,
+    ROLE_TAMBUR_PRESENCE_PRIMARY,
+    ROLE_TAMBUR_PRESENCE_SECONDARY,
+    ROLE_TOILET_AWAY,
+    ROLE_TOILET_FAN,
+    ROLE_TOILET_MAIN,
+    ROLE_TOILET_MOTION_PRIMARY,
+    ROLE_TOILET_MOTION_SECONDARY,
+    ROLE_TOILET_NIGHT,
+    role_targets_payload,
+)
 
 STORAGE_SCENARIO_ID = "system-storage-light-controller"
-STORAGE_LIGHT_TARGET_ID = "entity_0ec37ef18b4b39a6"
-STORAGE_MOTION_TARGET_ID = "entity_00dcf0ebdc0bc6cb"
+STORAGE_LIGHT_TARGET_ID = ROLE_STORAGE_LIGHT
+STORAGE_MOTION_TARGET_ID = ROLE_STORAGE_MOTION
 TAMBUR_SCENARIO_ID = "system-tambur-adaptive-controller"
-TAMBUR_MOTION_TARGET_ID = "entity_10b78187426f8485"
+TAMBUR_MOTION_TARGET_ID = ROLE_TAMBUR_MOTION
 TAMBUR_PRESENCE_TARGET_IDS = (
-    "entity_156050daca86aa6c",
-    "entity_402b26d150a1ef3f",
+    ROLE_TAMBUR_PRESENCE_PRIMARY,
+    ROLE_TAMBUR_PRESENCE_SECONDARY,
 )
-TAMBUR_CHANDELIER_TARGET_ID = "entity_71859313239a14e4"
-TAMBUR_POINTS_TARGET_ID = "entity_cd0098e5ff95da46"
-TAMBUR_MIRROR_TARGET_ID = "entity_fbdf27871edb89bf"
-TAMBUR_POWER_TARGET_ID = "entity_b47991988cc6b9f3"
-TAMBUR_ENTRY_DOOR_TARGET_ID = "entity_170c7a4e2505b803"
+TAMBUR_CHANDELIER_TARGET_ID = ROLE_TAMBUR_CHANDELIER
+TAMBUR_POINTS_TARGET_ID = ROLE_TAMBUR_POINTS
+TAMBUR_MIRROR_TARGET_ID = ROLE_TAMBUR_MIRROR
+TAMBUR_POWER_TARGET_ID = ROLE_TAMBUR_POWER
+TAMBUR_ENTRY_DOOR_TARGET_ID = ROLE_TAMBUR_ENTRY
 SMALL_CORRIDOR_SCENARIO_ID = "system-small-corridor-light-controller"
-SMALL_CORRIDOR_MOTION_TARGET_ID = "entity_a371cea02388be65"
-SMALL_CORRIDOR_LUX_TARGET_ID = "entity_2e306a9650ac5728"
-SMALL_CORRIDOR_RELAY_TARGET_ID = "entity_4be32416634e6416"
-SMALL_CORRIDOR_CHANDELIER_TARGET_ID = "entity_9ed909332fdaa8fd"
-SUN_TARGET_ID = "entity_6b9ccdab9bb484b2"
+SMALL_CORRIDOR_MOTION_TARGET_ID = ROLE_SMALL_MOTION
+SMALL_CORRIDOR_LUX_TARGET_ID = ROLE_SMALL_LUX
+SMALL_CORRIDOR_RELAY_TARGET_ID = ROLE_SMALL_RELAY
+SMALL_CORRIDOR_CHANDELIER_TARGET_ID = ROLE_SMALL_CHANDELIER
+SUN_TARGET_ID = ROLE_SHARED_SUN
 SHOWER_SCENARIO_ID = "system-shower-comfort-controller"
-SHOWER_PRESENCE_TARGET_ID = "entity_d1fb2cbf2a691bba"
-SHOWER_HUMIDITY_TARGET_ID = "entity_fd3945cf1a2110f8"
-SHOWER_MAIN_TARGET_ID = "entity_46174e1ff9913212"
-SHOWER_EXTRA_TARGET_ID = "entity_1fdcd8b244637246"
-SHOWER_FAN_TARGET_ID = "entity_afef5df0e0cae309"
-SHOWER_CABINET_TARGET_ID = "entity_e7a7c61eec7bdff8"
+SHOWER_PRESENCE_TARGET_ID = ROLE_SHOWER_PRESENCE
+SHOWER_HUMIDITY_TARGET_ID = ROLE_SHOWER_HUMIDITY
+SHOWER_MAIN_TARGET_ID = ROLE_SHOWER_MAIN
+SHOWER_EXTRA_TARGET_ID = ROLE_SHOWER_EXTRA
+SHOWER_FAN_TARGET_ID = ROLE_SHOWER_FAN
+SHOWER_CABINET_TARGET_ID = ROLE_SHOWER_CABINET
 TOILET_SCENARIO_ID = "system-toilet-comfort-controller"
 TOILET_MOTION_TARGET_IDS = (
-    "entity_ce73f88bda2e6812",
-    "entity_56650c782076ed4d",
+    ROLE_TOILET_MOTION_PRIMARY,
+    ROLE_TOILET_MOTION_SECONDARY,
 )
-TOILET_MAIN_TARGET_ID = "entity_5d95de599d2b5cec"
-TOILET_NIGHT_TARGET_ID = "entity_6667b3400bce7970"
-TOILET_FAN_TARGET_ID = "entity_9bbb3b0e8cd98627"
-TOILET_AWAY_TARGET_ID = "entity_3f343b8d6f58f5b4"
+TOILET_MAIN_TARGET_ID = ROLE_TOILET_MAIN
+TOILET_NIGHT_TARGET_ID = ROLE_TOILET_NIGHT
+TOILET_FAN_TARGET_ID = ROLE_TOILET_FAN
+TOILET_AWAY_TARGET_ID = ROLE_TOILET_AWAY
 BATHROOM_SCENARIO_ID = "system-bathroom-exhaust-controller"
 BATHROOM_LIGHT_TARGET_IDS = (
-    "entity_a591e035e3e5b34f",
-    "entity_d82766182d69dd51",
+    ROLE_BATHROOM_LIGHT_PRIMARY,
+    ROLE_BATHROOM_LIGHT_SECONDARY,
 )
-BATHROOM_HUMIDITY_TARGET_ID = "entity_436e12f71ce7b08b"
-BATHROOM_FAN_TARGET_ID = "entity_c15f5df5382ee180"
+BATHROOM_HUMIDITY_TARGET_ID = ROLE_BATHROOM_HUMIDITY
+BATHROOM_FAN_TARGET_ID = ROLE_BATHROOM_FAN
 OFFICE_SCENARIO_ID = "system-cabinet-light-controller"
-OFFICE_LIGHT_TARGET_ID = "entity_aeaf7c250c68e8c2"
-OFFICE_RELAY_TARGET_ID = "entity_7ff6d09cfa68fa5a"
-OFFICE_LUX_TARGET_ID = "entity_5f3b4436fb7b6f2b"
+OFFICE_LIGHT_TARGET_ID = ROLE_OFFICE_LIGHT
+OFFICE_RELAY_TARGET_ID = ROLE_OFFICE_RELAY
+OFFICE_LUX_TARGET_ID = ROLE_OFFICE_LUX
 _LIGHT_ACTION_IDS = frozenset(
     {"turn_on", "turn_off", "set_brightness_percent", "set_color_temperature"}
 )
@@ -325,6 +362,7 @@ class ScenarioControlCoordinator:
         light_priority: object,
         *,
         catalog_resolver: Callable[[str], object | None],
+        topology_resolver: Callable[[str], str | None] | None = None,
         storage_motion_target_id: str | None = STORAGE_MOTION_TARGET_ID,
         storage_presence_target_id: str | None = None,
         now_ms: Callable[[], int] | None = None,
@@ -337,6 +375,7 @@ class ScenarioControlCoordinator:
         self._store = store
         self._light_priority = light_priority
         self._catalog_resolver = catalog_resolver
+        self._topology_resolver = topology_resolver
         self._storage_motion_target_id = storage_motion_target_id
         self._storage_presence_target_id = storage_presence_target_id
         self._now_ms = now_ms or (lambda: time.time_ns() // 1_000_000)
@@ -417,24 +456,21 @@ class ScenarioControlCoordinator:
         relay or room-power target from accidentally gaining a second writer.
         """
 
-        return frozenset(
-            {
-                STORAGE_LIGHT_TARGET_ID,
-                SMALL_CORRIDOR_RELAY_TARGET_ID,
-                SMALL_CORRIDOR_CHANDELIER_TARGET_ID,
-                TOILET_MAIN_TARGET_ID,
-                TOILET_NIGHT_TARGET_ID,
-                TOILET_FAN_TARGET_ID,
-                TOILET_AWAY_TARGET_ID,
-                *BATHROOM_LIGHT_TARGET_IDS,
-                BATHROOM_FAN_TARGET_ID,
-                OFFICE_LIGHT_TARGET_ID,
-                OFFICE_RELAY_TARGET_ID,
-            }
-        ) | (
-            frozenset()
-            if self._tambur_external()
-            else frozenset(
+        roles = {
+            STORAGE_LIGHT_TARGET_ID,
+            SMALL_CORRIDOR_RELAY_TARGET_ID,
+            SMALL_CORRIDOR_CHANDELIER_TARGET_ID,
+            TOILET_MAIN_TARGET_ID,
+            TOILET_NIGHT_TARGET_ID,
+            TOILET_FAN_TARGET_ID,
+            TOILET_AWAY_TARGET_ID,
+            *BATHROOM_LIGHT_TARGET_IDS,
+            BATHROOM_FAN_TARGET_ID,
+            OFFICE_LIGHT_TARGET_ID,
+            OFFICE_RELAY_TARGET_ID,
+        }
+        if not self._tambur_external():
+            roles.update(
                 {
                     TAMBUR_CHANDELIER_TARGET_ID,
                     TAMBUR_POINTS_TARGET_ID,
@@ -442,10 +478,8 @@ class ScenarioControlCoordinator:
                     TAMBUR_POWER_TARGET_ID,
                 }
             )
-        ) | (
-            frozenset()
-            if self._shower_external()
-            else frozenset(
+        if not self._shower_external():
+            roles.update(
                 {
                     SHOWER_MAIN_TARGET_ID,
                     SHOWER_EXTRA_TARGET_ID,
@@ -453,6 +487,8 @@ class ScenarioControlCoordinator:
                     SHOWER_CABINET_TARGET_ID,
                 }
             )
+        return frozenset(
+            target_id for role in roles if (target_id := self._resolve_target_id(role)) is not None
         )
 
     def command_entity_ids(self) -> frozenset[str]:
@@ -670,6 +706,7 @@ class ScenarioControlCoordinator:
                     "ready": False,
                     "transition": "externally_managed",
                     "correlationId": run_id,
+                    "topology": self._topology_payload(scenario_id),
                 },
             }
         record = self._record_for_scenario(scenario_id)
@@ -696,11 +733,74 @@ class ScenarioControlCoordinator:
             if not matching:
                 if not manual:
                     state["transition"] = "stale_generation"
+        state["topology"] = self._topology_payload(scenario_id)
+        if not state["topology"].get("ready", False):
+            state["ready"] = False
+            state["transition"] = "protected_topology_missing"
         return {
             "policyRevision": document.policy_revision,
             "policy": policy,
             "state": state,
         }
+
+    def _topology_payload(self, scenario_id: str) -> dict[str, object]:
+        roles: dict[str, str] = {}
+        if scenario_id == STORAGE_SCENARIO_ID:
+            roles = {"light": STORAGE_LIGHT_TARGET_ID, "motion": STORAGE_MOTION_TARGET_ID}
+        elif scenario_id == TAMBUR_SCENARIO_ID:
+            roles = {
+                "chandelier": TAMBUR_CHANDELIER_TARGET_ID,
+                "points": TAMBUR_POINTS_TARGET_ID,
+                "mirror": TAMBUR_MIRROR_TARGET_ID,
+                "motion": TAMBUR_MOTION_TARGET_ID,
+                "presencePrimary": TAMBUR_PRESENCE_TARGET_IDS[0],
+                "presenceSecondary": TAMBUR_PRESENCE_TARGET_IDS[1],
+                "power": TAMBUR_POWER_TARGET_ID,
+                "entry": TAMBUR_ENTRY_DOOR_TARGET_ID,
+                "sun": SUN_TARGET_ID,
+            }
+        elif scenario_id == SMALL_CORRIDOR_SCENARIO_ID:
+            roles = {
+                "motion": SMALL_CORRIDOR_MOTION_TARGET_ID,
+                "lux": SMALL_CORRIDOR_LUX_TARGET_ID,
+                "relay": SMALL_CORRIDOR_RELAY_TARGET_ID,
+                "chandelier": SMALL_CORRIDOR_CHANDELIER_TARGET_ID,
+                "sun": SUN_TARGET_ID,
+            }
+        elif scenario_id == SHOWER_SCENARIO_ID:
+            roles = {
+                "presence": SHOWER_PRESENCE_TARGET_ID,
+                "humidity": SHOWER_HUMIDITY_TARGET_ID,
+                "main": SHOWER_MAIN_TARGET_ID,
+                "extra": SHOWER_EXTRA_TARGET_ID,
+                "fan": SHOWER_FAN_TARGET_ID,
+                "cabinet": SHOWER_CABINET_TARGET_ID,
+            }
+        elif scenario_id == TOILET_SCENARIO_ID:
+            roles = {
+                "motionPrimary": TOILET_MOTION_TARGET_IDS[0],
+                "motionSecondary": TOILET_MOTION_TARGET_IDS[1],
+                "main": TOILET_MAIN_TARGET_ID,
+                "night": TOILET_NIGHT_TARGET_ID,
+                "fan": TOILET_FAN_TARGET_ID,
+                "away": TOILET_AWAY_TARGET_ID,
+                "sun": SUN_TARGET_ID,
+            }
+        elif scenario_id == BATHROOM_SCENARIO_ID:
+            roles = {
+                "lightPrimary": BATHROOM_LIGHT_TARGET_IDS[0],
+                "lightSecondary": BATHROOM_LIGHT_TARGET_IDS[1],
+                "humidity": BATHROOM_HUMIDITY_TARGET_ID,
+                "fan": BATHROOM_FAN_TARGET_ID,
+            }
+        elif scenario_id == OFFICE_SCENARIO_ID:
+            roles = {
+                "light": OFFICE_LIGHT_TARGET_ID,
+                "relay": OFFICE_RELAY_TARGET_ID,
+                "lux": OFFICE_LUX_TARGET_ID,
+                "sun": SUN_TARGET_ID,
+            }
+        return role_targets_payload(self._resolve_target_id, roles)
 
     async def async_handle_storage_change(self) -> None:
         """Re-read both occupancy types and derive one durable transition."""
@@ -2110,6 +2210,9 @@ class ScenarioControlCoordinator:
         entity_id = self._target_entity_id(target_id)
         if entity_id is not None and self._light_priority.is_owned(entity_id, self._hass):
             return True
+        resolved_target_id = self._resolve_target_id(target_id)
+        if resolved_target_id is None:
+            return False
         if target_id not in {
             SHOWER_FAN_TARGET_ID,
             TOILET_FAN_TARGET_ID,
@@ -2118,7 +2221,7 @@ class ScenarioControlCoordinator:
             return False
         record = self._record_for_scenario(scenario_id)
         token = (
-            record.get("ownedTargets", {}).get(target_id)
+            record.get("ownedTargets", {}).get(resolved_target_id)
             if record is not None
             and isinstance(record.get("ownedTargets"), Mapping)
             else None
@@ -2440,13 +2543,22 @@ class ScenarioControlCoordinator:
         evidence: Mapping[str, object] | None = None,
         trigger_id: str = "light_action",
     ) -> bool:
+        resolved_target_id = self._resolve_target_id(target_id)
+        if resolved_target_id is None:
+            await self._set_zone_transition(
+                scenario_id,
+                "light_action_failed",
+                evidence=evidence,
+                clear_sequence=True,
+            )
+            return False
         correlation = f"{scenario_id.rsplit('-', 2)[0]}.{uuid.uuid4().hex}"
         await self._set_zone_transition(
             scenario_id,
             "light_action",
             evidence=evidence,
             correlation_id=correlation,
-            action={"targetId": target_id, "actionId": action_id, "value": value},
+            action={"targetId": resolved_target_id, "actionId": action_id, "value": value},
         )
         try:
             result = await self._scenario_service.async_run_scenario(
@@ -2478,11 +2590,11 @@ class ScenarioControlCoordinator:
                 if record is not None:
                     owned = dict(record.get("ownedTargets", {}))
                     if action_id == "turn_on":
-                        revision = self._target_state_revision(target_id)
+                        revision = self._target_state_revision(resolved_target_id)
                         if revision is not None:
-                            owned[target_id] = revision
+                            owned[resolved_target_id] = revision
                     else:
-                        owned.pop(target_id, None)
+                        owned.pop(resolved_target_id, None)
                     updated = self._next_record_for(
                         record,
                         transition=str(record.get("transition", "light_action")),
@@ -2824,9 +2936,8 @@ class ScenarioControlCoordinator:
     def _storage_evidence(self) -> tuple[object, object, str | None, str | None]:
         motion = self._target_state(self._storage_motion_target_id)
         presence = self._target_state(self._storage_presence_target_id)
-        light_device = self._catalog_resolver(STORAGE_LIGHT_TARGET_ID)
-        entity_id = getattr(light_device, "entity_id", None)
-        light = self._entity_state(entity_id if isinstance(entity_id, str) else None)
+        entity_id = self._target_entity_id(STORAGE_LIGHT_TARGET_ID)
+        light = self._entity_state(entity_id)
         return motion, presence, light, entity_id if isinstance(entity_id, str) else None
 
     def _storage_entity_ids(self) -> frozenset[str]:
@@ -2838,8 +2949,7 @@ class ScenarioControlCoordinator:
         ):
             if target_id is None:
                 continue
-            device = self._catalog_resolver(target_id)
-            entity_id = getattr(device, "entity_id", None)
+            entity_id = self._target_entity_id(target_id)
             if isinstance(entity_id, str):
                 result.add(entity_id)
         return frozenset(result)
@@ -3044,7 +3154,10 @@ class ScenarioControlCoordinator:
     def _target_state(self, target_id: str | None) -> object:
         if target_id is None:
             return None
-        device = self._catalog_resolver(target_id)
+        resolved = self._resolve_target_id(target_id)
+        if resolved is None:
+            return "unknown"
+        device = self._catalog_resolver(resolved)
         entity_id = getattr(device, "entity_id", None)
         if not isinstance(entity_id, str):
             return "unknown"
@@ -3068,9 +3181,26 @@ class ScenarioControlCoordinator:
         )
 
     def _target_entity_id(self, target_id: str) -> str | None:
-        device = self._catalog_resolver(target_id)
+        resolved = self._resolve_target_id(target_id)
+        if resolved is None:
+            return None
+        device = self._catalog_resolver(resolved)
         entity_id = getattr(device, "entity_id", None)
         return entity_id if isinstance(entity_id, str) else None
+
+    def _resolve_target_id(self, target_id: str | None) -> str | None:
+        if not isinstance(target_id, str) or not target_id:
+            return None
+        resolver = self._topology_resolver
+        resolved = resolver(target_id) if callable(resolver) else None
+        if isinstance(resolved, str) and resolved:
+            return resolved
+        if target_id.startswith(("managed.", "voice.")):
+            return None
+        device = self._catalog_resolver(target_id)
+        if getattr(device, "target_id", None) == target_id:
+            return target_id
+        return None
 
     def _target_state_object(self, target_id: str) -> object | None:
         entity_id = self._target_entity_id(target_id)

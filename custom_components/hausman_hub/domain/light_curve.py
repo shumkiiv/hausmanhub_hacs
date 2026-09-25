@@ -65,6 +65,7 @@ class LightCurveProfile:
     evening_lead_minutes: int = 60
     morning_min_percent: int = 15
     evening_min_percent: int = 5
+    evening_max_percent: int = 100
     day_max_percent: int = 100
     warm_kelvin: int = 2200
     neutral_kelvin: int = 3000
@@ -91,9 +92,15 @@ class LightCurveProfile:
         if not (
             0 <= self.morning_min_percent < self.day_max_percent <= 100
             and 0 <= self.evening_min_percent < self.day_max_percent
+            and self.evening_min_percent <= self.evening_max_percent <= self.day_max_percent
             and 0 <= self.motion_preview_percent <= 100
         ):
             raise LightCurveViolation("day curve brightness bounds are invalid")
+        if not (
+            isinstance(self.evening_max_percent, int)
+            and 0 <= self.evening_max_percent <= 100
+        ):
+            raise LightCurveViolation("evening max percent must be 0..100")
         if not 0 < self.warm_kelvin < self.neutral_kelvin:
             raise LightCurveViolation("day curve colour bounds are invalid")
         for label, value in (
@@ -245,8 +252,10 @@ def _mode_at(
         )
     if now < evening:
         ratio = _ratio(now, evening_start, evening)
-        brightness = profile.day_max_percent - (
-            profile.day_max_percent - profile.evening_min_percent
+        # Вечерний максимум: потолок яркости в вечернем режиме
+        # (настраивается в профиле комнаты, по умолчанию 100%).
+        brightness = profile.evening_max_percent - (
+            profile.evening_max_percent - profile.evening_min_percent
         ) * ratio
         kelvin = round(
             profile.neutral_kelvin
@@ -293,6 +302,14 @@ def evaluate_light_curve(
             fade_seconds=profile.mode_fade_seconds,
             mirror_on=mirror_on,
         )
+
+    # A lowered evening ceiling must not be bypassed by the reduction
+    # branches before sunset (HH-016.c SEC-EVM-03): the applicable floor
+    # never exceeds the current mode level. The default profile keeps the
+    # documented floor (15% before sunset) exactly as supplied; only a
+    # ceiling below 100 activates the clamp.
+    if profile.evening_max_percent < 100:
+        minimum_percent = min(minimum_percent, round(mode_brightness))
 
     if context.motion_rejected:
         return LightCurveDecision(

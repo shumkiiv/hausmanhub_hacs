@@ -150,11 +150,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         HomeAssistantTabletPreferencesStore(hass, entry.entry_id)
     )
     await tablet_preferences_service.async_load(settings_service.current)
+    domain_data = hass.data.setdefault(entry.domain, {})
+    admin_mutation_lock = domain_data.setdefault("admin_mutation_lock", asyncio.Lock())
     device_power_dependency_service = DevicePowerDependencyService(
         HomeAssistantDevicePowerDependencyStore(hass, entry.entry_id),
         entity_pair_validator=lambda dependent, source: (
             hass.states.get(dependent) is not None and hass.states.get(source) is not None
         ),
+        mutation_lock=admin_mutation_lock,
     )
     await device_power_dependency_service.async_load()
     await async_migrate_obsolete_small_corridor_power_source(
@@ -183,7 +186,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         HomeAssistantDeviceDiscoveryStore(hass, entry.entry_id)
     )
     await device_discovery_service.async_load()
-    domain_data = hass.data.setdefault(entry.domain, {})
     domain_data["settings_service"] = settings_service
     domain_data["tablet_preferences_service"] = tablet_preferences_service
     domain_data["device_power_dependency_service"] = (
@@ -455,6 +457,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         scenario_service.is_electrical_breaker_entity
     )
     await scenario_service.async_load()
+    from .application.protected_topology import (
+        ROLE_AWAY_SENSOR,
+        ROLE_CURTAIN_KITCHEN,
+        ROLE_CURTAIN_LIVING,
+        ROLE_CURTAIN_OFFICE,
+        ROLE_CURTAIN_ROOM,
+        ProtectedTopologyService,
+        role_targets_payload,
+    )
+    from .protected_topology_api import (
+        DATA_PROTECTED_TOPOLOGY,
+        register_protected_topology_api,
+    )
+    from .protected_topology_storage import HomeAssistantProtectedTopologyStore
+
+    protected_topology = ProtectedTopologyService(
+        HomeAssistantProtectedTopologyStore(hass, entry.entry_id),
+        catalog_resolver=lambda target_id: scenario_service.current_catalog().device(target_id),
+        entity_validator=lambda entity_id: hass.states.get(entity_id) is not None,
+        mutation_lock=admin_mutation_lock,
+    )
+    try:
+        await protected_topology.async_load()
+    except Exception:  # noqa: BLE001 - fail closed; readiness explains the missing roles
+        _LOGGER.warning("protected topology is unavailable; command roles remain disabled")
+    domain_data[DATA_PROTECTED_TOPOLOGY] = protected_topology
+    register_protected_topology_api(hass)
+    scenario_service.set_topology_resolver(protected_topology.target_id)
+    away_sensor_entity_id = protected_topology.entity_id(ROLE_AWAY_SENSOR)
     from .application.scenario_control_policy import ScenarioControlPolicyService
     from .scenario_control_storage import HomeAssistantScenarioControlPolicyStore
 
@@ -488,6 +519,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
     )
     domain_data["scenario_control_policy_service"] = scenario_control_policy
+    from .application.curtain_command_policy import curtain_targets_from_resolver
+
+    curtain_targets = curtain_targets_from_resolver(protected_topology.target_id)
+    curtain_target_ids = (
+        tuple(curtain_targets[role] for role in ("living", "kitchen", "room", "office"))
+        if curtain_targets is not None
+        else ()
+    )
+    office_curtain_target_id = (
+        curtain_targets["office"] if curtain_targets is not None else None
+    )
+    curtain_known_entity_ids = {}
+    if curtain_targets is not None:
+        for role, protected_role in {
+            "living": ROLE_CURTAIN_LIVING,
+            "kitchen": ROLE_CURTAIN_KITCHEN,
+            "room": ROLE_CURTAIN_ROOM,
+            "office": ROLE_CURTAIN_OFFICE,
+        }.items():
+            entity_id = protected_topology.entity_id(protected_role)
+            if isinstance(entity_id, str) and entity_id:
+                curtain_known_entity_ids[curtain_targets[role]] = entity_id
     from .application.curtain_scale_confirmation import CurtainScaleConfirmation
     from .curtain_scale_confirmation_storage import (
         HomeAssistantCurtainScaleConfirmationStore,
@@ -502,14 +555,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             lambda requested: scenario_service.current_catalog().device(requested),
             target_id,
         ),
+        office_target_id=office_curtain_target_id or "protected_topology_missing",
     )
     await curtain_scale_confirmation.async_load()
     domain_data["curtain_scale_confirmation"] = curtain_scale_confirmation
-    from .application.smart_switch_bindings import HomeAssistantSmartSwitchBindingsStore
+    from .application.smart_switch_bindings import (
+        HomeAssistantSmartSwitchBindingsStore,
+        bindings_from_payload,
+    )
 
     smart_switch_bindings_store = HomeAssistantSmartSwitchBindingsStore(
         hass, entry.entry_id
     )
+    try:
+        smart_switch_bindings = bindings_from_payload(
+            await smart_switch_bindings_store.async_load()
+        )
+    except Exception:  # noqa: BLE001 - native handover must fail closed
+        _LOGGER.warning("smart-switch bindings are unavailable; native handover is disabled")
+        smart_switch_bindings = None
     domain_data["smart_switch_bindings_store"] = smart_switch_bindings_store
     # No room supplies release-owned sensor evidence at setup any more. Reset
     # every tracked sensor to unknown so stale evidence can never release the
@@ -567,6 +631,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             scenario_service.current_catalog().device(target_id)
         ),
         next_sunrise_ms=next_curtain_sunrise_ms,
+        target_ids=curtain_target_ids,
     )
     await curtain_protection.async_load()
     domain_data["curtain_protection"] = curtain_protection
@@ -593,7 +658,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             scale_authorization_provider=(
                 curtain_scale_confirmation.authorization_snapshot
             ),
-            position_evidence_policy=CurtainPositionEvidencePolicy(),
+            position_evidence_policy=CurtainPositionEvidencePolicy(
+                known_entity_ids=curtain_known_entity_ids,
+            ),
+            curtain_targets=curtain_targets if curtain_targets is not None else {},
         ),
         curtain_protection=curtain_protection,
     )
@@ -619,6 +687,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         catalog_resolver=lambda target_id: (
             scenario_service.current_catalog().device(target_id)
         ),
+        topology_resolver=protected_topology.target_id,
     )
     await scenario_control_coordinator.async_load()
     scenario_executor.set_scenario_generation_validator(
@@ -631,9 +700,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             scenario_id, run_id, trigger
         )
         if scenario_id == "system-curtains-privacy-controller":
-            context["state"] = await curtain_protection.async_control_state(
+            curtain_state = await curtain_protection.async_control_state(
                 run_id, trigger
             )
+            curtain_topology = role_targets_payload(
+                protected_topology.target_id,
+                {
+                    "living": ROLE_CURTAIN_LIVING,
+                    "kitchen": ROLE_CURTAIN_KITCHEN,
+                    "room": ROLE_CURTAIN_ROOM,
+                    "office": ROLE_CURTAIN_OFFICE,
+                },
+            )
+            curtain_state["topology"] = curtain_topology
+            if curtain_topology.get("ready") is not True:
+                curtain_state["ready"] = False
+                curtain_state["transition"] = "protected_topology_missing"
+            context["state"] = curtain_state
         return context
 
     scenario_node_red_backend.set_control_context_provider(managed_control_context)
@@ -648,6 +731,126 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .application.activation_latch import ActivationLatch
 
     activation_latch = ActivationLatch()
+    try:
+        from .application.managed_switch_binding_migration import (
+            HomeAssistantManagedSwitchBindingMigrationStore,
+            ManagedSwitchBindingMigration,
+            managed_switch_binding_manifest_from_protected_topology,
+        )
+        from .application.managed_switch_migration import (
+            HomeAssistantManagedSwitchMigrationStore,
+            ManagedSwitchMigration,
+            ManagedSwitchMigrationConflict,
+            ManagedSwitchStartupCoordinator,
+            async_load_managed_switch_migration_entries,
+            managed_switch_manifest_from_protected_topology,
+        )
+        from .application.native_automation_migration import (
+            HomeAssistantNativeAutomationAdapter,
+            HomeAssistantNativeAutomationMigrationStore,
+            NativeAutomationMigration,
+            configure_native_automation_topology,
+            native_automation_manifest_from_protected_topology,
+        )
+
+        configure_native_automation_topology(
+            disable_entity_ids={},
+            preserve_entity_ids={},
+            expected={},
+        )
+        native_manifest = native_automation_manifest_from_protected_topology(
+            protected_topology
+        )
+        if native_manifest.get("ready") is not True:
+            raise ManagedSwitchMigrationConflict(
+                str(native_manifest.get("reason") or "protected_native_topology_missing")
+            )
+        configure_native_automation_topology(
+            disable_entity_ids=native_manifest["disableEntityIds"],  # type: ignore[arg-type]
+            preserve_entity_ids=native_manifest["preserveEntityIds"],  # type: ignore[arg-type]
+            expected=native_manifest["expected"],  # type: ignore[arg-type]
+        )
+        managed_manifest = managed_switch_manifest_from_protected_topology(
+            protected_topology
+        )
+        binding_manifest = managed_switch_binding_manifest_from_protected_topology(
+            protected_topology
+        )
+        scenario_service.set_managed_switch_binding_manifest(binding_manifest)
+        native_automation_migration = NativeAutomationMigration(
+            HomeAssistantNativeAutomationAdapter(hass, smart_switch_bindings),
+            HomeAssistantNativeAutomationMigrationStore(hass, entry.entry_id),
+        )
+        managed_switch_migration_store = HomeAssistantManagedSwitchMigrationStore(
+            hass, entry.entry_id, manifest=managed_manifest
+        )
+        # One lock serialises startup migration writes with the admin re-arm
+        # service so a stale expectedReceiptRevision cannot race a live write.
+        managed_switch_migration_lock = asyncio.Lock()
+        managed_switch_migration = ManagedSwitchMigration(
+            scenario_service,
+            managed_switch_migration_store,
+            source_loader=lambda: async_load_managed_switch_migration_entries(
+                hass.async_add_executor_job, managed_manifest
+            ),
+            native_automation_migration=native_automation_migration,
+            manifest=managed_manifest,
+            mutation_lock=managed_switch_migration_lock,
+        )
+        managed_switch_binding_migration = ManagedSwitchBindingMigration(
+            scenario_service,
+            HomeAssistantManagedSwitchBindingMigrationStore(
+                hass, entry.entry_id, manifest=binding_manifest
+            ),
+            manifest=binding_manifest,
+        )
+        # The re-arm service is created before startup so the supported recovery
+        # route stays reachable even when a stale durable receipt blocks the
+        # startup migration itself.
+        from .application.managed_switch_migration_rearm import (
+            ManagedSwitchMigrationRearmService,
+        )
+        from .managed_switch_migration_api import (
+            DATA_MANAGED_SWITCH_MIGRATION_REARM,
+        )
+
+        domain_data[DATA_MANAGED_SWITCH_MIGRATION_REARM] = (
+            ManagedSwitchMigrationRearmService(
+                managed_switch_migration_store,
+                lambda: managed_switch_manifest_from_protected_topology(
+                    protected_topology
+                ),
+                mutation_lock=managed_switch_migration_lock,
+            )
+        )
+
+        def _publish_managed_switch_status(status: dict[str, str]) -> None:
+            domain_data["managed_switch_startup_status"] = dict(status)
+
+        async def _activate_managed_switches() -> None:
+            await scenario_service.async_open_managed_switch_execution(managed_manifest)
+
+        managed_switch_startup = ManagedSwitchStartupCoordinator(
+            scenario_service,
+            managed_switch_migration,
+            _activate_managed_switches,
+            binding_migration=managed_switch_binding_migration,
+            status_publisher=_publish_managed_switch_status,
+            manifest=managed_manifest,
+        )
+        domain_data["managed_switch_startup"] = managed_switch_startup
+        entry.async_on_unload(managed_switch_startup.cancel)
+        await managed_switch_startup.async_start()
+    except Exception as error:  # noqa: BLE001 - missing topology keeps runtime fail-closed
+        domain_data["managed_switch_startup_status"] = {
+            "state": "blocked",
+            "reason": str(error) or "protected_topology_missing",
+        }
+        _LOGGER.warning("managed switch startup is blocked: %s", error)
+
+    from .managed_switch_migration_api import register_managed_switch_migration_api
+
+    register_managed_switch_migration_api(hass)
 
     # Tambur was transferred to RoomLightingRuntime.  The coordinator remains
     # active for every other controller but must neither subscribe to Tambur
@@ -762,9 +965,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         HomeAssistantRoomLightingOwnershipStore,
         RoomLightingRuntime,
     )
+    from .application.room_power_migration import (
+        RoomPowerMigrationClaimService,
+        RoomPowerMigrationManifestError,
+        corrupt_manifest,
+    )
     from .application.room_lighting_shadow import (
         HomeAssistantRoomLightingShadowStore,
         RoomLightingShadowService,
+    )
+    from .room_power_migration_storage import (
+        HomeAssistantRoomPowerMigrationManifestStore,
     )
     from .room_lighting_api import (
         DATA_ROOM_LIGHTING_RUNTIME,
@@ -773,6 +984,50 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     room_lighting_service = domain_data.get(DATA_ROOM_LIGHTING_SERVICE)
     if room_lighting_service is not None:
+        room_power_migration_store = HomeAssistantRoomPowerMigrationManifestStore(
+            hass, entry.entry_id
+        )
+        try:
+            room_power_migration_claim_service = RoomPowerMigrationClaimService(
+                room_power_migration_store,
+                room_lighting_service,
+                device_power_dependency_service,
+                mutation_lock=admin_mutation_lock,
+            )
+            await room_power_migration_claim_service.async_load()
+            power_manifest_healthy = True
+        except RoomPowerMigrationManifestError:
+            _LOGGER.warning(
+                "room lighting power migration claims are damaged or unsupported; "
+                "blocking exact-power fallback until the protected store is repaired"
+            )
+            stored_power_manifest = corrupt_manifest()
+            power_manifest_healthy = False
+        except Exception:  # noqa: BLE001 - an unreadable store must fail closed
+            _LOGGER.warning(
+                "room lighting power migration claims are unavailable; "
+                "blocking exact-power fallback until storage recovers"
+            )
+            stored_power_manifest = corrupt_manifest()
+            power_manifest_healthy = False
+        configs = await room_lighting_service.async_list_configs()
+        if power_manifest_healthy:
+            try:
+                room_power_migration_manifest = (
+                    await room_power_migration_claim_service.async_merge_live_dependencies(
+                        configs,
+                        device_power_dependency_service.mapping,
+                    )
+                )
+            except Exception:  # noqa: BLE001 - keep the current protected state
+                _LOGGER.warning("room lighting power migration claims were not saved")
+                room_power_migration_manifest = room_power_migration_claim_service.manifest
+            domain_data["room_power_migration_claim_service"] = (
+                room_power_migration_claim_service
+            )
+        else:
+            room_power_migration_manifest = stored_power_manifest
+        domain_data["room_power_migration_manifest"] = room_power_migration_manifest
         room_lighting_shadow = RoomLightingShadowService(
             HomeAssistantRoomLightingShadowStore(hass, entry.entry_id)
         )
@@ -785,6 +1040,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ),
             reserved_target_ids=scenario_control_coordinator.command_target_ids,
             reserved_entity_ids_provider=scenario_control_coordinator.command_entity_ids,
+            power_dependency_resolver=(
+                lambda: device_power_dependency_service.mapping
+            ),
+            electrical_breaker_resolver=(
+                scenario_service.is_electrical_breaker_entity
+            ),
+            power_migration_manifest=room_power_migration_manifest,
+            away_entity_id=away_sensor_entity_id,
         )
         domain_data[DATA_ROOM_LIGHTING_RUNTIME] = room_lighting_runtime
         await room_lighting_runtime.start(hass, entry.entry_id)

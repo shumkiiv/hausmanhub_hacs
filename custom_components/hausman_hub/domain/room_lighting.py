@@ -14,6 +14,8 @@ from enum import StrEnum
 import re
 from typing import Any
 
+from .light_curve import LightCurveProfile
+
 
 ROOM_LIGHTING_CONFIG_NAME = "hausman-hub-room-lighting-config"
 ROOM_LIGHTING_CONFIG_VERSION = 1
@@ -28,6 +30,10 @@ MIN_BRIGHTNESS = 0
 MAX_BRIGHTNESS = 100
 MIN_KELVIN = 2000
 MAX_KELVIN = 6500
+
+# Engine defaults anchor config-level bounds to a single source of truth
+# (the curve profile the runtime actually executes).
+_ENGINE_DEFAULT_PROFILE = LightCurveProfile()
 MIN_LUX = 0
 MAX_LUX = 100_000
 MANUAL_PRIORITY = "manual_above_auto"
@@ -928,6 +934,51 @@ class Timers:
 
 
 @dataclass(frozen=True, slots=True)
+class MorningBoundary:
+    """Optional morning boundary policy for day-curve rooms.
+
+    When enabled, the room's day profile starts at the configured boundary
+    time instead of staying blocked by manual holds from the previous
+    evening. In presence-gate mode the day starts at the first trusted
+    presence report at or after the boundary; until then the room remains
+    in its night state. Crossing the boundary never commands light by
+    itself: light is commanded only by the room profile's own decision.
+    """
+
+    enabled: bool = False
+    time: str = "07:00"
+    presence_gate: bool = False
+
+    def __post_init__(self) -> None:
+        _flag(self.enabled, "morning boundary flag")
+        if not isinstance(self.time, str) or _TIME_OF_DAY.fullmatch(self.time) is None:
+            raise RoomLightingViolation("morning boundary time must be HH:MM")
+        _flag(self.presence_gate, "morning presence gate flag")
+
+
+@dataclass(frozen=True, slots=True)
+class CurveParams:
+    """Day-curve parameters a room may deviate from the supplied document.
+
+    Absent values keep the engine defaults. ``evening_max_percent`` is the
+    evening brightness ceiling: the curve starts the evening at this level
+    and fades to the evening minimum (HH-016.c). The floor follows the
+    engine's fixed evening minimum: the evening branch interpolates from
+    the ceiling down to that minimum, so a lower ceiling cannot execute.
+    """
+
+    evening_max_percent: int = 100
+
+    def __post_init__(self) -> None:
+        _integer(
+            self.evening_max_percent,
+            "curve evening max percent",
+            minimum=_ENGINE_DEFAULT_PROFILE.evening_min_percent,
+            maximum=100,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class Behaviors:
     only_when_dark: bool = False
     respect_manual_off: bool = True
@@ -982,6 +1033,8 @@ class RoomLightingConfig:
     timers: Timers | None = None
     behaviors: Behaviors | None = None
     auxiliary: AuxiliaryPolicy | None = None
+    morning: MorningBoundary | None = None
+    curve: CurveParams | None = None
     profile: str | None = None
     template_id: str | None = None
     overrides: Overrides = field(default_factory=Overrides)
@@ -1015,6 +1068,10 @@ class RoomLightingConfig:
             raise RoomLightingViolation("behaviours block is invalid")
         if self.auxiliary is not None and not isinstance(self.auxiliary, AuxiliaryPolicy):
             raise RoomLightingViolation("auxiliary block is invalid")
+        if self.morning is not None and not isinstance(self.morning, MorningBoundary):
+            raise RoomLightingViolation("morning boundary block is invalid")
+        if self.curve is not None and not isinstance(self.curve, CurveParams):
+            raise RoomLightingViolation("curve params block is invalid")
         if self.profile is not None and self.profile not in ROOM_LIGHTING_PROFILES:
             raise RoomLightingViolation("room lighting profile is unknown")
         if self.template_id is not None:
@@ -1212,6 +1269,16 @@ class RoomLightingConfig:
                     "fanOffSeconds": exhaust.fan_off_seconds,
                 }
             payload["auxiliary"] = auxiliary_payload
+        if self.morning is not None:
+            payload["morningBoundary"] = {
+                "enabled": self.morning.enabled,
+                "time": self.morning.time,
+                "presenceGate": self.morning.presence_gate,
+            }
+        if self.curve is not None:
+            payload["curveParams"] = {
+                "eveningMaxPercent": self.curve.evening_max_percent,
+            }
         if self.profile is not None:
             payload["profile"] = self.profile
         return payload
@@ -1686,6 +1753,22 @@ def _behaviors_from_payload(payload: object) -> Behaviors:
     )
 
 
+def _morning_from_payload(payload: object) -> MorningBoundary:
+    data = _as_dict(payload, "morning boundary")
+    return MorningBoundary(
+        enabled=data.get("enabled", False),
+        time=data.get("time", "07:00"),
+        presence_gate=data.get("presenceGate", False),
+    )
+
+
+def _curve_from_payload(payload: object) -> CurveParams:
+    data = _as_dict(payload, "curve params")
+    return CurveParams(
+        evening_max_percent=data.get("eveningMaxPercent", 100),
+    )
+
+
 def _overrides_from_payload(payload: object) -> Overrides:
     if payload is None:
         return Overrides()
@@ -1708,6 +1791,8 @@ def room_lighting_config_from_payload(payload: object) -> RoomLightingConfig:
     timers = data.get("timers")
     behaviors = data.get("behaviors")
     auxiliary = data.get("auxiliary")
+    morning = data.get("morningBoundary")
+    curve_params = data.get("curveParams")
     profile = data.get("profile")
     return RoomLightingConfig(
         room_id=_require(data, "roomId", "room id"),
@@ -1728,6 +1813,8 @@ def room_lighting_config_from_payload(payload: object) -> RoomLightingConfig:
         timers=None if timers is None else _timers_from_payload(timers),
         behaviors=None if behaviors is None else _behaviors_from_payload(behaviors),
         auxiliary=None if auxiliary is None else _auxiliary_policy_from_payload(auxiliary),
+        morning=None if morning is None else _morning_from_payload(morning),
+        curve=None if curve_params is None else _curve_from_payload(curve_params),
         profile=profile,
         template_id=data.get("templateId"),
         overrides=_overrides_from_payload(data.get("overrides")),

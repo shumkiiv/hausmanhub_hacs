@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/protected-topology-status.schema.json",
+  "title": "HausmanHub protected topology status v1",
+  "description": "Redacted protected-topology status. It exposes only the contract marker, revision, health, readiness and per-role configured/missing reason codes; it never returns Home Assistant entity ids, target ids, source hashes or definition hashes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "revision",
+    "ready",
+    "healthy",
+    "roles"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-protected-topology"},
+        "version": {"const": 1}
+      }
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "ready": {"type": "boolean"},
+    "healthy": {"type": "boolean"},
+    "roles": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "configured", "missingReason"],
+        "properties": {
+          "role": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*){1,7}$"
+          },
+          "configured": {"type": "boolean"},
+          "missingReason": {
+            "type": ["string", "null"],
+            "enum": [
+              null,
+              "role_missing",
+              "target_unresolved",
+              "entity_unavailable",
+              "storage_unhealthy"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

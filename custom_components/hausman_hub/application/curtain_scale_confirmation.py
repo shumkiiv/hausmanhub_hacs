@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from .curtain_command_policy import OFFICE_CURTAIN_TARGET
 
 
-OFFICE_CURTAIN_ENTITY_ID = "cover.0xa4c1381b3fb1c985"
 _CONFIRMATION_SOURCE = "owner_observed_current_scale"
 _PAYLOAD_FIELDS = {
     "version", "revision", "entryId", "targetId", "entityId",
@@ -45,9 +44,14 @@ class CurtainScaleIdentity:
         entity_unique_id: object,
         device_id: object,
         device_identifiers: object,
+        office_target_id: object = OFFICE_CURTAIN_TARGET,
     ) -> CurtainScaleIdentity:
-        if target_id != OFFICE_CURTAIN_TARGET or entity_id != OFFICE_CURTAIN_ENTITY_ID:
+        if target_id != office_target_id:
             raise ValueError("only the exact office curtain may be confirmed")
+        if not isinstance(target_id, str) or not target_id:
+            raise ValueError("curtain registry target is invalid")
+        if not isinstance(entity_id, str) or not entity_id:
+            raise ValueError("office curtain registry identity is invalid")
         if any(
             not isinstance(value, str) or not value or len(value) > 256
             for value in (entity_unique_id, device_id)
@@ -117,8 +121,8 @@ def valid_curtain_scale_confirmation_payload(value: object) -> bool:
         value.get("version") != 1
         or type(value.get("revision")) is not int
         or not 1 <= value["revision"] < 2**31
-        or value.get("targetId") != OFFICE_CURTAIN_TARGET
-        or value.get("entityId") != OFFICE_CURTAIN_ENTITY_ID
+        or not isinstance(value.get("targetId"), str)
+        or not value.get("targetId")
         or value.get("confirmationSource") != _CONFIRMATION_SOURCE
         or value.get("state") not in {"confirmed", "revoked"}
         or type(value.get("confirmedAt")) is not int
@@ -139,6 +143,7 @@ def valid_curtain_scale_confirmation_payload(value: object) -> bool:
             entity_unique_id=value["entityUniqueId"],
             device_id=value["deviceId"],
             device_identifiers=identifiers,
+            office_target_id=value["targetId"],
         )
     except (TypeError, ValueError):
         return False
@@ -154,6 +159,7 @@ class CurtainScaleConfirmation:
         *,
         entry_id: str,
         identity_resolver: Callable[[str], CurtainScaleIdentity | None],
+        office_target_id: str = OFFICE_CURTAIN_TARGET,
         now_ms: Callable[[], int] | None = None,
     ) -> None:
         if not isinstance(entry_id, str) or not entry_id:
@@ -161,6 +167,9 @@ class CurtainScaleConfirmation:
         self._store = store
         self._entry_id = entry_id
         self._identity_resolver = identity_resolver
+        if not isinstance(office_target_id, str) or not office_target_id:
+            raise ValueError("office curtain target is invalid")
+        self._office_target_id = office_target_id
         self._now_ms = now_ms or (lambda: time.time_ns() // 1_000_000)
         self._record: dict[str, object] | None = None
         self._healthy = True
@@ -228,7 +237,7 @@ class CurtainScaleConfirmation:
                 raise
             self._record = updated
             self._identity_invalidated = False
-            return self.authorization_snapshot(OFFICE_CURTAIN_TARGET)
+            return self.authorization_snapshot(self._office_target_id)
 
     async def async_revoke(
         self, expected_revision: int
@@ -260,12 +269,12 @@ class CurtainScaleConfirmation:
                 raise
             self._record = updated
             self._identity_invalidated = False
-            return self.authorization_snapshot(OFFICE_CURTAIN_TARGET)
+            return self.authorization_snapshot(self._office_target_id)
 
     def authorization_snapshot(self, target_id: str) -> CurtainScaleAuthorization:
         """Re-read physical identity each time policy snapshots authority."""
 
-        if target_id != OFFICE_CURTAIN_TARGET:
+        if target_id != self._office_target_id:
             return CurtainScaleAuthorization(False, self.revision, None)
         current = self._try_resolve_office_identity()
         digest = current.identity_digest if current is not None else None
@@ -288,13 +297,13 @@ class CurtainScaleConfirmation:
     def office_confirmation_view(self) -> CurtainScaleConfirmationView:
         identity = self._resolve_office_identity()
         return CurtainScaleConfirmationView(
-            authorization=self.authorization_snapshot(OFFICE_CURTAIN_TARGET),
+            authorization=self.authorization_snapshot(self._office_target_id),
             identity=identity,
         )
 
     def _try_resolve_office_identity(self) -> CurtainScaleIdentity | None:
         try:
-            identity = self._identity_resolver(OFFICE_CURTAIN_TARGET)
+            identity = self._identity_resolver(self._office_target_id)
         except Exception:  # noqa: BLE001
             return None
         return identity if isinstance(identity, CurtainScaleIdentity) else None
@@ -313,6 +322,7 @@ class CurtainScaleConfirmation:
                 target_id=self._record["targetId"], entity_id=self._record["entityId"],
                 entity_unique_id=self._record["entityUniqueId"], device_id=self._record["deviceId"],
                 device_identifiers=self._record["deviceIdentifiers"],
+                office_target_id=self._office_target_id,
             )
         except (KeyError, TypeError, ValueError):
             return None

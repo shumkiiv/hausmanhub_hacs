@@ -4,15 +4,15 @@ const request = msg.payload && typeof msg.payload === 'object' ? msg.payload : {
 const controls = request.context && request.context.controls && typeof request.context.controls === 'object'
   ? request.context.controls : {};
 const controlState = controls.state && typeof controls.state === 'object' ? controls.state : {};
-const ID = Object.freeze({
-  relay: 'entity_4be32416634e6416',
-  chandelier: 'entity_9ed909332fdaa8fd',
-});
+const topology = controlState.topology && typeof controlState.topology === 'object' ? controlState.topology : {};
+const roles = topology.roles && typeof topology.roles === 'object' ? topology.roles : {};
+const ID = Object.freeze({relay: roles.relay, chandelier: roles.chandelier});
 const NAME = Object.freeze({
   [ID.relay]: 'Выключатель малого коридора',
   [ID.chandelier]: 'Люстра малого коридора',
 });
 const deviceAction = (targetId, actionId, value) => {
+  if (typeof targetId !== 'string' || !targetId) return null;
   const action = {id: 'server_action', type: 'device_action', targetId, targetName: NAME[targetId], actionId};
   if (value !== null && value !== undefined) action.value = value;
   return action;
@@ -25,7 +25,8 @@ const action = controlState.action;
 if (controlState.ready === true && action && typeof action === 'object' &&
     [ID.relay, ID.chandelier].includes(action.targetId) &&
     ['turn_on', 'turn_off', 'set_brightness_percent', 'set_color_temperature'].includes(action.actionId)) {
-  actions.push(deviceAction(action.targetId, action.actionId, action.value));
+  const planned = deviceAction(action.targetId, action.actionId, action.value);
+  if (planned) actions.push(planned);
 }
 const evidence = controlState.evidence && typeof controlState.evidence === 'object'
   ? controlState.evidence : {};

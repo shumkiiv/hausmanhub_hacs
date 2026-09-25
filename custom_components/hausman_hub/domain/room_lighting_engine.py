@@ -123,6 +123,7 @@ class LightSnapshot:
     last_changed: int
     brightness: int | None = None
     color_temperature: int | None = None
+    reported_state: SensorState | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.target_id, str) or not self.target_id:
@@ -131,6 +132,10 @@ class LightSnapshot:
             raise RoomLightingEngineViolation("light state is invalid")
         if type(self.last_changed) is not int or self.last_changed < 0:
             raise RoomLightingEngineViolation("light timestamp is invalid")
+        if self.reported_state is not None and not isinstance(
+            self.reported_state, SensorState
+        ):
+            raise RoomLightingEngineViolation("reported light state is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -439,6 +444,19 @@ def _time_minutes(value: str) -> int:
     return hour * 60 + minute
 
 
+def curve_profile_from_config(config: RoomLightingConfig) -> LightCurveProfile:
+    """Day-curve profile for a room: engine defaults plus configured params.
+
+    Rooms without a ``curveParams`` block keep the supplied document
+    unchanged; configured values overlay only the parameters a room may
+    deviate (HH-016.c evening maximum).
+    """
+
+    if config.curve is None:
+        return LightCurveProfile()
+    return LightCurveProfile(evening_max_percent=config.curve.evening_max_percent)
+
+
 def evaluate_curve_room(
     config: RoomLightingConfig,
     context: RoomLightingContext,
@@ -487,7 +505,7 @@ def evaluate_curve_room(
             ),
         )
     curve = evaluate_light_curve(
-        profile or LightCurveProfile(),
+        profile if profile is not None else curve_profile_from_config(config),
         LightCurveContext(
             now=now_time,
             sunrise=context.sunrise,
@@ -552,8 +570,11 @@ def _curve_manual_blocked(context: RoomLightingContext, target_id: str) -> bool:
     latest = latest_ownership(context.ownership, target_id)
     if latest is None or latest.source is not OwnershipSource.MANUAL:
         return False
+    light_off = light is not None and (
+        light.state is SensorState.OFF or light.reported_state is SensorState.OFF
+    )
     return not (
-        light is not None and light.state is SensorState.OFF
+        light_off
         and release_expired_manual(
             context.ownership, target_id, now=context.now,
             minimum_interval_seconds=context.protection.minimum_interval_seconds,
@@ -598,10 +619,18 @@ def _curve_main_decision(
 ) -> TargetDecision:
     target_id = target.id  # type: ignore[attr-defined]
     light = context.light(target_id)
-    light_on = light is not None and light.state is SensorState.ON
+    reported = light.reported_state if light is not None else None
+    light_on = light is not None and (
+        light.state is SensorState.ON or reported is SensorState.ON
+    )
     if not target.auto_control:  # type: ignore[attr-defined]
         return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_MODE))
-    if light is None or light.state in (SensorState.UNKNOWN, SensorState.UNAVAILABLE):
+    if light is None or (
+        light.state in (SensorState.UNKNOWN, SensorState.UNAVAILABLE)
+        and reported not in (SensorState.ON, SensorState.OFF)
+    ):
+        # A missing, unavailable or restored target is never treated as off.
+        # A stale but known on/off is still usable for schedule planning.
         return _unchanged(target_id, Skip(target_id, SkipReason.SENSOR_UNKNOWN))
     if _curve_manual_blocked(context, target_id):
         return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_OWNERSHIP))
@@ -626,20 +655,40 @@ def _curve_main_decision(
         )
 
     commands: list[PlannedCommand] = []
+    brightness = curve.brightness_percent  # type: ignore[attr-defined]
+    kelvin = curve.color_temperature  # type: ignore[attr-defined]
     if not light_on:
+        # Включающая команда несёт целевые яркость и оттенок: светильник
+        # включается сразу на уровне кривой, без отдельной регулировки к
+        # уже включённому светильнику (защита от дубликатов её блокирует).
         commands.append(
             PlannedCommand(
                 target_id,
                 LightAction.TURN_ON,
+                brightness=(
+                    brightness
+                    if target.brightness and brightness is not None
+                    else None
+                ),
+                color_temperature=(
+                    kelvin
+                    if target.color_temperature and kelvin is not None
+                    else None
+                ),
                 reason=DecisionReason.SCHEDULE,
                 fade_seconds=fade,
             )
         )
-    brightness = curve.brightness_percent  # type: ignore[attr-defined]
-    kelvin = curve.color_temperature  # type: ignore[attr-defined]
     if target.brightness and brightness is not None:  # type: ignore[attr-defined]
         current = light.brightness if light is not None else None
-        if current is None or abs(current - brightness) > BRIGHTNESS_TOLERANCE:
+        # Отдельная регулировка — только для уже включённого светильника:
+        # после turn_on уровень задан самой включающей командой. Если текущая
+        # яркость неизвестна (молчащий включённый светильник), планируем
+        # абсолютную целевую команду: она несёт уровень и не является слепым
+        # повтором, а dispatch ограничивает её одной попыткой на доказательства.
+        if light_on and (
+            current is None or abs(current - brightness) > BRIGHTNESS_TOLERANCE
+        ):
             commands.append(
                 PlannedCommand(
                     target_id,
@@ -650,8 +699,10 @@ def _curve_main_decision(
                 )
             )
     if target.color_temperature and kelvin is not None:  # type: ignore[attr-defined]
+        # Оттенок к включённому светильнику — только как регулировка после
+        # включения (turn_on уже несёт оттенок).
         current_kelvin = light.color_temperature if light is not None else None
-        if (
+        if light_on and (
             current_kelvin is None
             or abs(current_kelvin - kelvin) > COLOR_TEMPERATURE_TOLERANCE_KELVIN
         ):
@@ -681,11 +732,17 @@ def _curve_mirror_decision(
     target: object, curve: object, context: RoomLightingContext
 ) -> TargetDecision:
     target_id = target.id  # type: ignore[attr-defined]
-    light_on = _light_on(context, target_id)
+    light = context.light(target_id)
+    reported = light.reported_state if light is not None else None
+    light_on = light is not None and (
+        light.state is SensorState.ON or reported is SensorState.ON
+    )
     if not target.auto_control:  # type: ignore[attr-defined]
         return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_MODE))
-    light = context.light(target_id)
-    if light is None or light.state in (SensorState.UNKNOWN, SensorState.UNAVAILABLE):
+    if light is None or (
+        light.state in (SensorState.UNKNOWN, SensorState.UNAVAILABLE)
+        and reported not in (SensorState.ON, SensorState.OFF)
+    ):
         return _unchanged(target_id, Skip(target_id, SkipReason.SENSOR_UNKNOWN))
     if _curve_manual_blocked(context, target_id):
         return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_OWNERSHIP))
@@ -742,11 +799,18 @@ def _manual_off_released(
     context: RoomLightingContext, target_id: str, presence: SensorState,
     absence_proven: bool, absence_since: int | None,
 ) -> bool:
-    """Shared target/peer release: unknown is not a confirmed OFF state."""
+    """Shared target/peer release: unknown is not a confirmed OFF state.
+
+    A stale but known ``off`` counts as off: devices that report only on change
+    would otherwise keep manual ownership forever and never release.
+    """
 
     light = context.light(target_id)
+    light_off = light is not None and (
+        light.state is SensorState.OFF or light.reported_state is SensorState.OFF
+    )
     return (
-        light is not None and light.state is SensorState.OFF
+        light_off
         and presence is SensorState.ON
         and release_expired_manual(
             context.ownership, target_id, now=context.now,
@@ -990,25 +1054,18 @@ def _evaluate_target(
                 commands=tuple(commands),
                 skips=tuple(skips),
             )
-        commands = [PlannedCommand(target_id, LightAction.TURN_ON, reason=reason)]
-        if target.brightness and brightness is not None:  # type: ignore[attr-defined]
-            commands.append(
-                PlannedCommand(
-                    target_id,
-                    LightAction.SET_BRIGHTNESS,
-                    brightness=brightness,
-                    reason=reason,
-                )
+        # Включающая команда несёт целевые яркость и оттенок: светильник
+        # включается сразу на уровне кривой, без отдельной регулировки к
+        # уже включённому светильнику (защита от дубликатов её блокирует).
+        commands = [
+            PlannedCommand(
+                target_id,
+                LightAction.TURN_ON,
+                brightness=brightness if target.brightness else None,
+                color_temperature=color if target.color_temperature else None,
+                reason=reason,
             )
-        if target.color_temperature and color is not None:  # type: ignore[attr-defined]
-            commands.append(
-                PlannedCommand(
-                    target_id,
-                    LightAction.SET_COLOR_TEMPERATURE,
-                    color_temperature=color,
-                    reason=reason,
-                )
-            )
+        ]
         return TargetDecision(
             target_id=target_id,
             desired_state="on",

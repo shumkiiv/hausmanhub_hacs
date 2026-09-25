@@ -8,12 +8,16 @@ keeps producing a decision with an explicit skip reason.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, time as dt_time, timezone, tzinfo
 import logging
 import math
 from typing import TYPE_CHECKING
 
+from ..domain.device_power_dependencies import (
+    DevicePowerDependency,
+    effective_device_state,
+)
 from ..domain.room_lighting import (
     LightKind,
     LightTarget,
@@ -37,7 +41,16 @@ from ..domain.room_lighting_ownership import (
     SensorState,
     has_proven_auto_ownership,
 )
+from .power_evidence import (
+    state_is_restored_or_cached,
+    trusted_power_state,
+    trusted_target_state,
+)
 from .room_lighting_color import device_kelvin_bounds, reflect_inverted_kelvin
+from .room_power_migration import (
+    EXACT_POWER_TARGET_MANIFEST,
+    decide_exact_power,
+)
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -48,9 +61,13 @@ DEFAULT_SUNRISE = dt_time(7, 0)
 DEFAULT_SUNSET = dt_time(19, 0)
 SUN_ENTITY_ID = "sun.sun"
 MAX_BRIGHTNESS_255 = 255.0
+LIGHT_STATE_FRESHNESS_MS = 300_000
 
 OwnershipProvider = Callable[[RoomLightingConfig], Sequence[OwnershipSnapshot]]
 ProtectionProvider = Callable[[RoomLightingConfig], ProtectionSnapshot]
+PowerDependencyResolver = Callable[
+    [], Mapping[str, DevicePowerDependency] | None
+]
 NowMs = Callable[[], int]
 
 
@@ -82,6 +99,31 @@ def _state_of(value: object) -> SensorState:
     if raw == "unavailable":
         return SensorState.UNAVAILABLE
     return SensorState.UNKNOWN
+
+
+def _trusted_light_state(state: object, *, now: int) -> SensorState:
+    """Return a target state only when it is fresh and not restored/cached."""
+
+    value = trusted_target_state(
+        state, now_ms=now, freshness_ms=LIGHT_STATE_FRESHNESS_MS
+    )
+    return _state_of(value)
+
+
+def _planning_light_state(state: object) -> SensorState:
+    """Return a known target ``on``/``off`` for command planning.
+
+    A light or relay that reports only on change can keep a months-old
+    ``last_reported`` while its Home Assistant state is still the best known
+    truth.  Scheduling must not stall just because nothing changed recently;
+    freshness stays required for confirming a command that was just sent
+    (``_trusted_light_state``/``trusted_target_state``), while restored, cached
+    and non-binary states still fail closed here.
+    """
+
+    if state is None or state_is_restored_or_cached(state):
+        return SensorState.UNKNOWN
+    return _state_of(getattr(state, "state", None))
 
 
 def _last_changed_ms(state: object, *, now: int) -> int:
@@ -159,6 +201,8 @@ class RoomLightingHaStateProvider:
         unobserved_since_provider: Callable[[], int | None] | None = None,
         sunrise: dt_time | None = None,
         sunset: dt_time | None = None,
+        power_dependency_resolver: PowerDependencyResolver | None = None,
+        power_migration_manifest: Mapping[str, str] | None = None,
     ) -> None:
         self._now_ms = now_ms or _default_now_ms
         self._ownership_provider = ownership_provider
@@ -166,6 +210,17 @@ class RoomLightingHaStateProvider:
         self._unobserved_since_provider = unobserved_since_provider
         self._sunrise = sunrise
         self._sunset = sunset
+        self._power_dependency_resolver = power_dependency_resolver
+        self._power_migration_manifest = (
+            EXACT_POWER_TARGET_MANIFEST
+            if power_migration_manifest is None
+            else dict(power_migration_manifest)
+        )
+
+    def set_power_migration_manifest(self, manifest: Mapping[str, str]) -> None:
+        """Update protected exact-power claims without rebuilding the provider."""
+
+        self._power_migration_manifest = dict(manifest)
 
     async def build_context(
         self,
@@ -175,7 +230,27 @@ class RoomLightingHaStateProvider:
     ) -> RoomLightingContext:
         tz = _resolve_timezone(hass)
         sunrise, sunset = self._sun_times(hass, tz)
-        power_on = self._room_power_on(hass, config)
+        dependencies = self._power_dependencies()
+        # Only a room with an explicit release-owned migration claim switches
+        # to exact per-target semantics. Every other room keeps the legacy
+        # whole-room power switch association, regardless of the live map.
+        decision = decide_exact_power(
+            tuple(
+                (target.id, target.entity_id)
+                for target in config.devices.light_targets
+            ),
+            dependencies,
+            manifest=self._power_migration_manifest,
+            room_id=config.room_id,
+        )
+        exact_dependencies = decision.projection if decision.active else None
+        power_state = SensorState.ON if decision.active else self._room_power_state(hass, config)
+        power_on = power_state is SensorState.ON
+        legacy_power_off = not decision.active and power_state is SensorState.OFF
+        # Only claimed logical targets whose own edge is missing/wrong become
+        # unproven. Independent targets in the same claimed room keep their own
+        # trusted state; extra live edges are ignored by the projection.
+        unproven_targets = frozenset(decision.unproven_target_ids)
         return RoomLightingContext(
             now=now,
             timezone=tz,
@@ -186,7 +261,15 @@ class RoomLightingHaStateProvider:
                 for sensor in config.devices.sensors
             ),
             lights=tuple(
-                self._light_snapshot(hass, target, now, power_on=power_on)
+                self._light_snapshot(
+                    hass,
+                    target,
+                    now,
+                    power_on=power_on,
+                    dependencies=exact_dependencies,
+                    unproven_targets=unproven_targets,
+                    legacy_power_off=legacy_power_off,
+                )
                 for target in config.devices.light_targets
             ),
             ownership=self._ownership(config),
@@ -194,14 +277,49 @@ class RoomLightingHaStateProvider:
             unobserved_since=self._unobserved_since(),
         )
 
-    def _room_power_on(self, hass: HomeAssistant, config: RoomLightingConfig) -> bool:
-        """Whether the room's power switch, when configured, is provably on."""
+    def _room_power_state(
+        self, hass: HomeAssistant, config: RoomLightingConfig
+    ) -> SensorState:
+        """Trusted room power state; unknown is not a safe off proof."""
 
         power = config.devices.power_switch
         if power is None or power.entity_id is None:
-            return True
+            return SensorState.ON
         state = hass.states.get(power.entity_id)
-        return _state_of(getattr(state, "state", None)) is SensorState.ON
+        value = trusted_power_state(state, same_state_confirmation=True)
+        return _state_of(value)
+
+    def _power_dependencies(
+        self,
+    ) -> Mapping[str, DevicePowerDependency] | None:
+        """Return the exact dependency map, or ``None`` when unavailable.
+
+        A resolver that is absent keeps the legacy room-level association.
+        A resolver that raises or returns a damaged document means the exact
+        map cannot be trusted: the caller receives ``None`` and must fail
+        closed instead of guessing the electrical circuit.
+        """
+
+        resolver = self._power_dependency_resolver
+        if resolver is None:
+            return None
+        try:
+            value = resolver()
+        except Exception:  # noqa: BLE001 - a damaged map must not fail a room
+            _LOGGER.warning("room lighting power dependency map is unavailable")
+            return None
+        if not isinstance(value, Mapping):
+            _LOGGER.warning("room lighting power dependency map is damaged")
+            return None
+        dependencies: dict[str, DevicePowerDependency] = {}
+        for entity_id, dependency in value.items():
+            if not isinstance(entity_id, str) or not isinstance(
+                dependency, DevicePowerDependency
+            ):
+                _LOGGER.warning("room lighting power dependency map is damaged")
+                return None
+            dependencies[entity_id] = dependency
+        return dependencies
 
     def _unobserved_since(self) -> int | None:
         if self._unobserved_since_provider is None:
@@ -287,24 +405,61 @@ class RoomLightingHaStateProvider:
         now: int,
         *,
         power_on: bool = True,
+        dependencies: Mapping[str, DevicePowerDependency] | None = None,
+        unproven_targets: frozenset[str] = frozenset(),
+        legacy_power_off: bool = False,
     ) -> LightSnapshot:
-        if not power_on:
-            # An unpowered target cannot be on, regardless of the stale module
-            # state: the engine must treat it as off and request a turn-on.
-            return LightSnapshot(
-                target_id=target.id,
-                state=SensorState.OFF,
-                last_changed=now,
-            )
-        state = hass.states.get(target.entity_id) if target.entity_id else None
-        if state is None:
+        if target.id in unproven_targets:
+            # The claimed topology of this room is not proven by the live map.
+            # Never report the target as on: an unknown state fails closed and
+            # the dispatch path blocks the command with a diagnostic reason.
             return LightSnapshot(
                 target_id=target.id,
                 state=SensorState.UNKNOWN,
                 last_changed=now,
             )
-        raw = getattr(state, "state", None)
-        light_state = _state_of(raw)
+        state = hass.states.get(target.entity_id) if target.entity_id else None
+        trusted_target = _trusted_light_state(state, now=now)
+        reported_target = _planning_light_state(state)
+        if (
+            dependencies is None
+            and legacy_power_off
+            and trusted_target is SensorState.UNKNOWN
+            and str(getattr(state, "state", "")).lower() == "unavailable"
+        ):
+            # Narrow legacy room-power case: a freshly trusted OFF room relay can
+            # explain an unavailable Zigbee target. This only lets the engine
+            # plan the old two-step path; dispatch must re-read a trusted target
+            # OFF after power is restored before sending the target command.
+            return LightSnapshot(
+                target_id=target.id,
+                state=SensorState.OFF,
+                last_changed=now,
+            )
+        if trusted_target is SensorState.UNKNOWN:
+            return LightSnapshot(
+                target_id=target.id,
+                state=SensorState.UNKNOWN,
+                last_changed=now if state is None else _last_changed_ms(state, now=now),
+                reported_state=reported_target,
+            )
+        if dependencies is None and not power_on:
+            # Legacy whole-room association: an unpowered target cannot be on,
+            # but only after the target itself produced fresh trusted evidence.
+            return LightSnapshot(
+                target_id=target.id,
+                state=SensorState.OFF,
+                last_changed=now,
+            )
+        if dependencies is not None and target.entity_id is not None:
+            # Exact dependency map: only a target with an upstream source
+            # changes its effective state. Mirror and point switches keep
+            # their actual reported state even when another circuit is off.
+            light_state = self._effective_state(
+                hass, target.entity_id, dependencies, now=now
+            )
+        else:
+            light_state = trusted_target
         last_changed = _last_changed_ms(state, now=now)
         brightness: int | None = None
         color_temperature: int | None = None
@@ -323,7 +478,39 @@ class RoomLightingHaStateProvider:
             last_changed=last_changed,
             brightness=brightness,
             color_temperature=color_temperature,
+            reported_state=reported_target,
         )
+
+    @staticmethod
+    def _effective_state(
+        hass: HomeAssistant,
+        entity_id: str,
+        dependencies: Mapping[str, DevicePowerDependency],
+        *,
+        now: int,
+    ) -> SensorState:
+        """Resolve one target through the exact dependency map.
+
+        Power sources are read with the shared trusted-evidence rules, so a
+        restored, cached or stale relay report is never treated as power.
+        """
+
+        source_ids = {
+            dependency.power_source_entity_id
+            for dependency in dependencies.values()
+        }
+
+        def read_state(requested_entity_id: str) -> str | None:
+            state = hass.states.get(requested_entity_id)
+            if requested_entity_id in source_ids:
+                return trusted_power_state(state, same_state_confirmation=True)
+            trusted = _trusted_light_state(state, now=now)
+            return None if trusted is SensorState.UNKNOWN else trusted.value
+
+        effective, _status = effective_device_state(
+            entity_id, dependencies, read_state
+        )
+        return _state_of(effective)
 
     def build_auxiliary_observation(
         self,
@@ -431,6 +618,8 @@ async def build_context(
     unobserved_since_provider: Callable[[], int | None] | None = None,
     sunrise: dt_time | None = None,
     sunset: dt_time | None = None,
+    power_dependency_resolver: PowerDependencyResolver | None = None,
+    power_migration_manifest: Mapping[str, str] | None = None,
 ) -> RoomLightingContext:
     """Read the live state for one room and return a decision-ready context."""
 
@@ -440,6 +629,8 @@ async def build_context(
         unobserved_since_provider=unobserved_since_provider,
         sunrise=sunrise,
         sunset=sunset,
+        power_dependency_resolver=power_dependency_resolver,
+        power_migration_manifest=power_migration_manifest,
     )
     return await provider.build_context(hass, config, now)
 

@@ -28,6 +28,11 @@ from ..domain.scenarios import (
     ScenarioExecutionBackend,
 )
 from .device_action_protocol import DANGEROUS_ACTION_IDS
+from .power_evidence import (
+    power_state_is_fresh as _power_state_is_fresh,
+    state_is_restored_or_cached as _state_is_restored_or_cached,
+    trusted_power_state as _trusted_power_state,
+)
 from .curtain_command_policy import (
     CURTAIN_POSITION_PROVENANCE_UNVERIFIED,
     CURTAIN_POSITION_PROVENANCE_VERIFIED,
@@ -85,51 +90,6 @@ _PRESENCE_WORDS = (
 _DEPARTURE_SHUTDOWN_SCENARIO_ID = "system-away-turn-off"
 
 
-def _trusted_power_state(state: object | None) -> str | None:
-    """Return a power-source state only when its HA evidence is trustworthy."""
-
-    if (
-        state is None
-        or not _power_state_is_fresh(state)
-        or _state_is_restored_or_cached(state)
-    ):
-        return None
-    value = str(getattr(state, "state", "unknown"))
-    return None if value in _UNAVAILABLE_EVIDENCE else value
-
-
-def _power_state_is_fresh(
-    state: object | None,
-    *,
-    same_state_confirmation: bool = False,
-) -> bool:
-    """Trust a fresh same-state power report without rewriting manual history.
-
-    ``last_changed`` intentionally remains the ownership boundary for lights.
-    A relay that has stayed on for hours can nevertheless publish a new
-    ``last_updated`` report after an idempotent ``turn_on``. Power readiness
-    uses that observation while restored, cached and assumed states are still
-    rejected separately.
-    """
-
-    if state is None:
-        return False
-    observed = (
-        getattr(state, "last_reported", None)
-        or getattr(state, "last_updated", None)
-        if same_state_confirmation
-        else getattr(state, "last_changed", None)
-    )
-    if observed is None:
-        observed = getattr(state, "last_updated", None)
-    if not isinstance(observed, datetime):
-        return True
-    if observed.tzinfo is None:
-        observed = observed.replace(tzinfo=timezone.utc)
-    age = (datetime.now(timezone.utc) - observed.astimezone(timezone.utc)).total_seconds()
-    return 0 <= age <= 300
-
-
 def _power_state_revision(state: object | None) -> str | None:
     """Identify a relay report without changing light ownership semantics."""
 
@@ -142,26 +102,6 @@ def _power_state_revision(state: object | None) -> str | None:
     return observed.isoformat() if isinstance(observed, datetime) else _state_revision(state)
 
 
-def _state_is_restored_or_cached(state: object | None) -> bool:
-    if state is None:
-        return False
-    if (
-        getattr(state, "restored", False) is True
-        or getattr(state, "is_restored", False) is True
-        or getattr(state, "assumed_state", False) is True
-        or getattr(state, "is_assumed_state", False) is True
-    ):
-        return True
-    attributes = getattr(state, "attributes", {})
-    if not isinstance(attributes, Mapping):
-        return False
-    return bool(
-        attributes.get("restored") is True
-        or attributes.get("assumed_state") is True
-        or attributes.get("cached") is True
-        or attributes.get("cache") is True
-        or attributes.get("evidence_source") in {"restore", "cache"}
-    )
 _VENDOR_SERVICE_DOMAINS = frozenset({"media_player", "remote"})
 
 
@@ -223,8 +163,8 @@ def _display_device_name(raw: str) -> str:
     """Свернуть задвоения имён из реестра HA для человеческих сообщений.
 
     Каталог собирает имя как «<устройство> · <сущность>», а friendly_name
-    Zigbee2MQTT часто уже повторяет имя устройства: «Люстра тамбур · Люстра
-    тамбур Люстра тамбур». Для квитанций и ленты оставляем один экземпляр.
+    Zigbee2MQTT часто уже повторяет имя устройства: «Люстра тамбура · Люстра
+    тамбура Люстра тамбура». Для квитанций и ленты оставляем один экземпляр.
     """
 
     text = " ".join(raw.split())

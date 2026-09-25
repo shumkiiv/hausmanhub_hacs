@@ -50,58 +50,83 @@ class ManagedSwitchMigrationEntry:
     activation_ready: bool = False
 
 
+# Public defaults intentionally use synthetic role-template ids only. Production
+# setup replaces them with the per-entry protected topology snapshot before
+# startup, receipt validation, hashing, and execution.
 _SHOWER_LEGACY_INPUTS = (
-    "entity_d1fb2cbf2a691bba", "entity_fd3945cf1a2110f8",
-    "entity_6b9ccdab9bb484b2", "entity_46174e1ff9913212",
-    "entity_1fdcd8b244637246", "entity_afef5df0e0cae309",
-    "entity_e7a7c61eec7bdff8",
+    "protected_shower_presence",
+    "protected_shower_humidity",
+    "protected_shared_sun",
+    "protected_shower_main",
+    "protected_shower_extra",
+    "protected_shower_fan",
+    "protected_shower_cabinet",
 )
 _SHOWER_INPUTS = _SHOWER_LEGACY_INPUTS
 _SMALL_LEGACY_INPUTS = (
-    "entity_90417aada6a33491", "entity_6b9ccdab9bb484b2",
-    "entity_5f3b4436fb7b6f2b", "entity_c9d6bc67f172f30d",
-    "entity_4be32416634e6416", "entity_9ed909332fdaa8fd",
+    "protected_small_motion_old",
+    "protected_shared_sun",
+    "protected_small_lux_old",
+    "protected_small_relay_old",
+    "protected_small_switch_old",
+    "protected_small_chandelier_old",
 )
 _SMALL_INPUTS = (
-    "entity_a371cea02388be65", "entity_6b9ccdab9bb484b2",
-    "entity_2e306a9650ac5728", "entity_4be32416634e6416",
-    "entity_9ed909332fdaa8fd",
+    "protected_small_motion",
+    "protected_shared_sun",
+    "protected_small_lux",
+    "protected_small_relay",
+    "protected_small_chandelier",
 )
 _TAMBUR_LEGACY_INPUTS = (
-    "entity_156050daca86aa6c", "entity_10b78187426f8485",
-    "entity_6b9ccdab9bb484b2", "entity_5f3b4436fb7b6f2b",
-    "entity_71859313239a14e4", "entity_cd0098e5ff95da46",
-    "entity_fbdf27871edb89bf", "entity_b47991988cc6b9f3",
-    "entity_170c7a4e2505b803",
+    "protected_tambur_motion",
+    "protected_tambur_presence_primary_old",
+    "protected_shared_sun",
+    "protected_small_lux_old",
+    "protected_tambur_chandelier",
+    "protected_tambur_points",
+    "protected_tambur_mirror",
+    "protected_tambur_power",
+    "protected_tambur_entry",
 )
 _TAMBUR_INPUTS = (
-    "entity_156050daca86aa6c", "entity_402b26d150a1ef3f",
-    "entity_10b78187426f8485", "entity_6b9ccdab9bb484b2",
-    "entity_71859313239a14e4", "entity_cd0098e5ff95da46",
-    "entity_fbdf27871edb89bf", "entity_b47991988cc6b9f3",
-    "entity_170c7a4e2505b803",
+    "protected_tambur_motion",
+    "protected_tambur_presence_secondary",
+    "protected_tambur_presence_primary",
+    "protected_shared_sun",
+    "protected_tambur_chandelier",
+    "protected_tambur_points",
+    "protected_tambur_mirror",
+    "protected_tambur_power",
+    "protected_tambur_entry",
 )
-
-# Only stable catalog IDs may cross the scenario boundary.  Unknown live
-# bindings remain absent and make that controller safely skip until bound.
 _TOILET_INPUTS = (
-    "entity_ce73f88bda2e6812", "entity_56650c782076ed4d",
-    "entity_5d95de599d2b5cec", "entity_6667b3400bce7970",
-    "entity_9bbb3b0e8cd98627", "entity_6b9ccdab9bb484b2",
-    "entity_3f343b8d6f58f5b4",
+    "protected_toilet_motion_primary",
+    "protected_toilet_motion_secondary",
+    "protected_toilet_main",
+    "protected_toilet_night",
+    "protected_toilet_fan",
+    "protected_shared_sun",
+    "protected_toilet_away",
 )
 _BATHROOM_INPUTS = (
-    "entity_a591e035e3e5b34f", "entity_d82766182d69dd51",
-    "entity_436e12f71ce7b08b", "entity_c15f5df5382ee180",
+    "protected_bathroom_light_primary",
+    "protected_bathroom_light_secondary",
+    "protected_bathroom_humidity",
+    "protected_bathroom_fan",
 )
-_STORAGE_INPUTS = ("entity_00dcf0ebdc0bc6cb", "entity_0ec37ef18b4b39a6")
+_STORAGE_INPUTS = ("protected_storage_motion", "protected_storage_light")
 _CABINET_INPUTS = (
-    "entity_aeaf7c250c68e8c2", "entity_7ff6d09cfa68fa5a",
-    "entity_5f3b4436fb7b6f2b", "entity_6b9ccdab9bb484b2",
+    "protected_office_light",
+    "protected_office_relay",
+    "protected_small_lux",
+    "protected_shared_sun",
 )
 _CURTAIN_INPUTS = (
-    "entity_8746cfd7f6f7103d", "entity_2da2065add6e2168",
-    "entity_1e0b476b7d082cc0", "entity_9164132c7692d6f5",
+    "protected_curtain_living",
+    "protected_curtain_kitchen",
+    "protected_curtain_room",
+    "protected_curtain_office",
 )
 
 FULL_MIGRATION_MANIFEST: tuple[ManagedSwitchMigrationEntry, ...] = (
@@ -109,72 +134,64 @@ FULL_MIGRATION_MANIFEST: tuple[ManagedSwitchMigrationEntry, ...] = (
         "system-shower-comfort-controller", 4,
         "757bde711c85ebad4826c2ec0bf2695d0034f7dd820c9ec7c30816f3f37c1551",
         MANAGED_TOPOLOGY, _SHOWER_LEGACY_INPUTS, _SHOWER_INPUTS,
-        "53d8876b2b914bd438cdbd020b7dc85f3e9eb3d9a8ea17434ab290d852deea66",
+        "cef285d2567522304d3425c4877373dd3d01b9b8316e28ca3b97d019ffde74be",
         "shower_controller.js", expected_revision=4, activation_ready=True,
     ),
     ManagedSwitchMigrationEntry(
         "system-small-corridor-light-controller", 3,
         "bc9a2c7883046e568a428e355af312953d70f0f504393b063130f516fe5052b1",
         MANAGED_TOPOLOGY, _SMALL_LEGACY_INPUTS, _SMALL_INPUTS,
-        "c3097df8fefa2d09be4e57b059239bcb92fbb0302069500178fc0be1c8fc4800",
+        "718f13b5a6eb08f9a1eea3d5f844b841795d1089a4fa38e74fc08006b956ae0c",
         "small_corridor_controller.js", expected_revision=3, activation_ready=True,
     ),
     ManagedSwitchMigrationEntry(
         "system-tambur-adaptive-controller", 8,
         "4daef9ac2de8dc1c95dd2da6887e178751a65d0e47bcf48443635f68eb1ba5dc",
         MANAGED_TOPOLOGY, _TAMBUR_LEGACY_INPUTS, _TAMBUR_INPUTS,
-        "c8d5cd80006111146053767f7fd775c25a09ec8b5fab38f3a93a6c9126a417ca",
+        "d4577011013a1e93dc03b5bbc72c47c9a02573858b4b363701b8fb57658f31dc",
         "tambur_controller.js", expected_revision=8, activation_ready=True,
     ),
     ManagedSwitchMigrationEntry(
         "system-toilet-comfort-controller", 0,
         "218fa449363cb8d69cf366a670bf207846a7def9846da6fa130fa4157efb279d",
-        MANAGED_TOPOLOGY,
-        _TOILET_INPUTS, _TOILET_INPUTS,
-        "2d91781cf6dd910dadd8e4774eb3d45ae4ae6002b6912dee65bf40ef33af513b",
+        MANAGED_TOPOLOGY, _TOILET_INPUTS, _TOILET_INPUTS,
+        "e479089bce712f4f90b0e97388221fff2b9fa5b3837e162c1091d5f85c463cfa",
         "toilet_controller.js", operation="create", expected_revision=None,
         activation_ready=True,
     ),
     ManagedSwitchMigrationEntry(
         "system-bathroom-exhaust-controller", 0,
         "2b413c28d18f61f6730a3b31831bb73f98d690cb4d937ed75856f165475ebd74",
-        MANAGED_TOPOLOGY,
-        _BATHROOM_INPUTS, _BATHROOM_INPUTS,
-        "235302aeaa38e0d82eae01f63015a5180f3d4098f495919a18a587c973902af6",
+        MANAGED_TOPOLOGY, _BATHROOM_INPUTS, _BATHROOM_INPUTS,
+        "38b5aede291a5c2e45af61831a1fae39f69344cc7dc41998ae64896aca218f0f",
         "bathroom_controller.js", operation="create", expected_revision=None,
         activation_ready=True,
     ),
     ManagedSwitchMigrationEntry(
         "system-storage-light-controller", 0,
-        "3190e744c05403f496d5399ee56c4ff1a199461df0e51040afe5a7244d424fd0",
-        MANAGED_TOPOLOGY,
-        _STORAGE_INPUTS, _STORAGE_INPUTS,
-        "3190e744c05403f496d5399ee56c4ff1a199461df0e51040afe5a7244d424fd0",
+        "04e1673e931b17da998f184a55645b302ea0b8de8707c3e10280c92e9fa65c31",
+        MANAGED_TOPOLOGY, _STORAGE_INPUTS, _STORAGE_INPUTS,
+        "04e1673e931b17da998f184a55645b302ea0b8de8707c3e10280c92e9fa65c31",
         "storage_controller.js", operation="create", expected_revision=None,
         activation_ready=True,
     ),
     ManagedSwitchMigrationEntry(
         "system-cabinet-light-controller", 0,
         "07e08025f24e98dfb67cef2f424a63a161b45b01d67dbe90456aad6055bf34ff",
-        MANAGED_TOPOLOGY,
-        _CABINET_INPUTS, _CABINET_INPUTS,
-        "ead4919d6c3d088fc45a26e0b240a4b0520b0a62ba7277476d143b650133468c",
+        MANAGED_TOPOLOGY, _CABINET_INPUTS, _CABINET_INPUTS,
+        "b5a5ba2637ae33f5b7aa96a957ad439632f3fa2b7137a9487afa52165c09c299",
         "cabinet_controller.js", operation="create", expected_revision=None,
         activation_ready=True,
     ),
     ManagedSwitchMigrationEntry(
         "system-curtains-privacy-controller", 0,
-        "663af424f9fdb51ca3f9d95ed055206858810adf9ba780d5b1fb3ddb9336368e",
-        MANAGED_TOPOLOGY,
-        _CURTAIN_INPUTS, _CURTAIN_INPUTS,
-        "663af424f9fdb51ca3f9d95ed055206858810adf9ba780d5b1fb3ddb9336368e",
+        "f0e93a8e5dd88a7828c0070878e28e0ef9df4fc54349ba1dca64bc2e76299b13",
+        MANAGED_TOPOLOGY, _CURTAIN_INPUTS, _CURTAIN_INPUTS,
+        "f0e93a8e5dd88a7828c0070878e28e0ef9df4fc54349ba1dca64bc2e76299b13",
         "curtains_controller.js", operation="create", expected_revision=None,
         activation_ready=True,
     ),
 )
-# The active release manifest is the single authoritative set.  The old
-# three-controller set is compatibility history only and must never drive
-# startup, receipts, or execution.
 MIGRATION_MANIFEST = FULL_MIGRATION_MANIFEST
 LEGACY_MANAGED_SWITCHES = {
     item.scenario_id: (item.legacy_revision, item.legacy_source_hash)
@@ -221,7 +238,11 @@ MANIFEST_HASH = _manifest_hash_for(MIGRATION_MANIFEST)
 FULL_MANIFEST_HASH = _manifest_hash_for(FULL_MIGRATION_MANIFEST)
 
 
-def valid_managed_switch_migration_payload(value: object) -> bool:
+def valid_managed_switch_migration_payload(
+    value: object,
+    manifest: tuple[ManagedSwitchMigrationEntry, ...] = MIGRATION_MANIFEST,
+) -> bool:
+    manifest_hash = _manifest_hash_for(manifest)
     required = {
         "migrationId",
         "version",
@@ -231,18 +252,21 @@ def valid_managed_switch_migration_payload(value: object) -> bool:
         "dispositionHash",
         "dispositionCounts",
     }
+    revision = value.get("revision") if isinstance(value, Mapping) else None
     return bool(
         isinstance(value, Mapping)
-        and set(value) == required | {"journal"}
+        and required <= set(value)
+        and set(value) - required <= {"journal", "revision"}
+        and (revision is None or (type(revision) is int and revision >= 0))
         and value.get("migrationId") == MIGRATION_ID
         and value.get("version") == MIGRATION_VERSION
         and value.get("state") in {"prepared", "completed"}
-        and value.get("manifestHash") == MANIFEST_HASH
+        and value.get("manifestHash") == manifest_hash
         and value.get("dispositionVersion") == REGISTRY_DISPOSITION_VERSION
         and value.get("dispositionHash") == REGISTRY_DISPOSITION_HASH
         and value.get("dispositionCounts") == REGISTRY_DISPOSITION_COUNTS
         and (
-            _valid_migration_journal(value.get("journal"))
+            _valid_migration_journal(value.get("journal"), manifest)
             and (
                 value.get("state") != "completed"
                 or (
@@ -293,14 +317,17 @@ def _valid_flow_image(value: object) -> bool:
     )
 
 
-def _valid_capture_image(value: object) -> bool:
+def _valid_capture_image(
+    value: object,
+    manifest: tuple[ManagedSwitchMigrationEntry, ...] = MIGRATION_MANIFEST,
+) -> bool:
     return bool(
         isinstance(value, Mapping)
         and set(value) == {"registry", "flows"}
         and _valid_registry_image(value.get("registry"))
         and isinstance(value.get("flows"), Mapping)
         and set(value["flows"]) == {
-            item.scenario_id for item in MIGRATION_MANIFEST
+            item.scenario_id for item in manifest
         }
         and all(_valid_flow_image(item) for item in value["flows"].values())
     )
@@ -366,20 +393,23 @@ def _valid_staged_operation(
     )
 
 
-def _valid_migration_journal(value: object) -> bool:
+def _valid_migration_journal(
+    value: object,
+    manifest_entries: tuple[ManagedSwitchMigrationEntry, ...] = MIGRATION_MANIFEST,
+) -> bool:
     if (
         not isinstance(value, Mapping)
         or set(value) != {"before", "after", "operations", "registry"}
-        or not _valid_capture_image(value.get("before"))
+        or not _valid_capture_image(value.get("before"), manifest_entries)
         or (
             value.get("after") is not None
-            and not _valid_capture_image(value.get("after"))
+            and not _valid_capture_image(value.get("after"), manifest_entries)
         )
         or not isinstance(value.get("operations"), Mapping)
         or not isinstance(value.get("registry"), Mapping)
     ):
         return False
-    manifest = {item.scenario_id: item for item in MIGRATION_MANIFEST}
+    manifest = {item.scenario_id: item for item in manifest_entries}
     operations = value["operations"]
     if set(operations) != set(manifest):
         return False
@@ -481,6 +511,96 @@ def _is_known_completed_v2_receipt(value: object) -> bool:
     return isinstance(value, Mapping) and dict(value) == _KNOWN_COMPLETED_V2_RECEIPT
 
 
+def _valid_hash_text(value: object) -> bool:
+    return bool(
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+_SUPERSEDED_RECEIPT_KEYS = {
+    "migrationId",
+    "version",
+    "state",
+    "revision",
+    "manifestHash",
+    "supersededManifestHash",
+    "supersededState",
+    "supersededAt",
+    "dispositionVersion",
+    "dispositionHash",
+    "dispositionCounts",
+}
+_SUPERSEDED_RECEIPT_OPTIONAL_KEYS = {"supersededReceipt"}
+_SUPERSEDED_PREVIOUS_STATES = {"prepared", "completed", "superseded"}
+_SUPERSEDED_PREVIOUS_KEYS = {"state", "manifestHash", "revision", "journal"}
+
+
+def _is_valid_superseded_previous(value: object) -> bool:
+    """Validate the preserved previous completed receipt in a re-arm marker."""
+
+    return bool(
+        isinstance(value, Mapping)
+        and set(value) == _SUPERSEDED_PREVIOUS_KEYS
+        and value.get("state") == "completed"
+        and _valid_hash_text(value.get("manifestHash"))
+        and type(value.get("revision")) is int
+        and value["revision"] >= 0
+        and isinstance(value.get("journal"), Mapping)
+    )
+
+
+def _is_valid_superseded_receipt(value: object) -> bool:
+    """Validate the explicit re-arm marker that replaces a stale receipt.
+
+    The marker is intentionally manifest-agnostic: it records the newly
+    expected ``manifestHash`` from a local-admin re-arm together with the
+    previous receipt facts.  The startup path only proceeds when the fresh
+    manifest is recomputed and its hash equals ``manifestHash``; any other
+    value still fails closed.  A completed previous receipt may be preserved
+    under ``supersededReceipt`` so startup can prove that the already-migrated
+    registry did not drift before reconciling it.
+    """
+
+    if not isinstance(value, Mapping):
+        return False
+    keys = set(value)
+    if not (
+        _SUPERSEDED_RECEIPT_KEYS
+        <= keys
+        <= (_SUPERSEDED_RECEIPT_KEYS | _SUPERSEDED_RECEIPT_OPTIONAL_KEYS)
+    ):
+        return False
+    revision = value.get("revision")
+    previous_state = value.get("supersededState")
+    return bool(
+        value.get("migrationId") == MIGRATION_ID
+        and value.get("version") == MIGRATION_VERSION
+        and value.get("state") == "superseded"
+        and type(revision) is int
+        and revision >= 0
+        and _valid_hash_text(value.get("manifestHash"))
+        and (
+            value.get("supersededManifestHash") is None
+            or _valid_hash_text(value.get("supersededManifestHash"))
+        )
+        and (
+            previous_state is None
+            or previous_state in _SUPERSEDED_PREVIOUS_STATES
+        )
+        and isinstance(value.get("supersededAt"), str)
+        and bool(value.get("supersededAt"))
+        and value.get("dispositionVersion") == REGISTRY_DISPOSITION_VERSION
+        and value.get("dispositionHash") == REGISTRY_DISPOSITION_HASH
+        and value.get("dispositionCounts") == REGISTRY_DISPOSITION_COUNTS
+        and (
+            "supersededReceipt" not in value
+            or _is_valid_superseded_previous(value["supersededReceipt"])
+        )
+    )
+
+
 def _receipt(state: str) -> dict[str, object]:
     return {
         "migrationId": MIGRATION_ID,
@@ -525,6 +645,59 @@ async def async_load_managed_switch_migration_entries(
             "release-owned source loading returned invalid data"
         )
     return entries
+
+
+def managed_switch_manifest_from_protected_topology(
+    protected_topology: object,
+) -> tuple[ManagedSwitchMigrationEntry, ...]:
+    """Resolve migration entries from per-install protected roles.
+
+    The public package keeps only scenario/source metadata.  Input target ids
+    must come from the protected topology document; missing roles make startup
+    fail closed instead of falling back to a baked-in target map.
+    """
+
+    expectations_getter = getattr(protected_topology, "migration_expectations", None)
+    targets_getter = getattr(protected_topology, "targets_for_roles", None)
+    if not callable(expectations_getter) or not callable(targets_getter):
+        raise ManagedSwitchMigrationConflict("protected managed topology is unavailable")
+    entries: list[ManagedSwitchMigrationEntry] = []
+    for item in expectations_getter("managedSwitches"):
+        if not isinstance(item, Mapping):
+            raise ManagedSwitchMigrationConflict("protected managed topology is invalid")
+        legacy_roles = tuple(str(role) for role in item.get("legacyInputRoles", ()))
+        input_roles = tuple(str(role) for role in item.get("inputRoles", ()))
+        legacy_targets = targets_getter(legacy_roles)
+        input_targets = targets_getter(input_roles)
+        if (
+            len(legacy_targets) != len(legacy_roles)
+            or len(input_targets) != len(input_roles)
+            or not legacy_targets
+            or not input_targets
+        ):
+            raise ManagedSwitchMigrationConflict("protected managed topology is incomplete")
+        entries.append(
+            ManagedSwitchMigrationEntry(
+                scenario_id=str(item["scenarioId"]),
+                legacy_revision=int(item["legacyRevision"]),
+                legacy_source_hash=str(item["legacySourceHash"]),
+                legacy_topology=str(item["legacyTopology"]),
+                legacy_input_target_ids=tuple(legacy_targets),
+                input_target_ids=tuple(input_targets),
+                new_source_hash=str(item["newSourceHash"]),
+                source_file=str(item["sourceFile"]),
+                operation=str(item["operation"]),
+                expected_revision=(
+                    None
+                    if item.get("expectedRevision") is None
+                    else int(item["expectedRevision"])
+                ),
+                activation_ready=bool(item["activationReady"]),
+            )
+        )
+    if not entries:
+        raise ManagedSwitchMigrationConflict("protected managed topology is missing")
+    return tuple(entries)
 
 
 class ManagedSwitchStartupCoordinator:
@@ -760,7 +933,13 @@ class ManagedSwitchStartupCoordinator:
 class HomeAssistantManagedSwitchMigrationStore:
     """Verified atomic HA storage for the migration receipt."""
 
-    def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry_id: str,
+        *,
+        manifest: tuple[ManagedSwitchMigrationEntry, ...] = MIGRATION_MANIFEST,
+    ) -> None:
         from homeassistant.helpers.storage import Store  # noqa: PLC0415
         from ..verified_safety_storage import VerifiedSafetyStore  # noqa: PLC0415
 
@@ -770,8 +949,9 @@ class HomeAssistantManagedSwitchMigrationStore:
         self._store = VerifiedSafetyStore(
             store, hass.async_add_executor_job,
             payload_validator=lambda value: (
-                valid_managed_switch_migration_payload(value)
+                valid_managed_switch_migration_payload(value, manifest)
                 or _is_known_completed_v2_receipt(value)
+                or _is_valid_superseded_receipt(value)
             ),
         )
 
@@ -794,6 +974,7 @@ class ManagedSwitchMigration:
         | None = None,
         native_automation_migration: object | None = None,
         manifest: tuple[ManagedSwitchMigrationEntry, ...] = MIGRATION_MANIFEST,
+        mutation_lock: asyncio.Lock | None = None,
     ) -> None:
         self._service = service
         self._store = store
@@ -801,14 +982,21 @@ class ManagedSwitchMigration:
         self._native_automation_migration = native_automation_migration
         self._manifest = manifest
         self._manifest_hash = _manifest_hash_for(manifest)
+        self._revision = 0
+        self._mutation_lock = mutation_lock or asyncio.Lock()
 
     def _receipt(
         self, state: str, journal: dict[str, object] | None = None
     ) -> dict[str, object]:
+        # Every durable write advances the revision so an old admin snapshot of
+        # ``expectedReceiptRevision`` can never re-arm a receipt that has since
+        # moved to another prepared/completed image.
+        self._revision += 1
         receipt: dict[str, object] = {
             "migrationId": MIGRATION_ID,
             "version": MIGRATION_VERSION,
             "state": state,
+            "revision": self._revision,
             "manifestHash": self._manifest_hash,
             "dispositionVersion": REGISTRY_DISPOSITION_VERSION,
             "dispositionHash": REGISTRY_DISPOSITION_HASH,
@@ -846,18 +1034,32 @@ class ManagedSwitchMigration:
         await commit(entries, **keyword_arguments)
 
     async def async_apply(self) -> str:
+        async with self._mutation_lock:
+            return await self._async_apply_locked()
+
+    async def _async_apply_locked(self) -> str:
         loaded = await self._store.async_load()
         legacy_completed = _is_known_completed_v2_receipt(loaded)
-        if loaded is not None and not legacy_completed and not (
-            valid_managed_switch_migration_payload(loaded)
+        superseded = _is_valid_superseded_receipt(loaded)
+        if (
+            isinstance(loaded, Mapping)
+            and type(loaded.get("revision")) is int
+            and loaded["revision"] >= 0
+        ):
+            self._revision = loaded["revision"]
+        if loaded is not None and not legacy_completed and not superseded and not (
+            valid_managed_switch_migration_payload(loaded, self._manifest)
             and loaded.get("manifestHash") == self._manifest_hash
         ):
             raise ManagedSwitchMigrationConflict("migration receipt is invalid")
+        if superseded and loaded.get("manifestHash") != self._manifest_hash:
+            raise ManagedSwitchMigrationConflict("migration receipt is invalid")
         completed = (
             not legacy_completed
+            and not superseded
             and isinstance(loaded, Mapping)
             and loaded.get("state") == "completed"
-            and _valid_migration_journal(loaded.get("journal"))
+            and _valid_migration_journal(loaded.get("journal"), self._manifest)
         )
         apply = getattr(self._service, "async_apply_managed_switch_migration", None)
         if not callable(apply):
@@ -873,6 +1075,8 @@ class ManagedSwitchMigration:
             )
             if callable(require_ready):
                 await require_ready()
+        if superseded and loaded.get("supersededState") == "completed":
+            return await self._async_reconcile_completed(loaded, entries)
         capture = getattr(
             self._service, "async_capture_managed_switch_migration", None
         )
@@ -920,12 +1124,12 @@ class ManagedSwitchMigration:
         if (
             isinstance(loaded, Mapping)
             and loaded.get("state") == "prepared"
-            and _valid_migration_journal(loaded.get("journal"))
+            and _valid_migration_journal(loaded.get("journal"), self._manifest)
         ):
             journal = _clone_json(loaded["journal"])
         else:
             before = await capture(entries)
-            if not _valid_capture_image(before):
+            if not _valid_capture_image(before, self._manifest):
                 raise ManagedSwitchMigrationConflict(
                     "scenario migration before-image is invalid"
                 )
@@ -1011,7 +1215,7 @@ class ManagedSwitchMigration:
             else:
                 await finalize(entries)
             after = await capture(entries)
-            if not _valid_capture_image(after):
+            if not _valid_capture_image(after, self._manifest):
                 raise ManagedSwitchMigrationConflict(
                     "scenario migration after-image is invalid"
                 )
@@ -1087,4 +1291,74 @@ class ManagedSwitchMigration:
                     "managed switch migration journal recovery is required"
                 ) from recovery_error
             raise
+        return "completed"
+
+    async def _async_reconcile_completed(
+        self,
+        loaded: Mapping[str, object],
+        entries: tuple[ManagedSwitchMigrationEntry, ...],
+    ) -> str:
+        """Re-adopt an already-completed migration under a new manifest.
+
+        Only input-target changes are provable without touching Node-RED: the
+        preserved completed journal must still validate against the fresh
+        manifest, the service re-checks that the live registry and flows equal
+        the completed ``after`` image, and then only scenario input metadata is
+        updated.  A changed source hash, operation or scenario set fails closed.
+        """
+
+        previous = loaded.get("supersededReceipt")
+        if not _is_valid_superseded_previous(previous):
+            raise ManagedSwitchMigrationConflict(
+                "completed migration re-arm lacks the previous receipt"
+            )
+        journal = previous["journal"]  # type: ignore[index]
+        if not _valid_migration_journal(journal, self._manifest):
+            raise ManagedSwitchMigrationConflict(
+                "completed migration journal is not compatible with the manifest"
+            )
+        reconcile = getattr(
+            self._service,
+            "async_reconcile_completed_managed_switch_migration",
+            None,
+        )
+        if not callable(reconcile):
+            raise ManagedSwitchMigrationConflict(
+                "completed migration reconcile is unavailable"
+            )
+        try:
+            after = await reconcile(entries, journal)
+        except ManagedSwitchMigrationConflict:
+            raise
+        except Exception as error:  # noqa: BLE001
+            raise ManagedSwitchMigrationConflict(
+                "completed migration reconcile failed"
+            ) from error
+        if not _valid_capture_image(after, self._manifest):
+            raise ManagedSwitchMigrationConflict(
+                "completed migration reconcile image is invalid"
+            )
+        reconciled = _clone_json(journal)
+        reconciled["after"] = _clone_json(after)
+        reconciled["registry"] = {
+            "state": "applied",
+            "beforeHash": journal["registry"]["beforeHash"],  # type: ignore[index]
+            "afterHash": _storage_hash(after["registry"]),  # type: ignore[index]
+        }
+        await self._store.async_save(self._receipt("completed", reconciled))
+        capture = getattr(
+            self._service, "async_capture_managed_switch_migration", None
+        )
+        if not callable(capture) or _clone_json(await capture(entries)) != reconciled["after"]:
+            raise ManagedSwitchMigrationConflict(
+                "completed migration reconciled image changed"
+            )
+        if self._native_automation_migration is not None:
+            native_verify = getattr(
+                self._native_automation_migration, "async_verify_completed", None
+            )
+            if not callable(native_verify) or not await native_verify():
+                raise ManagedSwitchMigrationConflict(
+                    "native automation completion drifted"
+                )
         return "completed"

@@ -12,98 +12,15 @@ from .scenario_consolidation_inventory import NATIVE_AUTOMATIONS_TO_DISABLE
 from .smart_switch_bindings import SmartSwitchBindings
 
 
-NATIVE_AUTOMATION_ENTITY_IDS = {
-    "hausman_night_absence_small_corridor_light_off": (
-        "automation.malyi_koridor_nochiu_vykliuchit_svet_cherez_3_minuty_otsutstviia"
-    ),
-    "hausman_night_absence_tambur_light_off": (
-        "automation.tambur_nochiu_vykliuchit_svet_cherez_3_minuty_otsutstviia"
-    ),
-    "hausman_shower_cabinet_off_absence_failsafe": (
-        "automation.dushevaia_vykliuchit_podsvetku_shkafa_pri_otsutstvii"
-    ),
-    "hausman_shower_fan_humidity_on_failsafe": (
-        "automation.dushevaia_vkliuchit_vytiazhku_po_vysokoi_vlazhnosti"
-    ),
-    "hausman_shower_fan_off_absence_normal_humidity": (
-        "automation.dushevaia_vykliuchit_vytiazhku_pri_otsutstvii_i_normalnoi_vlazhnosti"
-    ),
-}
-NATIVE_AUTOMATION_PRESERVE_ENTITY_IDS = {
-    "1715696143987": "automation.vykliuchenie_sveta_po_nazhatiiu_knopki",
-    "1715696249639": "automation.vkliuchenie_sveta_po_knopke_detskaia",
-    "1716009214484": "automation.obnaruzhenie_protechki_tualet",
-    "1735193005877": "automation.perezapusk_ha",
-    "1767412144158": "automation.datchik_protechki_kukhnia",
-    "1767412233902": "automation.datchik_protechki_tualet",
-    "1767417411927": "automation.vneshnii_datchik_temperatury_termogolovki_gostinnaia",
-    "1767419808340": "automation.novaia_avtomatizatsiia",
-    "1767459525210": "automation.novaia_avtomatizatsiia_2",
-    "hausman_tambur_mirror_switch_all_keys": "automation.tambur_svet_po_liuboi_klavishe_vykliuchatelia_zerkala",
-    "hausmanhub_shower_leak_yandex_alert": "automation.hausman_dushevaia_golosovaia_trevoga_iandeks",
-    "hausmanhub_yandex_dialog_conversation": "automation.hausmanhub_dialog_alisy_cherez_assist",
-    "hausmanhub_yandex_welcome_home": "automation.hausmanhub_privetstvie_pri_vozvrashchenii_domoi",
-}
-
-# Canonical JSON digests of the exact definitions in native18.json. They are
-# release evidence, not names or a permissive shape check.
-_NATIVE_DEFINITION_HASHES = {
-    "1715696143987": "535a43716df9011d35b642cd47332ffea92d6520df5dbc893e1cb2c4fccc89ed",
-    "1715696249639": "ecd8c99445d81b550c576e83db1b56dd7f2a9f87bfb3b3694b1a3afd1879a188",
-    "1716009214484": "73c256f1855c0b1d1a6e406edbf23f5c6868021a67ff2baf1d80c62aae7e62a4",
-    "1735193005877": "145baa88f8eb5f6881ebb09238754fa85390549d2f11cc5819a96d4f4b293707",
-    "1767412144158": "2e67fb3ceac6dc07df5dff073071043f938027ad97abe08d9035e446594a4189",
-    "1767412233902": "f6f5b9d589cf901cddc8835ec2d2858a4f14903a8c65811bf7c381f36de1d597",
-    "1767417411927": "88828e73d242814d79a355b312808bc27beadeb09780c56f514239069e68306c",
-    "1767419808340": "e706016cd0ece2453e26e47a835454afe0089573ea6ae591f06a1db4a598388a",
-    "1767459525210": "f94385ef4e6d7e093543129f8248fad3f555c540bfa6883affcb5138892d4242",
-    "hausman_night_absence_small_corridor_light_off": "f5e3781ce6ca4800004b86931d99298d28d77eec960f80b39e9f4e1743b199c4",
-    "hausman_night_absence_tambur_light_off": "35cf1b7b409094c4940bd652e701acab0605ccbc40e649358bb0149c77da8330",
-    "hausman_shower_cabinet_off_absence_failsafe": "d239f31392212a01ed59b4c986aade5bb597e66f66fad43adefe1b6dbc02430b",
-    "hausman_shower_fan_humidity_on_failsafe": "57d91b50cae1fa3709fd0e2bf855babac216297f5461acab878165d2d6c4699d",
-    "hausman_shower_fan_off_absence_normal_humidity": "b0c5ba451e1caf49a6019b7415334ee7201d29c6180bf15c0087a737f987c93e",
-    "hausman_tambur_mirror_switch_all_keys": "9fb1c3960742170f6a83cfe0989c2b8d59516ea4c7dca652dfafc5a9559467a1",
-    "hausmanhub_shower_leak_yandex_alert": "ae2c54b501cc43d4e162b8b7f00cc2f5d9ed2be2effbea4ae09f66eba75b0489",
-    "hausmanhub_yandex_dialog_conversation": "d3b662cb1372cfac89b76b0c5d8aae841ac265f0279a887c43d8e7d83f5640ea",
-    "hausmanhub_yandex_welcome_home": "04f40fa9127951949ef6f02562b5b535e7998d37a286fc2f03506c6e1f6da818",
-}
-_NATIVE_EXPECTED_STATES = {
-    "1715696143987": "on",
-    "1715696249639": "on",
-    "1716009214484": "off",
-    "1735193005877": "off",
-    "1767412144158": "off",
-    "1767412233902": "off",
-    "1767417411927": "on",
-    "1767419808340": "on",
-    "1767459525210": "on",
-    "hausman_night_absence_small_corridor_light_off": "on",
-    "hausman_night_absence_tambur_light_off": "on",
-    "hausman_shower_cabinet_off_absence_failsafe": "on",
-    "hausman_shower_fan_humidity_on_failsafe": "on",
-    "hausman_shower_fan_off_absence_normal_humidity": "on",
-    "hausman_tambur_mirror_switch_all_keys": "on",
-    "hausmanhub_shower_leak_yandex_alert": "on",
-    "hausmanhub_yandex_dialog_conversation": "off",
-    "hausmanhub_yandex_welcome_home": "off",
-}
-EXPECTED_NATIVE_AUTOMATIONS = {
-    entity_id: {
-        "automationId": automation_id,
-        "definitionHash": _NATIVE_DEFINITION_HASHES[automation_id],
-        "state": _NATIVE_EXPECTED_STATES[automation_id],
-    }
-    for automation_id, entity_id in {
-        **NATIVE_AUTOMATION_ENTITY_IDS,
-        **NATIVE_AUTOMATION_PRESERVE_ENTITY_IDS,
-    }.items()
-}
-_DISABLE_ENTITIES = tuple(NATIVE_AUTOMATION_ENTITY_IDS.values())
-_PRESERVE_ENTITIES = tuple(NATIVE_AUTOMATION_PRESERVE_ENTITY_IDS.values())
-_ALL_ENTITIES = _DISABLE_ENTITIES + _PRESERVE_ENTITIES
-_MIRROR_AUTOMATION_ENTITY_ID = NATIVE_AUTOMATION_PRESERVE_ENTITY_IDS[
+NATIVE_AUTOMATION_ENTITY_IDS: dict[str, str] = {}
+NATIVE_AUTOMATION_PRESERVE_ENTITY_IDS: dict[str, str] = {}
+EXPECTED_NATIVE_AUTOMATIONS: dict[str, dict[str, str]] = {}
+_DISABLE_ENTITIES: tuple[str, ...] = ()
+_PRESERVE_ENTITIES: tuple[str, ...] = ()
+_ALL_ENTITIES: tuple[str, ...] = ()
+_MIRROR_AUTOMATION_ENTITY_ID = NATIVE_AUTOMATION_PRESERVE_ENTITY_IDS.get(
     "hausman_tambur_mirror_switch_all_keys"
-]
+)
 _MIRROR_FIXTURE_DEVICE_ID = "synthetic-tambur-mirror-device"
 _MIRROR_TRIGGER_KEYS = frozenset(
     {"platform", "domain", "device_id", "type", "subtype"}
@@ -118,12 +35,112 @@ _EVIDENCE_KEYS = {
 }
 
 
+def configure_native_automation_topology(
+    *,
+    disable_entity_ids: Mapping[str, str],
+    preserve_entity_ids: Mapping[str, str],
+    expected: Mapping[str, Mapping[str, str]],
+) -> None:
+    """Install a protected native automation manifest for this process.
+
+    Production callers build this from protected topology. The public module has
+    no baked-in Home Assistant entity ids or definition hashes, so a fresh
+    install remains fail-closed until provisioned.
+    """
+
+    global _ALL_ENTITIES, _DISABLE_ENTITIES, _MIRROR_AUTOMATION_ENTITY_ID, _PRESERVE_ENTITIES
+    NATIVE_AUTOMATION_ENTITY_IDS.clear()
+    NATIVE_AUTOMATION_ENTITY_IDS.update(dict(disable_entity_ids))
+    NATIVE_AUTOMATION_PRESERVE_ENTITY_IDS.clear()
+    NATIVE_AUTOMATION_PRESERVE_ENTITY_IDS.update(dict(preserve_entity_ids))
+    EXPECTED_NATIVE_AUTOMATIONS.clear()
+    EXPECTED_NATIVE_AUTOMATIONS.update(
+        {
+            entity_id: {
+                "automationId": str(value["automationId"]),
+                "definitionHash": str(value["definitionHash"]),
+                "state": str(value["state"]),
+            }
+            for entity_id, value in expected.items()
+        }
+    )
+    _DISABLE_ENTITIES = tuple(NATIVE_AUTOMATION_ENTITY_IDS.values())
+    _PRESERVE_ENTITIES = tuple(NATIVE_AUTOMATION_PRESERVE_ENTITY_IDS.values())
+    _ALL_ENTITIES = _DISABLE_ENTITIES + _PRESERVE_ENTITIES
+    _MIRROR_AUTOMATION_ENTITY_ID = NATIVE_AUTOMATION_PRESERVE_ENTITY_IDS.get(
+        "hausman_tambur_mirror_switch_all_keys"
+    )
+
+
+def native_automation_manifest_from_protected_topology(
+    protected_topology: object,
+) -> dict[str, object]:
+    """Build native migration manifest from protected expectations."""
+
+    expectations_getter = getattr(protected_topology, "migration_expectations", None)
+    entity_getter = getattr(protected_topology, "entity_id", None)
+    if not callable(expectations_getter) or not callable(entity_getter):
+        return {"ready": False, "reason": "protected_native_topology_missing"}
+    disable: dict[str, str] = {}
+    preserve: dict[str, str] = {}
+    expected: dict[str, dict[str, str]] = {}
+    for item in expectations_getter("nativeAutomations"):
+        if not isinstance(item, Mapping):
+            return {"ready": False, "reason": "protected_native_topology_invalid"}
+        role = item.get("role")
+        entity_id = entity_getter(role) if isinstance(role, str) else None
+        automation_id = item.get("automationId")
+        definition_hash = item.get("definitionHash")
+        state = item.get("state")
+        disposition = item.get("disposition")
+        if not all(isinstance(value, str) and value for value in (entity_id, automation_id, definition_hash, state)):
+            return {"ready": False, "reason": "protected_native_topology_incomplete"}
+        key = str(automation_id)
+        if disposition == "disable":
+            disable[key] = entity_id
+        elif disposition == "preserve":
+            preserve[key] = entity_id
+        else:
+            return {"ready": False, "reason": "protected_native_topology_invalid"}
+        expected[entity_id] = {
+            "automationId": key,
+            "definitionHash": str(definition_hash),
+            "state": str(state),
+        }
+    if not disable and not preserve:
+        return {"ready": False, "reason": "protected_native_topology_missing"}
+    return {
+        "ready": True,
+        "disableEntityIds": disable,
+        "preserveEntityIds": preserve,
+        "expected": expected,
+    }
+
+
 class NativeAutomationMigrationConflict(RuntimeError):
     """The native handover cannot establish exact before/after evidence."""
 
 
 class NativeAutomationNotReady(NativeAutomationMigrationConflict):
     """The automation component has not exposed its runtime entities yet."""
+
+
+def native_automation_topology_status() -> dict[str, object]:
+    """Return a redacted import-safe readiness diagnostic."""
+
+    configured = bool(_ALL_ENTITIES)
+    complete = (
+        configured
+        and set(NATIVE_AUTOMATION_ENTITY_IDS) == NATIVE_AUTOMATIONS_TO_DISABLE
+        and bool(_MIRROR_AUTOMATION_ENTITY_ID)
+    )
+    return {
+        "configured": configured,
+        "ready": complete,
+        "disableCount": len(_DISABLE_ENTITIES),
+        "preserveCount": len(_PRESERVE_ENTITIES),
+        "reason": None if complete else "protected_native_topology_missing",
+    }
 
 
 def _valid_evidence(entity_id: str, value: object) -> bool:
@@ -300,10 +317,17 @@ class NativeAutomationMigration:
     """Disable five exact rules with durable per-operation CAS evidence."""
 
     def __init__(self, adapter: object, store: object) -> None:
-        if set(NATIVE_AUTOMATION_ENTITY_IDS) != NATIVE_AUTOMATIONS_TO_DISABLE:
+        if NATIVE_AUTOMATION_ENTITY_IDS and set(NATIVE_AUTOMATION_ENTITY_IDS) != NATIVE_AUTOMATIONS_TO_DISABLE:
             raise RuntimeError("native automation release map is incomplete")
         self._adapter = adapter
         self._store = store
+
+    @property
+    def diagnostic(self) -> dict[str, object]:
+        return native_automation_topology_status()
+
+    def _topology_ready(self) -> bool:
+        return self.diagnostic["ready"] is True
 
     async def _save(self, journal: dict[str, object]) -> None:
         if not valid_native_automation_migration_payload(journal):
@@ -437,6 +461,8 @@ class NativeAutomationMigration:
         return True
 
     async def async_apply(self) -> None:
+        if not self._topology_ready():
+            return
         required_adapter = (
             "async_snapshot",
             "async_disable",
@@ -571,9 +597,13 @@ class NativeAutomationMigration:
     async def async_require_ready(self) -> None:
         """Read and validate all native objects without writing a receipt."""
 
+        if not self._topology_ready():
+            raise NativeAutomationNotReady("native automation protected topology is unavailable")
         await self._snapshot()
 
     async def async_verify_completed(self) -> bool:
+        if not self._topology_ready():
+            return False
         loaded = await self._store.async_load()
         if (
             not valid_native_automation_migration_payload(loaded)
@@ -585,6 +615,8 @@ class NativeAutomationMigration:
     async def async_rollback(self) -> bool:
         """Restore only five objects still matching this migration's writes."""
 
+        if not self._topology_ready():
+            return False
         loaded = await self._store.async_load()
         if not valid_native_automation_migration_payload(loaded):
             return False

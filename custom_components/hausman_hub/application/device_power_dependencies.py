@@ -17,17 +17,20 @@ from ..domain.device_power_dependencies import (
 
 
 DEVICE_POWER_DEPENDENCY_CONTRACT = "hausman-hub-device-power-dependencies"
-SMALL_CORRIDOR_CHANDELIER_ENTITY_ID = "light.0xa4c138d69d102803"
-OBSOLETE_SMALL_CORRIDOR_POWER_SOURCE_ENTITY_ID = "switch.0x603d61fffe75c334_1"
-SMALL_CORRIDOR_POWER_SOURCE_ENTITY_ID = "switch.0x603d61fffe759363_1"
+SMALL_CORRIDOR_CHANDELIER_ENTITY_ID = ""
+OBSOLETE_SMALL_CORRIDOR_POWER_SOURCE_ENTITY_ID = ""
+SMALL_CORRIDOR_POWER_SOURCE_ENTITY_ID = ""
 
 
 class DevicePowerDependencyServiceViolation(ValueError):
     """A dependency update is malformed, stale or references missing entities."""
 
-    def __init__(self, message: str, *, stale: bool = False) -> None:
+    def __init__(
+        self, message: str, *, stale: bool = False, storage: bool = False
+    ) -> None:
         super().__init__(message)
         self.stale = stale
+        self.storage = storage
 
 
 class DevicePowerDependencyService:
@@ -40,6 +43,7 @@ class DevicePowerDependencyService:
         entity_pair_validator: Callable[[str, str], bool] | None = None,
         electrical_breaker_resolver: Callable[[str], bool] | None = None,
         now: Callable[[], datetime] | None = None,
+        mutation_lock: asyncio.Lock | None = None,
     ) -> None:
         self._store = store
         self._entity_pair_validator = entity_pair_validator
@@ -49,7 +53,7 @@ class DevicePowerDependencyService:
         self._updated_at = ""
         self._dependencies: tuple[DevicePowerDependency, ...] = ()
         self._loaded = False
-        self._lock = asyncio.Lock()
+        self._lock = mutation_lock or asyncio.Lock()
 
     async def async_load(self) -> None:
         loaded = await self._store.async_load()
@@ -170,7 +174,12 @@ class DevicePowerDependencyService:
                 "updatedAt": updated_at,
                 "dependencies": device_power_dependencies_to_payload(validated),
             }
-            await self._store.async_save(stored)
+            saved = await self._store.async_save(stored)
+            if saved is False:
+                raise DevicePowerDependencyServiceViolation(
+                    "device power dependency storage save failed",
+                    storage=True,
+                )
             self._revision = next_revision
             self._updated_at = updated_at
             self._dependencies = validated
@@ -257,7 +266,12 @@ class DevicePowerDependencyService:
                 "updatedAt": updated_at,
                 "dependencies": device_power_dependencies_to_payload(validated),
             }
-            await self._store.async_save(stored)
+            saved = await self._store.async_save(stored)
+            if saved is False:
+                raise DevicePowerDependencyServiceViolation(
+                    "device power dependency storage save failed",
+                    storage=True,
+                )
             self._revision = next_revision
             self._updated_at = updated_at
             self._dependencies = validated
@@ -286,6 +300,12 @@ async def async_migrate_obsolete_small_corridor_power_source(
 ) -> bool:
     """Persist the exact release-owned binding, pending HA registration if needed."""
 
+    if not (
+        SMALL_CORRIDOR_CHANDELIER_ENTITY_ID
+        and OBSOLETE_SMALL_CORRIDOR_POWER_SOURCE_ENTITY_ID
+        and SMALL_CORRIDOR_POWER_SOURCE_ENTITY_ID
+    ):
+        return False
     revision = service.document["revision"]
     return await service.async_migrate_exact_source(
         revision,

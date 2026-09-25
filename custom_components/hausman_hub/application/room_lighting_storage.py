@@ -79,7 +79,7 @@ class HomeAssistantRoomLightingStore:
                 return config
         return None
 
-    async def async_upsert(self, config: RoomLightingConfig) -> None:
+    async def async_upsert(self, config: RoomLightingConfig) -> object | None:
         """Insert or replace one validated configuration atomically."""
 
         if not isinstance(config, RoomLightingConfig):
@@ -88,7 +88,7 @@ class HomeAssistantRoomLightingStore:
         merged = [item for item in existing if item.room_id != config.room_id]
         merged.append(config)
         merged.sort(key=lambda item: item.room_id)
-        await self._save(merged)
+        return await self._save(merged)
 
     async def async_delete(self, room_id: str) -> bool:
         """Delete one configuration and report whether it existed."""
@@ -97,11 +97,13 @@ class HomeAssistantRoomLightingStore:
         merged = [item for item in existing if item.room_id != room_id]
         if len(merged) == len(existing):
             return False
-        await self._save(merged)
+        saved = await self._save(merged)
+        if saved is False:
+            return False
         return True
 
-    async def _save(self, configs: list[RoomLightingConfig]) -> None:
-        await self._store.async_save(
+    async def _save(self, configs: list[RoomLightingConfig]) -> object | None:
+        return await self._store.async_save(
             {
                 "version": ROOM_LIGHTING_STORAGE_VERSION,
                 "rooms": [config.to_dict() for config in configs],

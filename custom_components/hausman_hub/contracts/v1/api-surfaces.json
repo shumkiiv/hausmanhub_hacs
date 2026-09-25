@@ -198,6 +198,24 @@
       "target": "canonical"
     },
     {
+      "id": "integration.operations.journal-archive",
+      "source": "integration",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/admin/operations/archive",
+      "owner": "integration",
+      "status": "contracted",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.operations.journal-reset",
+      "source": "integration",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/admin/operations/reset",
+      "owner": "integration",
+      "status": "contracted",
+      "target": "canonical"
+    },
+    {
       "id": "integration.device-power-dependencies.read",
       "source": "contracts",
       "method": "GET",
@@ -214,6 +232,78 @@
       "owner": "integration",
       "status": "contracted",
       "target": "canonical"
+    },
+    {
+      "id": "integration.room-power-migration-claims.preview",
+      "source": "contracts",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/admin/room-power-migration-claims/preview",
+      "owner": "integration",
+      "status": "contracted_admin_only",
+      "target": "internal"
+    },
+    {
+      "id": "integration.room-power-migration-claims.read",
+      "source": "contracts",
+      "method": "GET",
+      "path": "/api/hausman_hub/v1/admin/room-power-migration-claims/{roomId}",
+      "owner": "integration",
+      "status": "contracted_admin_only",
+      "target": "internal"
+    },
+    {
+      "id": "integration.room-power-migration-claims.write",
+      "source": "contracts",
+      "method": "PUT",
+      "path": "/api/hausman_hub/v1/admin/room-power-migration-claims/{roomId}",
+      "owner": "integration",
+      "status": "contracted_admin_only",
+      "target": "internal"
+    },
+    {
+      "id": "integration.protected-topology.read",
+      "source": "contracts",
+      "method": "GET",
+      "path": "/api/hausman_hub/v1/admin/protected-topology",
+      "owner": "integration",
+      "status": "contracted_admin_only",
+      "target": "internal"
+    },
+    {
+      "id": "integration.protected-topology.write",
+      "source": "contracts",
+      "method": "PUT",
+      "path": "/api/hausman_hub/v1/admin/protected-topology",
+      "owner": "integration",
+      "status": "contracted_admin_only",
+      "target": "internal"
+    },
+    {
+      "id": "integration.protected-topology.readiness",
+      "source": "contracts",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/admin/protected-topology/readiness",
+      "owner": "integration",
+      "status": "contracted_admin_only",
+      "target": "internal"
+    },
+    {
+      "id": "integration.managed-switch-migration.read",
+      "source": "contracts",
+      "method": "GET",
+      "path": "/api/hausman_hub/v1/admin/managed-switch-migration",
+      "owner": "integration",
+      "status": "contracted_admin_only",
+      "target": "internal"
+    },
+    {
+      "id": "integration.managed-switch-migration.rearm",
+      "source": "contracts",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/admin/managed-switch-migration/rearm",
+      "owner": "integration",
+      "status": "contracted_admin_only",
+      "target": "internal"
     },
     {
       "id": "integration.tablet-profile.read",

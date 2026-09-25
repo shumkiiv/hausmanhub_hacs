@@ -50,148 +50,204 @@ _TRUSTED_SYSTEM_SOURCE_HASHES = {
     "system-tambur-adaptive-controller": frozenset(
         {
             "c8d5cd80006111146053767f7fd775c25a09ec8b5fab38f3a93a6c9126a417ca",
+            "d4577011013a1e93dc03b5bbc72c47c9a02573858b4b363701b8fb57658f31dc",
         }
     ),
     "system-shower-comfort-controller": frozenset(
         {
             "757bde711c85ebad4826c2ec0bf2695d0034f7dd820c9ec7c30816f3f37c1551",
             "53d8876b2b914bd438cdbd020b7dc85f3e9eb3d9a8ea17434ab290d852deea66",
+            "cef285d2567522304d3425c4877373dd3d01b9b8316e28ca3b97d019ffde74be",
         }
     ),
     "system-small-corridor-light-controller": frozenset(
-        {"c3097df8fefa2d09be4e57b059239bcb92fbb0302069500178fc0be1c8fc4800"}
+        {
+            "c3097df8fefa2d09be4e57b059239bcb92fbb0302069500178fc0be1c8fc4800",
+            "718f13b5a6eb08f9a1eea3d5f844b841795d1089a4fa38e74fc08006b956ae0c",
+        }
     ),
 }
 _TRUSTED_ADDITIONAL_SYSTEM_SOURCE_HASHES = {
-    "system-toilet-comfort-controller": frozenset({"2d91781cf6dd910dadd8e4774eb3d45ae4ae6002b6912dee65bf40ef33af513b"}),
-    "system-bathroom-exhaust-controller": frozenset({"235302aeaa38e0d82eae01f63015a5180f3d4098f495919a18a587c973902af6"}),
-    "system-storage-light-controller": frozenset({"3190e744c05403f496d5399ee56c4ff1a199461df0e51040afe5a7244d424fd0"}),
-    "system-cabinet-light-controller": frozenset({"ead4919d6c3d088fc45a26e0b240a4b0520b0a62ba7277476d143b650133468c"}),
-    "system-curtains-privacy-controller": frozenset({"663af424f9fdb51ca3f9d95ed055206858810adf9ba780d5b1fb3ddb9336368e"}),
+    "system-toilet-comfort-controller": frozenset({
+        "2d91781cf6dd910dadd8e4774eb3d45ae4ae6002b6912dee65bf40ef33af513b",
+        "e479089bce712f4f90b0e97388221fff2b9fa5b3837e162c1091d5f85c463cfa",
+    }),
+    "system-bathroom-exhaust-controller": frozenset({
+        "235302aeaa38e0d82eae01f63015a5180f3d4098f495919a18a587c973902af6",
+        "38b5aede291a5c2e45af61831a1fae39f69344cc7dc41998ae64896aca218f0f",
+    }),
+    "system-storage-light-controller": frozenset({
+        "3190e744c05403f496d5399ee56c4ff1a199461df0e51040afe5a7244d424fd0",
+        "04e1673e931b17da998f184a55645b302ea0b8de8707c3e10280c92e9fa65c31",
+    }),
+    "system-cabinet-light-controller": frozenset({
+        "ead4919d6c3d088fc45a26e0b240a4b0520b0a62ba7277476d143b650133468c",
+        "b5a5ba2637ae33f5b7aa96a957ad439632f3fa2b7137a9487afa52165c09c299",
+    }),
+    "system-curtains-privacy-controller": frozenset({
+        "663af424f9fdb51ca3f9d95ed055206858810adf9ba780d5b1fb3ddb9336368e",
+        "f0e93a8e5dd88a7828c0070878e28e0ef9df4fc54349ba1dca64bc2e76299b13",
+    }),
 }
 
 def _trusted_hashes(scenario_id: str) -> frozenset[str]:
     return _TRUSTED_SYSTEM_SOURCE_HASHES.get(scenario_id, frozenset()) | _TRUSTED_ADDITIONAL_SYSTEM_SOURCE_HASHES.get(scenario_id, frozenset())
+
+
+_SYSTEM_SCENARIO_IDS = frozenset(
+    {
+        "system-toilet-comfort-controller",
+        "system-bathroom-exhaust-controller",
+        "system-storage-light-controller",
+        "system-cabinet-light-controller",
+        "system-curtains-privacy-controller",
+        "system-shower-comfort-controller",
+        "system-tambur-adaptive-controller",
+        "system-small-corridor-light-controller",
+    }
+)
+_BRIGHTNESS_INPUT_ATTRIBUTES = frozenset(
+    {"brightness", "color_temp_kelvin", "color_temp"}
+)
+_CURTAIN_INPUT_ATTRIBUTES = frozenset({"current_position"})
+
+
+def _control_state(server_controls: Mapping[str, object] | None) -> Mapping[str, object]:
+    controls = server_controls if isinstance(server_controls, Mapping) else {}
+    state = controls.get("state")
+    return state if isinstance(state, Mapping) else {}
+
+
+def _control_topology_roles(
+    server_controls: Mapping[str, object] | None,
+) -> dict[str, str]:
+    state = _control_state(server_controls)
+    topology = state.get("topology")
+    topology = topology if isinstance(topology, Mapping) else {}
+    roles = topology.get("roles")
+    roles = roles if isinstance(roles, Mapping) else {}
+    return {
+        str(alias): target_id
+        for alias, target_id in roles.items()
+        if isinstance(alias, str) and isinstance(target_id, str) and target_id
+    }
+
+
+def _topology_target(
+    server_controls: Mapping[str, object] | None, alias: str
+) -> str | None:
+    return _control_topology_roles(server_controls).get(alias)
+
+
+def _topology_targets(
+    server_controls: Mapping[str, object] | None, aliases: tuple[str, ...]
+) -> tuple[str, ...]:
+    roles = _control_topology_roles(server_controls)
+    return tuple(
+        target_id
+        for alias in aliases
+        if isinstance((target_id := roles.get(alias)), str) and target_id
+    )
+
+
+def _js_target_token(target_id: object) -> str:
+    return re.sub(r"[^A-Za-z0-9]", "_", str(target_id))
+
+
+def _dynamic_input_attribute_allowlist(
+    scenario_id: str, server_controls: Mapping[str, object] | None
+) -> dict[str, frozenset[str]]:
+    result: dict[str, frozenset[str]] = {}
+    roles = _control_topology_roles(server_controls)
+    if scenario_id == "system-tambur-adaptive-controller":
+        if target_id := roles.get("chandelier"):
+            result[target_id] = _BRIGHTNESS_INPUT_ATTRIBUTES
+    elif scenario_id == "system-small-corridor-light-controller":
+        if target_id := roles.get("chandelier"):
+            result[target_id] = _BRIGHTNESS_INPUT_ATTRIBUTES
+    elif scenario_id == "system-storage-light-controller":
+        if target_id := roles.get("light"):
+            result[target_id] = _BRIGHTNESS_INPUT_ATTRIBUTES
+    elif scenario_id == "system-cabinet-light-controller":
+        if target_id := roles.get("light"):
+            result[target_id] = _BRIGHTNESS_INPUT_ATTRIBUTES
+    elif scenario_id == "system-curtains-privacy-controller":
+        for target_id in _topology_targets(
+            server_controls, ("living", "kitchen", "room", "office")
+        ):
+            result[target_id] = _CURTAIN_INPUT_ATTRIBUTES
+    return result
+
+
+def _dynamic_system_plan_envelope(
+    scenario_id: str,
+    server_controls: Mapping[str, object] | None,
+    server_bindings: Mapping[str, str] | None,
+) -> dict[str, dict[object, int]]:
+    envelope: dict[str, dict[object, int]] = {
+        "actions": {}, "delays": {}, "runScenarios": {}
+    }
+
+    def add(target_id: str | None, action_ids: tuple[str, ...]) -> None:
+        if not isinstance(target_id, str) or not target_id:
+            return
+        for action_id in action_ids:
+            envelope["actions"][(target_id, action_id)] = 1
+
+    if scenario_id == "system-storage-light-controller":
+        add(_topology_target(server_controls, "light"), ("turn_on", "turn_off"))
+        exhaust = (
+            server_bindings.get("storageExhaust")
+            if isinstance(server_bindings, Mapping)
+            else None
+        )
+        add(exhaust, ("turn_on", "turn_off"))
+    elif scenario_id == "system-cabinet-light-controller":
+        add(
+            _topology_target(server_controls, "light"),
+            ("turn_on", "set_brightness_percent", "set_color_temperature"),
+        )
+    elif scenario_id == "system-curtains-privacy-controller":
+        for target_id in _topology_targets(
+            server_controls, ("living", "kitchen", "room", "office")
+        ):
+            add(target_id, ("set_position",))
+    elif scenario_id == "system-shower-comfort-controller":
+        for target_id in _topology_targets(
+            server_controls, ("main", "extra", "cabinet", "fan")
+        ):
+            add(target_id, ("turn_on", "turn_off"))
+    elif scenario_id == "system-toilet-comfort-controller":
+        for target_id in _topology_targets(server_controls, ("main", "night", "fan")):
+            add(target_id, ("turn_on", "turn_off"))
+    elif scenario_id == "system-bathroom-exhaust-controller":
+        add(_topology_target(server_controls, "fan"), ("turn_on", "turn_off"))
+    elif scenario_id == "system-tambur-adaptive-controller":
+        add(
+            _topology_target(server_controls, "chandelier"),
+            ("turn_on", "turn_off", "set_brightness_percent", "set_color_temperature"),
+        )
+        add(_topology_target(server_controls, "points"), ("turn_on", "turn_off"))
+        add(_topology_target(server_controls, "mirror"), ("turn_on", "turn_off"))
+    elif scenario_id == "system-small-corridor-light-controller":
+        add(_topology_target(server_controls, "relay"), ("turn_on", "turn_off"))
+        add(
+            _topology_target(server_controls, "chandelier"),
+            ("turn_on", "turn_off", "set_brightness_percent", "set_color_temperature"),
+        )
+    return envelope
+
 # Release-trusted managed sources may select a branch, but cannot enlarge the
 # physical envelope. Each listed device action is allowed at most once; their
 # delays are exact source constants, not values supplied by Node-RED.
 _SYSTEM_PLAN_ENVELOPES = {
-    "system-toilet-comfort-controller": {
-        "actions": {
-            ("entity_6667b3400bce7970", "turn_on"): 1,
-            ("entity_6667b3400bce7970", "turn_off"): 1,
-            ("entity_5d95de599d2b5cec", "turn_on"): 1,
-            ("entity_5d95de599d2b5cec", "turn_off"): 1,
-            ("entity_9bbb3b0e8cd98627", "turn_on"): 1,
-            ("entity_9bbb3b0e8cd98627", "turn_off"): 1,
-        }, "delays": {}, "runScenarios": {},
-    },
-    "system-bathroom-exhaust-controller": {
-        "actions": {
-            ("entity_c15f5df5382ee180", "turn_on"): 1,
-            ("entity_c15f5df5382ee180", "turn_off"): 1,
-        }, "delays": {}, "runScenarios": {},
-    },
-    "system-storage-light-controller": {
-        "actions": {
-            ("entity_0ec37ef18b4b39a6", "turn_on"): 1,
-            ("entity_0ec37ef18b4b39a6", "turn_off"): 1,
-        },
-        "delays": {}, "runScenarios": {},
-    },
-    "system-cabinet-light-controller": {
-        "actions": {
-            ("entity_aeaf7c250c68e8c2", "turn_on"): 1,
-            ("entity_aeaf7c250c68e8c2", "set_brightness_percent"): 1,
-            ("entity_aeaf7c250c68e8c2", "set_color_temperature"): 1,
-        }, "delays": {}, "runScenarios": {},
-    },
-    "system-curtains-privacy-controller": {
-        "actions": {
-            ("entity_8746cfd7f6f7103d", "set_position"): 1,
-            ("entity_2da2065add6e2168", "set_position"): 1,
-            ("entity_1e0b476b7d082cc0", "set_position"): 1,
-            ("entity_9164132c7692d6f5", "set_position"): 1,
-        }, "delays": {}, "runScenarios": {},
-    },
-    "system-shower-comfort-controller": {
-        "actions": {
-            ("entity_46174e1ff9913212", "turn_on"): 1,
-            ("entity_46174e1ff9913212", "turn_off"): 1,
-            ("entity_1fdcd8b244637246", "turn_on"): 1,
-            ("entity_1fdcd8b244637246", "turn_off"): 1,
-            ("entity_e7a7c61eec7bdff8", "turn_on"): 1,
-            ("entity_e7a7c61eec7bdff8", "turn_off"): 1,
-            ("entity_afef5df0e0cae309", "turn_on"): 1,
-            ("entity_afef5df0e0cae309", "turn_off"): 1,
-        },
-        "delays": {},
-        "runScenarios": {},
-    },
-    "system-tambur-adaptive-controller": {
-        "actions": {
-            ("entity_71859313239a14e4", "turn_on"): 1,
-            ("entity_71859313239a14e4", "turn_off"): 1,
-            ("entity_71859313239a14e4", "set_brightness_percent"): 1,
-            ("entity_71859313239a14e4", "set_color_temperature"): 1,
-            ("entity_cd0098e5ff95da46", "turn_on"): 1,
-            ("entity_cd0098e5ff95da46", "turn_off"): 1,
-            ("entity_fbdf27871edb89bf", "turn_on"): 1,
-            ("entity_fbdf27871edb89bf", "turn_off"): 1,
-        },
-        "delays": {},
-        "runScenarios": {},
-    },
-    "system-small-corridor-light-controller": {
-        "actions": {
-            ("entity_4be32416634e6416", "turn_on"): 1,
-            ("entity_4be32416634e6416", "turn_off"): 1,
-            ("entity_9ed909332fdaa8fd", "turn_on"): 1,
-            ("entity_9ed909332fdaa8fd", "turn_off"): 1,
-            ("entity_9ed909332fdaa8fd", "set_brightness_percent"): 1,
-            ("entity_9ed909332fdaa8fd", "set_color_temperature"): 1,
-        },
-        "delays": {},
-        "runScenarios": {},
-    },
+    scenario_id: {"actions": {}, "delays": {}, "runScenarios": {}}
+    for scenario_id in _SYSTEM_SCENARIO_IDS
 }
 _SYSTEM_BINDING_ALLOWLIST = {
-    "system-cabinet-light-controller": {"light": "entity_aeaf7c250c68e8c2"},
+    "system-cabinet-light-controller": {},
     "system-curtains-privacy-controller": {},
     "system-storage-light-controller": {},
-}
-_SYSTEM_INPUT_ATTRIBUTE_ALLOWLIST = {
-    "system-shower-comfort-controller": {},
-    "system-tambur-adaptive-controller": {
-        "entity_6b9ccdab9bb484b2": frozenset({"next_setting"}),
-        "entity_71859313239a14e4": frozenset(
-            {"brightness", "color_temp_kelvin", "color_temp"}
-        ),
-    },
-    "system-small-corridor-light-controller": {
-        "entity_9ed909332fdaa8fd": frozenset(
-            {"brightness", "color_temp_kelvin", "color_temp"}
-        ),
-    },
-    "system-storage-light-controller": {
-        "entity_0ec37ef18b4b39a6": frozenset(
-            {"brightness", "color_temp_kelvin", "color_temp"}
-        ),
-    },
-    "system-cabinet-light-controller": {
-        "entity_aeaf7c250c68e8c2": frozenset(
-            {"brightness", "color_temp_kelvin", "color_temp"}
-        ),
-    },
-    "system-curtains-privacy-controller": {
-        target_id: frozenset({"current_position"})
-        for target_id in (
-            "entity_8746cfd7f6f7103d",
-            "entity_2da2065add6e2168",
-            "entity_1e0b476b7d082cc0",
-            "entity_9164132c7692d6f5",
-        )
-    },
 }
 _TRACE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _TRACE_REASON = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
@@ -1973,21 +2029,27 @@ class NodeRedScenarioBackend:
         )
 
     def _input_snapshot(
-        self, scenario_id: str, definition: ScenarioDefinition, catalog: ScenarioCatalog
+        self,
+        scenario_id: str,
+        definition: ScenarioDefinition,
+        catalog: ScenarioCatalog,
+        server_controls: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         metadata = definition.node_red
-        target_ids = metadata.input_target_ids if metadata is not None else ()
+        target_ids = set(metadata.input_target_ids if metadata is not None else ())
+        target_ids.update(_control_topology_roles(server_controls).values())
+        attribute_allowlist = _dynamic_input_attribute_allowlist(
+            scenario_id, server_controls
+        )
         result: dict[str, object] = {}
-        for target_id in target_ids:
+        for target_id in sorted(target_ids):
             device = catalog.device(target_id)
             if device is None:
                 result[target_id] = {"state": None, "attributes": {}}
                 continue
             state = self._hass.states.get(device.entity_id)
             attributes = getattr(state, "attributes", {}) if state is not None else {}
-            allowed_attributes = _SYSTEM_INPUT_ATTRIBUTE_ALLOWLIST.get(
-                scenario_id, {}
-            ).get(target_id, frozenset())
+            allowed_attributes = attribute_allowlist.get(target_id, frozenset())
             safe_attributes = {
                 str(key): value
                 for key, value in attributes.items()
@@ -2048,7 +2110,7 @@ class NodeRedScenarioBackend:
             "correlationId": run_id,
             "scenarioId": scenario_id,
             "dryRun": dry_run,
-            "inputs": self._input_snapshot(scenario_id, definition, catalog),
+            "inputs": self._input_snapshot(scenario_id, definition, catalog, controls),
             # Bindings are server-owned.  Node-RED never receives arbitrary
             # entity IDs from a caller or editor.
             "bindings": bindings,
@@ -2120,7 +2182,7 @@ class NodeRedScenarioBackend:
             server_controls=controls,
             trigger_context=safe_trigger,
         )
-        self._validate_typed_plan(scenario_id, actions, safe_trigger)
+        self._validate_typed_plan(scenario_id, actions, safe_trigger, controls)
         trace = body.get("trace")
         if not isinstance(trace, list) or len(trace) > 64:
             raise NodeRedBackendError("Node-RED trace is invalid")
@@ -2207,7 +2269,9 @@ class NodeRedScenarioBackend:
             server_controls=server_controls,
             trigger_context=trigger_context,
         )
-        envelope = _SYSTEM_PLAN_ENVELOPES[scenario_id]
+        envelope = _dynamic_system_plan_envelope(
+            scenario_id, server_controls, server_bindings
+        )
         counts: dict[tuple[str, object], int] = {}
         for action in actions:
             if action.type is ScenarioActionType.DEVICE_ACTION:
@@ -2244,6 +2308,7 @@ class NodeRedScenarioBackend:
         scenario_id: str,
         actions: list[ScenarioAction],
         trigger: Mapping[str, object],
+        server_controls: Mapping[str, object] | None = None,
     ) -> None:
         """Narrow direct-user plans beyond the general release envelope."""
 
@@ -2259,15 +2324,19 @@ class NodeRedScenarioBackend:
         if len(signatures) != len(actions):
             raise NodeRedBackendError("Node-RED typed intent plan is invalid")
         if binding == "shower-cabinet":
-            expected = [("entity_e7a7c61eec7bdff8", f"turn_{intent}")]
+            cabinet = _topology_target(server_controls, "cabinet")
+            expected = [(cabinet, f"turn_{intent}")]
             if scenario_id != "system-shower-comfort-controller" or signatures != expected:
                 raise NodeRedBackendError("Node-RED typed intent plan is invalid")
             return
         if scenario_id != "system-tambur-adaptive-controller":
             raise NodeRedBackendError("Node-RED typed intent plan is invalid")
+        chandelier = _topology_target(server_controls, "chandelier")
+        points = _topology_target(server_controls, "points")
         allowed = {
-            ("entity_71859313239a14e4", f"turn_{intent}"),
-            ("entity_cd0098e5ff95da46", f"turn_{intent}"),
+            (target_id, f"turn_{intent}")
+            for target_id in (chandelier, points)
+            if isinstance(target_id, str) and target_id
         }
         if intent == "off":
             valid = len(signatures) == 2 and set(signatures) == allowed
@@ -2388,22 +2457,25 @@ def _validate_system_branch(
         )
 
     if scenario_id == "system-curtains-privacy-controller":
-        targets = (
-            "entity_8746cfd7f6f7103d",
-            "entity_2da2065add6e2168",
-            "entity_1e0b476b7d082cc0",
-            "entity_9164132c7692d6f5",
-        )
         controls = server_controls if isinstance(server_controls, Mapping) else {}
         policy = controls.get("policy")
         state = controls.get("state")
         policy = policy if isinstance(policy, Mapping) else {}
         state = state if isinstance(state, Mapping) else {}
+        roles = _control_topology_roles(server_controls)
+        configured = (
+            (roles.get("living"), 100),
+            (roles.get("kitchen"), policy.get("kitchenCoverCapPercent")),
+            (roles.get("room"), 100),
+            (roles.get("office"), policy.get("cabinetCoverCapPercent")),
+        )
+        targets = tuple(
+            target_id for target_id, _cap in configured if isinstance(target_id, str)
+        )
         caps = {
-            targets[0]: 100,
-            targets[1]: policy.get("kitchenCoverCapPercent"),
-            targets[2]: 100,
-            targets[3]: policy.get("cabinetCoverCapPercent"),
+            target_id: cap
+            for target_id, cap in configured
+            if isinstance(target_id, str)
         }
         protected = state.get("targets")
         protected = protected if isinstance(protected, Mapping) else {}
@@ -2460,7 +2532,7 @@ def _validate_system_branch(
             action.target_id not in expected
             or not device(
                 action,
-                f"cover_{action.target_id}",
+                f"cover_{_js_target_token(action.target_id)}",
                 str(action.target_id),
                 "set_position",
                 expected.get(str(action.target_id)),
@@ -2478,18 +2550,22 @@ def _validate_system_branch(
         if len(actions) != 1:
             raise NodeRedBackendError("Node-RED storage branch exceeds release source")
         action = actions[0]
+        light = _topology_target(server_controls, "light")
         valid = (
-            device(
-                action,
-                "storage_light_on",
-                "entity_0ec37ef18b4b39a6",
-                "turn_on",
-            )
-            or device(
-                action,
-                "storage_light_off",
-                "entity_0ec37ef18b4b39a6",
-                "turn_off",
+            isinstance(light, str)
+            and (
+                device(
+                    action,
+                    "storage_light_on",
+                    light,
+                    "turn_on",
+                )
+                or device(
+                    action,
+                    "storage_light_off",
+                    light,
+                    "turn_off",
+                )
             )
         )
         exhaust = (
@@ -2509,9 +2585,9 @@ def _validate_system_branch(
         return
 
     if scenario_id == "system-tambur-adaptive-controller":
-        chandelier = "entity_71859313239a14e4"
-        points = "entity_cd0098e5ff95da46"
-        mirror = "entity_fbdf27871edb89bf"
+        chandelier = _topology_target(server_controls, "chandelier")
+        points = _topology_target(server_controls, "points")
+        mirror = _topology_target(server_controls, "mirror")
         if not actions:
             return
         # Direct typed group controls remain a separate exact user path.
@@ -2520,9 +2596,10 @@ def _validate_system_branch(
             and trigger_context.get("source") == "manual"
             and trigger_context.get("binding") == "tambur-light-group"
         )
+        group_targets = {target for target in (chandelier, points) if isinstance(target, str)}
         if typed_group and len(actions) in {1, 2} and all(
             action.type is ScenarioActionType.DEVICE_ACTION
-            and action.target_id in {chandelier, points}
+            and action.target_id in group_targets
             and action.action_id in {"turn_on", "turn_off"}
             and action.value is None
             and action.scenario_id is None
@@ -2530,20 +2607,24 @@ def _validate_system_branch(
             for action in actions
         ):
             return
+        control_targets = {
+            target for target in (chandelier, points, mirror) if isinstance(target, str)
+        }
         if not _matches_control_action(
-            actions, expected_control_action, {chandelier, points, mirror}
+            actions, expected_control_action, control_targets
         ):
             raise NodeRedBackendError(
                 "Node-RED tambur action differs from the server decision"
             )
         return
     if scenario_id == "system-small-corridor-light-controller":
-        relay = "entity_4be32416634e6416"
-        chandelier = "entity_9ed909332fdaa8fd"
+        relay = _topology_target(server_controls, "relay")
+        chandelier = _topology_target(server_controls, "chandelier")
         if not actions:
             return
+        control_targets = {target for target in (relay, chandelier) if isinstance(target, str)}
         if not _matches_control_action(
-            actions, expected_control_action, {relay, chandelier}
+            actions, expected_control_action, control_targets
         ):
             raise NodeRedBackendError(
                 "Node-RED small corridor action differs from the server decision"
@@ -2552,16 +2633,18 @@ def _validate_system_branch(
     if not actions:
         return
     targets = {
-        "system-shower-comfort-controller": {
-            "entity_46174e1ff9913212", "entity_1fdcd8b244637246",
-            "entity_e7a7c61eec7bdff8", "entity_afef5df0e0cae309",
-        },
-        "system-toilet-comfort-controller": {
-            "entity_5d95de599d2b5cec", "entity_6667b3400bce7970",
-            "entity_9bbb3b0e8cd98627",
-        },
-        "system-bathroom-exhaust-controller": {"entity_c15f5df5382ee180"},
-        "system-cabinet-light-controller": {"entity_aeaf7c250c68e8c2"},
+        "system-shower-comfort-controller": set(
+            _topology_targets(server_controls, ("main", "extra", "cabinet", "fan"))
+        ),
+        "system-toilet-comfort-controller": set(
+            _topology_targets(server_controls, ("main", "night", "fan"))
+        ),
+        "system-bathroom-exhaust-controller": set(
+            _topology_targets(server_controls, ("fan",))
+        ),
+        "system-cabinet-light-controller": set(
+            _topology_targets(server_controls, ("light",))
+        ),
     }.get(scenario_id)
     if targets is None:
         raise NodeRedBackendError("Node-RED system controller has no exact branch validator")
@@ -2571,10 +2654,11 @@ def _validate_system_branch(
         and trigger_context.get("source") == "manual"
         and trigger_context.get("binding") == "shower-cabinet"
     )
+    cabinet = _topology_target(server_controls, "cabinet")
     if typed_cabinet and len(actions) == 1 and device(
         actions[0],
         f"set_cabinet_{trigger_context.get('direct_user_intent')}",
-        "entity_e7a7c61eec7bdff8",
+        str(cabinet),
         f"turn_{trigger_context.get('direct_user_intent')}",
     ):
         return

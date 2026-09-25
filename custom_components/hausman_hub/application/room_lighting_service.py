@@ -7,6 +7,7 @@ outside this module.
 
 from __future__ import annotations
 
+import asyncio
 from copy import deepcopy
 from dataclasses import replace
 import time
@@ -64,7 +65,6 @@ def _template_document() -> dict[str, object]:
                     "id": "sensor_demo_presence",
                     "name": "Датчик присутствия",
                     "kind": "presence",
-                    "entityId": "binary_sensor.demo_presence",
                     "autoAdoptOverride": None,
                 }
             ],
@@ -73,7 +73,6 @@ def _template_document() -> dict[str, object]:
                     "id": "light_demo_main",
                     "name": "Основной свет",
                     "kind": "light",
-                    "entityId": "light.demo_main",
                     "role": "main",
                     "groupId": "grp_demo_main",
                     "brightness": True,
@@ -84,7 +83,6 @@ def _template_document() -> dict[str, object]:
             "power_switch": {
                 "id": "switch_demo_power",
                 "name": "Питание света",
-                "entityId": "switch.demo_power",
                 "autoAdoptOverride": None,
             },
             "wireless_switches": [],
@@ -182,11 +180,16 @@ ROOM_LIGHTING_TEMPLATES: dict[str, dict[str, object]] = {
 }
 
 
+class RoomLightingStorageError(RuntimeError):
+    """Room lighting configuration storage did not durably save."""
+
+
 class RoomLightingService:
     """Validate, version and persist room lighting configurations only."""
 
-    def __init__(self, store: object) -> None:
+    def __init__(self, store: object, *, mutation_lock: asyncio.Lock | None = None) -> None:
         self._store = store
+        self._lock = mutation_lock or asyncio.Lock()
 
     async def async_get_config(self, room_id: str) -> RoomLightingConfig | None:
         return await self._store.async_get(room_id)  # type: ignore[attr-defined]
@@ -199,31 +202,35 @@ class RoomLightingService:
 
         if not isinstance(config, RoomLightingConfig):
             raise RoomLightingViolation("room lighting config is required")
-        violations = room_lighting_violations(config)
-        if violations:
-            raise RoomLightingViolation("; ".join(violations))
-        others = tuple(
-            existing
-            for existing in await self.async_list_configs()
-            if existing.room_id != config.room_id
-        )
-        collisions = room_lighting_entity_collisions((config, *others))
-        if collisions:
-            raise RoomLightingViolation("; ".join(collisions))
-        existing = await self._store.async_get(config.room_id)  # type: ignore[attr-defined]
-        if existing is not None and not _changed(existing, config):
-            return existing
-        version = 1 if existing is None else existing.version + 1
-        stored = replace(
-            config,
-            version=version,
-            updated_at=max(_now_seconds(), existing.updated_at + 1 if existing else 0),
-        )
-        await self._store.async_upsert(stored)  # type: ignore[attr-defined]
-        return stored
+        async with self._lock:
+            violations = room_lighting_violations(config)
+            if violations:
+                raise RoomLightingViolation("; ".join(violations))
+            others = tuple(
+                existing
+                for existing in await self.async_list_configs()
+                if existing.room_id != config.room_id
+            )
+            collisions = room_lighting_entity_collisions((config, *others))
+            if collisions:
+                raise RoomLightingViolation("; ".join(collisions))
+            existing = await self._store.async_get(config.room_id)  # type: ignore[attr-defined]
+            if existing is not None and not _changed(existing, config):
+                return existing
+            version = 1 if existing is None else existing.version + 1
+            stored = replace(
+                config,
+                version=version,
+                updated_at=max(_now_seconds(), existing.updated_at + 1 if existing else 0),
+            )
+            saved = await self._store.async_upsert(stored)  # type: ignore[attr-defined]
+            if saved is False:
+                raise RoomLightingStorageError("room lighting config storage save failed")
+            return stored
 
     async def async_delete_config(self, room_id: str) -> bool:
-        return await self._store.async_delete(room_id)  # type: ignore[attr-defined]
+        async with self._lock:
+            return await self._store.async_delete(room_id)  # type: ignore[attr-defined]
 
     async def async_apply_template(
         self,

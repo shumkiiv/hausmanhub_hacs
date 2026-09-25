@@ -7,10 +7,12 @@ const trigger = context.trigger && typeof context.trigger === 'object' ? context
 const controls = context.controls && typeof context.controls === 'object' ? context.controls : {};
 const policy = controls.policy && typeof controls.policy === 'object' ? controls.policy : {};
 const state = controls.state && typeof controls.state === 'object' ? controls.state : {};
+const topology = state.topology && typeof state.topology === 'object' ? state.topology : {};
+const roles = topology.roles && typeof topology.roles === 'object' ? topology.roles : {};
 const protectedTargets = state.targets && typeof state.targets === 'object' ? state.targets : {};
 const kitchenCap = Number.isInteger(policy.kitchenCoverCapPercent) && policy.kitchenCoverCapPercent >= 1 && policy.kitchenCoverCapPercent <= 100 ? policy.kitchenCoverCapPercent : null;
 const officeCap = Number.isInteger(policy.cabinetCoverCapPercent) && policy.cabinetCoverCapPercent >= 1 && policy.cabinetCoverCapPercent <= 100 ? policy.cabinetCoverCapPercent : null;
-const configured = [['entity_8746cfd7f6f7103d', 'Шторы гостиная', 100], ['entity_2da2065add6e2168', 'Шторы кухня', kitchenCap], ['entity_1e0b476b7d082cc0', 'Шторы Алисы', 100], ['entity_9164132c7692d6f5', 'Шторы кабинет', officeCap]];
+const configured = [[roles.living, 'Шторы гостиная', 100], [roles.kitchen, 'Шторы кухня', kitchenCap], [roles.room, 'Шторы комнаты', 100], [roles.office, 'Шторы рабочей комнаты', officeCap]].filter(([targetId]) => typeof targetId === 'string' && targetId);
 const manual = trigger.source === 'manual' || (trigger.source === 'nested' && trigger.origin_source === 'manual');
 const manualOpen = manual && trigger.trigger_id === 'manual_open_all';
 const manualClose = manual && trigger.trigger_id === 'manual_close_all';
@@ -38,7 +40,7 @@ for (const [targetId, targetName, cap] of configured) {
     reason = pos === cap ? 'already_open' : 'trusted_sunrise';
   } else if (automaticClose) {
     const allowed = state.ready === true && protection && protection.automaticCloseAllowed === true;
-    if (allowed && pos > (targetId === 'entity_9164132c7692d6f5' ? 20 : 5)) actions.push({id: `cover_${targetId.replace(/[^a-z0-9]/gi, '_')}`, type: 'device_action', targetId, targetName, actionId: 'set_position', actionTitle: 'Положение', value: 0});
+    if (allowed && pos > (targetId === roles.office ? 20 : 5)) actions.push({id: `cover_${targetId.replace(/[^a-z0-9]/gi, '_')}`, type: 'device_action', targetId, targetName, actionId: 'set_position', actionTitle: 'Положение', value: 0});
     reason = !allowed ? 'manual_open_latched' : 'automatic_close';
   }
   trace.push({id: targetId, title: targetName, status: actions.some(action => action.targetId === targetId) ? 'selected' : 'skipped', expected: `cap ${cap}%`, reason});

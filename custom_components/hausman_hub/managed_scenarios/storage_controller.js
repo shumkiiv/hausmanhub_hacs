@@ -3,19 +3,21 @@
 const r = msg.payload && typeof msg.payload === 'object' ? msg.payload : {};
 const i = r.inputs && typeof r.inputs === 'object' ? r.inputs : {};
 const s = id => i[id] && i[id].state != null ? String(i[id].state) : null;
-const light = 'entity_0ec37ef18b4b39a6';
 const controls = r.context && r.context.controls && typeof r.context.controls === 'object' ? r.context.controls : {};
 const policy = controls.policy && typeof controls.policy === 'object' ? controls.policy : {};
 const controlState = controls.state && typeof controls.state === 'object' ? controls.state : {};
+const topology = controlState.topology && typeof controlState.topology === 'object' ? controlState.topology : {};
+const roles = topology.roles && typeof topology.roles === 'object' ? topology.roles : {};
+const light = roles.light;
 const ready = controlState.ready === true;
 const transition = ready ? String(controlState.transition || 'idle') : 'stale_generation';
 const bindings = r.bindings && typeof r.bindings === 'object' ? r.bindings : {};
 const exhaust = typeof bindings.storageExhaust === 'string' ? bindings.storageExhaust : null;
 const action = (id, targetId, targetName, actionId) => ({id, type: 'device_action', targetId, targetName, actionId, actionTitle: actionId === 'turn_on' ? 'Включить' : 'Выключить'});
 const actions = [];
-if (transition === 'storage_light_on' && s(light) === 'off') {
+if (typeof light === 'string' && transition === 'storage_light_on' && s(light) === 'off') {
   actions.push(action('storage_light_on', light, 'Кладовка: свет', 'turn_on'));
-} else if (transition === 'storage_light_off_due' && s(light) === 'on') {
+} else if (typeof light === 'string' && transition === 'storage_light_off_due' && s(light) === 'on') {
   actions.push(action('storage_light_off', light, 'Кладовка: свет', 'turn_off'));
 } else if (transition === 'storage_exhaust_on' && exhaust) {
   actions.push(action('storage_exhaust_on', exhaust, 'Кладовка: вытяжка', 'turn_on'));

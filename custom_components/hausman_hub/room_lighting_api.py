@@ -29,6 +29,7 @@ from .application.room_lighting_service import (
     DEFAULT_TEMPLATE_ID,
     ROOM_LIGHTING_TEMPLATES,
     RoomLightingService,
+    RoomLightingStorageError,
 )
 from .climate_api import (
     DOMAIN,
@@ -68,6 +69,7 @@ _LOGGER = logging.getLogger(__name__)
 ROOM_LIGHTING_BASE = "/api/hausman_hub/v1/rooms/{room_id}/lighting"
 ROOM_LIGHTING_CONFIG_PATH = f"{ROOM_LIGHTING_BASE}/config"
 ROOM_LIGHTING_STATUS_PATH = f"{ROOM_LIGHTING_BASE}/status"
+ROOM_LIGHTING_FORCE_AUTO_PATH = f"{ROOM_LIGHTING_BASE}/force-auto"
 ROOM_LIGHTING_TEMPLATES_PATH = f"{ROOM_LIGHTING_BASE}/templates"
 ROOM_LIGHTING_TEMPLATE_APPLY_PATH = f"{ROOM_LIGHTING_TEMPLATES_PATH}/apply"
 ROOM_LIGHTING_LIVE_TESTS_PATH = f"{ROOM_LIGHTING_BASE}/live-tests"
@@ -98,13 +100,15 @@ def register_room_lighting_api(hass: HomeAssistant, entry_id: str) -> None:
         from .application.room_lighting_storage import HomeAssistantRoomLightingStore
 
         data[DATA_ROOM_LIGHTING_SERVICE] = RoomLightingService(
-            HomeAssistantRoomLightingStore(hass, entry_id)
+            HomeAssistantRoomLightingStore(hass, entry_id),
+            mutation_lock=data.setdefault("admin_mutation_lock", asyncio.Lock()),
         )
     data.setdefault(DATA_ROOM_LIGHTING_LIVE_TESTS, {})
     if DATA_ROOM_LIGHTING_VIEWS in data:
         return
     views = (
         RoomLightingConfigView(hass),
+        RoomLightingForceAutoView(hass),
         RoomLightingStatusView(hass),
         RoomLightingTemplatesView(hass),
         RoomLightingTemplateApplyView(hass),
@@ -245,7 +249,61 @@ class RoomLightingConfigView(_RoomLightingView):
                 saved = await service.async_put_config(config)
             except RoomLightingViolation as error:
                 return self._invalid(error)
+            except RoomLightingStorageError:
+                return self._unavailable()
+            except Exception:
+                return self._error("internal_error")
         return self.json(saved.to_dict(), headers=NO_STORE_HEADERS)
+
+
+class RoomLightingForceAutoView(_RoomLightingView):
+    """Перевести комнату в авто по явному действию владельца.
+
+    Снимает все ручные удержания и защиты комнаты и немедленно применяет
+    сценарий текущего времени суток. Свет напрямую не командуется:
+    решение принимает собственная оценка профиля с подтверждением
+    результата. Явное действие владельца (кнопка панели/клавиша
+    выключателя) — требование HH-016.c.
+    """
+
+    url = ROOM_LIGHTING_FORCE_AUTO_PATH
+    name = "api:hausman_hub:room_lighting_force_auto"
+
+    async def post(self, request: Any, room_id: str | None = None) -> Any:
+        del room_id
+        room_id = self._room_id(request)
+        if room_id is None:
+            return _not_found(self)
+        if not self._authorized(request):
+            return _forbidden(self)
+        service = self._service()
+        if service is None:
+            return self._unavailable()
+        config = await service.async_get_config(room_id)
+        if config is None:
+            return self._error("not_found")
+        data = self._data()
+        runtime = data.get(DATA_ROOM_LIGHTING_RUNTIME)
+        force = getattr(runtime, "async_force_auto", None)
+        if runtime is None or not callable(force):
+            return self._unavailable()
+        raw_reason = str(
+            (request.query or {}).get("reason") or "панель: перевести в авто"
+        )
+        reason = "".join(
+            ch for ch in raw_reason if ch.isalnum() or ch in " _-:.,«»()"
+        )[:120]
+        result = await force(room_id, reason=reason)
+        return self.json(
+            {
+                "contract": {
+                    "name": "hausman-hub-room-lighting-force-auto",
+                    "version": 1,
+                },
+                **result,
+            },
+            headers=NO_STORE_HEADERS,
+        )
 
 
 class RoomLightingStatusView(_RoomLightingView):
@@ -789,6 +847,7 @@ def room_lighting_api_views(hass: HomeAssistant) -> tuple[HomeAssistantView, ...
 
     return (
         RoomLightingConfigView(hass),
+        RoomLightingForceAutoView(hass),
         RoomLightingStatusView(hass),
         RoomLightingTemplatesView(hass),
         RoomLightingTemplateApplyView(hass),
@@ -800,6 +859,7 @@ def room_lighting_api_views(hass: HomeAssistant) -> tuple[HomeAssistantView, ...
 __all__ = [
     "ROOM_LIGHTING_CONFIG_PATH",
     "ROOM_LIGHTING_STATUS_PATH",
+    "ROOM_LIGHTING_FORCE_AUTO_PATH",
     "ROOM_LIGHTING_TEMPLATES_PATH",
     "ROOM_LIGHTING_TEMPLATE_APPLY_PATH",
     "ROOM_LIGHTING_LIVE_TESTS_PATH",

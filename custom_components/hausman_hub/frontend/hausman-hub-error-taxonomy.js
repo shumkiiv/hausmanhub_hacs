@@ -28,6 +28,19 @@ const TAXONOMY_SNAPSHOT = {
       ]
     },
     {
+      "code": "unauthorized",
+      "category": "access",
+      "httpStatus": 401,
+      "retryable": false,
+      "clientState": "disabled",
+      "recoveryAction": "reauthenticate",
+      "retryPolicy": "new_user_action",
+      "safeMessage": "Требуется вход в Home Assistant.",
+      "detailsPolicy": "discard",
+      "allowedDetailKeys": [],
+      "aliases": []
+    },
+    {
       "code": "forbidden",
       "category": "access",
       "httpStatus": 403,
@@ -389,6 +402,19 @@ const TAXONOMY_SNAPSHOT = {
       "aliases": []
     },
     {
+      "code": "unprocessable_entity",
+      "category": "input",
+      "httpStatus": 422,
+      "retryable": false,
+      "clientState": "failed",
+      "recoveryAction": "refresh",
+      "retryPolicy": "new_user_action",
+      "safeMessage": "Запрос понятен, но сейчас небезопасен для сохранения. Обновите данные и проверьте выбор.",
+      "detailsPolicy": "discard",
+      "allowedDetailKeys": [],
+      "aliases": []
+    },
+    {
       "code": "rate_limited",
       "category": "rate_limit",
       "httpStatus": 429,
@@ -571,11 +597,12 @@ const DETAIL_POLICY_BY_KEY = new Map(
 /* never by the free-form message text. */
 const STATUS_FALLBACK_CODES = {
   400: "invalid_request",
+  401: "unauthorized",
   403: "forbidden",
   404: "not_found",
   406: "not_acceptable",
   409: "conflict",
-  422: "invalid_request",
+  422: "unprocessable_entity",
   429: "rate_limited",
   503: "unavailable",
 };

@@ -19,8 +19,8 @@
       {
         "roomId": "shower",
         "profileId": "shower-main",
-        "lightIds": ["light.shower_main"],
-        "presenceSensorIds": ["binary_sensor.shower_presence"]
+        "lightIds": ["light.demo_001"],
+        "presenceSensorIds": ["binary_sensor.demo_001"]
       }
     ]
   },
@@ -28,7 +28,7 @@
     {
       "roomId": "shower",
       "profileId": "shower-main",
-      "lightIds": ["light.shower_main"],
+      "lightIds": ["light.demo_002"],
       "startedAt": "2026-09-03T12:00:00Z",
       "notBefore": "2026-09-03T12:10:00Z",
       "remainingMinimumSeconds": 600,

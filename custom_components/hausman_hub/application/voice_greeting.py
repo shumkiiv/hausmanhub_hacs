@@ -22,7 +22,9 @@ VOICE_TEST_REQUEST_CONTRACT_VERSION = 1
 VOICE_RECEIPT_CONTRACT_NAME = "hausman-hub-voice-command-receipt"
 VOICE_RECEIPT_CONTRACT_VERSION = 1
 
-DEFAULT_AWAY_ENTITY_ID = "input_boolean.away_from_home"
+# Production startup injects the per-entry protected away-sensor binding and
+# disables the watcher when the role is absent.
+DEFAULT_AWAY_ENTITY_ID: str | None = None
 MAX_TEXT_LENGTH = 180
 MAX_SPEECH_LENGTH = 512
 MAX_SUMMARY_ITEMS = 6
@@ -61,7 +63,7 @@ class VoiceGreetingViolation(ValueError):
 def default_voice_greeting_settings() -> dict[str, Any]:
     return {
         "enabled": False,
-        "stationEntityId": "media_player.yandex_station",
+        "stationEntityId": "media_player.hausman_voice_station",
         "delaySeconds": 3,
         "greetingText": "Добро пожаловать домой",
         "summaryItems": ["temperature", "humidity", "air_quality", "security"],

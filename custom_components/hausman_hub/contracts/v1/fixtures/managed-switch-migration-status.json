@@ -1,0 +1,34 @@
+{
+  "contract": {
+    "name": "hausman-hub-managed-switch-migration",
+    "version": 1
+  },
+  "receipt": {
+    "present": true,
+    "state": "superseded",
+    "revision": 1,
+    "manifestHash": "1111111111111111111111111111111111111111111111111111111111111111",
+    "supersededManifestHash": "2222222222222222222222222222222222222222222222222222222222222222",
+    "supersededState": "completed",
+    "matchesExpectation": true
+  },
+  "expectation": {
+    "ready": true,
+    "reason": null,
+    "manifestHash": "1111111111111111111111111111111111111111111111111111111111111111",
+    "scenarioCount": 1,
+    "operations": {
+      "replace": 1,
+      "create": 0
+    },
+    "scenarios": [
+      {
+        "scenarioId": "system-demo-controller",
+        "operation": "replace",
+        "sourceFile": "demo_controller.js",
+        "activationReady": true
+      }
+    ]
+  },
+  "physicalCommandsSent": false
+}

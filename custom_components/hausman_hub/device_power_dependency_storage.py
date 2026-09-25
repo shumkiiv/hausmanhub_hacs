@@ -23,5 +23,5 @@ class HomeAssistantDevicePowerDependencyStore:
     async def async_load(self) -> dict[str, object] | None:
         return await self._store.async_load()
 
-    async def async_save(self, value: dict[str, object]) -> None:
-        await self._store.async_save(value)
+    async def async_save(self, value: dict[str, object]) -> bool | None:
+        return await self._store.async_save(value)

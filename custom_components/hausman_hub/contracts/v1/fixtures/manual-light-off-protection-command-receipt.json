@@ -9,7 +9,7 @@
   "protection": {
     "roomId": "shower",
     "profileId": "shower-main",
-    "lightIds": ["light.shower_main"],
+    "lightIds": ["light.demo_004"],
     "startedAt": "2026-09-03T12:00:00Z",
     "notBefore": "2026-09-03T12:10:00Z",
     "absenceSince": null,

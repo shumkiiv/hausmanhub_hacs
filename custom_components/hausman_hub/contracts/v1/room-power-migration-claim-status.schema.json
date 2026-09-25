@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/room-power-migration-claim-status.schema.json",
+  "title": "HausmanHub room power migration claim status v1",
+  "description": "Logical-only status of a protected exact power-topology claim for one room. It exposes stable room and target ids, revisions and redacted diagnostics, but never Home Assistant entity ids.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "roomId",
+    "roomConfigVersion",
+    "dependencyRevision",
+    "claimRevision",
+    "active",
+    "complete",
+    "ready",
+    "reloadRequired",
+    "saved",
+    "physicalCommandsSent",
+    "claimableTargetIds",
+    "claimedTargetIds",
+    "independentTargetIds",
+    "unprovenTargetIds",
+    "extraTargetIds",
+    "diagnostics",
+    "updatedAt"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-room-power-migration-claim-status"},
+        "version": {"const": 1}
+      }
+    },
+    "roomId": {"$ref": "#/$defs/stable_id"},
+    "roomConfigVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "dependencyRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "claimRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "active": {
+      "type": "boolean",
+      "description": "True when the room has, or would have after this request, an exact per-target claim."
+    },
+    "complete": {
+      "type": "boolean",
+      "description": "True when every persisted claimed target is backed by the current dependency map. Extra live edges do not make the saved claim complete=false, but remain visible in extraTargetIds."
+    },
+    "ready": {
+      "type": "boolean",
+      "description": "True only when at least one logical target is claimed, the room is in exact mode and the current dependency map proves every claimed edge."
+    },
+    "reloadRequired": {
+      "type": "boolean",
+      "description": "True only when the saved metadata cannot be applied to the running integration until reload. The current v1 writer applies the in-memory claim immediately and returns false."
+    },
+    "saved": {
+      "type": "boolean",
+      "description": "True when the status reflects durable storage. Preview responses keep this false."
+    },
+    "physicalCommandsSent": {
+      "const": false,
+      "description": "Reading, previewing or saving the claim only edits metadata and never sends a physical device command."
+    },
+    "requestedTargetIds": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/stable_id"}
+    },
+    "claimableTargetIds": {"$ref": "#/$defs/target_id_list"},
+    "claimedTargetIds": {"$ref": "#/$defs/target_id_list"},
+    "independentTargetIds": {"$ref": "#/$defs/target_id_list"},
+    "unprovenTargetIds": {"$ref": "#/$defs/target_id_list"},
+    "extraTargetIds": {"$ref": "#/$defs/target_id_list"},
+    "diagnostics": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^(?:target:[a-z][a-z0-9_-]{0,63}|wrong:target:[a-z][a-z0-9_-]{0,63}|extra:target:[a-z][a-z0-9_-]{0,63}|claim:room:[a-z][a-z0-9_-]{0,63}:target:[a-z][a-z0-9_-]{0,63}|protected_power_migration_store_corrupt)$"
+      }
+    },
+    "updatedAt": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "stable_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "target_id_list": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/stable_id"}
+    }
+  }
+}

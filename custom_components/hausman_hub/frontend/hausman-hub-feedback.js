@@ -52,6 +52,13 @@ export function applyCriticalNotifications(panel) {
     panel._criticalNotificationsActive = response.notifications.filter((item) => item && typeof item.message === "string" && item.message);
   }
   const items = panel._criticalNotificationsActive || [];
+  const signature = items.map((item) => `${item.role}:${item.reason}:${item.message}`).join("|");
+  // Новая пара «список неисправностей» снимает ручное скрытие: владелец
+  // должен увидеть обновившийся набор отказов.
+  if (panel._criticalSignature !== signature) {
+    panel._criticalSignature = signature;
+    panel._criticalDismissed = false;
+  }
   let node = panel._criticalNotificationsNode;
   if (!node) {
     node = document.createElement("section");
@@ -63,16 +70,38 @@ export function applyCriticalNotifications(panel) {
     const container = panel._shell && panel._shell.container;
     if (container) container.appendChild(node);
   }
-  node.hidden = !items.length;
-  const signature = items.map((item) => `${item.role}:${item.reason}:${item.message}`).join("|");
-  if (node._criticalSignature === signature) return;
-  node._criticalSignature = signature;
+  node.hidden = !items.length || panel._criticalDismissed === true;
   node.textContent = "";
-  if (!items.length) return;
+  if (!items.length || panel._criticalDismissed === true) return;
+  const expanded = panel._criticalExpanded === true;
+  const header = document.createElement("div");
+  header.className = "critical-notices-header";
   const title = document.createElement("strong");
   title.className = "critical-notices-title";
   title.textContent = `Критические отказы датчиков: ${items.length}`;
-  node.appendChild(title);
+  header.appendChild(title);
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "critical-notices-toggle";
+  criticalAttr(toggle, "aria-expanded", expanded ? "true" : "false");
+  toggle.textContent = expanded ? "Скрыть список" : "Показать";
+  toggle.addEventListener("click", () => {
+    panel._criticalExpanded = !panel._criticalExpanded;
+    applyCriticalNotifications(panel);
+  });
+  header.appendChild(toggle);
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "critical-notices-close";
+  criticalAttr(close, "aria-label", "Скрыть предупреждение до изменения списка отказов");
+  close.textContent = "×";
+  close.addEventListener("click", () => {
+    panel._criticalDismissed = true;
+    applyCriticalNotifications(panel);
+  });
+  header.appendChild(close);
+  node.appendChild(header);
+  if (!expanded) return;
   for (const item of items) {
     const row = document.createElement("p");
     row.className = "critical-notices-item";

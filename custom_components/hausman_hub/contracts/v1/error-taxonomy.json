@@ -16,6 +16,19 @@
       "aliases": [{"surface": "voice_receipt_code", "code": "invalid_request"}]
     },
     {
+      "code": "unauthorized",
+      "category": "access",
+      "httpStatus": 401,
+      "retryable": false,
+      "clientState": "disabled",
+      "recoveryAction": "reauthenticate",
+      "retryPolicy": "new_user_action",
+      "safeMessage": "Требуется вход в Home Assistant.",
+      "detailsPolicy": "discard",
+      "allowedDetailKeys": [],
+      "aliases": []
+    },
+    {
       "code": "forbidden",
       "category": "access",
       "httpStatus": 403,
@@ -282,6 +295,19 @@
       "recoveryAction": "none",
       "retryPolicy": "never",
       "safeMessage": "Сценарий выключен и не может быть запущен.",
+      "detailsPolicy": "discard",
+      "allowedDetailKeys": [],
+      "aliases": []
+    },
+    {
+      "code": "unprocessable_entity",
+      "category": "input",
+      "httpStatus": 422,
+      "retryable": false,
+      "clientState": "failed",
+      "recoveryAction": "refresh",
+      "retryPolicy": "new_user_action",
+      "safeMessage": "Запрос понятен, но сейчас небезопасен для сохранения. Обновите данные и проверьте выбор.",
       "detailsPolicy": "discard",
       "allowedDetailKeys": [],
       "aliases": []

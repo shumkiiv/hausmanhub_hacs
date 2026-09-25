@@ -9,7 +9,6 @@ from homeassistant.components.http import HomeAssistantView
 
 from .application.api_capabilities import API_BASE_PATH
 from .application.voice_greeting import (
-    DEFAULT_AWAY_ENTITY_ID,
     VoiceGreetingViolation,
 )
 from .application.voice_greeting_service import VoiceGreetingService
@@ -65,9 +64,21 @@ async def async_start_voice_greeting(hass: HomeAssistant, entry: Any) -> VoiceGr
         )
 
     vendor_resilience = hass.data.get(DOMAIN, {}).get("vendor_resilience")
+    protected_topology = hass.data.get(DOMAIN, {}).get("protected_topology_service")
+    away_entity_id = None
+    entity_getter = getattr(protected_topology, "entity_id", None)
+    if callable(entity_getter):
+        try:
+            from .application.protected_topology import ROLE_AWAY_SENSOR
+
+            resolved = entity_getter(ROLE_AWAY_SENSOR)
+            away_entity_id = resolved if isinstance(resolved, str) and resolved else None
+        except Exception:  # noqa: BLE001 - voice watcher must fail closed
+            away_entity_id = None
+
     gateway = HomeAssistantVoiceGateway(
         hass,
-        away_entity_id=DEFAULT_AWAY_ENTITY_ID,
+        away_entity_id=away_entity_id,
         vendor_resilience=vendor_resilience,
     )
     service = VoiceGreetingService(
@@ -89,7 +100,11 @@ async def async_start_voice_greeting(hass: HomeAssistant, entry: Any) -> VoiceGr
 
     def _state_changed(event: Any) -> None:
         event_data = getattr(event, "data", {})
-        if not isinstance(event_data, dict) or event_data.get("entity_id") != gateway.away_entity_id:
+        if (
+            gateway.away_entity_id is None
+            or not isinstance(event_data, dict)
+            or event_data.get("entity_id") != gateway.away_entity_id
+        ):
             return
         old = getattr(event_data.get("old_state"), "state", None)
         new = getattr(event_data.get("new_state"), "state", None)
@@ -107,7 +122,8 @@ async def async_start_voice_greeting(hass: HomeAssistant, entry: Any) -> VoiceGr
 
     bus = getattr(hass, "bus", None)
     if bus is not None:
-        unsubscribers.append(bus.async_listen("state_changed", _state_changed))
+        if gateway.away_entity_id is not None:
+            unsubscribers.append(bus.async_listen("state_changed", _state_changed))
         unsubscribers.append(bus.async_listen(YANDEX_INTENT_EVENT, _intent_listener))
     data[DATA_VOICE_UNSUBSCRIBE] = tuple(unsubscribers)
 

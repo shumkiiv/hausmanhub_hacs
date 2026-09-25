@@ -27,9 +27,7 @@ NATIVE_AUTOMATIONS_TO_DISABLE = frozenset(
         "hausman_shower_fan_off_absence_normal_humidity",
     }
 )
-PROTECTED_WATER_TARGET_IDS = frozenset(
-    {"entity_e3941765c1f247c5", "entity_cadf80670b42abc3"}
-)
+PROTECTED_WATER_TARGET_IDS = frozenset()
 
 REGISTRY_MANAGED_REPLACE_IDS = frozenset(
     {

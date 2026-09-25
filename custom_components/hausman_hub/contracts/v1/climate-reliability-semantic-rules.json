@@ -4,7 +4,7 @@
   "scope": "climate_reliability_v1",
   "rules": [
     {
-      "id": "climate.revisions_and_time",
+      "id": "climate.demo_001",
       "documents": [
         "climate-action-request",
         "climate-operation-receipt",
@@ -21,7 +21,7 @@
       ]
     },
     {
-      "id": "climate.full_branch",
+      "id": "climate.demo_002",
       "documents": [
         "climate-operation-receipt",
         "climate-control-receipt"
@@ -36,7 +36,7 @@
       ]
     },
     {
-      "id": "climate.device_confirmation",
+      "id": "climate.demo_003",
       "documents": [
         "climate-operation-receipt",
         "climate-control-receipt",
@@ -52,7 +52,7 @@
       ]
     },
     {
-      "id": "climate.room_derivation",
+      "id": "climate.demo_004",
       "documents": [
         "climate-operation-receipt",
         "climate-control-receipt"
@@ -71,7 +71,7 @@
       ]
     },
     {
-      "id": "climate.lifecycle",
+      "id": "climate.demo_005",
       "documents": [
         "climate-operation-receipt",
         "climate-control-receipt",
@@ -90,7 +90,7 @@
       ]
     },
     {
-      "id": "climate.intent_outcome",
+      "id": "climate.demo_006",
       "documents": [
         "climate-operation-receipt",
         "climate-control-receipt"
@@ -108,7 +108,7 @@
       ]
     },
     {
-      "id": "climate.evidence_counts",
+      "id": "climate.demo_007",
       "documents": [
         "climate-operation-receipt",
         "climate-control-receipt",
@@ -122,7 +122,7 @@
       ]
     },
     {
-      "id": "climate.endpoint_binding",
+      "id": "climate.demo_008",
       "documents": [
         "climate-action-request",
         "contour-apply-request",
@@ -154,7 +154,7 @@
       ]
     },
     {
-      "id": "climate.runtime_summary",
+      "id": "climate.demo_009",
       "documents": [
         "climate-runtime"
       ],

@@ -5,9 +5,11 @@ const context = r.context && typeof r.context === 'object' ? r.context : {};
 const trigger = context.trigger && typeof context.trigger === 'object' ? context.trigger : {};
 const controls = context.controls && typeof context.controls === 'object' ? context.controls : {};
 const state = controls.state && typeof controls.state === 'object' ? controls.state : {};
+const topology = state.topology && typeof state.topology === 'object' ? state.topology : {};
+const roles = topology.roles && typeof topology.roles === 'object' ? topology.roles : {};
 const server = state.action && typeof state.action === 'object' ? state.action : null;
 const valid = trigger.source === 'scenario_control' && state.ready === true && server &&
-  Object.keys(server).sort().join(',') === 'actionId,targetId,value' && server.targetId === 'entity_aeaf7c250c68e8c2' &&
+  Object.keys(server).sort().join(',') === 'actionId,targetId,value' && server.targetId === roles.light &&
   (server.actionId === 'set_brightness_percent' ? Number.isInteger(server.value) && server.value >= 0 && server.value <= 100 :
     server.actionId === 'set_color_temperature' ? Number.isInteger(server.value) && server.value >= 1500 && server.value <= 6500 : false);
 const action = valid ? {id: 'server_action', type: 'device_action', targetId: server.targetId, targetName: 'Управляемое устройство', actionId: server.actionId, actionTitle: 'Серверное действие', value: server.value} : null;

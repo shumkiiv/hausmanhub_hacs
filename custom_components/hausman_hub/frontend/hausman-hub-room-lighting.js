@@ -11,7 +11,7 @@
  * visible form only offers readable names and catalog devices.
  */
 
-import { apiErrorMessage, resolveApiError } from "./hausman-hub-error-taxonomy.js?v=1.52.293";
+import { apiErrorMessage, resolveApiError } from "./hausman-hub-error-taxonomy.js?v=1.52.296";
 
 export const ROOM_LIGHTING_SECTIONS = [
   ["overview", "Обзор"],
@@ -91,12 +91,34 @@ const EDITABLE_KEYS = [
   "dimming",
   "manualOffProtection",
   "awayBehavior",
+  "morningBoundary",
+  "curveParams",
   "autoAdopt",
 ];
 
 function lightingApi(roomId, suffix = "") {
   return `hausman_hub/v1/rooms/${encodeURIComponent(roomId)}/lighting${suffix}`;
 }
+
+/* Перевести комнату в авто (HH-016.c): снять ручные удержания и защиты,
+   применить сценарий текущего времени суток. Снятие защит может сразу
+   изменить свет (сценарий текущего часа вступает в силу немедленно). */
+async function forceAutoRoom(panel, roomId) {
+  const store = lightingState(panel, roomId);
+  if (store.saving) return;
+  store.saving = true;
+  rerender(panel, roomId);
+  try {
+    await panel._hass.callApi("POST", lightingApi(roomId, "/force-auto"), {});
+    store.notice = "Переведено в авто: ручные удержания и защиты сняты, светом управляет сценарий текущего времени.";
+  } catch (error) {
+    store.error = lightingErrorMessage(error);
+  } finally {
+    store.saving = false;
+    rerender(panel, roomId);
+  }
+}
+
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value ?? null));
@@ -849,6 +871,74 @@ function renderSchedule(panel, roomId, store, deps) {
   const draft = store.draft;
   const block = deps.el("section", "rle-block");
   block.appendChild(deps.el("h4", null, "Периоды"));
+  if (draft.profile === "day_curve") {
+    // Для профиля «кривая суток» движок не исполняет записи расписания:
+    // светом управляет кривая. Раздел остаётся справочником будущих сценариев.
+    const note = deps.el("p", "rle-hint",
+      "Кривая суток управляет светом автоматически; записи расписания ниже — справочник и не исполняются движком.");
+    setData(deps, note, "data-testid", "room-lighting:schedule-day-curve-note");
+    block.appendChild(note);
+  }
+  const morningDefaults = { enabled: false, time: "07:00", presenceGate: false };
+  const morningView = draft.morningBoundary && typeof draft.morningBoundary === "object"
+    ? draft.morningBoundary
+    : morningDefaults;
+  // The block appears in the draft on the first real edit only: merely
+  // opening the section must not mark the room as having unsaved changes.
+  const ensureMorning = () => {
+    if (!draft.morningBoundary || typeof draft.morningBoundary !== "object") {
+      draft.morningBoundary = { ...morningDefaults };
+    }
+    return draft.morningBoundary;
+  };
+  block.appendChild(itemCard(deps, "Утренняя граница", () => {
+    delete draft.morningBoundary;
+    markDirty(panel, roomId);
+  }, [
+    checkInput(deps, "Включить утреннюю границу", morningView.enabled === true, (checked) => {
+      ensureMorning().enabled = checked;
+      markDirty(panel, roomId);
+    }),
+    field(deps, "Время границы (ЧЧ:ММ)", textInput(deps, morningView.time || "07:00", (value) => {
+      ensureMorning().time = value || "07:00";
+      markDirty(panel, roomId);
+    })),
+    checkInput(deps, "Ждать первого присутствия (не раньше границы)", morningView.presenceGate === true, (checked) => {
+      ensureMorning().presenceGate = checked;
+      markDirty(panel, roomId);
+    }),
+  ]));
+  // Вечерний максимум (HH-016.c): потолок яркости люстры в вечернем
+  // режиме. Как и утренняя граница, блок появляется в черновике только
+  // при первой правке; простое открытие раздела не делает комнату
+  // «грязной». Показывается только профилю «кривая суток»: другие
+  // профили кривую не исполняют.
+  if (draft.profile === "day_curve") {
+    const curveDefaults = { eveningMaxPercent: 100 };
+    const curveView = draft.curveParams && typeof draft.curveParams === "object"
+      ? draft.curveParams
+      : curveDefaults;
+    const ensureCurve = () => {
+      if (!draft.curveParams || typeof draft.curveParams !== "object") {
+        draft.curveParams = { ...curveDefaults };
+      }
+      return draft.curveParams;
+    };
+    const curveCard = itemCard(deps, "Вечерний максимум", () => {
+      delete draft.curveParams;
+      markDirty(panel, roomId);
+    }, [
+      numberInput(deps, "Потолок яркости вечером, %", curveView.eveningMaxPercent, (value) => {
+        ensureCurve().eveningMaxPercent = value;
+        markDirty(panel, roomId);
+      }, { min: 5, max: 100 }),
+    ]);
+    const curveHint = deps.el("p", "rle-hint",
+      "Вечером люстра включается не выше этого потолка и плавно снижается к вечернему минимуму (5%) к 22:00. 100 — без потолка.");
+    curveCard.appendChild(curveHint);
+    setData(deps, curveCard, "data-testid", "room-lighting:curve-params-card");
+    block.appendChild(curveCard);
+  }
   if (!Array.isArray(draft.schedule)) draft.schedule = [];
   draft.schedule.forEach((entry, index) => {
     entry.when = entry.when || { daysOfWeek: "all", holiday: false, anchor: { kind: "fixed", time: "09:00", offsetMinutes: 0 } };
@@ -859,16 +949,23 @@ function renderSchedule(panel, roomId, store, deps) {
       markDirty(panel, roomId);
     }, [
       field(deps, "Название", textInput(deps, entry.title, (value) => { entry.title = value; markDirty(panel, roomId); })),
-      field(deps, "Дни (all/weekdays/weekend или список)", textInput(
+      selectInput(
         deps,
-        Array.isArray(entry.when.daysOfWeek) ? entry.when.daysOfWeek.join(", ") : entry.when.daysOfWeek,
+        "Дни",
+        Array.isArray(entry.when.daysOfWeek) ? "custom" : String(entry.when.daysOfWeek || "all"),
+        [
+          ["all", "Каждый день"],
+          ["weekdays", "Будни"],
+          ["weekend", "Выходные"],
+          ["custom", "Свой список"],
+        ],
         (value) => {
-          entry.when.daysOfWeek = value.includes(",")
-            ? value.split(",").map((item) => item.trim()).filter(Boolean)
+          entry.when.daysOfWeek = value === "custom"
+            ? (Array.isArray(entry.when.daysOfWeek) ? entry.when.daysOfWeek : ["mon", "tue", "wed", "thu", "fri"])
             : value;
           markDirty(panel, roomId);
         },
-      )),
+      ),
       checkInput(deps, "Только в праздник", entry.when.holiday, (checked) => { entry.when.holiday = checked; markDirty(panel, roomId); }),
       selectInput(deps, "Якорь", entry.when.anchor.kind, ANCHOR_KINDS, (value) => {
         entry.when.anchor.kind = value;
@@ -889,6 +986,14 @@ function renderSchedule(panel, roomId, store, deps) {
       }, { min: 2000, max: 6500, nullable: true }),
     ], {
       advanced: [
+        field(deps, "Свой список дней (через запятую)", textInput(
+          deps,
+          Array.isArray(entry.when.daysOfWeek) ? entry.when.daysOfWeek.join(", ") : "",
+          (value) => {
+            entry.when.daysOfWeek = value.split(",").map((item) => item.trim()).filter(Boolean);
+            markDirty(panel, roomId);
+          },
+        )),
         renderTargets(deps, entry.targets, (value) => { entry.targets = value; markDirty(panel, roomId); }),
         numberInput(deps, "Смещение, мин", entry.when.anchor.offsetMinutes, (value) => {
           entry.when.anchor.offsetMinutes = value;
@@ -979,7 +1084,7 @@ function renderIllumination(panel, roomId, store, deps) {
   const hasIllumination = Boolean(draft.illumination);
   block.appendChild(button(deps, hasIllumination ? "Убрать блок люкс" : "Добавить блок люкс", () => {
     draft.illumination = hasIllumination ? null : {
-      sensor: "sensor.demo_lux",
+      sensor: "sensor.hausman_lux_placeholder",
       calibration: { offset: 0, multiplier: 1 },
       hysteresis: 5,
       minLux: 0,
@@ -993,10 +1098,13 @@ function renderIllumination(panel, roomId, store, deps) {
   const illumination = draft.illumination;
   illumination.calibration = illumination.calibration || { offset: 0, multiplier: 1 };
   illumination.thresholds = illumination.thresholds || [];
-  block.appendChild(field(deps, "Датчик", textInput(deps, illumination.sensor, (value) => {
-    illumination.sensor = value;
-    markDirty(panel, roomId);
-  })));
+  // Показываем понятное имя датчика из состава комнаты; сырой entity id
+  // остаётся в технических данных.
+  const sensorRecord = (draft.devices && Array.isArray(draft.devices.sensors))
+    ? draft.devices.sensors.find((item) => item && item.entityId === illumination.sensor)
+    : null;
+  const sensorLabel = (sensorRecord && sensorRecord.name) || illumination.sensor || "не выбран";
+  block.appendChild(readonlyField(deps, "Датчик", sensorLabel));
   block.appendChild(numberInput(deps, "Гистерезис", illumination.hysteresis, (value) => { illumination.hysteresis = value; markDirty(panel, roomId); }));
   illumination.thresholds.forEach((threshold, index) => {
     block.appendChild(itemCard(deps, `Порог ${threshold.lux} лк`, () => {
@@ -1020,6 +1128,7 @@ function renderIllumination(panel, roomId, store, deps) {
     markDirty(panel, roomId);
   }));
   block.appendChild(detailsBlock(deps, "rle-advanced", "Дополнительно", [
+    readonlyField(deps, "Датчик (entity id)", illumination.sensor || "—"),
     numberInput(deps, "Смещение калибровки", illumination.calibration.offset, (value) => {
       illumination.calibration.offset = value;
       markDirty(panel, roomId);
@@ -1258,6 +1367,18 @@ function renderSaveBar(panel, roomId, store, deps) {
   reload.disabled = !dirty || store.saving;
   setData(deps, reload, "data-testid", "room-lighting:reload");
   bar.appendChild(reload);
+  // Перевести комнату в авто: снимает ручные удержания и защиты, дальше
+  // светом управляет сценарий текущего времени (HH-016.c). Требует
+  // подтверждения: сразу после перевода сценарий может изменить свет
+  // (например, приглушить вечером или включить по присутствию).
+  const forceAuto = button(deps, "Перевести в авто", () => {
+    const message = "Перевести свет комнаты в авто? Ручные удержания и защиты будут сняты, и свет сразу изменится по текущему сценарию (вечером — приглушённый тёплый). Отменить можно будет только вручную.";
+    if (typeof deps.confirm === "function" && !deps.confirm(message)) return;
+    void forceAutoRoom(panel, roomId);
+  }, "is-secondary");
+  forceAuto.disabled = store.saving;
+  setData(deps, forceAuto, "data-testid", "room-lighting:force-auto");
+  bar.appendChild(forceAuto);
   const save = button(deps, store.saving ? "Сохранение…" : "Сохранить", () => { void saveRoomLighting(panel, roomId); }, "is-primary");
   save.disabled = store.saving || !store.draft || !dirty;
   setData(deps, save, "data-testid", "room-lighting:save");
@@ -1392,10 +1513,22 @@ export function renderRoomLightingEditor(panel, container, room, deps, options =
   const store = lightingState(panel, roomId);
   let mounted = null;
   const render = () => {
+    // Держим viewport привязанным к редактору: полная перерисовка не должна
+    // уводить прокрутку при переключении галочек и полей.
+    const keepContainerScroll = container.scrollTop;
+    const windowY = typeof window !== "undefined" ? window.scrollY : 0;
+    const beforeTop = mounted ? mounted.getBoundingClientRect().top : 0;
     const section = buildEditor(panel, room, deps, options);
     if (mounted && typeof mounted.remove === "function") mounted.remove();
     container.appendChild(section);
     mounted = section;
+    if (keepContainerScroll) container.scrollTop = keepContainerScroll;
+    if (mounted && typeof mounted.getBoundingClientRect === "function") {
+      const drift = mounted.getBoundingClientRect().top - beforeTop;
+      if (typeof window !== "undefined" && Math.abs(drift) > 2) {
+        window.scrollTo({ top: windowY + drift });
+      }
+    }
   };
   store.rerender = render;
   render();

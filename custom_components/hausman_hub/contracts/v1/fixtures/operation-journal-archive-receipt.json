@@ -81,7 +81,7 @@
         "sequence": 7,
         "correlation_id": "climate-action-0007",
         "source": "climate",
-        "operation": "climate.tablet_action",
+        "operation": "climate.demo_010",
         "accepted": true,
         "confirmed": false,
         "status": "accepted",

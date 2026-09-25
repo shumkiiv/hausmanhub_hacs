@@ -181,7 +181,7 @@ class IRCodeService:
         timeout_seconds: float = 30.0,
         replace: bool = False,
     ) -> IRCommandCode:
-        """Trigger ``remote.learn_command`` and wait for confirmation.
+        """Trigger the configured learning remote and wait for confirmation.
 
         Raises IRCodeLearnTimeoutError or IRCodeLearnRejectedError on failure.
         Returns the newly learned IRCommandCode on success.
@@ -243,7 +243,7 @@ class IRCodeService:
         device_id: str,
         code_data: str,
     ) -> None:
-        """Send one IR code via ``remote.send_command``.
+        """Send one IR code via the configured remote.
 
         Raises IRCodeSendError on failure.
         """

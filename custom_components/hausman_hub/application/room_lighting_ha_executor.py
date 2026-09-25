@@ -8,6 +8,7 @@ observation and a ``confirmed`` flag.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Mapping
 
@@ -17,6 +18,7 @@ from ..domain.room_lighting_engine import (
     LightAction,
     PlannedCommand,
 )
+from .power_evidence import trusted_power_state
 from .room_lighting_color import (
     FALLBACK_MAX_KELVIN,
     FALLBACK_MIN_KELVIN,
@@ -33,6 +35,8 @@ if TYPE_CHECKING:
 
 _LIGHT_DOMAIN = "light"
 _SWITCH_DOMAIN = "switch"
+DEFAULT_POWER_READBACK_WINDOW_SECONDS = 8.0
+DEFAULT_POWER_READBACK_INTERVAL_SECONDS = 0.25
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,11 +49,15 @@ class RoomLightingReceipt:
     state_after: dict[str, object] | None
     service: str
     service_data: dict[str, object]
+    sent: bool = True
+    send_outcome: str = "sent"
 
     def to_payload(self) -> dict[str, object]:
         return {
             "targetId": self.target_id,
             "action": self.action,
+            "sent": self.sent,
+            "sendOutcome": self.send_outcome,
             "confirmed": self.confirmed,
             "stateAfter": self.state_after,
             "service": self.service,
@@ -60,9 +68,24 @@ class RoomLightingReceipt:
 class RoomLightingHaExecutor:
     """Dispatch a planned command and observe the physical result."""
 
-    def __init__(self, targets: Mapping[str, LightTarget] | None = None) -> None:
+    def __init__(
+        self,
+        targets: Mapping[str, LightTarget] | None = None,
+        *,
+        power_readback_window_seconds: float = DEFAULT_POWER_READBACK_WINDOW_SECONDS,
+        power_readback_interval_seconds: float = DEFAULT_POWER_READBACK_INTERVAL_SECONDS,
+    ) -> None:
         self._targets: dict[str, LightTarget] = dict(targets or {})
         self._active_context_ids: set[str] = set()
+        # Bounded diagnostic trace used by narrow runtime tests and local
+        # troubleshooting. It does not participate in command decisions.
+        self.calls: list[PlannedCommand] = []
+        self._power_readback_window = max(
+            0.0, float(power_readback_window_seconds)
+        )
+        self._power_readback_interval = max(
+            0.01, float(power_readback_interval_seconds)
+        )
 
     def owns_service_context(self, context: object) -> bool:
         """Recognize only our exact in-flight call, never a matching action."""
@@ -88,6 +111,8 @@ class RoomLightingHaExecutor:
     async def execute(
         self, hass: HomeAssistant, command: PlannedCommand
     ) -> RoomLightingReceipt:
+        self.calls.append(command)
+        del self.calls[:-256]
         target = self._targets.get(command.target_id)
         if target is None or target.entity_id is None:
             return RoomLightingReceipt(
@@ -97,6 +122,8 @@ class RoomLightingHaExecutor:
                 state_after=None,
                 service="unknown",
                 service_data={},
+                sent=False,
+                send_outcome="not_sent",
             )
         min_kelvin, max_kelvin = _device_kelvin_bounds(hass, target)
         domain, service, data = _service_call(
@@ -113,22 +140,87 @@ class RoomLightingHaExecutor:
             service_data=data,
         )
 
-    async def async_power_on(self, hass: HomeAssistant, entity_id: str) -> bool:
-        """Turn on a room power switch and confirm it through the read-back."""
+    async def async_power_on(
+        self, hass: HomeAssistant, entity_id: str
+    ) -> dict[str, object]:
+        """Turn on a power source and confirm it through fresh read-back.
 
+        A single immediate read is not proof: a relay can report a few seconds
+        after the call. The method therefore polls for a fresh, non-restored
+        ``on`` report and returns an explicit receipt. An already provable
+        ``on`` source is not commanded again.
+        """
+
+        receipt: dict[str, object] = {
+            "entityId": entity_id,
+            "sent": False,
+            "sendOutcome": "not_sent",
+            "confirmed": False,
+            "stateBefore": None,
+            "stateAfter": None,
+            "waitedSeconds": 0.0,
+        }
         if not isinstance(entity_id, str) or not entity_id:
-            return False
+            receipt["reason"] = "power_source_invalid"
+            return receipt
+        before = hass.states.get(entity_id)
+        receipt["stateBefore"] = (
+            None if before is None else str(getattr(before, "state", "unknown"))
+        )
+        if trusted_power_state(before, same_state_confirmation=True) == "on":
+            receipt.update(
+                confirmed=True,
+                stateAfter="on",
+                reason="power_source_on",
+            )
+            return receipt
+        started = asyncio.get_running_loop().time()
+        domain = entity_id.split(".", 1)[0]
+        if domain not in (_LIGHT_DOMAIN, _SWITCH_DOMAIN):
+            receipt["reason"] = "power_source_invalid"
+            return receipt
         try:
             await self._call(
                 hass,
-                _SWITCH_DOMAIN,
+                domain,
                 "turn_on",
                 {"entity_id": entity_id},
             )
         except Exception:  # noqa: BLE001 - a failed power call must not crash
-            return False
+            # The exception may have happened before, during or after the
+            # Home Assistant boundary: the command outcome is unknown, never a
+            # confirmed send.
+            receipt.update(
+                sendOutcome="uncertain",
+                reason="command_uncertain",
+            )
+            return receipt
+        receipt["sent"] = True
+        receipt["sendOutcome"] = "sent"
+        deadline = started + self._power_readback_window
+        while True:
+            state = hass.states.get(entity_id)
+            if trusted_power_state(state, same_state_confirmation=True) == "on":
+                receipt.update(
+                    confirmed=True,
+                    stateAfter="on",
+                    waitedSeconds=round(
+                        asyncio.get_running_loop().time() - started, 3
+                    ),
+                    reason="power_source_on",
+                )
+                return receipt
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(self._power_readback_interval, remaining))
         state = hass.states.get(entity_id)
-        return state is not None and str(getattr(state, "state", "")).lower() == "on"
+        receipt.update(
+            stateAfter=None if state is None else str(getattr(state, "state", "unknown")),
+            waitedSeconds=round(asyncio.get_running_loop().time() - started, 3),
+            reason="power_source_unconfirmed",
+        )
+        return receipt
 
 
 def _new_service_context():

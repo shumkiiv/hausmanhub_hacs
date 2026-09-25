@@ -1,10 +1,10 @@
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.270";
-import { appendDeviceRangeControls, appendDeviceVisual, localizedDeviceState, openPhysicalDeviceSheet } from "./hausman-hub-device-card.js?v=1.52.270";
-import { lightingSideIcon, openLightingTurnOffConfirm, renderLightingSide } from "./hausman-hub-lighting-side.js?v=1.52.270";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.270";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.270";
-import { renderManualLightProtectionStatus } from "./hausman-hub-light-protection.js?v=1.52.270";
-import { openRoomLightingSettings, renderRoomLightingSettingsScreen } from "./hausman-hub-room-lighting-editor.js?v=1.52.293";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.296";
+import { appendDeviceRangeControls, appendDeviceVisual, localizedDeviceState, openPhysicalDeviceSheet } from "./hausman-hub-device-card.js?v=1.52.296";
+import { lightingSideIcon, openLightingTurnOffConfirm, renderLightingSide } from "./hausman-hub-lighting-side.js?v=1.52.296";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.296";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.296";
+import { renderManualLightProtectionStatus } from "./hausman-hub-light-protection.js?v=1.52.296";
+import { openRoomLightingSettings, renderRoomLightingSettingsScreen } from "./hausman-hub-room-lighting-editor.js?v=1.52.296";
 
 const LIGHTING_EXCLUSIONS = [
   "ambilight", "глазок", "домофон", "пульт", "очистител", "аквариум", "aquarium",
@@ -322,9 +322,10 @@ function renderLightingRoomCard(panel, page, rooms, name, roomDevices, deps) {
   const shell = el("article", "lighting-room-card-shell");
   shell.appendChild(card);
   if (room && room.id) {
-    const configure = el("button", "lighting-room-configure", "Настроить");
+    const configure = el("button", "lighting-room-configure", "⚙ Настроить свет");
     configure.type = "button";
     setAttr(configure, "aria-label", `Настроить свет комнаты ${name}`);
+    setAttr(configure, "data-testid", `lighting-room-configure:${room.id}`);
     configure.addEventListener("click", () => openRoomLightingSettings(panel, room.id, name));
     shell.appendChild(configure);
   }

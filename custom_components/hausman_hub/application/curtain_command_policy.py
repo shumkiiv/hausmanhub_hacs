@@ -15,32 +15,31 @@ from ..domain.scenario_controls import (
     ScenarioControlDocument,
     ScenarioControlPolicy,
 )
-
-
-LIVING_CURTAIN_TARGET = "entity_8746cfd7f6f7103d"
-KITCHEN_CURTAIN_TARGET = "entity_2da2065add6e2168"
-ALICE_CURTAIN_TARGET = "entity_1e0b476b7d082cc0"
-OFFICE_CURTAIN_TARGET = "entity_9164132c7692d6f5"
-
-_CURTAIN_ENTITY_IDS = MappingProxyType(
-    {
-        LIVING_CURTAIN_TARGET: "cover.shtory_gostinaia",
-        KITCHEN_CURTAIN_TARGET: "cover.0xa4c1385a4bcce3d6",
-        ALICE_CURTAIN_TARGET: "cover.0xa4c138b23cb850b4",
-        OFFICE_CURTAIN_TARGET: "cover.0xa4c1381b3fb1c985",
-    }
+from .protected_topology import (
+    ROLE_CURTAIN_KITCHEN,
+    ROLE_CURTAIN_LIVING,
+    ROLE_CURTAIN_OFFICE,
+    ROLE_CURTAIN_ROOM,
 )
 
-_CURTAIN_TARGETS = frozenset(
+
+LIVING_CURTAIN_TARGET = "protected_curtain_living"
+KITCHEN_CURTAIN_TARGET = "protected_curtain_kitchen"
+ALICE_CURTAIN_TARGET = "protected_curtain_room"
+OFFICE_CURTAIN_TARGET = "protected_curtain_office"
+
+_CURTAIN_TARGET_BY_ROLE = MappingProxyType(
     {
-        LIVING_CURTAIN_TARGET,
-        KITCHEN_CURTAIN_TARGET,
-        ALICE_CURTAIN_TARGET,
-        OFFICE_CURTAIN_TARGET,
+        "living": LIVING_CURTAIN_TARGET,
+        "kitchen": KITCHEN_CURTAIN_TARGET,
+        "room": ALICE_CURTAIN_TARGET,
+        "office": OFFICE_CURTAIN_TARGET,
     }
 )
+_CURTAIN_TARGETS = frozenset(_CURTAIN_TARGET_BY_ROLE.values())
+_SCALE_DEPENDENT_ROLES = frozenset({"kitchen", "office"})
 _SCALE_DEPENDENT_TARGETS = frozenset(
-    {KITCHEN_CURTAIN_TARGET, OFFICE_CURTAIN_TARGET}
+    _CURTAIN_TARGET_BY_ROLE[role] for role in _SCALE_DEPENDENT_ROLES
 )
 _ACTION_SERVICES = {
     "open_cover": "open_cover",
@@ -52,6 +51,44 @@ _UNAVAILABLE_STATES = frozenset({"unknown", "unavailable"})
 _STOP_POLICY_REVISION = "curtain-safe-stop.v1"
 CURTAIN_POSITION_PROVENANCE_UNVERIFIED = "unverified_optimistic"
 CURTAIN_POSITION_PROVENANCE_VERIFIED = "verified_device_report"
+
+
+def _normalize_curtain_targets(
+    curtain_targets: Mapping[str, str] | None,
+) -> Mapping[str, str]:
+    if curtain_targets is None:
+        return _CURTAIN_TARGET_BY_ROLE
+    if len(curtain_targets) == 0:
+        return MappingProxyType({})
+    expected = set(_CURTAIN_TARGET_BY_ROLE)
+    if set(curtain_targets) != expected:
+        raise ValueError("curtain protected topology is incomplete")
+    normalized: dict[str, str] = {}
+    for role in sorted(expected):
+        target_id = curtain_targets.get(role)
+        if not isinstance(target_id, str) or not target_id:
+            raise ValueError("curtain protected topology is incomplete")
+        normalized[role] = target_id
+    if len(set(normalized.values())) != len(normalized):
+        raise ValueError("curtain protected topology is duplicated")
+    return MappingProxyType(normalized)
+
+
+def curtain_targets_from_resolver(
+    resolver: Callable[[str], str | None] | None,
+) -> Mapping[str, str] | None:
+    if not callable(resolver):
+        return None
+    roles = {
+        "living": ROLE_CURTAIN_LIVING,
+        "kitchen": ROLE_CURTAIN_KITCHEN,
+        "room": ROLE_CURTAIN_ROOM,
+        "office": ROLE_CURTAIN_OFFICE,
+    }
+    resolved = {alias: resolver(role) for alias, role in roles.items()}
+    if any(not isinstance(target_id, str) or not target_id for target_id in resolved.values()):
+        return None
+    return MappingProxyType(resolved)  # type: ignore[arg-type]
 
 
 class CurtainPolicyError(ValueError):
@@ -88,8 +125,10 @@ class CurtainPositionEvidencePolicy:
         self,
         *,
         verified_device_reports: frozenset[tuple[str, str]] = frozenset(),
+        known_entity_ids: Mapping[str, str] | None = None,
     ) -> None:
-        exact_identities = frozenset(_CURTAIN_ENTITY_IDS.items())
+        self._known_entity_ids = MappingProxyType(dict(known_entity_ids or {}))
+        exact_identities = frozenset(self._known_entity_ids.items())
         if not verified_device_reports.issubset(exact_identities):
             raise ValueError("verified curtain evidence identity is invalid")
         self._verified_device_reports = verified_device_reports
@@ -100,7 +139,10 @@ class CurtainPositionEvidencePolicy:
     ) -> CurtainPositionEvidencePolicy:
         """Create an explicit synthetic adapter for provenance tests."""
 
-        return cls(verified_device_reports=frozenset(identities))
+        return cls(
+            verified_device_reports=frozenset(identities),
+            known_entity_ids={target_id: entity_id for target_id, entity_id in identities},
+        )
 
     def snapshot(self, target_id: str, entity_id: str) -> CurtainPositionEvidence:
         """Bind provenance to the exact current target/entity pair."""
@@ -113,7 +155,7 @@ class CurtainPositionEvidencePolicy:
             ).encode("utf-8")
         ).hexdigest()
         verified = (
-            _CURTAIN_ENTITY_IDS.get(target_id) == entity_id
+            self._known_entity_ids.get(target_id) == entity_id
             and (target_id, entity_id) in self._verified_device_reports
         )
         return CurtainPositionEvidence(
@@ -164,14 +206,20 @@ class CurtainCalibrationAuthority:
 
     _OPERATIONS = frozenset({"full_open", "full_close"})
 
-    def __init__(self, *, now_ms: Callable[[], int]) -> None:
+    def __init__(
+        self,
+        *,
+        now_ms: Callable[[], int],
+        curtain_targets: Mapping[str, str] | None = None,
+    ) -> None:
         self._now_ms = now_ms
+        self._target_ids = frozenset(_normalize_curtain_targets(curtain_targets).values())
         self._grants: dict[str, CurtainCalibrationGrant] = {}
 
     def issue(
         self, target_id: str, operation: str, *, expires_at_ms: int
     ) -> CurtainCalibrationGrant:
-        if target_id not in _CURTAIN_TARGETS:
+        if target_id not in self._target_ids:
             raise ValueError("unknown curtain calibration target")
         if operation not in self._OPERATIONS:
             raise ValueError("unknown curtain calibration operation")
@@ -225,8 +273,20 @@ class CurtainCommandPolicy:
         confirmed_scale_targets: frozenset[str] = frozenset(),
         scale_authorization_provider: Callable[[str], object] | None = None,
         position_evidence_policy: CurtainPositionEvidencePolicy | None = None,
+        curtain_targets: Mapping[str, str] | None = None,
     ) -> None:
-        unknown = set(confirmed_scale_targets).difference(_SCALE_DEPENDENT_TARGETS)
+        self._curtain_targets_by_role = _normalize_curtain_targets(curtain_targets)
+        self._curtain_targets = frozenset(self._curtain_targets_by_role.values())
+        self._scale_dependent_targets = frozenset(
+            self._curtain_targets_by_role[role]
+            for role in _SCALE_DEPENDENT_ROLES
+            if role in self._curtain_targets_by_role
+        )
+        self._office_target = self._curtain_targets_by_role.get("office")
+        self._kitchen_target = self._curtain_targets_by_role.get("kitchen")
+        self._living_target = self._curtain_targets_by_role.get("living")
+        self._room_target = self._curtain_targets_by_role.get("room")
+        unknown = set(confirmed_scale_targets).difference(self._scale_dependent_targets)
         if unknown:
             raise ValueError("unknown curtain calibration target")
         self._control_document_provider = (
@@ -252,16 +312,24 @@ class CurtainCommandPolicy:
         *,
         control_document_provider: Callable[[], ScenarioControlDocument] | None = None,
         position_evidence_policy: CurtainPositionEvidencePolicy | None = None,
+        curtain_targets: Mapping[str, str] | None = None,
     ) -> CurtainCommandPolicy:
         """Create a server-side policy for a physically confirmed test/setup."""
 
-        unknown = set(confirmed_targets).difference(_SCALE_DEPENDENT_TARGETS)
+        resolved_targets = _normalize_curtain_targets(curtain_targets)
+        scale_dependent = frozenset(
+            resolved_targets[role]
+            for role in _SCALE_DEPENDENT_ROLES
+            if role in resolved_targets
+        )
+        unknown = set(confirmed_targets).difference(scale_dependent)
         if unknown:
             raise ValueError("unknown curtain calibration target")
         return cls(
             control_document_provider,
             confirmed_scale_targets=frozenset(confirmed_targets),
             position_evidence_policy=position_evidence_policy,
+            curtain_targets=resolved_targets,
         )
 
     @property
@@ -270,16 +338,15 @@ class CurtainCommandPolicy:
         return revision
 
     def target(self, target_id: str) -> CurtainTargetPolicy | None:
-        if target_id not in _CURTAIN_TARGETS:
+        if target_id not in self._curtain_targets:
             return None
         targets, _revision = self._snapshot()
         return targets.get(target_id)
 
-    @staticmethod
-    def manages_target(target_id: str) -> bool:
+    def manages_target(self, target_id: str) -> bool:
         """Return whether the exact stable target belongs to curtain policy."""
 
-        return target_id in _CURTAIN_TARGETS
+        return target_id in self._curtain_targets
 
     def plan(
         self,
@@ -292,7 +359,7 @@ class CurtainCommandPolicy:
         """Resolve one exact target and fail closed before service dispatch."""
 
         target_id = getattr(device, "target_id", None)
-        if target_id not in _CURTAIN_TARGETS:
+        if target_id not in self._curtain_targets:
             return None
         entity_id = getattr(device, "entity_id", None)
         if not isinstance(entity_id, str) or not entity_id:
@@ -347,7 +414,7 @@ class CurtainCommandPolicy:
         elif requested is not None:
             raise CurtainPolicyError("curtain_action_does_not_accept_value")
 
-        if target_id == OFFICE_CURTAIN_TARGET:
+        if target_id == self._office_target:
             _enforce_office_close_guard(
                 action_id=action_id,
                 requested=normalized,
@@ -361,7 +428,7 @@ class CurtainCommandPolicy:
         confirmation_value = normalized
         service_data: dict[str, object] = {"entity_id": entity_id}
 
-        scale_dependent_target = target_id in _SCALE_DEPENDENT_TARGETS
+        scale_dependent_target = target_id in self._scale_dependent_targets
         if action_id == "open_cover" and scale_dependent_target:
             if not target.scale_confirmed:
                 raise CurtainPolicyError("curtain_scale_unconfirmed")
@@ -436,7 +503,7 @@ class CurtainCommandPolicy:
 
         target_id = getattr(device, "target_id", None)
         if (
-            target_id not in _CURTAIN_TARGETS
+            target_id not in self._curtain_targets
             or not isinstance(authority, CurtainCalibrationAuthority)
             or not authority.consume(
                 grant, target_id=str(target_id), operation=operation
@@ -509,10 +576,10 @@ class CurtainCommandPolicy:
         ):
             raise CurtainPolicyError("curtain_policy_unavailable")
         caps = {
-            LIVING_CURTAIN_TARGET: 100,
-            KITCHEN_CURTAIN_TARGET: policy.kitchen_cover_cap_percent,
-            ALICE_CURTAIN_TARGET: 100,
-            OFFICE_CURTAIN_TARGET: policy.cabinet_cover_cap_percent,
+            self._living_target: 100,
+            self._kitchen_target: policy.kitchen_cover_cap_percent,
+            self._room_target: 100,
+            self._office_target: policy.cabinet_cover_cap_percent,
         }
         authorizations = self._scale_authorizations()
         targets = MappingProxyType(
@@ -521,7 +588,7 @@ class CurtainCommandPolicy:
                     target_id=target_id,
                     maximum_position=maximum,
                     scale_confirmed=(
-                        target_id not in _SCALE_DEPENDENT_TARGETS
+                    target_id not in self._scale_dependent_targets
                         or target_id in self._confirmed_scale_targets
                         or authorizations[target_id][0]
                     ),
@@ -539,7 +606,7 @@ class CurtainCommandPolicy:
                     sorted(self._confirmed_scale_targets),
                     [
                         [target_id, *authorizations[target_id]]
-                        for target_id in sorted(_SCALE_DEPENDENT_TARGETS)
+                        for target_id in sorted(self._scale_dependent_targets)
                     ],
                 ],
                 separators=(",", ":"),
@@ -555,7 +622,7 @@ class CurtainCommandPolicy:
         """Read exact per-target authority without trusting request payloads."""
 
         result: dict[str, tuple[bool, int, str | None]] = {}
-        for target_id in _SCALE_DEPENDENT_TARGETS:
+        for target_id in self._scale_dependent_targets:
             if target_id in self._confirmed_scale_targets:
                 result[target_id] = (True, 0, "test-confirmed-scale")
                 continue

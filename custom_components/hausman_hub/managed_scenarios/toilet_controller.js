@@ -5,10 +5,12 @@ const context = r.context && typeof r.context === 'object' ? r.context : {};
 const trigger = context.trigger && typeof context.trigger === 'object' ? context.trigger : {};
 const controls = context.controls && typeof context.controls === 'object' ? context.controls : {};
 const state = controls.state && typeof controls.state === 'object' ? controls.state : {};
+const topology = state.topology && typeof state.topology === 'object' ? state.topology : {};
+const roles = topology.roles && typeof topology.roles === 'object' ? topology.roles : {};
 const server = state.action && typeof state.action === 'object' ? state.action : null;
 const valid = trigger.source === 'scenario_control' && state.ready === true && server &&
   Object.keys(server).sort().join(',') === 'actionId,targetId,value' &&
-  new Set(['entity_5d95de599d2b5cec', 'entity_6667b3400bce7970', 'entity_9bbb3b0e8cd98627']).has(server.targetId) &&
+  new Set([roles.main, roles.night, roles.fan].filter(v => typeof v === 'string' && v)).has(server.targetId) &&
   ['turn_on', 'turn_off'].includes(server.actionId) && server.value === null;
 const action = valid ? {id: 'server_action', type: 'device_action', targetId: server.targetId, targetName: 'Управляемое устройство', actionId: server.actionId, actionTitle: 'Серверное действие'} : null;
 msg.statusCode = 200;
