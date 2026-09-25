@@ -11,11 +11,19 @@ from custom_components.hausman_hub.application.managed_switch_migration import (
     LEGACY_MANAGED_SWITCHES,
     MANIFEST_HASH,
     MIGRATION_MANIFEST,
+    ManagedSwitchMigrationEntry,
     ManagedSwitchMigration,
     ManagedSwitchMigrationConflict,
     _initial_journal,
+    _entries_with_sources,
     _receipt,
+    managed_switch_manifest_from_protected_topology,
     valid_managed_switch_migration_payload,
+)
+from custom_components.hausman_hub.application.protected_topology import (
+    ProtectedRoleBinding,
+    ProtectedTopologyService,
+    ProtectedTopologyViolation,
 )
 
 
@@ -225,6 +233,58 @@ def test_manifest_contains_exact_eight_protected_scenarios_and_sources() -> None
         assert item.legacy_topology == "managed-three-node-v1"
         assert len(item.legacy_source_hash) == len(item.new_source_hash) == 64
         assert item.input_target_ids
+
+
+def test_release_source_reader_rejects_symlink(tmp_path) -> None:
+    source = tmp_path / "release.js"
+    source.write_text("safe", encoding="utf-8")
+    link = tmp_path / "link.js"
+    link.symlink_to(source)
+    entry = ManagedSwitchMigrationEntry(
+        "scenario", 0, "a" * 64, "topology", ("old",), ("new",),
+        hashlib.sha256(b"safe").hexdigest(), "link.js",
+    )
+
+    with pytest.raises(ManagedSwitchMigrationConflict, match="source is unavailable"):
+        _entries_with_sources((entry,), root=tmp_path)
+
+
+def test_protected_manifest_cannot_replace_release_source_metadata() -> None:
+    release = MIGRATION_MANIFEST[0]
+
+    class Topology:
+        def migration_expectations(self, _kind):
+            return ({
+                "scenarioId": release.scenario_id,
+                "legacyRevision": release.legacy_revision,
+                "legacySourceHash": release.legacy_source_hash,
+                "legacyTopology": release.legacy_topology,
+                "legacyInputRoles": ["managed.test.old"],
+                "inputRoles": ["managed.test.new"],
+                "newSourceHash": release.new_source_hash,
+                "sourceFile": "../../outside.js",
+                "operation": release.operation,
+                "expectedRevision": release.expected_revision,
+                "activationReady": release.activation_ready,
+            },)
+
+        def targets_for_roles(self, roles):
+            return tuple(f"target.{index}" for index, _role in enumerate(roles))
+
+    with pytest.raises(ManagedSwitchMigrationConflict, match="differs from release manifest"):
+        managed_switch_manifest_from_protected_topology(Topology())
+
+
+def test_protected_binding_rejects_split_target_and_entity_identity() -> None:
+    device = type("Device", (), {"target_id": "target.one", "entity_id": "light.one"})()
+    service = ProtectedTopologyService(
+        object(), catalog_resolver=lambda _target: device,
+    )
+
+    with pytest.raises(ProtectedTopologyViolation, match="identity is invalid"):
+        service._validate_runtime_bindings(  # noqa: SLF001
+            [ProtectedRoleBinding("managed.test.light", "target.one", "light.two")]
+        )
 
 
 def test_migration_persists_prepared_before_cas_and_completed_after() -> None:

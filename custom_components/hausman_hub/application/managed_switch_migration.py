@@ -8,6 +8,7 @@ import hashlib
 import inspect
 import json
 import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Mapping
 
@@ -613,13 +614,40 @@ def _receipt(state: str) -> dict[str, object]:
     }
 
 
+def _safe_release_source(root: Path, source_file: str) -> str:
+    """Read one bounded release asset without resolving a symlink."""
+
+    relative = Path(source_file)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise ManagedSwitchMigrationConflict("release-owned source is unavailable")
+    candidate = root / relative
+    try:
+        candidate.relative_to(root)
+        descriptor = os.open(candidate, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except (OSError, ValueError) as error:
+        raise ManagedSwitchMigrationConflict("release-owned source is unavailable") from error
+    try:
+        with os.fdopen(descriptor, "rb") as handle:
+            source_bytes = handle.read(512 * 1024 + 1)
+    except OSError as error:
+        raise ManagedSwitchMigrationConflict("release-owned source is unavailable") from error
+    if len(source_bytes) > 512 * 1024:
+        raise ManagedSwitchMigrationConflict("release-owned source exceeds safe bound")
+    try:
+        return source_bytes.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ManagedSwitchMigrationConflict("release-owned source is invalid") from error
+
+
 def _entries_with_sources(
     manifest: tuple[ManagedSwitchMigrationEntry, ...] = MIGRATION_MANIFEST,
+    *,
+    root: Path | None = None,
 ) -> tuple[ManagedSwitchMigrationEntry, ...]:
-    root = Path(__file__).resolve().parents[1] / "managed_scenarios"
+    root = (root or Path(__file__).resolve().parents[1] / "managed_scenarios").resolve()
     entries: list[ManagedSwitchMigrationEntry] = []
     for item in manifest:
-        source = (root / item.source_file).read_text(encoding="utf-8")
+        source = _safe_release_source(root, item.source_file)
         if hashlib.sha256(source.encode()).hexdigest() != item.new_source_hash:
             raise ManagedSwitchMigrationConflict("release-owned source hash mismatch")
         entries.append(
@@ -661,6 +689,7 @@ def managed_switch_manifest_from_protected_topology(
     targets_getter = getattr(protected_topology, "targets_for_roles", None)
     if not callable(expectations_getter) or not callable(targets_getter):
         raise ManagedSwitchMigrationConflict("protected managed topology is unavailable")
+    release_by_scenario = {item.scenario_id: item for item in MIGRATION_MANIFEST}
     entries: list[ManagedSwitchMigrationEntry] = []
     for item in expectations_getter("managedSwitches"):
         if not isinstance(item, Mapping):
@@ -676,6 +705,18 @@ def managed_switch_manifest_from_protected_topology(
             or not input_targets
         ):
             raise ManagedSwitchMigrationConflict("protected managed topology is incomplete")
+        release = release_by_scenario.get(item.get("scenarioId"))
+        if release is None or (
+            item.get("legacyRevision") != release.legacy_revision
+            or item.get("legacySourceHash") != release.legacy_source_hash
+            or item.get("legacyTopology") != release.legacy_topology
+            or item.get("newSourceHash") != release.new_source_hash
+            or item.get("sourceFile") != release.source_file
+            or item.get("operation") != release.operation
+            or item.get("expectedRevision") != release.expected_revision
+            or item.get("activationReady") != release.activation_ready
+        ):
+            raise ManagedSwitchMigrationConflict("protected managed topology differs from release manifest")
         entries.append(
             ManagedSwitchMigrationEntry(
                 scenario_id=str(item["scenarioId"]),

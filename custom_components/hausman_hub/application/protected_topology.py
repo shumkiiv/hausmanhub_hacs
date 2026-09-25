@@ -542,6 +542,13 @@ class ProtectedTopologyService:
                 device = resolver(binding.target_id)
                 if getattr(device, "target_id", None) != binding.target_id:
                     raise ProtectedTopologyViolation("protected topology target is unavailable")
+                if (
+                    binding.entity_id is not None
+                    and getattr(device, "entity_id", None) != binding.entity_id
+                ):
+                    raise ProtectedTopologyViolation("protected topology target identity is invalid")
+            elif binding.target_id is not None and binding.entity_id is not None:
+                raise ProtectedTopologyViolation("protected topology target identity is unavailable")
             if binding.entity_id is not None and callable(entity_validator):
                 if not entity_validator(binding.entity_id):
                     raise ProtectedTopologyViolation("protected topology entity is unavailable")
