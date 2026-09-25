@@ -631,14 +631,37 @@ async def test_runtime_dispatches_plan_when_commands_enabled() -> None:
         actions = [command.action for command in executor.calls]
         assert actions == [LightAction.TURN_ON]
         entries = runtime._shadow.journal_payload()["entries"]  # type: ignore[attr-defined]
-        assert any(
-            entry.get("commandsEnabled") is True
-            and entry.get("mode") == "live"
-            and entry.get("commands", [{}])[0].get("action")
-            == LightAction.TURN_ON.value
-            for entry in entries
-            if entry.get("commands")
-        )
+        operation_id = f"room-lighting-{_ROOM_ID}-{_NOW_MS}-1"
+        decisions = [
+            entry for entry in entries
+            if entry.get("operationId") == operation_id and "commands" in entry
+        ]
+        assert decisions == [
+            {
+                "at": _NOW_MS,
+                "roomId": _ROOM_ID,
+                "mode": "live",
+                "commandsEnabled": True,
+                "operationId": operation_id,
+                "configVersion": 1,
+                "commands": [
+                    {
+                        "targetId": "light_main",
+                        "action": LightAction.TURN_ON.value,
+                        "brightness": 60,
+                        "colorTemperature": 3000,
+                        "reason": "presence",
+                    }
+                ],
+                "skips": [],
+            }
+        ]
+        dispatches = [
+            entry for entry in entries
+            if entry.get("operationId") == operation_id and "dispatch" in entry
+        ]
+        assert len(dispatches) == 1
+        assert dispatches[0]["dispatch"][0]["operationId"] == operation_id
         # A confirmed receipt grants proven automatic ownership.
         ownership = runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"})  # type: ignore[attr-defined]
         assert ownership
@@ -1056,6 +1079,57 @@ async def test_restart_keeps_manual_protection_without_observed_absence() -> Non
         assert runtime2._ownership.snapshots_for(_ROOM_ID, {"light_main"})  # type: ignore[attr-defined]
         config = runtime2.configs()[0]
         assert runtime2._protection_for(config).active is True  # type: ignore[attr-defined]
+    finally:
+        await runtime2.stop()
+
+
+async def test_restart_releases_manual_protection_after_new_observed_absence() -> None:
+    """A post-restart off interval starts anew and can later release safely."""
+
+    payload = _config_payload(minimum_interval_seconds=60, stable_absence_seconds=5)
+    ownership_store = _MemoryOwnershipStore()
+    clock = _Clock(_NOW_MS)
+    t0 = _NOW_MS
+
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    runtime1 = _make_runtime(
+        hass,
+        commands_enabled=False,
+        ownership_store=ownership_store,
+        now_ms=clock,
+        payload=payload,
+    )
+    await runtime1.start(hass, "entry")
+    runtime1._service_event(_event("light", "turn_off", "light.demo_main"))
+    await asyncio.gather(*hass.tasks)
+    await runtime1.stop()
+
+    # A long gap is not absence. The fresh off state starts a new interval at
+    # startup, which must still reach the configured stable duration.
+    clock.value = t0 + 600_000
+    hass2 = _FakeHass()
+    hass2.states.set("binary_sensor.demo_presence", "off", last_changed=_dt(clock.value))
+    hass2.states.set("light.demo_main", "off", last_changed=_dt(t0))
+    executor = _SpyExecutor()
+    runtime2 = _make_runtime(
+        hass2,
+        commands_enabled=True,
+        executor=executor,
+        ownership_store=ownership_store,
+        now_ms=clock,
+        payload=payload,
+    )
+    await runtime2.start(hass2, "entry")
+    try:
+        assert executor.calls == []
+        clock.value += 5_000
+        await runtime2.async_process()
+        assert executor.calls == []
+        clock.value += 1_000
+        hass2.states.set("binary_sensor.demo_presence", "on", last_changed=_dt(clock.value))
+        await runtime2.async_process()
+        assert [command.action for command in executor.calls] == [LightAction.TURN_ON]
     finally:
         await runtime2.stop()
 
