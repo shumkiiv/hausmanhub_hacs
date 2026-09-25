@@ -48,6 +48,10 @@ from custom_components.hausman_hub.domain.room_lighting import (
     SensorKind,
     config_from_payload,
 )
+from custom_components.hausman_hub.domain.device_power_dependencies import (
+    AUTO_TURN_ON_POLICY,
+    DevicePowerDependency,
+)
 from custom_components.hausman_hub.domain.room_lighting_engine import (
     LightAction,
     PlannedCommand,
@@ -2202,6 +2206,112 @@ def test_ownership_journal_keeps_stale_manual_while_presence_active() -> None:
 
 
 POWER_ENTITY = "switch.demo_power"
+
+
+@pytest.mark.parametrize("path", ("exact", "legacy"))
+@pytest.mark.parametrize("away_transition", ("before_pending", "after_pending"))
+async def test_untrusted_away_closes_only_saved_power_intent(
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+    away_transition: str,
+) -> None:
+    """An Away change cannot leave an unsent automatic power retry marker."""
+
+    class PowerExecutor(_SpyExecutor):
+        def __init__(self) -> None:
+            super().__init__()
+            self.power_calls: list[str] = []
+
+        async def async_power_on(self, hass: object, entity_id: str) -> dict[str, object]:
+            del hass
+            self.power_calls.append(entity_id)
+            return {"confirmed": True, "sent": True, "sendOutcome": "sent"}
+
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    hass.states.set(AWAY_ENTITY_ID, "off", last_changed=_NOW_DT)
+    hass.states.set(POWER_ENTITY, "off", last_changed=_NOW_DT)
+    shadow = RoomLightingShadowService(_MemoryShadowStore())
+    executor = PowerExecutor()
+    runtime = RoomLightingRuntime(
+        hass,
+        _ConfigService(config_from_payload(_config_payload())),
+        shadow,
+        executor=executor,
+        now_ms=lambda: _NOW_MS,
+        track_state_changes=lambda hass, entities, callback: (lambda: None),
+        track_interval=lambda hass, callback, interval: (lambda: None),
+        listen_bus=lambda hass, event_type, callback: (lambda: None),
+        electrical_breaker_resolver=(lambda _entity: False) if path == "exact" else None,
+        away_entity_id=AWAY_ENTITY_ID,
+    )
+
+    await runtime.start(hass, "entry")
+    try:
+        if away_transition == "before_pending":
+            hass.states.set(AWAY_ENTITY_ID, "unavailable", last_changed=_NOW_DT)
+        else:
+            original_persist = runtime._persist_pending_power_dispatch
+
+            async def persist_then_invalidate_away(**kwargs: object) -> bool:
+                persisted = await original_persist(**kwargs)
+                hass.states.set(AWAY_ENTITY_ID, "unavailable", last_changed=_NOW_DT)
+                return persisted
+
+            monkeypatch.setattr(
+                runtime,
+                "_persist_pending_power_dispatch",
+                persist_then_invalidate_away,
+            )
+
+        if path == "exact":
+            powered, detail = await runtime._ensure_power_source_locked(
+                DevicePowerDependency(
+                    dependent_entity_id="light.demo_main",
+                    power_source_entity_id=POWER_ENTITY,
+                    policy=AUTO_TURN_ON_POLICY,
+                    warmup_seconds=0,
+                ),
+                at=_NOW_MS,
+                room_id=_ROOM_ID,
+                operation_id="away-power-test",
+                config_version=1,
+            )
+        else:
+            powered, detail = await runtime._ensure_legacy_room_power_locked(
+                POWER_ENTITY,
+                at=_NOW_MS,
+                room_id=_ROOM_ID,
+                operation_id="away-power-test",
+                config_version=1,
+            )
+
+        assert not powered
+        assert detail["reason"] == "away_sensor_unavailable"
+        assert detail["dispatchAttempt"] is False
+        assert detail["sent"] is False
+        assert detail["sendOutcome"] == "not_sent"
+        assert executor.power_calls == []
+        assert POWER_ENTITY not in runtime._power_failures
+        failures = shadow.journal_payload().get("dispatchFailures", [])
+        assert all(item.get("key") != f"power:{POWER_ENTITY}" for item in failures)
+
+        if away_transition == "after_pending":
+            receipts = [
+                receipt
+                for entry in shadow.journal_payload()["entries"]
+                for receipt in entry.get("dispatch", [])
+            ]
+            assert {
+                "sourceEntityId": POWER_ENTITY,
+                "dispatchAttempt": False,
+                "sent": False,
+                "sendOutcome": "not_sent",
+                "reason": "away_sensor_unavailable",
+            }.items() <= receipts[-1]["power"].items()
+    finally:
+        await runtime.stop()
 
 
 async def test_power_switch_state_event_recomputes_the_room() -> None:

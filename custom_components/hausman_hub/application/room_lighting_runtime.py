@@ -710,7 +710,6 @@ class RoomLightingRuntime:
         # отправляется повторно, пока прибор не отчитается новым значением.
         self._last_untrusted_adjustment: dict[str, tuple[int | None, int | None]] = {}
         self._power_failures: dict[str, tuple[str, str]] = {}
-        self._power_failures: dict[str, tuple[str, str]] = {}
         self._dispatch_overflow_latch = False
         self._dispatch_overflow_blocked_after_ms: int | None = None
         self._dispatch_overflow_boundary_unknown = False
@@ -826,7 +825,8 @@ class RoomLightingRuntime:
             if not self._away_missing_warned:
                 self._away_missing_warned = True
                 _LOGGER.warning(
-                    "room lighting commands are disabled: protected away sensor role is missing"
+                    "room lighting automatic commands are disabled: "
+                    "protected away sensor role is missing"
                 )
         self._away_diagnostic = observation.diagnostic
         return observation.command_block_reason
@@ -2028,6 +2028,45 @@ class RoomLightingRuntime:
             return False
         receipt["_durable_recorded"] = True
         return True
+
+    async def _persist_not_sent_power_dispatch_closure(
+        self,
+        *,
+        at: int,
+        room_id: str,
+        source_entity_id: str,
+        evidence_revision: str,
+        reason: str,
+        operation_id: str | None,
+        config_version: int | None,
+    ) -> bool:
+        """Close a saved power intent before its executor boundary.
+
+        The shadow service already knows how to clear a pending power marker
+        from a not-sent dispatch receipt. Keep the in-memory retry guard until
+        that durable closure succeeds, so a storage failure remains fail-closed.
+        """
+
+        receipt: dict[str, object] = {
+            "power": {
+                "sourceEntityId": source_entity_id,
+                "evidenceRevision": evidence_revision,
+                "dispatchAttempt": False,
+                "sent": False,
+                "sendOutcome": "not_sent",
+                "reason": reason,
+            }
+        }
+        closed = await self._persist_not_sent_dispatch_closure(
+            at=at,
+            room_id=room_id,
+            receipt=receipt,
+            operation_id=operation_id,
+            config_version=config_version,
+        )
+        if closed:
+            self._power_failures.pop(source_entity_id, None)
+        return closed
 
     @staticmethod
     def _dispatch_permission_token(
@@ -3509,6 +3548,15 @@ class RoomLightingRuntime:
         away_block = self._automatic_away_block_reason()
         if away_block is not None:
             detail["reason"] = away_block
+            await self._persist_not_sent_power_dispatch_closure(
+                at=at,
+                room_id=room_id,
+                source_entity_id=source_entity_id,
+                evidence_revision=evidence_revision,
+                reason=away_block,
+                operation_id=operation_id,
+                config_version=config_version,
+            )
             return False, detail
         self._executing_actions[source_entity_id] = "turn_on"
         self._command_grace[source_entity_id] = ("turn_on", self._now_ms())
@@ -3656,6 +3704,15 @@ class RoomLightingRuntime:
         away_block = self._automatic_away_block_reason()
         if away_block is not None:
             detail["reason"] = away_block
+            await self._persist_not_sent_power_dispatch_closure(
+                at=at,
+                room_id=room_id,
+                source_entity_id=power_entity,
+                evidence_revision=evidence_revision,
+                reason=away_block,
+                operation_id=operation_id,
+                config_version=config_version,
+            )
             return False, detail
         self._executing_actions[power_entity] = "turn_on"
         self._command_grace[power_entity] = ("turn_on", self._now_ms())
