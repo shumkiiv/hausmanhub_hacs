@@ -458,6 +458,43 @@ class RoomLightingApiTest(unittest.TestCase):
 
             physical = _config_payload(room_id, name="Физическая настройка")
             physical["devices"]["light_targets"][0]["entityId"] = "light.physical_main"
+            physical["devices"]["wireless_switches"] = [
+                {
+                    "id": "sw_physical",
+                    "name": "Физический выключатель",
+                    "entityId": "sensor.physical_action",
+                    "buttons": ["left"],
+                    "pressTypes": ["single"],
+                }
+            ]
+            physical["devices"]["auxiliaries"] = [
+                {
+                    "id": "aux_physical_fan",
+                    "name": "Физическая вытяжка",
+                    "kind": "fan",
+                    "entityId": "switch.physical_fan",
+                    "autoAdoptOverride": None,
+                }
+            ]
+            physical["switchBindings"] = [
+                {
+                    "switchId": "sw_physical",
+                    "button": "left",
+                    "pressType": "single",
+                    "action": "toggle",
+                    "targets": {"lightTargets": ["light_main"], "groupIds": [], "roles": []},
+                }
+            ]
+            physical["auxiliary"] = {
+                "fan": {
+                    "targetId": "aux_physical_fan",
+                    "humidityThreshold": 70,
+                    "dayOffSeconds": 900,
+                    "quietStart": "06:00",
+                    "dayStart": "08:00",
+                    "nightStart": "22:00",
+                }
+            }
             created = await self.config_view.put(
                 _json_request(self._config_path(room_id), physical, room_id=room_id)
             )
@@ -476,10 +513,11 @@ class RoomLightingApiTest(unittest.TestCase):
                 _request(self._config_path(room_id), room_id=room_id)
             )
             self.assertEqual(1, current.payload["version"])
+            self.assertEqual(created.payload["devices"], current.payload["devices"])
             self.assertEqual(
-                "light.physical_main",
-                current.payload["devices"]["light_targets"][0]["entityId"],
+                created.payload["switchBindings"], current.payload["switchBindings"]
             )
+            self.assertEqual(created.payload["auxiliary"], current.payload["auxiliary"])
 
         asyncio.run(flow())
 

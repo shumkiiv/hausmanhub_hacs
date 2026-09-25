@@ -232,6 +232,43 @@ class RoomLightingServiceTest(unittest.IsolatedAsyncioTestCase):
 
         physical = _payload(room_id, name="Физическая настройка")
         physical["devices"]["light_targets"][0]["entityId"] = "switch.physical_main"  # type: ignore[index]
+        physical["devices"]["wireless_switches"] = [  # type: ignore[index]
+            {
+                "id": "sw_physical",
+                "name": "Физический выключатель",
+                "entityId": "sensor.physical_action",
+                "buttons": ["left"],
+                "pressTypes": ["single"],
+            }
+        ]
+        physical["devices"]["auxiliaries"] = [  # type: ignore[index]
+            {
+                "id": "aux_physical_fan",
+                "name": "Физическая вытяжка",
+                "kind": "fan",
+                "entityId": "switch.physical_fan",
+                "autoAdoptOverride": None,
+            }
+        ]
+        physical["switchBindings"] = [
+            {
+                "switchId": "sw_physical",
+                "button": "left",
+                "pressType": "single",
+                "action": "toggle",
+                "targets": {"lightTargets": ["light_demo_a"], "groupIds": [], "roles": []},
+            }
+        ]
+        physical["auxiliary"] = {
+            "fan": {
+                "targetId": "aux_physical_fan",
+                "humidityThreshold": 70,
+                "dayOffSeconds": 900,
+                "quietStart": "06:00",
+                "dayStart": "08:00",
+                "nightStart": "22:00",
+            }
+        }
         created = await self.service.async_put_config(config_from_payload(physical))
         self.assertEqual(1, created.version)
 
@@ -244,9 +281,9 @@ class RoomLightingServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(preserved)
         assert preserved is not None
         self.assertEqual(1, preserved.version)
-        self.assertEqual(
-            "switch.physical_main", preserved.devices.light_targets[0].entity_id
-        )
+        self.assertEqual(created.to_dict()["devices"], preserved.to_dict()["devices"])
+        self.assertEqual(created.to_dict()["switchBindings"], preserved.to_dict()["switchBindings"])
+        self.assertEqual(created.to_dict()["auxiliary"], preserved.to_dict()["auxiliary"])
 
     async def test_apply_template_keeps_room_auxiliary_policy_with_devices(self) -> None:
         room_id = "room_demo_bathroom"
