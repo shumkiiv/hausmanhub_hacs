@@ -138,4 +138,10 @@ test("HH-016.f keeps stale template draft blocked after reapply failure", async 
   assert.equal(saveButton().disabled, false);
   await editor.saveRoomLighting(panel, roomId);
   assert.equal(server.config.devices.light_targets[0].entityId, "light.new_binding");
+  assert.equal(store.templateBaseline, null);
+
+  await editor.applyTemplate(panel, roomId, "day_profile");
+  assert.notEqual(store.templateBaseline, null);
+  await editor.refreshRoomLighting(panel, roomId, true);
+  assert.equal(store.templateBaseline, null);
 });

@@ -253,6 +253,7 @@ export async function refreshRoomLighting(panel, roomId, force = false) {
     store.conflictMessage = "";
     store.templateDraft = false;
     store.appliedTemplateId = null;
+    store.templateBaseline = null;
     store.preview = null;
   } catch (error) {
     store.error = lightingErrorMessage(error);
@@ -280,6 +281,7 @@ async function saveRoomLighting(panel, roomId) {
     store.draft = clone(saved);
     store.templateDraft = false;
     store.appliedTemplateId = null;
+    store.templateBaseline = null;
     store.preview = null;
     store.notice = "Сохранено. Черновик стал текущей версией.";
   } catch (error) {

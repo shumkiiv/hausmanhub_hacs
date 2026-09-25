@@ -343,6 +343,23 @@ class RoomLightingServiceTest(unittest.IsolatedAsyncioTestCase):
                 DEFAULT_TEMPLATE_ID, room_id=room_id, keep_devices=True
             )
 
+    async def test_apply_template_without_stored_devices_skips_kept_capability_check(
+        self,
+    ) -> None:
+        with patch(
+            "custom_components.hausman_hub.application.room_lighting_service."
+            "_validate_selected_target_capabilities"
+        ) as validate:
+            config = await self.service.async_apply_template(
+                DEFAULT_TEMPLATE_ID,
+                {"name": "Шаблон с прежним переопределением"},
+                room_id="room_demo_entry",
+                keep_devices=False,
+            )
+
+        self.assertEqual("Шаблон с прежним переопределением", config.name)
+        validate.assert_not_called()
+
     async def test_apply_template_does_not_remap_explicit_schedule_or_bindings(self) -> None:
         room_id = "room_demo_entry"
         await self.service.async_put_config(config_from_payload(_payload(room_id)))

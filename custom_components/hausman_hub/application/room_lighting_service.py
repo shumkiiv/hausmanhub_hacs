@@ -256,6 +256,7 @@ class RoomLightingService:
         payload["version"] = 1
         payload["updatedAt"] = _now_seconds()
         payload["templateId"] = template_id
+        kept_stored_devices = False
         if overrides is not None:
             if not isinstance(overrides, Mapping):
                 raise RoomLightingViolation("template overrides must be a mapping")
@@ -265,6 +266,7 @@ class RoomLightingService:
         if keep_devices and room_id is not None:
             stored = await self._store.async_get(room_id)  # type: ignore[attr-defined]
             if stored is not None:
+                kept_stored_devices = True
                 if overrides is not None and "devices" in overrides:
                     raise RoomLightingViolation(
                         "template devices override conflicts with keepDevices"
@@ -288,7 +290,8 @@ class RoomLightingService:
                 if overrides is None or "schedule" not in overrides:
                     _remap_template_schedule(template, payload, stored_payload["devices"])
         config = config_from_payload(payload)
-        _validate_selected_target_capabilities(config)
+        if kept_stored_devices:
+            _validate_selected_target_capabilities(config)
         return config
 
 
