@@ -13,6 +13,7 @@ from custom_components.hausman_hub.application.manual_light_authority import (
 )
 from custom_components.hausman_hub.manual_light_authority_events import (
     ManualLightAuthorityEvents,
+    room_light_entity_ids,
 )
 from custom_components.hausman_hub.application.room_lighting_ha_executor import (
     RoomLightingHaExecutor,
@@ -253,6 +254,74 @@ async def test_room_upstream_power_checks_dependent_light_before_call(monkeypatc
     assert receipt["reason"] == "manual_light_priority"
     assert receipt["sent"] is False
     assert not called
+
+
+async def test_room_context_child_trust_is_scoped_to_entity_and_action(monkeypatch) -> None:
+    from custom_components.hausman_hub.application import room_lighting_ha_executor
+
+    monkeypatch.setattr(
+        room_lighting_ha_executor, "_new_service_context",
+        lambda: SimpleNamespace(id="room-call"),
+    )
+    authority = ManualLightAuthority()
+    executor = RoomLightingHaExecutor(manual_light_authority=authority)
+
+    class _Hass:
+        def __init__(self):
+            self.tasks = []
+            self.services = _Services()
+
+        def async_create_task(self, coroutine):
+            task = asyncio.create_task(coroutine)
+            self.tasks.append(task)
+            return task
+
+    class _Services:
+        async def async_call(self, domain, service, data, blocking=True, context=None):
+            del blocking
+            child = SimpleNamespace(id="child-call", parent_id=context.id)
+            for entity_id, action, service_context in (
+                ("light.a", "turn_on", context),
+                ("light.a", "turn_on", child),
+                ("light.b", "turn_on", child),
+                ("light.a", "turn_off", child),
+            ):
+                listener.service_event(SimpleNamespace(
+                    data={
+                        "domain": domain, "service": action,
+                        "service_data": {"entity_id": entity_id},
+                    },
+                    context=service_context,
+                    time_fired=datetime.now(timezone.utc),
+                ))
+
+    hass = _Hass()
+    listener = ManualLightAuthorityEvents(
+        hass, authority, lambda: {"light.a", "light.b"},
+        None, lambda: executor,
+    )
+    await executor._call(hass, "light", "turn_on", {"entity_id": "light.a"})
+    assert authority.generation == 2
+    assert authority.record("light.a").action == "off"
+    assert authority.record("light.b").action == "on"
+    assert executor.owns_service_context(
+        SimpleNamespace(id="later", parent_id="room-call"), "light.a", "on"
+    )
+    assert not executor.owns_service_context(
+        SimpleNamespace(id="later", parent_id="room-call"), "light.b", "on"
+    )
+    assert not executor.owns_service_context(
+        SimpleNamespace(id="later", parent_id="room-call"), "light.a", "off"
+    )
+    await asyncio.gather(*hass.tasks)
+
+
+def test_managed_room_light_scope_excludes_auxiliary_fan() -> None:
+    config = SimpleNamespace(devices=SimpleNamespace(
+        light_targets=(SimpleNamespace(entity_id="switch.room_lamp"),),
+        auxiliaries=(SimpleNamespace(entity_id="switch.shower_fan"),),
+    ))
+    assert room_light_entity_ids((config,)) == frozenset({"switch.room_lamp"})
 
 
 async def test_room_manual_only_target_refuses_automatic_command(monkeypatch) -> None:

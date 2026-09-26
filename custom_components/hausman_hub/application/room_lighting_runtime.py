@@ -1383,9 +1383,13 @@ class RoomLightingRuntime:
         service = str(data.get("service") or "")
         service_data = data.get("service_data")
         owns_context = getattr(self._executor, "owns_service_context", None)
-        if callable(owns_context) and owns_context(getattr(event, "context", None)):
-            return
+        action = {"turn_on": "on", "turn_off": "off"}.get(service)
         for entity_id in _entity_ids(service_data):
+            if (
+                action is not None and callable(owns_context)
+                and owns_context(getattr(event, "context", None), entity_id, action)
+            ):
+                continue
             power_rooms = self._power_rooms_for(entity_id)
             if power_rooms:
                 for room_id in power_rooms:

@@ -3495,11 +3495,28 @@ async def test_executor_context_does_not_hide_concurrent_identical_manual_call()
     try:
         class Services(_FakeServices):
             async def async_call(self, domain, service, data, blocking=True, context=None):
-                assert executor.owns_service_context(context)
+                assert executor.owns_service_context(context, data["entity_id"], "on")
                 own_event = _event(domain, service, data["entity_id"])
                 own_event.context = context
                 runtime._service_event(own_event)
                 assert not runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"})
+                child = SimpleNamespace(id="child-automation", parent_id=context.id)
+                assert executor.owns_service_context(child, "light.demo_main", "on")
+                assert not executor.owns_service_context(child, "light.demo_mirror", "on")
+                mixed_targets = _event("light", "turn_on", "light.demo_main")
+                mixed_targets.data["service_data"]["entity_id"] = [
+                    "light.demo_main", "light.demo_mirror",
+                ]
+                mixed_targets.context = child
+                runtime._service_event(mixed_targets)
+                assert runtime._ownership.snapshots_for(_ROOM_ID, {"light_mirror"})
+                assert not runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"})
+
+                opposite_action = _event("light", "turn_off", "light.demo_main")
+                opposite_action.context = child
+                assert not executor.owns_service_context(child, "light.demo_main", "off")
+                runtime._service_event(opposite_action)
+                assert runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"})
                 now[0] += 1
                 runtime._service_event(_event(domain, service, data["entity_id"]))
                 await super().async_call(domain, service, data, blocking, context)

@@ -87,7 +87,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # light/switch event is buffered and automatic dispatch stays closed.
     from .application.manual_light_authority import ManualLightAuthority
     from .manual_light_authority_storage import HomeAssistantManualLightAuthorityStore
-    from .manual_light_authority_events import ManualLightAuthorityEvents
+    from .manual_light_authority_events import (
+        ManualLightAuthorityEvents,
+        room_light_entity_ids,
+    )
 
     manual_light_authority = ManualLightAuthority(
         HomeAssistantManualLightAuthorityStore(hass, entry.entry_id)
@@ -735,13 +738,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     break
         runtime = domain_data.get("room_lighting_runtime")
         if runtime is not None:
-            for config in runtime.configs():
-                entities.update(
-                    target.entity_id for target in
-                    (*config.devices.light_targets, *config.devices.auxiliaries)
-                    if isinstance(target.entity_id, str)
-                    and target.entity_id.startswith(("light.", "switch."))
-                )
+            entities.update(room_light_entity_ids(runtime.configs()))
         return frozenset(entities)
 
     def _room_writer_conflict(entity_id: str) -> bool:

@@ -80,7 +80,7 @@ class RoomLightingHaExecutor:
         self._targets: dict[str, LightTarget] = dict(targets or {})
         self._manual_light_authority = manual_light_authority
         self._active_context_ids: set[str] = set()
-        self._recent_context_ids: dict[str, float] = {}
+        self._recent_context_ids: dict[str, tuple[float, str, str]] = {}
         # Bounded diagnostic trace used by narrow runtime tests and local
         # troubleshooting. It does not participate in command decisions.
         self.calls: list[PlannedCommand] = []
@@ -91,19 +91,23 @@ class RoomLightingHaExecutor:
             0.01, float(power_readback_interval_seconds)
         )
 
-    def owns_service_context(self, context: object) -> bool:
-        """Recognize our exact call and its delayed device report."""
+    def owns_service_context(
+        self, context: object, entity_id: str, action: str
+    ) -> bool:
+        """Trust a context lineage only for its exact physical light action."""
         now = time.monotonic()
         self._recent_context_ids = {
-            key: deadline for key, deadline in self._recent_context_ids.items()
-            if deadline > now
+            key: evidence for key, evidence in self._recent_context_ids.items()
+            if evidence[0] > now
         }
         context_id = getattr(context, "id", None)
-        return (
-            context_id in self._active_context_ids
-            or context_id in self._recent_context_ids
-            or getattr(context, "parent_id", None) in self._recent_context_ids
-        )
+        for candidate_id in (context_id, getattr(context, "parent_id", None)):
+            if not isinstance(candidate_id, str):
+                continue
+            evidence = self._recent_context_ids.get(candidate_id)
+            if evidence is not None and evidence[1:] == (entity_id, action):
+                return True
+        return False
 
     async def _call(
         self, hass, domain: str, service: str, data: dict,
@@ -116,7 +120,12 @@ class RoomLightingHaExecutor:
             raise ManualLightAuthorityDenied("manual_light_priority")
         context = _new_service_context()
         self._active_context_ids.add(context.id)
-        self._recent_context_ids[context.id] = time.monotonic() + 30.0
+        entity_id = data.get("entity_id")
+        action = {"turn_on": "on", "turn_off": "off"}.get(service)
+        if isinstance(entity_id, str) and action is not None:
+            self._recent_context_ids[context.id] = (
+                time.monotonic() + 30.0, entity_id, action
+            )
         try:
             await hass.services.async_call(
                 domain, service, data, blocking=True, context=context

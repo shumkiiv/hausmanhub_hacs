@@ -6,13 +6,28 @@ import asyncio
 import logging
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from .application.manual_light_authority import ManualLightAuthority
 from .manual_light_off_protection_events import _is_fresh_light_transition
 
+if TYPE_CHECKING:
+    from .domain.room_lighting import RoomLightingConfig
+
 
 _LOGGER = logging.getLogger(__name__)
 MAX_STARTUP_EVENTS = 512
+
+
+def room_light_entity_ids(configs: Iterable[RoomLightingConfig]) -> frozenset[str]:
+    """Only physical light targets are manual-light authority subjects."""
+    return frozenset(
+        target.entity_id
+        for config in configs
+        for target in config.devices.light_targets
+        if isinstance(target.entity_id, str)
+        and target.entity_id.startswith(("light.", "switch."))
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,7 +116,7 @@ class ManualLightAuthorityEvents:
             return True
         room = self._room_executor()
         owns = getattr(room, "owns_service_context", None)
-        return bool(callable(owns) and owns(context))
+        return bool(callable(owns) and owns(context, entity_id, action))
 
     def _capture_evidence(
         self, evidence: _StartupEvidence, *, schedule_drain: bool = True
