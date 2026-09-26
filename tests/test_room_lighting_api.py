@@ -470,6 +470,92 @@ class RoomLightingApiTest(unittest.TestCase):
 
         asyncio.run(flow())
 
+    def test_status_deduplicates_aliases_and_fails_closed_on_conflict(self) -> None:
+        from custom_components.hausman_hub.application.manual_light_authority import (
+            ManualLightAuthority,
+        )
+
+        async def flow() -> None:
+            room_id = "room_demo_entry"
+            config = _config_payload(room_id)
+            alias = {
+                "id": "light_demo_main_alias", "name": "Люстра, второй ID",
+                "kind": "light", "entityId": "light.demo_main", "role": "other",
+                "groupId": None, "brightness": True, "color_temperature": True,
+                "autoControl": True, "autoAdoptOverride": None,
+            }
+            config["devices"]["light_targets"].append(alias)
+            response = await self.config_view.put(
+                _json_request(self._config_path(room_id), config, room_id=room_id)
+            )
+            self.assertEqual(200, response.status)
+            authority = ManualLightAuthority()
+            authority.capture("light.demo_main", "on", "service", "alias", observed_at_ms=1_000)
+            self.hass.data["hausman_hub"]["manual_light_authority"] = authority
+            request = _request(
+                self.api.ROOM_LIGHTING_STATUS_PATH.format(room_id=room_id), room_id=room_id
+            )
+            deduplicated = (await self.status_view.get(request)).payload
+            returned = deduplicated["manual_control_return"]
+            self.assertEqual(["light.demo_main"], [
+                source["entityId"] for source in returned["sources"]
+            ])
+            self.assertEqual("manual_on_wait", returned["reason"])
+            self.assertEqual(1, returned["since"])
+            _validate("room-lighting-status.schema.json", deduplicated)
+
+            alias["autoControl"] = False
+            response = await self.config_view.put(
+                _json_request(self._config_path(room_id), config, room_id=room_id)
+            )
+            self.assertEqual(200, response.status)
+            conflicted = (await self.status_view.get(request)).payload
+            returned = conflicted["manual_control_return"]
+            self.assertEqual("attribution_uncertain", returned["reason"])
+            self.assertEqual("blocked", returned["scope"])
+            self.assertIsNone(returned["since"])
+            self.assertEqual("attribution_uncertain", returned["sources"][0]["reason"])
+            _validate("room-lighting-status.schema.json", conflicted)
+
+        asyncio.run(flow())
+
+    def test_status_aggregate_since_comes_from_selected_reason_source(self) -> None:
+        from custom_components.hausman_hub.application.manual_light_authority import (
+            ManualLightAuthority,
+        )
+
+        async def flow() -> None:
+            room_id = "room_demo_entry"
+            config = _config_payload(room_id)
+            config["devices"]["light_targets"].append({
+                "id": "light_demo_secondary", "name": "Второй свет", "kind": "light",
+                "entityId": "light.demo_secondary", "role": "other", "groupId": None,
+                "brightness": True, "color_temperature": False,
+                "autoControl": True, "autoAdoptOverride": None,
+            })
+            response = await self.config_view.put(
+                _json_request(self._config_path(room_id), config, room_id=room_id)
+            )
+            self.assertEqual(200, response.status)
+            authority = ManualLightAuthority()
+            authority.capture_legacy("light.demo_main", source="startup_unobserved")
+            authority.capture(
+                "light.demo_secondary", "off", "service", "manual-off", observed_at_ms=2_000
+            )
+            self.hass.data["hausman_hub"]["manual_light_authority"] = authority
+            request = _request(
+                self.api.ROOM_LIGHTING_STATUS_PATH.format(room_id=room_id), room_id=room_id
+            )
+            status = (await self.status_view.get(request)).payload
+            returned = status["manual_control_return"]
+            self.assertEqual("restart_uncertain", returned["reason"])
+            self.assertEqual("blocked", returned["scope"])
+            self.assertIsNone(returned["since"])
+            self.assertIsNone(returned["remaining_seconds"])
+            _validate("room-lighting-status.schema.json", status)
+
+        asyncio.run(flow())
+
     def test_status_uses_the_running_runtime_context(self) -> None:
         from datetime import datetime, timezone
 

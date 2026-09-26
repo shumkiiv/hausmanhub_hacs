@@ -843,20 +843,29 @@ def _manual_control_return_status(
 
     if not isinstance(authority, ManualLightAuthority):
         return None
-    targets = tuple(
-        target for target in config.devices.light_targets
-        if isinstance(target.entity_id, str)
-        and target.entity_id.startswith(("light.", "switch."))
-    )
-    if not targets:
+    targets_by_entity: dict[str, list[object]] = {}
+    for target in config.devices.light_targets:
+        if not isinstance(target.entity_id, str) or not target.entity_id.startswith(
+            ("light.", "switch.")
+        ):
+            continue
+        targets_by_entity.setdefault(target.entity_id, []).append(target)
+    if not targets_by_entity:
         return None
     global_reason = authority.barrier_reason
     sources: list[dict[str, object]] = []
-    since_ms: list[int] = []
-    for target in targets:
-        assert target.entity_id is not None
-        record = authority.record(target.entity_id)
-        if global_reason is not None:
+    records_by_entity: dict[str, object | None] = {}
+    for entity_id, aliases in targets_by_entity.items():
+        target = aliases[0]
+        record = authority.record(entity_id)
+        records_by_entity[entity_id] = record
+        auto_controls = {alias.auto_control for alias in aliases}
+        if len(auto_controls) != 1:
+            # Two config aliases disagree about whether the same physical
+            # device may be automated. Publishing a permissive projection
+            # would hide that ambiguity, so retain one blocked source.
+            reason = "attribution_uncertain"
+        elif global_reason is not None:
             reason = global_reason
         elif not target.auto_control:
             reason = "manual_only_target"
@@ -870,7 +879,7 @@ def _manual_control_return_status(
         else:
             reason = "none"
         source: dict[str, object] = {
-            "entityId": target.entity_id,
+            "entityId": entity_id,
             "active": reason != "none",
             "reason": reason,
             # The current authority is deny-only. Do not advertise the future
@@ -879,17 +888,24 @@ def _manual_control_return_status(
         }
         if record is not None:
             source["source"] = record.source
-            if not record.legacy and reason in {"manual_on_wait", "manual_off_wait"}:
-                since_ms.append(record.observed_at_ms)
         sources.append(source)
     active = any(source["active"] for source in sources)
     reasons = {source["reason"] for source in sources}
     aggregate_reason = next(
         (reason for reason in (
-            "storage_unavailable", "restart_uncertain", "manual_only_target",
+            "storage_unavailable", "restart_uncertain", "attribution_uncertain",
+            "selector_uncertain", "manual_only_target",
             "manual_off_protection", "manual_off_wait", "manual_on_wait",
         ) if reason in reasons),
         "none",
+    )
+    selected_source = next(
+        (source for source in sources if source["reason"] == aggregate_reason), None
+    )
+    selected_record = (
+        records_by_entity.get(selected_source["entityId"])
+        if selected_source is not None
+        else None
     )
     return {
         "active": active,
@@ -898,8 +914,10 @@ def _manual_control_return_status(
         "expires_at": None,
         "remaining_seconds": None if active else 0,
         "since": (
-            min(since_ms) // 1000
-            if since_ms and aggregate_reason in {"manual_on_wait", "manual_off_wait"}
+            selected_record.observed_at_ms // 1000
+            if selected_record is not None
+            and not selected_record.legacy
+            and aggregate_reason in {"manual_on_wait", "manual_off_wait"}
             else None
         ),
         "sources": sources,
