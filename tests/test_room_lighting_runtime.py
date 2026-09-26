@@ -796,6 +796,25 @@ async def test_shared_manual_priority_blocks_room_runtime_dispatch() -> None:
     assert executor.calls == []
 
 
+async def test_runtime_start_publishes_related_graph_before_startup_release() -> None:
+    from custom_components.hausman_hub.application.manual_light_authority import ManualLightAuthority
+    hass = _FakeHass()
+    payload = _config_payload(commands_enabled=False)
+    payload["devices"]["light_targets"].append({
+        "id": "related_switch", "name": "Связанный", "kind": "switch",
+        "entityId": "switch.related", "role": "other", "groupId": None,
+        "brightness": False, "color_temperature": False, "autoAdoptOverride": None,
+    })
+    authority = ManualLightAuthority()
+    authority.begin_startup_observation()
+    runtime = _make_runtime(hass, payload=payload, manual_light_authority=authority, seed_away=False)
+    await runtime.start(hass, "entry")
+    authority.capture("light.demo_main", "on", "service", "runtime-related")
+    assert authority.blocks("switch.related")
+    assert authority.unhealthy
+    runtime.cancel()
+
+
 @pytest.mark.parametrize("valid_state", ["off", "on"])
 async def test_automatic_commands_stop_after_valid_away_becomes_untrusted(
     valid_state: str,
