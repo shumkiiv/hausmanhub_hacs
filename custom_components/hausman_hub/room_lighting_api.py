@@ -852,12 +852,11 @@ def _manual_control_return_status(
         targets_by_entity.setdefault(target.entity_id, []).append(target)
     if not targets_by_entity:
         return None
-    global_reason = authority.barrier_reason
     sources: list[dict[str, object]] = []
     records_by_entity: dict[str, object | None] = {}
     for entity_id, aliases in targets_by_entity.items():
         target = aliases[0]
-        record = authority.record(entity_id)
+        record = authority.blocking_evidence(entity_id)
         records_by_entity[entity_id] = record
         auto_controls = {alias.auto_control for alias in aliases}
         if len(auto_controls) != 1:
@@ -865,8 +864,8 @@ def _manual_control_return_status(
             # device may be automated. Publishing a permissive projection
             # would hide that ambiguity, so retain one blocked source.
             reason = "attribution_uncertain"
-        elif global_reason is not None:
-            reason = global_reason
+        elif authority.barrier_reason_for(entity_id) is not None:
+            reason = authority.barrier_reason_for(entity_id)
         elif not target.auto_control:
             reason = "manual_only_target"
         elif record is not None:

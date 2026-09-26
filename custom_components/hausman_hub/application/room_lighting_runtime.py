@@ -4397,6 +4397,10 @@ class RoomLightingRuntime:
         )
 
     def _rebuild_index(self) -> None:
+        from .related_light_sources import RelatedLightSources
+        authority = self._manual_light_authority
+        if authority is not None:
+            authority.set_related_sources(RelatedLightSources.from_configs(self._configs.values()))
         rooms_by_entity: EntityRooms = {}
         entry_by_entity: EntityRooms = {}
         targets_by_entity: dict[str, tuple[str, str]] = {}

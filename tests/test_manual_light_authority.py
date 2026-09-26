@@ -11,6 +11,7 @@ from custom_components.hausman_hub.application.manual_light_authority import (
     ManualLightAuthority,
     valid_manual_light_authority_payload,
 )
+from custom_components.hausman_hub.application.related_light_sources import RelatedLightSources
 from custom_components.hausman_hub.manual_light_authority_events import (
     ManualLightAuthorityEvents,
     room_light_entity_ids,
@@ -40,6 +41,30 @@ async def test_capture_is_durable_and_duplicate_is_not_extended() -> None:
     assert authority.blocks("light.demo")
     assert not await authority.async_capture("light.demo", "off", "yandex", "ctx-1")
     assert store.payload["records"][0]["generation"] == 1
+
+
+def test_related_light_sources_extend_deny_without_copying_record() -> None:
+    config = SimpleNamespace(devices=SimpleNamespace(light_targets=(
+        SimpleNamespace(entity_id="light.primary"),
+        SimpleNamespace(entity_id="switch.alternate"),
+    )))
+    graph = RelatedLightSources.from_configs((config,))
+    authority = ManualLightAuthority()
+    authority.set_related_sources(graph)
+    authority.capture("light.primary", "on", "service", "related", observed_at_ms=1)
+    assert authority.blocks("switch.alternate")
+    assert authority.record("switch.alternate") is None
+    assert authority.blocking_evidence("switch.alternate").entity_id == "light.primary"
+
+
+def test_related_light_sources_fail_closed_when_target_has_no_entity() -> None:
+    config = SimpleNamespace(devices=SimpleNamespace(light_targets=(
+        SimpleNamespace(entity_id=None),
+    )))
+    authority = ManualLightAuthority()
+    authority.set_related_sources(RelatedLightSources.from_configs((config,)))
+    assert authority.blocks("light.any")
+    assert authority.barrier_reason_for("light.any") == "attribution_uncertain"
 
 
 async def test_storage_failure_remains_deny_only() -> None:

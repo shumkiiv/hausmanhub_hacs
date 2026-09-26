@@ -8,6 +8,7 @@ import time
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
+from .related_light_sources import RelatedLightSources
 
 
 DEFAULT_MANUAL_PRIORITY_MS = 3_600_000
@@ -53,6 +54,11 @@ class ManualLightAuthority:
         self._startup_observation_pending = False
         self._seeded_empty_store = False
         self._writer = asyncio.Lock()
+        self._related_sources = RelatedLightSources(True, {})
+
+    def set_related_sources(self, graph: RelatedLightSources) -> None:
+        """Atomically replace the only relation graph; an invalid graph denies all."""
+        self._related_sources = graph
 
     @property
     def seeded_empty_store(self) -> bool:
@@ -80,6 +86,11 @@ class ManualLightAuthority:
             return "restart_uncertain"
         return None
 
+    def barrier_reason_for(self, entity_id: str) -> str | None:
+        if not self._related_sources.ready:
+            return "attribution_uncertain"
+        return self.barrier_reason
+
     def begin_startup_observation(self) -> None:
         """Close dispatch until the full room entity set has been restored."""
         self._startup_observation_pending = True
@@ -94,7 +105,20 @@ class ManualLightAuthority:
     def blocks(self, entity_id: str) -> bool:
         # First slice: the clock never releases a manual choice. A later
         # migration must prove every other condition before using deadline.
-        return self.unhealthy or entity_id in self._pending or entity_id in self._records
+        if self.unhealthy or not self._related_sources.ready:
+            return True
+        return any(
+            related in self._pending or related in self._records
+            for related in self._related_sources.related(entity_id)
+        )
+
+    def blocking_evidence(self, entity_id: str) -> ManualLightRecord | None:
+        """Return linked evidence without copying it to a sibling entity."""
+        for related in self._related_sources.related(entity_id):
+            record = self.record(related)
+            if record is not None:
+                return record
+        return None
 
     def mark_unhealthy(self) -> None:
         """Close every automatic light route after ambiguous attribution."""
