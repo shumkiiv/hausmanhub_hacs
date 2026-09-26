@@ -3,11 +3,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from homeassistant.helpers.storage import Store
 from .verified_safety_storage import VerifiedSafetyStore
+from .application.manual_light_authority import valid_manual_light_authority_payload
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
-
-def valid_manual_light_authority_payload(value: object) -> bool:
-    return isinstance(value, dict) and value.get("version") == 1 and isinstance(value.get("records"), list)
 
 class HomeAssistantManualLightAuthorityStore:
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:

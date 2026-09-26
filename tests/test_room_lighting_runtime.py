@@ -39,6 +39,9 @@ from custom_components.hausman_hub.application.room_lighting_runtime import (
     RoomLightingOwnershipJournal,
     RoomLightingRuntime,
 )
+from custom_components.hausman_hub.application.manual_light_authority import (
+    ManualLightAuthority,
+)
 from custom_components.hausman_hub.application.room_lighting_shadow import (
     RoomLightingShadowService,
 )
@@ -404,6 +407,7 @@ def _make_runtime(
     seed_away: bool = True,
     away_entity_id: str | None = AWAY_ENTITY_ID,
     light_priority: object | None = None,
+    manual_light_authority: object | None = None,
 ) -> RoomLightingRuntime:
     # Live-mode tests must model the protected topology explicitly. Keep the
     # fixture home, unless an away transition test supplied its own state.
@@ -433,6 +437,7 @@ def _make_runtime(
         reserved_entity_ids_provider=reserved_entity_ids_provider,
         away_entity_id=away_entity_id,
         light_priority=light_priority,
+        manual_light_authority=manual_light_authority,
     )
 
 
@@ -1184,6 +1189,72 @@ async def test_manual_off_protection_releases_after_timer_and_absence() -> None:
         hass.states.set("binary_sensor.demo_presence", "on", last_changed=_dt(clock.value))
         await runtime.async_process()
         assert executor.calls
+    finally:
+        await runtime.stop()
+
+
+async def test_legacy_room_manual_record_migrates_before_dispatch() -> None:
+    class _AuthorityStore(_MemoryOwnershipStore):
+        recovered_previous = False
+
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    ownership_store = _MemoryOwnershipStore()
+    ownership_store.payload = {
+        "version": 1,
+        "records": [{
+            "roomId": _ROOM_ID, "targetId": "light_main",
+            "source": "manual", "confirmed": True, "at": _NOW_MS,
+        }],
+        "manualOff": [], "morning": [],
+    }
+    authority_store = _AuthorityStore()
+    authority = ManualLightAuthority(authority_store)
+    await authority.async_load()
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor,
+        ownership_store=ownership_store, manual_light_authority=authority,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        record = authority.record("light.demo_main")
+        assert record is not None and record.legacy
+        assert authority.blocks("light.demo_main")
+        assert authority_store.payload["records"][0]["entityId"] == "light.demo_main"
+        assert not executor.calls
+    finally:
+        await runtime.stop()
+
+
+async def test_ambiguous_legacy_room_record_closes_all_lights() -> None:
+    class _AuthorityStore(_MemoryOwnershipStore):
+        recovered_previous = False
+
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    ownership_store = _MemoryOwnershipStore()
+    ownership_store.payload = {
+        "version": 1,
+        "records": [{
+            "targetId": "light_main", "source": "manual",
+            "confirmed": True, "at": _NOW_MS,
+        }],
+        "manualOff": [], "morning": [],
+    }
+    second = _config_payload()
+    second["roomId"] = "room_other"
+    authority = ManualLightAuthority(_AuthorityStore())
+    await authority.async_load()
+    runtime = _make_runtime(
+        hass, payloads=[_config_payload(), second],
+        executor=_SpyExecutor(), ownership_store=ownership_store,
+        manual_light_authority=authority,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        assert authority.unhealthy
+        assert authority.blocks("light.unrelated")
     finally:
         await runtime.stop()
 

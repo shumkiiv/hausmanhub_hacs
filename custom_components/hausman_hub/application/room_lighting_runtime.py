@@ -677,6 +677,7 @@ class RoomLightingRuntime:
         power_migration_manifest: Mapping[str, str] | None = None,
         away_entity_id: str | None = None,
         light_priority: object | None = None,
+        manual_light_authority: object | None = None,
     ) -> None:
         self._hass = hass
         self._service = service
@@ -727,7 +728,10 @@ class RoomLightingRuntime:
             power_dependency_resolver=power_dependency_resolver,
             power_migration_manifest=self._power_migration_manifest,
         )
-        self._executor = executor or RoomLightingHaExecutor()
+        self._manual_light_authority = manual_light_authority
+        self._executor = executor or RoomLightingHaExecutor(
+            manual_light_authority=manual_light_authority
+        )
         self._now_ms = now_ms or _default_now_ms
         self._track_state_changes = track_state_changes
         self._track_interval = track_interval
@@ -886,6 +890,25 @@ class RoomLightingRuntime:
         }
         # Legacy journals were keyed by target id only; attach them to rooms
         # now that the room/target mapping is known.
+        legacy_ambiguous = any(
+            sum(
+                record.target_id in (
+                    config.devices.light_target_ids
+                    | frozenset(item.id for item in config.devices.auxiliaries)
+                )
+                for config in self._configs.values()
+            ) != 1
+            for record in self._ownership._legacy_records
+        ) or any(
+            sum(
+                target_id in (
+                    config.devices.light_target_ids
+                    | frozenset(item.id for item in config.devices.auxiliaries)
+                )
+                for config in self._configs.values()
+            ) != 1
+            for target_id in self._ownership._legacy_manual_off
+        )
         self._ownership.migrate_legacy(
             {
                 room_id: config.devices.light_target_ids
@@ -893,6 +916,31 @@ class RoomLightingRuntime:
                 for room_id, config in self._configs.items()
             }
         )
+        authority = self._manual_light_authority
+        if authority is not None:
+            if legacy_ambiguous:
+                authority.mark_unhealthy()
+            legacy_payload = self._ownership.to_payload()
+            legacy_keys = {
+                (item.get("roomId"), item.get("targetId"))
+                for key in ("records", "manualOff")
+                for item in legacy_payload[key]
+                if isinstance(item, Mapping)
+                and (key == "manualOff" or item.get("source") == "manual")
+            }
+            for room_id, target_id in legacy_keys:
+                config = self._configs.get(room_id)
+                target = config.devices.target(target_id) if config is not None else None
+                entity_id = getattr(target, "entity_id", None)
+                if not isinstance(entity_id, str):
+                    authority.mark_unhealthy()
+                elif entity_id.startswith(("light.", "switch.")):
+                    authority.capture_legacy(entity_id, source="room")
+            try:
+                await authority.async_drain()
+            except Exception:  # noqa: BLE001 - all automatic light routes stay closed
+                authority.mark_unhealthy()
+                _LOGGER.exception("room manual light migration failed")
         # Stale manual holds (protection window expired on an off light) would
         # otherwise block automation forever after a restart.
         self._ownership.prune_stale_manual(
@@ -1133,6 +1181,14 @@ class RoomLightingRuntime:
         self, config: RoomLightingConfig, command: PlannedCommand
     ) -> bool:
         """Fail closed when the shared scenario authority marks this light manual."""
+        authority = self._manual_light_authority
+        if authority is not None and any(
+            authority.blocks(target.entity_id)
+            for target in config.devices.light_targets
+            if isinstance(target.entity_id, str)
+            and target.entity_id.startswith(("light.", "switch."))
+        ):
+            return True
         priority = self._light_priority
         if priority is None or self._hass is None:
             return False
@@ -1152,6 +1208,16 @@ class RoomLightingRuntime:
             return entity_id in claims(frozenset({entity_id}))
         except Exception:  # noqa: BLE001 - shared safety authority is fail closed
             return True
+
+    def _power_protected_entities(self, room_id: str) -> tuple[str, ...]:
+        config = self._configs.get(room_id)
+        if config is None:
+            return ()
+        return tuple(
+            target.entity_id for target in config.devices.light_targets
+            if isinstance(target.entity_id, str)
+            and target.entity_id.startswith(("light.", "switch."))
+        )
 
     @staticmethod
     def _blocked_command_receipt(
@@ -1630,6 +1696,24 @@ class RoomLightingRuntime:
             # A press is a manual intent regardless of the command flag.
             for target_id in target_ids:
                 target = config.devices.target(target_id)
+                entity_id = getattr(target, "entity_id", None)
+                authority = self._manual_light_authority
+                if (
+                    authority is not None and isinstance(entity_id, str)
+                    and entity_id.startswith(("light.", "switch."))
+                ):
+                    try:
+                        changed = authority.capture(
+                            entity_id,
+                            "off" if _binding_turns_off(self._hass, target, binding) else "on",
+                            "device_trigger",
+                            f"{config.room_id}:{device_id}:{subtype}:{moment}:{target_id}",
+                            observed_at_ms=moment,
+                        )
+                        if changed:
+                            self._create_task(authority.async_drain())
+                    except Exception:  # noqa: BLE001
+                        authority.mark_unhealthy()
                 self._ownership.record_manual(
                     config.room_id,
                     target_id,
@@ -1699,7 +1783,8 @@ class RoomLightingRuntime:
             if command is None:
                 continue
             try:
-                await self._executor.execute(  # type: ignore[attr-defined]
+                execute_manual = getattr(self._executor, "execute_manual", self._executor.execute)
+                await execute_manual(  # type: ignore[attr-defined]
                     self._hass, command
                 )
             except Exception:  # noqa: BLE001 - a failed press is not a crash
@@ -3611,7 +3696,11 @@ class RoomLightingRuntime:
         self._command_grace[source_entity_id] = ("turn_on", self._now_ms())
         detail["dispatchAttempt"] = True
         try:
-            receipt = await ensure_power(self._hass, source_entity_id)
+            kwargs = (
+                {"protected_entities": self._power_protected_entities(room_id)}
+                if isinstance(self._executor, RoomLightingHaExecutor) else {}
+            )
+            receipt = await ensure_power(self._hass, source_entity_id, **kwargs)
         except Exception:  # noqa: BLE001 - keep the room isolated
             # The command may have reached the relay before the exception, so
             # the outcome is unknown, not a confirmed failure or a success.
@@ -3767,7 +3856,11 @@ class RoomLightingRuntime:
         self._command_grace[power_entity] = ("turn_on", self._now_ms())
         detail["dispatchAttempt"] = True
         try:
-            receipt = await ensure_power(self._hass, power_entity)
+            kwargs = (
+                {"protected_entities": self._power_protected_entities(room_id)}
+                if isinstance(self._executor, RoomLightingHaExecutor) else {}
+            )
+            receipt = await ensure_power(self._hass, power_entity, **kwargs)
         except Exception:  # noqa: BLE001 - keep the room isolated
             self._power_failures[power_entity] = ("turn_on", evidence_revision)
             detail["reason"] = "power_source_uncertain"

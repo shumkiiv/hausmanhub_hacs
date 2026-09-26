@@ -9,6 +9,7 @@ observation and a ``confirmed`` flag.
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Mapping
 
@@ -74,9 +75,12 @@ class RoomLightingHaExecutor:
         *,
         power_readback_window_seconds: float = DEFAULT_POWER_READBACK_WINDOW_SECONDS,
         power_readback_interval_seconds: float = DEFAULT_POWER_READBACK_INTERVAL_SECONDS,
+        manual_light_authority: object | None = None,
     ) -> None:
         self._targets: dict[str, LightTarget] = dict(targets or {})
+        self._manual_light_authority = manual_light_authority
         self._active_context_ids: set[str] = set()
+        self._recent_context_ids: dict[str, float] = {}
         # Bounded diagnostic trace used by narrow runtime tests and local
         # troubleshooting. It does not participate in command decisions.
         self.calls: list[PlannedCommand] = []
@@ -88,12 +92,31 @@ class RoomLightingHaExecutor:
         )
 
     def owns_service_context(self, context: object) -> bool:
-        """Recognize only our exact in-flight call, never a matching action."""
-        return getattr(context, "id", None) in self._active_context_ids
+        """Recognize our exact call and its delayed device report."""
+        now = time.monotonic()
+        self._recent_context_ids = {
+            key: deadline for key, deadline in self._recent_context_ids.items()
+            if deadline > now
+        }
+        context_id = getattr(context, "id", None)
+        return (
+            context_id in self._active_context_ids
+            or context_id in self._recent_context_ids
+            or getattr(context, "parent_id", None) in self._recent_context_ids
+        )
 
-    async def _call(self, hass, domain: str, service: str, data: dict) -> None:
+    async def _call(
+        self, hass, domain: str, service: str, data: dict,
+        *, protected_entities: tuple[str, ...] = (),
+    ) -> None:
+        authority = self._manual_light_authority
+        if authority is not None and any(
+            authority.blocks(entity_id) for entity_id in protected_entities
+        ):
+            raise ManualLightAuthorityDenied("manual_light_priority")
         context = _new_service_context()
         self._active_context_ids.add(context.id)
+        self._recent_context_ids[context.id] = time.monotonic() + 30.0
         try:
             await hass.services.async_call(
                 domain, service, data, blocking=True, context=context
@@ -109,7 +132,8 @@ class RoomLightingHaExecutor:
         return dict(self._targets)
 
     async def execute(
-        self, hass: HomeAssistant, command: PlannedCommand
+        self, hass: HomeAssistant, command: PlannedCommand,
+        *, automatic: bool = True,
     ) -> RoomLightingReceipt:
         self.calls.append(command)
         del self.calls[:-256]
@@ -125,11 +149,32 @@ class RoomLightingHaExecutor:
                 sent=False,
                 send_outcome="not_sent",
             )
+        if automatic and isinstance(target, LightTarget) and not target.auto_control:
+            return RoomLightingReceipt(
+                target_id=command.target_id, action=command.action.value,
+                confirmed=False, state_after=None, service="manual_only",
+                service_data={}, sent=False, send_outcome="not_sent",
+            )
         min_kelvin, max_kelvin = _device_kelvin_bounds(hass, target)
         domain, service, data = _service_call(
             command, target, min_kelvin=min_kelvin, max_kelvin=max_kelvin
         )
-        await self._call(hass, domain, service, data)
+        protected = (
+            (target.entity_id,)
+            if automatic and isinstance(target, LightTarget)
+            and target.entity_id.startswith(("light.", "switch."))
+            else ()
+        )
+        try:
+            await self._call(hass, domain, service, data,
+                             protected_entities=protected)
+        except ManualLightAuthorityDenied:
+            return RoomLightingReceipt(
+                target_id=command.target_id, action=command.action.value,
+                confirmed=False, state_after=None,
+                service=f"{domain}.{service}", service_data=data,
+                sent=False, send_outcome="not_sent",
+            )
         state_after = _read_back(hass, target)
         return RoomLightingReceipt(
             target_id=command.target_id,
@@ -140,8 +185,15 @@ class RoomLightingHaExecutor:
             service_data=data,
         )
 
+    async def execute_manual(
+        self, hass: HomeAssistant, command: PlannedCommand
+    ) -> RoomLightingReceipt:
+        """Physical binding presses remain directly executable by the user."""
+        return await self.execute(hass, command, automatic=False)
+
     async def async_power_on(
-        self, hass: HomeAssistant, entity_id: str
+        self, hass: HomeAssistant, entity_id: str,
+        *, protected_entities: tuple[str, ...] = (),
     ) -> dict[str, object]:
         """Turn on a power source and confirm it through fresh read-back.
 
@@ -185,7 +237,11 @@ class RoomLightingHaExecutor:
                 domain,
                 "turn_on",
                 {"entity_id": entity_id},
+                protected_entities=protected_entities,
             )
+        except ManualLightAuthorityDenied:
+            receipt["reason"] = "manual_light_priority"
+            return receipt
         except Exception:  # noqa: BLE001 - a failed power call must not crash
             # The exception may have happened before, during or after the
             # Home Assistant boundary: the command outcome is unknown, never a
@@ -221,6 +277,10 @@ class RoomLightingHaExecutor:
             reason="power_source_unconfirmed",
         )
         return receipt
+
+
+class ManualLightAuthorityDenied(RuntimeError):
+    """Physical call was refused before reaching Home Assistant."""
 
 
 def _new_service_context():

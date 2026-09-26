@@ -594,6 +594,9 @@ class ScenarioExecutor:
         electrical_breaker_resolver: Callable[[str], bool] | None = None,
         command_contexts: ScenarioCommandContextRegistry | None = None,
         manual_light_off_protection: ManualLightOffProtectionCoordinator | None = None,
+        manual_light_authority: object | None = None,
+        managed_light_entity_ids: Callable[[], frozenset[str]] | None = None,
+        automatic_light_writer_conflict: Callable[[str], bool] | None = None,
         curtain_command_policy: CurtainCommandPolicy | None = None,
         curtain_protection: object | None = None,
     ):
@@ -618,6 +621,9 @@ class ScenarioExecutor:
         self._electrical_breaker_resolver = electrical_breaker_resolver
         self._command_contexts = command_contexts
         self._manual_light_off_protection = manual_light_off_protection
+        self._manual_light_authority = manual_light_authority
+        self._managed_light_entity_ids = managed_light_entity_ids
+        self._automatic_light_writer_conflict = automatic_light_writer_conflict
         self._curtain_command_policy = curtain_command_policy or CurtainCommandPolicy()
         self._curtain_protection = curtain_protection
         self._scenario_generation_validator: (
@@ -3124,6 +3130,15 @@ class ScenarioExecutor:
             power_error, power_precondition, prepared_sources = (
                 await self._prepare_power_dependency(
                     device.entity_id,
+                    automatic=automatic,
+                    manual_light_entity_id=(
+                        device.entity_id
+                        if automatic and self._light_priority.is_lighting_action(
+                            action, self._catalog,
+                            scenario_text=lighting_scenario_text,
+                        )
+                        else None
+                    ),
                     powered_sources=powered_sources or {},
                     dry_run=dry_run,
                     reassert_auto_source=confirmation_action_id != "turn_off",
@@ -3399,6 +3414,36 @@ class ScenarioExecutor:
                         "on" if dispatch_service == "turn_on" else "off",
                     )
                 physical_dispatch_at = datetime.now(timezone.utc)
+                is_automatic_light = automatic and self._light_priority.is_lighting_action(
+                    action, self._catalog, scenario_text=lighting_scenario_text
+                )
+                if (
+                    automatic and self._automatic_light_writer_conflict is not None
+                    and self._automatic_light_writer_conflict(device.entity_id)
+                ):
+                    return failed_after_power_dispatch({
+                        **base, "status": "failed", "error": "light_writer_conflict",
+                        "physicalAttempted": False,
+                    })
+                if (
+                    is_automatic_light
+                    and self._managed_light_entity_ids is not None
+                    and device.entity_id not in self._managed_light_entity_ids()
+                ):
+                    return failed_after_power_dispatch({
+                        **base, "status": "failed",
+                        "error": "manual_light_attribution_unavailable",
+                        "physicalAttempted": False,
+                    })
+                if (
+                    is_automatic_light
+                    and self._manual_light_authority is not None
+                    and self._manual_light_authority.blocks(device.entity_id)
+                ):
+                    return failed_after_power_dispatch({
+                        **base, "status": "failed", "error": "manual_light_priority",
+                        "physicalAttempted": False,
+                    })
                 mark_physical_dispatch()
                 base["_physical_attempted"] = True
                 await self._call_service(
@@ -3723,6 +3768,8 @@ class ScenarioExecutor:
         self,
         entity_id: str,
         *,
+        automatic: bool = False,
+        manual_light_entity_id: str | None = None,
         powered_sources: Mapping[str, float],
         dry_run: bool,
         reassert_auto_source: bool = True,
@@ -3768,6 +3815,8 @@ class ScenarioExecutor:
                 )
         upstream_error, _, upstream_sources = await self._prepare_power_dependency(
             source_entity_id,
+            automatic=automatic,
+            manual_light_entity_id=manual_light_entity_id,
             powered_sources=powered_sources,
             dry_run=dry_run,
             reassert_auto_source=reassert_auto_source,
@@ -3951,6 +4000,30 @@ class ScenarioExecutor:
                         await before_dispatch()
                     if cancellation_event is not None and cancellation_event.is_set():
                         return "dispatch_cancelled", precondition, upstream_sources
+                    if (
+                        manual_light_entity_id is not None
+                        and self._managed_light_entity_ids is not None
+                        and manual_light_entity_id not in self._managed_light_entity_ids()
+                    ):
+                        return "manual_light_attribution_unavailable", precondition, upstream_sources
+                    if (
+                        automatic
+                        and self._automatic_light_writer_conflict is not None
+                        and (
+                            (
+                                manual_light_entity_id is not None
+                                and self._automatic_light_writer_conflict(manual_light_entity_id)
+                            )
+                            or self._automatic_light_writer_conflict(source_entity_id)
+                        )
+                    ):
+                        return "light_writer_conflict", precondition, upstream_sources
+                    if (
+                        manual_light_entity_id is not None
+                        and self._manual_light_authority is not None
+                        and self._manual_light_authority.blocks(manual_light_entity_id)
+                    ):
+                        return "manual_light_priority", precondition, upstream_sources
                     if dispatch_marker is not None:
                         dispatch_marker()
                     await self._call_service(

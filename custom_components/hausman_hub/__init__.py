@@ -589,6 +589,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     await light_priority.async_load()
     domain_data["light_automation_priority"] = light_priority
+    from .application.manual_light_authority import ManualLightAuthority
+    from .manual_light_authority_storage import HomeAssistantManualLightAuthorityStore
+
+    manual_light_authority = ManualLightAuthority(
+        HomeAssistantManualLightAuthorityStore(hass, entry.entry_id)
+    )
+    try:
+        await manual_light_authority.async_load()
+    except Exception:  # noqa: BLE001 - both automatic routes remain closed
+        _LOGGER.exception("manual light authority unavailable; automatic light is denied")
+    domain_data["manual_light_authority"] = manual_light_authority
+    # Old scenario records do not carry a proved deadline. Copy them into
+    # the common store before any automatic event subscription can run.
+    for device in scenario_catalog.devices.values():
+        entity_id = getattr(device, "entity_id", None)
+        if isinstance(entity_id, str) and entity_id.startswith(("light.", "switch.")) and (
+            entity_id in light_priority.manual_claim_entity_ids(frozenset({entity_id}))
+        ):
+            manual_light_authority.capture_legacy(entity_id, source="scenario")
+    try:
+        await manual_light_authority.async_drain()
+    except Exception:  # noqa: BLE001
+        _LOGGER.exception("legacy manual light migration failed; automation is denied")
     from .application.light_safety_obligations import LightSafetyObligations
     from .light_safety_obligation_storage import (
         HomeAssistantLightSafetyObligationStore,
@@ -653,6 +676,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         electrical_breaker_resolver=scenario_service.is_electrical_breaker_entity,
         command_contexts=scenario_command_contexts,
         manual_light_off_protection=manual_light_off_protection,
+        manual_light_authority=manual_light_authority,
+        managed_light_entity_ids=lambda: _managed_light_entities(),
+        automatic_light_writer_conflict=lambda entity_id: _room_writer_conflict(entity_id),
         curtain_command_policy=CurtainCommandPolicy(
             lambda: scenario_control_policy.current,
             scale_authorization_provider=(
@@ -665,6 +691,73 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ),
         curtain_protection=curtain_protection,
     )
+    from .manual_light_authority_events import ManualLightAuthorityEvents
+
+    def _managed_light_entities() -> frozenset[str]:
+        from .domain.scenarios import ScenarioAction, ScenarioActionType
+
+        catalog = scenario_service.current_catalog()
+        entities = {
+            device.entity_id
+            for device in catalog.devices.values()
+            if isinstance(getattr(device, "entity_id", None), str)
+            and device.entity_id.startswith("light.")
+        }
+        for device in catalog.devices.values():
+            entity_id = getattr(device, "entity_id", None)
+            if not isinstance(entity_id, str) or not entity_id.startswith("switch."):
+                continue
+            for action in getattr(device, "actions", ()):
+                if light_priority.is_lighting_action(
+                    ScenarioAction(
+                        id="managed_light_probe",
+                        type=ScenarioActionType.DEVICE_ACTION,
+                        target_id=device.target_id,
+                        action_id=action.action_id,
+                    ),
+                    catalog,
+                ):
+                    entities.add(entity_id)
+                    break
+        runtime = domain_data.get("room_lighting_runtime")
+        if runtime is not None:
+            for config in runtime.configs():
+                entities.update(
+                    target.entity_id for target in
+                    (*config.devices.light_targets, *config.devices.auxiliaries)
+                    if isinstance(target.entity_id, str)
+                    and target.entity_id.startswith(("light.", "switch."))
+                )
+        return frozenset(entities)
+
+    def _room_writer_conflict(entity_id: str) -> bool:
+        runtime = domain_data.get("room_lighting_runtime")
+        if runtime is None:
+            # A configured room service still loading its writer map cannot
+            # prove that a scenario owns the target exclusively.
+            return domain_data.get("room_lighting_service") is not None
+        for config in runtime.configs():
+            for target in config.devices.light_targets:
+                if target.entity_id == entity_id and (
+                    config.commands_enabled or not target.auto_control
+                ):
+                    return True
+            power = config.devices.power_switch
+            if config.commands_enabled and power is not None and power.entity_id == entity_id:
+                return True
+            power_rooms = getattr(runtime, "_exact_power_by_entity", {})
+            if config.commands_enabled and config.room_id in power_rooms.get(entity_id, set()):
+                return True
+        return False
+
+    manual_light_events = ManualLightAuthorityEvents(
+        hass,
+        manual_light_authority,
+        _managed_light_entities,
+        scenario_command_contexts,
+        lambda: getattr(domain_data.get("room_lighting_runtime"), "_executor", None),
+    )
+    entry.async_on_unload(manual_light_events.start())
     entry.async_on_unload(
         light_safety_obligations.start(
             scenario_executor.async_reconcile_light_obligation
@@ -1049,6 +1142,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             power_migration_manifest=room_power_migration_manifest,
             away_entity_id=away_sensor_entity_id,
             light_priority=light_priority,
+            manual_light_authority=manual_light_authority,
         )
         domain_data[DATA_ROOM_LIGHTING_RUNTIME] = room_lighting_runtime
         await room_lighting_runtime.start(hass, entry.entry_id)

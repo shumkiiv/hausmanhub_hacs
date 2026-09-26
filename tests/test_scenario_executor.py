@@ -40,6 +40,9 @@ from custom_components.hausman_hub.application.device_action_receipts import (
 from custom_components.hausman_hub.application.scenario_light_priority import (
     LightAutomationPriority,
 )
+from custom_components.hausman_hub.application.manual_light_authority import (
+    ManualLightAuthority,
+)
 from custom_components.hausman_hub.application.scenario_command_context import (
     ScenarioCommandContextRegistry,
 )
@@ -365,6 +368,94 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             readback_window_seconds=0.02,
             readback_interval_seconds=0.01,
         )
+
+    async def test_shared_manual_authority_blocks_final_scenario_dispatch(self) -> None:
+        self.hass.state_values["light.living_room"] = SimpleNamespace(
+            state="off", attributes={}
+        )
+        authority = ManualLightAuthority()
+        authority.capture("light.living_room", "off", "service", "manual-1")
+        executor = ScenarioExecutor(
+            self.hass, self.catalog, self.executor._run_callback,
+            manual_light_authority=authority,
+        )
+        action = ScenarioAction(
+            id="light_on", type=ScenarioActionType.DEVICE_ACTION,
+            target_id="device_1", action_id="turn_on",
+        )
+        receipt = await executor._device_action_receipt(
+            action, {"action_id": action.id, "status": "pending"},
+            automatic=True,
+        )
+        self.assertEqual("manual_light_priority", receipt.get("error"))
+        self.hass.services.async_call.assert_not_awaited()
+
+    async def test_shared_manual_authority_blocks_upstream_power(self) -> None:
+        self.hass.state_values["switch.wall"] = SimpleNamespace(
+            state="off", attributes={}
+        )
+        authority = ManualLightAuthority()
+        authority.capture("light.living_room", "on", "state", "manual-2")
+        executor = ScenarioExecutor(
+            self.hass, self.catalog, self.executor._run_callback,
+            power_dependency_resolver=lambda: _power_link(policy="auto_turn_on"),
+            electrical_breaker_resolver=lambda _entity: False,
+            command_guard=lambda *_args: None,
+            manual_light_authority=authority,
+        )
+        error, _detail, _sources = await executor._prepare_power_dependency(
+            "light.living_room", manual_light_entity_id="light.living_room",
+            powered_sources={}, dry_run=False, request_id="power-manual-test",
+        )
+        self.assertEqual("manual_light_priority", error)
+        self.hass.services.async_call.assert_not_awaited()
+
+    async def test_switch_light_uses_same_final_manual_deny(self) -> None:
+        self.catalog._devices["relay_light"] = ScenarioDeviceEntry(
+            target_id="relay_light", name="Свет прихожей",
+            entity_id="switch.hall_light",
+            actions=(ScenarioDeviceAction(
+                "turn_on", "On", "switch", "turn_on", frozenset()
+            ),),
+        )
+        self.hass.state_values["switch.hall_light"] = SimpleNamespace(
+            state="off", attributes={}
+        )
+        authority = ManualLightAuthority()
+        authority.capture("switch.hall_light", "off", "service", "relay-manual")
+        executor = ScenarioExecutor(
+            self.hass, self.catalog, self.executor._run_callback,
+            manual_light_authority=authority,
+        )
+        action = ScenarioAction(
+            id="relay_on", type=ScenarioActionType.DEVICE_ACTION,
+            target_id="relay_light", action_id="turn_on",
+        )
+        receipt = await executor._device_action_receipt(
+            action, {"action_id": action.id, "status": "pending"},
+            automatic=True,
+        )
+        self.assertEqual("manual_light_priority", receipt.get("error"))
+        self.hass.services.async_call.assert_not_awaited()
+
+    async def test_conflicting_room_writer_blocks_scenario_physical_call(self) -> None:
+        self.hass.state_values["light.living_room"] = SimpleNamespace(
+            state="off", attributes={}
+        )
+        executor = ScenarioExecutor(
+            self.hass, self.catalog, self.executor._run_callback,
+            automatic_light_writer_conflict=lambda entity: entity == "light.living_room",
+        )
+        action = ScenarioAction(
+            id="light_on", type=ScenarioActionType.DEVICE_ACTION,
+            target_id="device_1", action_id="turn_on",
+        )
+        receipt = await executor._device_action_receipt(
+            action, {"action_id": action.id, "status": "pending"},
+            automatic=True,
+        )
+        self.assertEqual("light_writer_conflict", receipt.get("error"))
+        self.hass.services.async_call.assert_not_awaited()
 
     async def test_managed_light_zero_action_and_source_failures_have_sanitized_phase(self) -> None:
         """Both managed controllers fail closed before any physical dispatch."""
