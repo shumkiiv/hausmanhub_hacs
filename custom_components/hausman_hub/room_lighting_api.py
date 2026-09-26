@@ -103,6 +103,7 @@ def register_room_lighting_api(hass: HomeAssistant, entry_id: str) -> None:
         data[DATA_ROOM_LIGHTING_SERVICE] = RoomLightingService(
             HomeAssistantRoomLightingStore(hass, entry_id),
             mutation_lock=data.setdefault("admin_mutation_lock", asyncio.Lock()),
+            topology_invalidator=getattr(data.get("manual_light_authority"), "invalidate_related_sources", None),
         )
     data.setdefault(DATA_ROOM_LIGHTING_LIVE_TESTS, {})
     if DATA_ROOM_LIGHTING_VIEWS in data:

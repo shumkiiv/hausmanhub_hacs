@@ -187,9 +187,11 @@ class RoomLightingStorageError(RuntimeError):
 class RoomLightingService:
     """Validate, version and persist room lighting configurations only."""
 
-    def __init__(self, store: object, *, mutation_lock: asyncio.Lock | None = None) -> None:
+    def __init__(self, store: object, *, mutation_lock: asyncio.Lock | None = None,
+                 topology_invalidator: callable | None = None) -> None:
         self._store = store
         self._lock = mutation_lock or asyncio.Lock()
+        self._topology_invalidator = topology_invalidator
 
     async def async_get_config(self, room_id: str) -> RoomLightingConfig | None:
         return await self._store.async_get(room_id)  # type: ignore[attr-defined]
@@ -223,6 +225,8 @@ class RoomLightingService:
                 version=version,
                 updated_at=max(_now_seconds(), existing.updated_at + 1 if existing else 0),
             )
+            if self._topology_invalidator is not None:
+                self._topology_invalidator()
             saved = await self._store.async_upsert(stored)  # type: ignore[attr-defined]
             if saved is False:
                 raise RoomLightingStorageError("room lighting config storage save failed")
@@ -230,6 +234,11 @@ class RoomLightingService:
 
     async def async_delete_config(self, room_id: str) -> bool:
         async with self._lock:
+            existing = await self._store.async_get(room_id)  # type: ignore[attr-defined]
+            if existing is None:
+                return False
+            if self._topology_invalidator is not None:
+                self._topology_invalidator()
             return await self._store.async_delete(room_id)  # type: ignore[attr-defined]
 
     async def async_apply_template(

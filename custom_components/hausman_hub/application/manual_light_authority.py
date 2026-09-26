@@ -55,10 +55,16 @@ class ManualLightAuthority:
         self._seeded_empty_store = False
         self._writer = asyncio.Lock()
         self._related_sources = RelatedLightSources(True, {})
+        self._related_sources_invalidated = False
 
     def set_related_sources(self, graph: RelatedLightSources) -> None:
         """Atomically replace the only relation graph; an invalid graph denies all."""
-        self._related_sources = graph
+        if not self._related_sources_invalidated:
+            self._related_sources = graph
+
+    def invalidate_related_sources(self) -> None:
+        self._related_sources_invalidated = True
+        self._related_sources = RelatedLightSources(False, {})
 
     @property
     def seeded_empty_store(self) -> bool:
