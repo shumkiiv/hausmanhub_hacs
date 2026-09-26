@@ -1318,6 +1318,88 @@ async def test_legacy_import_in_production_startup_order_preserves_old_payload(
     assert ownership_store.saves == 0
 
 
+async def test_legacy_manual_hold_without_authority_store_blocks_dispatch() -> None:
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    ownership_store = _MemoryOwnershipStore()
+    ownership_store.payload = {
+        "version": 1,
+        "records": [{
+            "targetId": "light_main", "source": "manual",
+            "confirmed": True, "at": 1,
+        }],
+        "manualOff": [{"targetId": "light_main", "at": 1}],
+        "morning": [],
+    }
+    before = copy.deepcopy(ownership_store.payload)
+    authority = ManualLightAuthority()
+    await authority.async_drain()  # No store and no pending event: no-op.
+    assert not authority.persistence_ready and not authority.unhealthy
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor,
+        ownership_store=ownership_store, manual_light_authority=authority,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        assert authority.unhealthy
+        assert authority.blocks("light.demo_main")
+        assert authority.blocks("light.unrelated")
+        await runtime.async_process([_ROOM_ID])
+        assert executor.calls == []
+        assert hass.services.calls == []
+    finally:
+        await runtime.stop()
+    assert ownership_store.payload == before
+    assert ownership_store.saves == 0
+
+
+async def test_noop_authority_drain_cannot_prove_legacy_import() -> None:
+    class _AuthorityStore(_MemoryOwnershipStore):
+        recovered_previous = False
+
+    class _NoOpDrainAuthority(ManualLightAuthority):
+        async def async_drain(self) -> None:
+            return None
+
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    ownership_store = _MemoryOwnershipStore()
+    ownership_store.payload = {
+        "version": 1,
+        "records": [{
+            "targetId": "light_main", "source": "manual",
+            "confirmed": True, "at": 1,
+        }],
+        "manualOff": [], "morning": [],
+    }
+    before = copy.deepcopy(ownership_store.payload)
+    authority_store = _AuthorityStore()
+    authority = _NoOpDrainAuthority(authority_store)
+    authority.begin_startup_observation()
+    await authority.async_load()
+    seed_writes = authority_store.saves
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor,
+        ownership_store=ownership_store, manual_light_authority=authority,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        authority.finish_startup_observation()
+        assert authority.unhealthy
+        assert not authority.has_durable_import(("light.demo_main",))
+        assert authority.blocks("light.unrelated")
+        await runtime.async_process([_ROOM_ID])
+        assert executor.calls == []
+        assert hass.services.calls == []
+    finally:
+        await runtime.stop()
+    assert authority_store.saves == seed_writes
+    assert ownership_store.payload == before
+    assert ownership_store.saves == 0
+
+
 async def test_ambiguous_legacy_room_record_closes_all_lights() -> None:
     class _AuthorityStore(_MemoryOwnershipStore):
         recovered_previous = False

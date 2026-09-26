@@ -992,15 +992,18 @@ class RoomLightingRuntime:
         legacy_entities, legacy_uncertain = legacy_manual_authority_plan(
             self._ownership, self._configs.values()
         )
+        legacy_refs = self._ownership.manual_authority_target_refs()
         authority = self._manual_light_authority
         if authority is not None:
-            if legacy_uncertain:
+            if legacy_uncertain or (legacy_refs and not authority.persistence_ready):
                 authority.mark_unhealthy()
             elif authority.persistence_ready:
                 try:
                     for entity_id in legacy_entities:
                         authority.capture_legacy(entity_id, source="room")
                     await authority.async_drain()
+                    if not authority.has_durable_import(legacy_entities):
+                        authority.mark_unhealthy()
                 except Exception:  # noqa: BLE001 - all automatic light routes stay closed
                     authority.mark_unhealthy()
                     _LOGGER.exception("room manual light migration failed")
