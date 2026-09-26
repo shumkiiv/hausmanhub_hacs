@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -50,7 +50,13 @@ class ManualLightAuthority:
         # An event can be lost if the process dies before its async save.
         # A loaded file alone therefore cannot prove a clean observation gap.
         self._restart_uncertain = False
+        self._startup_observation_pending = False
+        self._seeded_empty_store = False
         self._writer = asyncio.Lock()
+
+    @property
+    def seeded_empty_store(self) -> bool:
+        return self._seeded_empty_store
 
     @property
     def generation(self) -> int:
@@ -60,7 +66,7 @@ class ManualLightAuthority:
     def unhealthy(self) -> bool:
         return (
             not self._ready or self._failed or self._recovery
-            or self._restart_uncertain
+            or self._restart_uncertain or self._startup_observation_pending
         )
 
     @property
@@ -70,7 +76,17 @@ class ManualLightAuthority:
             return "storage_unavailable"
         if self._restart_uncertain:
             return "restart_uncertain"
+        if self._startup_observation_pending:
+            return "restart_uncertain"
         return None
+
+    def begin_startup_observation(self) -> None:
+        """Close dispatch until the full room entity set has been restored."""
+        self._startup_observation_pending = True
+
+    def finish_startup_observation(self) -> None:
+        """Open dispatch only after buffered evidence was verified."""
+        self._startup_observation_pending = False
 
     def record(self, entity_id: str) -> ManualLightRecord | None:
         return self._pending.get(entity_id) or self._records.get(entity_id)
@@ -97,6 +113,7 @@ class ManualLightAuthority:
                 await self._store.async_save(
                     {"version": 2, "records": [], "recentFingerprints": []}
                 )
+                self._seeded_empty_store = True
             else:
                 self._restart_uncertain = True
             loaded: dict[str, ManualLightRecord] = {}
@@ -184,6 +201,16 @@ class ManualLightAuthority:
             return False
         return self.capture(entity_id, "unknown", source,
                             f"legacy:{source}:{entity_id}", legacy=True)
+
+    async def async_capture_initial_room_scope(
+        self, entity_ids: Iterable[str]
+    ) -> None:
+        """Hold pre-existing room lights when no earlier authority file exists."""
+        if not self._seeded_empty_store:
+            return
+        for entity_id in entity_ids:
+            self.capture_legacy(entity_id, source="startup_unobserved")
+        await self.async_drain()
 
     async def async_drain(self) -> None:
         async with self._writer:

@@ -448,6 +448,22 @@ class RoomLightingApiTest(unittest.TestCase):
             self.assertEqual("manual_off_wait", returned["sources"][0]["reason"])
             _validate("room-lighting-status.schema.json", manual_off)
 
+            initial = ManualLightAuthority()
+            initial.capture_legacy(
+                "light.demo_main", source="startup_unobserved"
+            )
+            self.hass.data["hausman_hub"]["manual_light_authority"] = initial
+            startup = (await self.status_view.get(request)).payload
+            uncertain = startup["manual_control_return"]
+            self.assertTrue(uncertain["active"])
+            self.assertEqual("restart_uncertain", uncertain["reason"])
+            self.assertEqual(
+                "startup_unobserved", uncertain["sources"][0]["source"]
+            )
+            self.assertIsNone(uncertain["since"])
+            self.assertIsNone(uncertain["remaining_seconds"])
+            _validate("room-lighting-status.schema.json", startup)
+
         asyncio.run(flow())
 
     def test_status_uses_the_running_runtime_context(self) -> None:

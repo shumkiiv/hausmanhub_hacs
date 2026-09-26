@@ -82,6 +82,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _clear_restored_hausmanhub_records(hass, (entry.entry_id,))
         return False
 
+    # Observe external light actions before the first setup await. The room
+    # catalog and scenario registry are attached later; until then every
+    # light/switch event is buffered and automatic dispatch stays closed.
+    from .application.manual_light_authority import ManualLightAuthority
+    from .manual_light_authority_storage import HomeAssistantManualLightAuthorityStore
+    from .manual_light_authority_events import ManualLightAuthorityEvents
+
+    manual_light_authority = ManualLightAuthority(
+        HomeAssistantManualLightAuthorityStore(hass, entry.entry_id)
+    )
+    manual_light_events = ManualLightAuthorityEvents(
+        hass,
+        manual_light_authority,
+        lambda: _managed_light_entities(),
+        None,
+        lambda: getattr(
+            hass.data.get(entry.domain, {}).get("room_lighting_runtime"),
+            "_executor", None,
+        ),
+    )
+    entry.async_on_unload(manual_light_events.start(buffer_startup=True))
+    try:
+        await manual_light_authority.async_load()
+    except Exception:  # noqa: BLE001 - automatic light remains denied
+        _LOGGER.exception("manual light authority unavailable; automatic light is denied")
+
     # Imports stay at the outer boundary so framework-independent tests can run
     # without Home Assistant itself.
     from homeassistant.const import Platform
@@ -589,16 +615,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     await light_priority.async_load()
     domain_data["light_automation_priority"] = light_priority
-    from .application.manual_light_authority import ManualLightAuthority
-    from .manual_light_authority_storage import HomeAssistantManualLightAuthorityStore
-
-    manual_light_authority = ManualLightAuthority(
-        HomeAssistantManualLightAuthorityStore(hass, entry.entry_id)
-    )
-    try:
-        await manual_light_authority.async_load()
-    except Exception:  # noqa: BLE001 - both automatic routes remain closed
-        _LOGGER.exception("manual light authority unavailable; automatic light is denied")
     domain_data["manual_light_authority"] = manual_light_authority
     # Old scenario records do not carry a proved deadline. Copy them into
     # the common store before any automatic event subscription can run.
@@ -691,8 +707,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ),
         curtain_protection=curtain_protection,
     )
-    from .manual_light_authority_events import ManualLightAuthorityEvents
-
     def _managed_light_entities() -> frozenset[str]:
         from .domain.scenarios import ScenarioAction, ScenarioActionType
 
@@ -750,14 +764,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 return True
         return False
 
-    manual_light_events = ManualLightAuthorityEvents(
-        hass,
-        manual_light_authority,
-        _managed_light_entities,
-        scenario_command_contexts,
-        lambda: getattr(domain_data.get("room_lighting_runtime"), "_executor", None),
-    )
-    entry.async_on_unload(manual_light_events.start())
+    manual_light_events.set_automatic_contexts(scenario_command_contexts)
     entry.async_on_unload(
         light_safety_obligations.start(
             scenario_executor.async_reconcile_light_obligation
@@ -1104,6 +1111,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             stored_power_manifest = corrupt_manifest()
             power_manifest_healthy = False
         configs = await room_lighting_service.async_list_configs()
+        if manual_light_authority.seeded_empty_store:
+            # The first authority file may be created while older room
+            # profiles already exist. Their pre-subscription history cannot
+            # be reconstructed, so only those configured physical lights
+            # retain an unknown manual claim until a later proved release.
+            try:
+                await manual_light_authority.async_capture_initial_room_scope(
+                    target.entity_id
+                    for config in configs
+                    for target in config.devices.light_targets
+                    if isinstance(target.entity_id, str)
+                    and target.entity_id.startswith(("light.", "switch."))
+                )
+            except Exception:  # noqa: BLE001 - startup stays fail closed
+                manual_light_authority.mark_unhealthy()
+                _LOGGER.exception("initial room light authority migration failed")
         if power_manifest_healthy:
             try:
                 room_power_migration_manifest = (
@@ -1147,6 +1170,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         domain_data[DATA_ROOM_LIGHTING_RUNTIME] = room_lighting_runtime
         await room_lighting_runtime.start(hass, entry.entry_id)
         entry.async_on_unload(room_lighting_runtime.cancel)
+    # No automatic route may open until room-only light events received while
+    # the room catalog loaded have been attributed and durably drained.
+    await manual_light_events.async_complete_startup()
     from .critical_sensor_notification_api import (
         register_critical_sensor_notification_api,
     )

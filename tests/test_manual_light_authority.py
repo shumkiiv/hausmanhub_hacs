@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -320,6 +321,18 @@ async def test_switch_light_event_and_selector_uncertainty() -> None:
     await asyncio.gather(*hass.tasks)
 
 
+def test_broad_entity_id_string_cannot_bypass_managed_light_attribution() -> None:
+    authority = ManualLightAuthority()
+    listener = ManualLightAuthorityEvents(
+        SimpleNamespace(), authority, lambda: {"light.demo"}, None, lambda: None
+    )
+    listener.service_event(SimpleNamespace(
+        data={"domain": "light", "service": "turn_on",
+              "service_data": {"entity_id": "all"}},
+    ))
+    assert authority.unhealthy
+
+
 def test_event_subscription_registers_both_sync_boundaries() -> None:
     callbacks = {}
     cancelled = []
@@ -338,3 +351,205 @@ def test_event_subscription_registers_both_sync_boundaries() -> None:
     assert set(callbacks) == {"call_service", "state_changed"}
     cancel()
     assert set(cancelled) == {"call_service", "state_changed"}
+
+
+async def test_first_startup_buffers_room_only_event_until_verified_save(monkeypatch) -> None:
+    from custom_components.hausman_hub.application import room_lighting_ha_executor
+
+    monkeypatch.setattr(
+        room_lighting_ha_executor, "_new_service_context",
+        lambda: SimpleNamespace(id="startup-automatic"),
+    )
+    callbacks = {}
+    calls = []
+
+    class _Bus:
+        def async_listen(self, event_type, callback):
+            callbacks[event_type] = callback
+            return lambda: None
+
+    class _Services:
+        async def async_call(self, *args, **kwargs):
+            calls.append((args, kwargs))
+
+    hass = SimpleNamespace(
+        bus=_Bus(), services=_Services(),
+        states=SimpleNamespace(get=lambda _entity: None),
+    )
+    class _DelayedLoadStore(_Store):
+        def __init__(self):
+            super().__init__()
+            self.load_started = asyncio.Event()
+            self.load_release = asyncio.Event()
+
+        async def async_load(self):
+            self.load_started.set()
+            await self.load_release.wait()
+            return self.payload
+
+    store = _DelayedLoadStore()
+    authority = ManualLightAuthority(store)
+    managed = set()
+    listener = ManualLightAuthorityEvents(
+        hass, authority, lambda: managed, None, lambda: None
+    )
+    listener.start(buffer_startup=True)
+    loading = asyncio.create_task(authority.async_load())
+    await store.load_started.wait()  # The setup await has begun.
+    assert authority.blocks("light.room_only")
+    callbacks["call_service"](SimpleNamespace(
+        data={"domain": "light", "service": "turn_on",
+              "service_data": {"entity_id": "light.room_only"}},
+        context=SimpleNamespace(id="external-startup-on"),
+        time_fired=datetime.now(timezone.utc),
+    ))
+    store.load_release.set()
+    await loading  # First install, verified empty seed.
+    assert authority.seeded_empty_store
+    # The room-only entity is not known yet. Startup denial covers the race.
+    assert authority.record("light.room_only") is None
+    target = LightTarget(
+        id="room_only", name="Комнатный свет", kind=LightKind.LIGHT,
+        brightness=False, color_temperature=False,
+        entity_id="light.room_only",
+    )
+    executor = RoomLightingHaExecutor(
+        {"room_only": target}, manual_light_authority=authority
+    )
+    command = PlannedCommand(
+        "room_only", LightAction.TURN_OFF, reason=DecisionReason.SCHEDULE
+    )
+    assert not (await executor.execute(hass, command)).sent
+    assert not calls
+    managed.add("light.room_only")  # RoomLightingRuntime.start() completed.
+    await listener.async_complete_startup()
+    assert authority.record("light.room_only").action == "on"
+    assert store.payload["records"][0]["entityId"] == "light.room_only"
+    assert authority.blocks("light.room_only")
+    assert not authority.blocks("light.unrelated")
+    assert not (await executor.execute(hass, command)).sent
+    assert not calls
+
+
+async def test_empty_store_holds_preexisting_room_light_scope_only() -> None:
+    store = _Store()
+    authority = ManualLightAuthority(store)
+    await authority.async_load()
+    assert authority.seeded_empty_store
+    await authority.async_capture_initial_room_scope(
+        ["light.configured", "switch.configured_relay"]
+    )
+    assert authority.record("light.configured").legacy
+    assert authority.record("switch.configured_relay").legacy
+    assert authority.blocks("light.configured")
+    assert not authority.blocks("light.unconfigured")
+    assert {item["entityId"] for item in store.payload["records"]} == {
+        "light.configured", "switch.configured_relay",
+    }
+
+    restored = ManualLightAuthority(store)
+    await restored.async_load()
+    assert not restored.seeded_empty_store
+    await restored.async_capture_initial_room_scope(["light.new"])
+    assert restored.record("light.new") is None
+
+
+async def test_room_only_state_transition_is_buffered_before_catalog_load() -> None:
+    callbacks = {}
+
+    class _Bus:
+        def async_listen(self, event_type, callback):
+            callbacks[event_type] = callback
+            return lambda: None
+
+    store = _Store()
+    authority = ManualLightAuthority(store)
+    await authority.async_load()
+    managed = set()
+    listener = ManualLightAuthorityEvents(
+        SimpleNamespace(bus=_Bus()), authority, lambda: managed, None, lambda: None
+    )
+    listener.start(buffer_startup=True)
+    observed = datetime.now(timezone.utc)
+    callbacks["state_changed"](SimpleNamespace(
+        data={
+            "entity_id": "switch.room_only",
+            "old_state": SimpleNamespace(state="on"),
+            "new_state": SimpleNamespace(
+                state="off", last_changed=observed, attributes={},
+            ),
+        },
+        context=SimpleNamespace(id="external-state-off"),
+    ))
+    assert authority.record("switch.room_only") is None
+    assert authority.blocks("switch.room_only")
+    managed.add("switch.room_only")
+    await listener.async_complete_startup()
+    assert authority.record("switch.room_only").action == "off"
+    assert store.payload["records"][0]["entityId"] == "switch.room_only"
+
+
+async def test_room_only_event_during_startup_drain_is_not_lost() -> None:
+    class _SlowStore(_Store):
+        def __init__(self):
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.delay = False
+
+        async def async_save(self, payload):
+            if self.delay:
+                self.started.set()
+                await self.release.wait()
+            self.payload = payload
+
+    store = _SlowStore()
+    authority = ManualLightAuthority(store)
+    await authority.async_load()
+    store.delay = True
+    managed = {"light.room_a", "light.room_b"}
+    callbacks = {}
+
+    class _Bus:
+        def async_listen(self, event_type, callback):
+            callbacks[event_type] = callback
+            return lambda: None
+
+    listener = ManualLightAuthorityEvents(
+        SimpleNamespace(bus=_Bus()), authority, lambda: managed, None, lambda: None
+    )
+    listener.start(buffer_startup=True)
+    callbacks["call_service"](SimpleNamespace(
+        data={"domain": "light", "service": "turn_off",
+              "service_data": {"entity_id": "light.room_a"}},
+        context=SimpleNamespace(id="first"), time_fired=1,
+    ))
+    completion = asyncio.create_task(listener.async_complete_startup())
+    await store.started.wait()
+    assert authority.blocks("light.unrelated")  # Save not verified yet.
+    callbacks["call_service"](SimpleNamespace(
+        data={"domain": "light", "service": "turn_on",
+              "service_data": {"entity_id": "light.room_b"}},
+        context=SimpleNamespace(id="second"), time_fired=2,
+    ))
+    assert authority.blocks("light.room_b")
+    store.release.set()
+    await completion
+    assert {item["entityId"] for item in store.payload["records"]} == managed
+    assert authority.record("light.room_b").action == "on"
+    assert not authority.blocks("light.unrelated")
+
+
+def test_startup_wiring_drains_room_events_before_activation() -> None:
+    source = (Path(__file__).parents[1] / "custom_components" /
+              "hausman_hub" / "__init__.py").read_text(encoding="utf-8")
+    assert source.index("manual_light_events.start(buffer_startup=True)") < source.index(
+        "await manual_light_authority.async_load()"
+    ) < source.index(
+        "await room_lighting_runtime.start(hass, entry.entry_id)"
+    ) < source.index("await manual_light_events.async_complete_startup()") < source.index(
+        "activation_latch.open()"
+    )
+    assert source.index("await room_lighting_service.async_list_configs()") < source.index(
+        "await manual_light_authority.async_capture_initial_room_scope("
+    ) < source.index("await manual_light_events.async_complete_startup()")
