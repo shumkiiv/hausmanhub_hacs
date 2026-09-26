@@ -403,6 +403,7 @@ def _make_runtime(
     reserved_entity_ids_provider: object | None = None,
     seed_away: bool = True,
     away_entity_id: str | None = AWAY_ENTITY_ID,
+    light_priority: object | None = None,
 ) -> RoomLightingRuntime:
     # Live-mode tests must model the protected topology explicitly. Keep the
     # fixture home, unless an away transition test supplied its own state.
@@ -431,6 +432,7 @@ def _make_runtime(
         reserved_target_ids=reserved_target_ids,
         reserved_entity_ids_provider=reserved_entity_ids_provider,
         away_entity_id=away_entity_id,
+        light_priority=light_priority,
     )
 
 
@@ -758,6 +760,34 @@ async def test_generic_command_fails_closed_when_configured_away_is_untrusted() 
         "sendOutcome": "not_sent",
         "reason": "away_sensor_unavailable",
     }
+    assert executor.calls == []
+
+
+async def test_shared_manual_priority_blocks_room_runtime_dispatch() -> None:
+    """A manual claim made by ScenarioExecutor closes the room-runtime route."""
+    class _ManualPriority:
+        @staticmethod
+        def manual_claim_entity_ids(entity_ids: frozenset[str]) -> frozenset[str]:
+            return entity_ids
+
+    hass = _FakeHass()
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=True,
+        executor=executor,
+        seed_away=True,
+        light_priority=_ManualPriority(),
+    )
+    config = config_from_payload(_config_payload(commands_enabled=True))
+
+    receipt = await runtime.async_execute_command(
+        config, PlannedCommand("light_main", LightAction.TURN_ON)
+    )
+
+    assert receipt["reason"] == "manual_light_priority"
+    assert receipt["sent"] is False
     assert executor.calls == []
 
 

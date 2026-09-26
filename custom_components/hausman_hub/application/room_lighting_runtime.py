@@ -676,6 +676,7 @@ class RoomLightingRuntime:
         electrical_breaker_resolver: Callable[[str], bool] | None = None,
         power_migration_manifest: Mapping[str, str] | None = None,
         away_entity_id: str | None = None,
+        light_priority: object | None = None,
     ) -> None:
         self._hass = hass
         self._service = service
@@ -775,6 +776,9 @@ class RoomLightingRuntime:
         self._away_missing_warned = False
         self._away_generation = 0
         self._away_debounce_seconds = max(0.0, float(away_debounce_seconds))
+        # Shared with ScenarioExecutor.  A durable manual marker is a deny-only
+        # boundary: it never manufactures room ownership or sends a command.
+        self._light_priority = light_priority
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -1089,6 +1093,8 @@ class RoomLightingRuntime:
 
         if self._hass is None:
             return self._blocked_command_receipt("runtime_unavailable")
+        if self._manual_priority_blocks(config, command):
+            return self._blocked_command_receipt("manual_light_priority")
         away_block = self._automatic_away_block_reason()
         if away_block is not None:
             return self._blocked_command_receipt(away_block)
@@ -1122,6 +1128,30 @@ class RoomLightingRuntime:
         if callable(to_payload):
             return dict(to_payload())
         return {"confirmed": bool(getattr(receipt, "confirmed", False))}
+
+    def _manual_priority_blocks(
+        self, config: RoomLightingConfig, command: PlannedCommand
+    ) -> bool:
+        """Fail closed when the shared scenario authority marks this light manual."""
+        priority = self._light_priority
+        if priority is None or self._hass is None:
+            return False
+        target_id = getattr(command, "target_id", None)
+        entity_id = None
+        for target in (*config.devices.light_targets, *config.devices.auxiliaries):
+            if target.id == target_id:
+                entity_id = target.entity_id
+                break
+        if not isinstance(entity_id, str) or not entity_id.startswith("light."):
+            return False
+        claims = getattr(priority, "manual_claim_entity_ids", None)
+        if not callable(claims):
+            # An unavailable shared authority must not open an automatic route.
+            return True
+        try:
+            return entity_id in claims(frozenset({entity_id}))
+        except Exception:  # noqa: BLE001 - shared safety authority is fail closed
+            return True
 
     @staticmethod
     def _blocked_command_receipt(
@@ -3027,6 +3057,19 @@ class RoomLightingRuntime:
                             self._dispatch_failures.pop(failure_key, None)
                         receipts.append(receipt)
                     continue
+            if self._manual_priority_blocks(config, command):
+                self._restore_unsent_command_markers(
+                    entity_id,
+                    service_name,
+                    grace_marker,
+                    previous_executing,
+                    previous_grace,
+                )
+                receipt["reason"] = "manual_light_priority"
+                receipt["sent"] = False
+                receipt["sendOutcome"] = "not_sent"
+                receipts.append(receipt)
+                continue
             result: object | None = None
             try:
                 result = await self._executor.execute(  # type: ignore[attr-defined]

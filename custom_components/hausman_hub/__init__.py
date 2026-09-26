@@ -1048,6 +1048,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ),
             power_migration_manifest=room_power_migration_manifest,
             away_entity_id=away_sensor_entity_id,
+            light_priority=light_priority,
         )
         domain_data[DATA_ROOM_LIGHTING_RUNTIME] = room_lighting_runtime
         await room_lighting_runtime.start(hass, entry.entry_id)
