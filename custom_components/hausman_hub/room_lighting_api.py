@@ -342,6 +342,9 @@ class RoomLightingStatusView(_RoomLightingView):
                 fresh=fresh,
                 phase=_status_phase(config, context) if fresh else "unknown",
                 away=away,
+                manual_control_return=_manual_control_return_status(
+                    config, context, data.get("manual_light_authority")
+                ),
             ),
             headers=NO_STORE_HEADERS,
         )
@@ -697,6 +700,7 @@ def _status_payload(
     fresh: bool = False,
     phase: str = "unknown",
     away: bool | None = None,
+    manual_control_return: dict[str, object] | None = None,
 ) -> dict[str, object]:
     evaluate_room_lighting(config, context)
     target = config.devices.light_targets[0] if config.devices.light_targets else None
@@ -795,7 +799,7 @@ def _status_payload(
             "reason": "none",
             "since": None,
         }
-    return {
+    payload = {
         "contract": {"name": "hausman-hub-room-lighting-status", "version": 1},
         "generated_at": int(time.time()),
         "roomId": config.room_id,
@@ -825,6 +829,76 @@ def _status_payload(
             if away is not None
             else config.away_behavior.mode.value != "none"
         ),
+    }
+    if manual_control_return is not None:
+        payload["manual_control_return"] = manual_control_return
+    return payload
+
+
+def _manual_control_return_status(
+    config: RoomLightingConfig, context: RoomLightingContext, authority: object
+) -> dict[str, object] | None:
+    """Project the common deny per physical source, without a false timer."""
+    from .application.manual_light_authority import ManualLightAuthority
+
+    if not isinstance(authority, ManualLightAuthority):
+        return None
+    targets = tuple(
+        target for target in config.devices.light_targets
+        if isinstance(target.entity_id, str)
+        and target.entity_id.startswith(("light.", "switch."))
+    )
+    if not targets:
+        return None
+    global_reason = authority.barrier_reason
+    sources: list[dict[str, object]] = []
+    since_ms: list[int] = []
+    for target in targets:
+        assert target.entity_id is not None
+        record = authority.record(target.entity_id)
+        if global_reason is not None:
+            reason = global_reason
+        elif not target.auto_control:
+            reason = "manual_only_target"
+        elif record is not None:
+            reason = {
+                "on": "manual_on_wait", "off": "manual_off_wait",
+                "unknown": "restart_uncertain",
+            }[record.action]
+        elif context.protection.active:
+            reason = "manual_off_protection"
+        else:
+            reason = "none"
+        source: dict[str, object] = {
+            "entityId": target.entity_id,
+            "active": reason != "none",
+            "reason": reason,
+        }
+        if record is not None:
+            source["source"] = record.source
+            if not record.legacy and reason in {"manual_on_wait", "manual_off_wait"}:
+                since_ms.append(record.observed_at_ms)
+        sources.append(source)
+    active = any(source["active"] for source in sources)
+    reasons = {source["reason"] for source in sources}
+    aggregate_reason = next(
+        (reason for reason in (
+            "storage_unavailable", "restart_uncertain", "manual_only_target",
+            "manual_off_protection", "manual_off_wait", "manual_on_wait",
+        ) if reason in reasons),
+        "none",
+    )
+    return {
+        "active": active,
+        "reason": aggregate_reason,
+        "expires_at": None,
+        "remaining_seconds": None if active else 0,
+        "since": (
+            min(since_ms) // 1000
+            if since_ms and aggregate_reason in {"manual_on_wait", "manual_off_wait"}
+            else None
+        ),
+        "sources": sources,
     }
 
 

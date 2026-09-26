@@ -63,6 +63,15 @@ class ManualLightAuthority:
             or self._restart_uncertain
         )
 
+    @property
+    def barrier_reason(self) -> str | None:
+        """Expose the global deny cause without promising an expiry."""
+        if not self._ready or self._failed or self._recovery:
+            return "storage_unavailable"
+        if self._restart_uncertain:
+            return "restart_uncertain"
+        return None
+
     def record(self, entity_id: str) -> ManualLightRecord | None:
         return self._pending.get(entity_id) or self._records.get(entity_id)
 

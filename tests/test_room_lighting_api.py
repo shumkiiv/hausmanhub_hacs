@@ -327,6 +327,129 @@ class RoomLightingApiTest(unittest.TestCase):
 
         asyncio.run(flow())
 
+    def test_status_reports_each_manual_return_source_without_false_countdown(self) -> None:
+        from custom_components.hausman_hub.application.manual_light_authority import (
+            ManualLightAuthority,
+        )
+
+        async def flow() -> None:
+            room_id = "room_demo_entry"
+            config = _config_payload(room_id)
+            config["devices"]["light_targets"].append({
+                "id": "switch_lamp", "name": "Ручной свет", "kind": "switch",
+                "entityId": "switch.demo_lamp", "role": None, "groupId": None,
+                "brightness": False, "color_temperature": False,
+                "autoControl": False, "autoAdoptOverride": None,
+            })
+            response = await self.config_view.put(
+                _json_request(self._config_path(room_id), config, room_id=room_id)
+            )
+            self.assertEqual(200, response.status)
+            authority = ManualLightAuthority()
+            authority.capture(
+                "light.demo_main", "on", "service", "context-1",
+                observed_at_ms=1_000,
+            )
+            self.hass.data["hausman_hub"]["manual_light_authority"] = authority
+            request = _request(
+                self.api.ROOM_LIGHTING_STATUS_PATH.format(room_id=room_id),
+                room_id=room_id,
+            )
+            status = await self.status_view.get(request)
+            self.assertEqual(200, status.status)
+            returned = status.payload["manual_control_return"]
+            self.assertTrue(returned["active"])
+            self.assertEqual("manual_only_target", returned["reason"])
+            self.assertIsNone(returned["expires_at"])
+            self.assertIsNone(returned["remaining_seconds"])
+            self.assertIsNone(returned["since"])
+            self.assertEqual({
+                "light.demo_main": "manual_on_wait",
+                "switch.demo_lamp": "manual_only_target",
+            }, {source["entityId"]: source["reason"] for source in returned["sources"]})
+            _validate("room-lighting-status.schema.json", status.payload)
+
+            authority.mark_unhealthy()
+            failed = (await self.status_view.get(request)).payload["manual_control_return"]
+            self.assertEqual("storage_unavailable", failed["reason"])
+            self.assertTrue(all(
+                source["reason"] == "storage_unavailable"
+                for source in failed["sources"]
+            ))
+            self.assertIsNone(failed["remaining_seconds"])
+            _validate("room-lighting-status.schema.json", {
+                **status.payload, "manual_control_return": failed,
+            })
+
+            class _RestoredStore:
+                recovered_previous = False
+
+                async def async_load(self):
+                    return {"version": 2, "records": [], "recentFingerprints": []}
+
+                async def async_save(self, _payload):
+                    return None
+
+            restored = ManualLightAuthority(_RestoredStore())
+            await restored.async_load()
+            self.hass.data["hausman_hub"]["manual_light_authority"] = restored
+            restart = (await self.status_view.get(request)).payload
+            self.assertEqual(
+                "restart_uncertain", restart["manual_control_return"]["reason"]
+            )
+            self.assertIsNone(
+                restart["manual_control_return"]["remaining_seconds"]
+            )
+            _validate("room-lighting-status.schema.json", restart)
+
+        asyncio.run(flow())
+
+    def test_status_manual_off_and_inactive_return_sources(self) -> None:
+        from custom_components.hausman_hub.application.manual_light_authority import (
+            ManualLightAuthority,
+        )
+
+        async def flow() -> None:
+            room_id = "room_demo_entry"
+            response = await self.config_view.put(
+                _json_request(
+                    self._config_path(room_id), _config_payload(room_id),
+                    room_id=room_id,
+                )
+            )
+            self.assertEqual(200, response.status)
+            authority = ManualLightAuthority()
+            self.hass.data["hausman_hub"]["manual_light_authority"] = authority
+            request = _request(
+                self.api.ROOM_LIGHTING_STATUS_PATH.format(room_id=room_id),
+                room_id=room_id,
+            )
+            inactive = (await self.status_view.get(request)).payload
+            self.assertEqual({
+                "active": False, "reason": "none", "expires_at": None,
+                "remaining_seconds": 0, "since": None,
+                "sources": [{
+                    "entityId": "light.demo_main", "active": False,
+                    "reason": "none",
+                }],
+            }, inactive["manual_control_return"])
+            _validate("room-lighting-status.schema.json", inactive)
+
+            authority.capture(
+                "light.demo_main", "off", "service", "context-off",
+                observed_at_ms=2_000,
+            )
+            manual_off = (await self.status_view.get(request)).payload
+            returned = manual_off["manual_control_return"]
+            self.assertTrue(returned["active"])
+            self.assertEqual("manual_off_wait", returned["reason"])
+            self.assertEqual(2, returned["since"])
+            self.assertIsNone(returned["remaining_seconds"])
+            self.assertEqual("manual_off_wait", returned["sources"][0]["reason"])
+            _validate("room-lighting-status.schema.json", manual_off)
+
+        asyncio.run(flow())
+
     def test_status_uses_the_running_runtime_context(self) -> None:
         from datetime import datetime, timezone
 
