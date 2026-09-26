@@ -591,6 +591,50 @@ class RoomLightingApiTest(unittest.TestCase):
 
         asyncio.run(flow())
 
+    def test_registered_service_closes_fresh_config_until_runtime_rebuilds_graph(self) -> None:
+        """A saved room must not inherit the previous topology's authority."""
+        from custom_components.hausman_hub.application.manual_light_authority import (
+            ManualLightAuthority,
+        )
+        from custom_components.hausman_hub.application.related_light_sources import (
+            RelatedLightSources,
+        )
+        from custom_components.hausman_hub.domain.room_lighting import (
+            config_from_payload,
+        )
+
+        async def flow() -> None:
+            hass = FakeHomeAssistant()
+            authority = ManualLightAuthority()
+            hass.data["hausman_hub"] = {"manual_light_authority": authority}
+            self.api.register_room_lighting_api(hass, "entry_graph_invalidation")
+            service = hass.data["hausman_hub"][self.api.DATA_ROOM_LIGHTING_SERVICE]
+            self.assertIsNotNone(service)
+
+            config = _config_payload("room_graph_invalidation")
+            saved = await service.async_put_config(config_from_payload(config))
+            authority.set_related_sources(RelatedLightSources.from_configs((saved,)))
+            self.assertEqual(
+                "attribution_uncertain",
+                authority.barrier_reason_for("light.demo_main"),
+            )
+
+            status = await self.api.RoomLightingStatusView(hass).get(
+                _request(
+                    self.api.ROOM_LIGHTING_STATUS_PATH.format(
+                        room_id="room_graph_invalidation"
+                    ),
+                    room_id="room_graph_invalidation",
+                )
+            )
+            self.assertEqual(200, status.status)
+            returned = status.payload["manual_control_return"]
+            self.assertEqual("attribution_uncertain", returned["reason"])
+            self.assertEqual("attribution_uncertain", returned["sources"][0]["reason"])
+            _validate("room-lighting-status.schema.json", status.payload)
+
+        asyncio.run(flow())
+
     def test_status_uses_the_running_runtime_context(self) -> None:
         from datetime import datetime, timezone
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import types
 import unittest
@@ -274,6 +275,168 @@ class RoomLightingServiceTest(unittest.IsolatedAsyncioTestCase):
         await self.service.async_delete_config("room_demo_entry")
 
         self.assertFalse(self.hass.services.async_call.called)
+
+
+class _DelayedMutationStore:
+    """In-memory store whose mutation can be observed before it completes."""
+
+    def __init__(self, config=None, *, save_result: object = None) -> None:
+        self.configs = {} if config is None else {config.room_id: config}
+        self.save_result = save_result
+        self.upsert_started = asyncio.Event()
+        self.delete_started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def async_get(self, room_id: str):
+        return self.configs.get(room_id)
+
+    async def async_load_all(self):
+        return tuple(self.configs.values())
+
+    async def async_upsert(self, config):
+        self.upsert_started.set()
+        await self.release.wait()
+        if self.save_result is None:
+            self.configs[config.room_id] = config
+        return self.save_result
+
+    async def async_delete(self, room_id: str) -> bool:
+        self.delete_started.set()
+        await self.release.wait()
+        if self.save_result is not None:
+            return False
+        return self.configs.pop(room_id, None) is not None
+
+
+class RoomLightingTopologyInvalidationTest(unittest.IsolatedAsyncioTestCase):
+    """Configuration writes must close stale manual-attribution relations first."""
+
+    def _config(self, name: str = "Тамбур"):
+        return config_from_payload(_payload(name=name))
+
+    @staticmethod
+    def _authority(config):
+        from custom_components.hausman_hub.application.manual_light_authority import (
+            ManualLightAuthority,
+        )
+        from custom_components.hausman_hub.application.related_light_sources import (
+            RelatedLightSources,
+        )
+
+        authority = ManualLightAuthority()
+        authority.set_related_sources(RelatedLightSources.from_configs((config,)))
+        return authority
+
+    async def test_changed_put_invalidates_before_delayed_save(self) -> None:
+        initial = self._config()
+        store = _DelayedMutationStore(initial)
+        authority = self._authority(initial)
+        service = RoomLightingService(
+            store,
+            topology_invalidator=authority.invalidate_related_sources,
+        )
+
+        pending = asyncio.create_task(
+            service.async_put_config(self._config("Новый тамбур"))
+        )
+        await store.upsert_started.wait()
+
+        self.assertEqual(
+            "attribution_uncertain", authority.barrier_reason_for("switch.demo_a")
+        )
+        store.release.set()
+        await pending
+
+    async def test_delete_existing_invalidates_before_delayed_delete(self) -> None:
+        initial = self._config()
+        store = _DelayedMutationStore(initial)
+        authority = self._authority(initial)
+        service = RoomLightingService(
+            store,
+            topology_invalidator=authority.invalidate_related_sources,
+        )
+
+        pending = asyncio.create_task(service.async_delete_config(initial.room_id))
+        await store.delete_started.wait()
+
+        self.assertEqual(
+            "attribution_uncertain", authority.barrier_reason_for("switch.demo_a")
+        )
+        store.release.set()
+        self.assertTrue(await pending)
+
+    async def test_failed_or_cancelled_mutation_keeps_stale_graph_closed(self) -> None:
+        from custom_components.hausman_hub.application.related_light_sources import (
+            RelatedLightSources,
+        )
+        from custom_components.hausman_hub.application.room_lighting_service import (
+            RoomLightingStorageError,
+        )
+
+        initial = self._config()
+        failing_store = _DelayedMutationStore(initial, save_result=False)
+        failing_authority = self._authority(initial)
+        failing_service = RoomLightingService(
+            failing_store,
+            topology_invalidator=failing_authority.invalidate_related_sources,
+        )
+        failed = asyncio.create_task(
+            failing_service.async_put_config(self._config("Не сохранится"))
+        )
+        await failing_store.upsert_started.wait()
+        failing_authority.set_related_sources(
+            RelatedLightSources.from_configs((initial,))
+        )
+        self.assertEqual(
+            "attribution_uncertain",
+            failing_authority.barrier_reason_for("switch.demo_a"),
+        )
+        failing_store.release.set()
+        with self.assertRaises(RoomLightingStorageError):
+            await failed
+        self.assertEqual(
+            "attribution_uncertain",
+            failing_authority.barrier_reason_for("switch.demo_a"),
+        )
+
+        cancelled_store = _DelayedMutationStore(initial)
+        cancelled_authority = self._authority(initial)
+        cancelled_service = RoomLightingService(
+            cancelled_store,
+            topology_invalidator=cancelled_authority.invalidate_related_sources,
+        )
+        cancelled = asyncio.create_task(
+            cancelled_service.async_delete_config(initial.room_id)
+        )
+        await cancelled_store.delete_started.wait()
+        cancelled_authority.set_related_sources(
+            RelatedLightSources.from_configs((initial,))
+        )
+        cancelled.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await cancelled
+        self.assertEqual(
+            "attribution_uncertain",
+            cancelled_authority.barrier_reason_for("switch.demo_a"),
+        )
+
+    async def test_noop_put_missing_delete_and_template_build_do_not_invalidate(self) -> None:
+        initial = self._config()
+        store = _DelayedMutationStore(initial)
+        calls = 0
+
+        def invalidate() -> None:
+            nonlocal calls
+            calls += 1
+
+        service = RoomLightingService(store, topology_invalidator=invalidate)
+        same = await service.async_put_config(self._config())
+        self.assertEqual(initial.version, same.version)
+        self.assertFalse(await service.async_delete_config("room_missing"))
+        template = await service.async_apply_template(DEFAULT_TEMPLATE_ID)
+
+        self.assertEqual(DEFAULT_TEMPLATE_ID, template.template_id)
+        self.assertEqual(0, calls)
 
 
 if __name__ == "__main__":

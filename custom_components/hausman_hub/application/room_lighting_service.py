@@ -11,7 +11,7 @@ import asyncio
 from copy import deepcopy
 from dataclasses import replace
 import time
-from typing import Mapping
+from typing import Callable, Mapping
 
 from ..domain.room_lighting import (
     ROOM_LIGHTING_CONFIG_NAME,
@@ -187,8 +187,13 @@ class RoomLightingStorageError(RuntimeError):
 class RoomLightingService:
     """Validate, version and persist room lighting configurations only."""
 
-    def __init__(self, store: object, *, mutation_lock: asyncio.Lock | None = None,
-                 topology_invalidator: callable | None = None) -> None:
+    def __init__(
+        self,
+        store: object,
+        *,
+        mutation_lock: asyncio.Lock | None = None,
+        topology_invalidator: Callable[[], None] | None = None,
+    ) -> None:
         self._store = store
         self._lock = mutation_lock or asyncio.Lock()
         self._topology_invalidator = topology_invalidator
