@@ -700,9 +700,15 @@ def legacy_manual_authority_plan(
             else light_entities.get(target_id, [])
         )
         if len(candidates) != 1:
-            is_auxiliary = target_id in (
-                auxiliary_ids if room_id is None
-                else auxiliary_by_room.get(room_id, set())
+            # A fan is outside this boundary only when no room exposes this
+            # legacy id as a light.  An auxiliary with the same id must never
+            # mask a missing or multiply-owned physical light mapping.
+            is_auxiliary = (
+                not light_entities.get(target_id)
+                and target_id in (
+                    auxiliary_ids if room_id is None
+                    else auxiliary_by_room.get(room_id, set())
+                )
             )
             if not is_auxiliary:
                 uncertain = True

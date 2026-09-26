@@ -2513,6 +2513,50 @@ def test_legacy_manual_authority_plan_requires_one_physical_light_mapping() -> N
         ("light.main",), True,
     )
 
+    room_a = SimpleNamespace(
+        room_id="room_a", devices=SimpleNamespace(
+            light_targets=(SimpleNamespace(id="shared", entity_id="light.a"),),
+            auxiliaries=(),
+        ),
+    )
+    room_b = SimpleNamespace(
+        room_id="room_b", devices=SimpleNamespace(
+            light_targets=(SimpleNamespace(id="shared", entity_id="light.b"),),
+            auxiliaries=(),
+        ),
+    )
+    fan_room = SimpleNamespace(
+        room_id="fan_room", devices=SimpleNamespace(
+            light_targets=(),
+            auxiliaries=(SimpleNamespace(id="shared", entity_id="switch.fan"),),
+        ),
+    )
+    assert legacy_manual_authority_plan(
+        journal_for("shared"), (room_a, room_b, fan_room)
+    ) == ((), True)
+
+    scoped = RoomLightingOwnershipJournal()
+    scoped.restore({
+        "version": 1,
+        "records": [{
+            "roomId": "fan_room", "targetId": "shared", "source": "manual",
+            "confirmed": True, "at": 1,
+        }],
+        "manualOff": [],
+    })
+    assert legacy_manual_authority_plan(scoped, (room_a, fan_room)) == ((), True)
+
+    missing_room = RoomLightingOwnershipJournal()
+    missing_room.restore({
+        "version": 1,
+        "records": [{
+            "roomId": "missing", "targetId": "shared", "source": "manual",
+            "confirmed": True, "at": 1,
+        }],
+        "manualOff": [],
+    })
+    assert legacy_manual_authority_plan(missing_room, (room_a, fan_room)) == ((), True)
+
 
 def test_ownership_journal_prunes_stale_manual_only_when_light_off() -> None:
     journal = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
