@@ -1342,6 +1342,75 @@ async def test_legacy_journal_is_not_migrated_when_authority_save_fails() -> Non
     assert ownership_store.payload == before
 
 
+async def test_mixed_legacy_mapping_skips_all_journal_mutation_and_pruning() -> None:
+    class _AuthorityStore(_MemoryOwnershipStore):
+        recovered_previous = False
+
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    ownership_store = _MemoryOwnershipStore()
+    ownership_store.payload = {
+        "version": 1,
+        "records": [
+            {"targetId": "light_main", "source": "manual", "confirmed": True, "at": 1},
+            {"targetId": "missing", "source": "manual", "confirmed": True, "at": 1},
+        ],
+        "manualOff": [{"targetId": "light_main", "at": 1}], "morning": [],
+    }
+    before = dict(ownership_store.payload)
+    authority = ManualLightAuthority(_AuthorityStore())
+    await authority.async_load()
+    runtime = _make_runtime(
+        hass, ownership_store=ownership_store, manual_light_authority=authority,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        assert authority.unhealthy
+        assert authority.record("light.demo_main") is None
+        assert runtime._ownership.has_legacy()  # type: ignore[attr-defined]
+    finally:
+        await runtime.stop()
+    assert ownership_store.payload == before
+
+
+async def test_failed_authority_preserves_modern_manual_hold_from_pruning() -> None:
+    class _UnavailableAuthorityStore:
+        recovered_previous = False
+
+        async def async_load(self):
+            return {"version": 2, "records": [], "recentFingerprints": []}
+
+        async def async_save(self, _payload):
+            raise RuntimeError("unavailable")
+
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    ownership_store = _MemoryOwnershipStore()
+    ownership_store.payload = {
+        "version": 1,
+        "records": [{
+            "roomId": _ROOM_ID, "targetId": "light_main", "source": "manual",
+            "confirmed": True, "at": 0,
+        }],
+        "manualOff": [{"roomId": _ROOM_ID, "targetId": "light_main", "at": 0}],
+        "morning": [],
+    }
+    before = dict(ownership_store.payload)
+    authority = ManualLightAuthority(_UnavailableAuthorityStore())
+    await authority.async_load()
+    runtime = _make_runtime(
+        hass, ownership_store=ownership_store, manual_light_authority=authority,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        assert authority.unhealthy
+        assert runtime._ownership.last_manual_off_at(_ROOM_ID, {"light_main"}) == 0  # type: ignore[attr-defined]
+    finally:
+        await runtime.stop()
+    assert ownership_store.payload == before
+
+
 async def test_manual_off_protection_survives_restart() -> None:
     payload = _config_payload(minimum_interval_seconds=60, stable_absence_seconds=5)
     ownership_store = _MemoryOwnershipStore()
@@ -1809,6 +1878,43 @@ async def test_device_trigger_return_to_auto_keeps_manual_hold_without_calling_l
         assert runtime._ownership.last_manual_off_at(_ROOM_ID, {"light_main"}) == _NOW_MS  # type: ignore[attr-defined]
         ownership = runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"})  # type: ignore[attr-defined]
         assert ownership[-1].source is OwnershipSource.MANUAL
+    finally:
+        await runtime.stop()
+
+
+async def test_return_to_auto_noop_skips_evaluation_and_write_for_two_targets() -> None:
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    hass.states.set("switch.demo_second", "off", last_changed=_NOW_DT)
+    api = _FakeDeviceAutomationApi()
+    payload = _trigger_config_payload(action="return_to_auto")
+    payload["devices"]["light_targets"].append({  # type: ignore[index]
+        "id": "second", "name": "Второй свет", "kind": "switch",
+        "entityId": "switch.demo_second", "role": "other", "groupId": None,
+        "brightness": False, "color_temperature": False, "autoAdoptOverride": None,
+    })
+    ownership_store = _MemoryOwnershipStore()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=_SpyExecutor(), payload=payload,
+        device_automation_api=api, ownership_store=ownership_store,
+    )
+    evaluated: list[tuple[str, ...] | None] = []
+
+    async def unexpected_process(room_ids=None):
+        evaluated.append(room_ids)
+
+    await runtime.start(hass, "entry")
+    try:
+        runtime.async_process = unexpected_process  # type: ignore[method-assign]
+        runtime._ownership.record_manual(_ROOM_ID, "light_main", turned_off=True)  # type: ignore[attr-defined]
+        runtime._ownership.record_manual(_ROOM_ID, "second", turned_off=True)  # type: ignore[attr-defined]
+        _, action, _ = api.attached[0]
+        await action({}, None)  # type: ignore[operator]
+        assert evaluated == []
+        assert ownership_store.payload is None
+        records = runtime._ownership.snapshots_for(_ROOM_ID, {"light_main", "second"})  # type: ignore[attr-defined]
+        assert all(record.source is OwnershipSource.MANUAL for record in records)
     finally:
         await runtime.stop()
 

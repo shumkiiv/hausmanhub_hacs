@@ -992,14 +992,15 @@ class RoomLightingRuntime:
         if authority is not None:
             if legacy_uncertain:
                 authority.mark_unhealthy()
-            try:
-                for entity_id in legacy_entities:
-                    authority.capture_legacy(entity_id, source="room")
-                await authority.async_drain()
-                legacy_imported = True
-            except Exception:  # noqa: BLE001 - all automatic light routes stay closed
-                authority.mark_unhealthy()
-                _LOGGER.exception("room manual light migration failed")
+            if not authority.unhealthy:
+                try:
+                    for entity_id in legacy_entities:
+                        authority.capture_legacy(entity_id, source="room")
+                    await authority.async_drain()
+                    legacy_imported = authority.has_durable_import(legacy_entities)
+                except Exception:  # noqa: BLE001 - all automatic light routes stay closed
+                    authority.mark_unhealthy()
+                    _LOGGER.exception("room manual light migration failed")
         if legacy_imported:
             self._ownership.migrate_legacy(
                 {
@@ -1008,21 +1009,23 @@ class RoomLightingRuntime:
                     for room_id, config in self._configs.items()
                 }
             )
-        # Stale manual holds (protection window expired on an off light) would
-        # otherwise block automation forever after a restart.
-        self._ownership.prune_stale_manual(
-            now=self._now_ms(),
-            minimum_interval_seconds={
-                room_id: (
-                    config.manual_off_protection.minimum_interval_seconds
-                    if config.manual_off_protection.enabled
-                    else 0
-                )
-                for room_id, config in self._configs.items()
-            },
-            light_on=self._light_on_by_target(),
-            presence_active=self._presence_active_by_room(),
-        )
+        if legacy_imported:
+            # Stale manual holds (protection window expired on an off light)
+            # are mutable only after the shared authority proved the complete
+            # import durable. Otherwise a failed migration could erase a hold.
+            self._ownership.prune_stale_manual(
+                now=self._now_ms(),
+                minimum_interval_seconds={
+                    room_id: (
+                        config.manual_off_protection.minimum_interval_seconds
+                        if config.manual_off_protection.enabled
+                        else 0
+                    )
+                    for room_id, config in self._configs.items()
+                },
+                light_on=self._light_on_by_target(),
+                presence_active=self._presence_active_by_room(),
+            )
         try:
             # Exact power sources are subscribed separately below so a live map
             # change can add or remove them without touching the core tracker.
@@ -1197,7 +1200,7 @@ class RoomLightingRuntime:
             returned = self._ownership.return_room_to_automatic(
                 room_id, target_ids, self._now_ms()
             )
-            if target_ids:
+            if returned:
                 await self._persist_ownership()
             return returned
 
@@ -1761,7 +1764,7 @@ class RoomLightingRuntime:
                     subtype,
                     ",".join(returned),
                 )
-                if self._running:
+                if returned and self._running:
                     await self.async_process((config.room_id,))
                 continue
             # A press is a manual intent regardless of the command flag.

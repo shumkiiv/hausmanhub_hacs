@@ -128,6 +128,15 @@ class ManualLightAuthority:
     def record(self, entity_id: str) -> ManualLightRecord | None:
         return self._pending.get(entity_id) or self._records.get(entity_id)
 
+    def has_durable_import(self, entity_ids: Iterable[str]) -> bool:
+        """Whether a legacy batch is durably present in the common store."""
+        return (
+            self._store is not None
+            and not self.unhealthy
+            and not self._pending
+            and all(self.record(entity_id) is not None for entity_id in entity_ids)
+        )
+
     def blocks(self, entity_id: str) -> bool:
         # First slice: the clock never releases a manual choice. A later
         # migration must prove every other condition before using deadline.
