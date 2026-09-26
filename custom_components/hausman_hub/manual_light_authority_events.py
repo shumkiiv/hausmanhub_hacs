@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 MAX_STARTUP_EVENTS = 512
+_EXACT_ENTITY_ID = re.compile(r"^(?:light|switch)\.[a-z0-9_]+$")
 
 
 def room_light_entity_ids(configs: Iterable[RoomLightingConfig]) -> frozenset[str]:
@@ -173,7 +175,12 @@ class ManualLightAuthorityEvents:
         if service not in {"turn_on", "turn_off", "toggle"}:
             return
         service_data = data.get("service_data")
-        entities = _exact_service_entities(service_data, domain)
+        # HA event payloads can carry targeting at the outer level as well as
+        # inside service_data.  An outer target makes the effective scope
+        # ambiguous even when service_data happens to contain an entity_id.
+        entities = _exact_service_entities(
+            service_data, domain, outer_target=data.get("target")
+        )
         if entities is None:
             self._mark_selector_uncertain(domain)
             return
@@ -244,12 +251,12 @@ class ManualLightAuthorityEvents:
 
 
 def _exact_service_entities(
-    service_data: object, domain: str
+    service_data: object, domain: str, *, outer_target: object = None,
 ) -> tuple[str, ...] | None:
     """Accept only an explicit, non-broad entity set for a service call."""
-    if not isinstance(service_data, Mapping):
+    if outer_target is not None or not isinstance(service_data, Mapping):
         return None
-    if any(key in service_data for key in ("area_id", "device_id", "label_id")):
+    if _has_target_selector(service_data):
         return None
     raw_entities = service_data.get("entity_id")
     if isinstance(raw_entities, str):
@@ -261,11 +268,27 @@ def _exact_service_entities(
     else:
         return None
     if any(
-        not entity_id
-        or entity_id in {"all", f"{domain}.all"}
-        or entity_id == f"{domain}."
+        not _EXACT_ENTITY_ID.fullmatch(entity_id)
         or not entity_id.startswith(f"{domain}.")
+        or entity_id == f"{domain}.all"
         for entity_id in entities
     ):
         return None
     return entities
+
+
+def _has_target_selector(service_data: Mapping[object, object]) -> bool:
+    """Reject broad and future selector shapes without rejecting light options."""
+    for raw_key in service_data:
+        if not isinstance(raw_key, str):
+            return True
+        key = raw_key.lower()
+        if key == "entity_id":
+            continue
+        if (
+            key in {"target", "targets", "entity_ids"}
+            or key.startswith("target_")
+            or key.endswith("_id")
+        ):
+            return True
+    return False

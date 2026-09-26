@@ -509,9 +509,14 @@ def test_broad_or_malformed_service_never_captures_partial_manual_action() -> No
         {"entity_id": ["light.first", "all"]},
         {"entity_id": ["light.first", "switch.other"]},
         {"entity_id": "light.all"},
+        {"entity_id": "light.first,light.second"},
+        {"entity_id": "light.*"},
+        {"entity_id": "light.first "},
         {"entity_id": "light.first", "area_id": "area"},
         {"device_id": "device"},
         {"label_id": "label"},
+        {"entity_id": "light.first", "floor_id": "floor"},
+        {"entity_id": "light.first", "target": {"area_id": "area"}},
     ):
         listener.service_event(SimpleNamespace(
             data={"domain": "light", "service": "turn_on", "service_data": service_data},
@@ -521,6 +526,23 @@ def test_broad_or_malformed_service_never_captures_partial_manual_action() -> No
     assert authority.record("light.second") is None
     assert authority.barrier_reason_for("light.first") == "selector_uncertain"
     assert not authority.unhealthy
+
+
+def test_outer_event_target_cannot_bypass_exact_service_data() -> None:
+    authority = ManualLightAuthority()
+    listener = ManualLightAuthorityEvents(
+        SimpleNamespace(), authority, lambda: {"light.first"}, None, lambda: None,
+    )
+    listener.service_event(SimpleNamespace(
+        data={
+            "domain": "light", "service": "turn_on",
+            "service_data": {"entity_id": "light.first"},
+            "target": {"area_id": "area"},
+        },
+        context=SimpleNamespace(id="outer-target"), time_fired=1,
+    ))
+    assert authority.record("light.first") is None
+    assert authority.barrier_reason_for("light.first") == "selector_uncertain"
 
 
 async def test_exact_service_list_captures_each_target_only() -> None:
