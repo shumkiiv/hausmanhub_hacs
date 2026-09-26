@@ -965,7 +965,12 @@ class LightAutomationPriority:
     ) -> frozenset[str]:
         """Return durable manual markers without granting or clearing authority."""
 
-        return frozenset(entity_ids & self._manual_records.keys())
+        return frozenset(entity_ids & self.manual_entity_ids())
+
+    def manual_entity_ids(self) -> frozenset[str]:
+        """Snapshot durable manual entities without requiring a live catalog."""
+
+        return frozenset(self._manual_records)
 
     async def _async_clear_ownership_unlocked(self, entity_id: str) -> None:
         """Clear automation ownership while the shared authority lock is held."""

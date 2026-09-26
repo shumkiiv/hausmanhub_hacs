@@ -251,9 +251,10 @@ class RoomLightingOwnershipJournal:
         """Attach legacy target-id-only evidence to a single unambiguous room.
 
         Old payloads were keyed by target id alone. A legacy id that is still
-        unique across the current room configs is attached to that room; an id
-        that several rooms still use is ambiguous and is dropped instead of
-        being shared between rooms.
+        unique across the current room configs is attached to that room.
+        Ambiguous and missing ids stay in the legacy journal: dropping them
+        would erase the evidence before the shared manual authority can close
+        automatic light routes safely.
         """
 
         if not self.has_legacy():
@@ -262,17 +263,49 @@ class RoomLightingOwnershipJournal:
             room_id: set(target_ids)
             for room_id, target_ids in rooms_targets.items()
         }
+        unresolved_records: list[OwnershipSnapshot] = []
+        migrated = False
         for record in self._legacy_records:
             room_id = _single_room_for(record.target_id, owned)
             if room_id is not None:
                 self._append(room_id, record)
+                migrated = True
+            else:
+                unresolved_records.append(record)
+        unresolved_manual_off: dict[str, int] = {}
         for target_id, moment in self._legacy_manual_off.items():
             room_id = _single_room_for(target_id, owned)
             if room_id is not None:
                 self._manual_off[(room_id, target_id)] = moment
-        self._legacy_records = []
-        self._legacy_manual_off = {}
-        self._dirty = True
+                migrated = True
+            else:
+                unresolved_manual_off[target_id] = moment
+        self._legacy_records = unresolved_records
+        self._legacy_manual_off = unresolved_manual_off
+        if migrated:
+            self._dirty = True
+
+    def legacy_manual_target_ids(self) -> frozenset[str]:
+        """Read-only legacy manual targets for migration into shared authority."""
+        return frozenset(
+            [
+                record.target_id
+                for record in self._legacy_records
+                if record.source is OwnershipSource.MANUAL
+            ]
+            + list(self._legacy_manual_off)
+        )
+
+    def manual_authority_target_refs(self) -> tuple[tuple[str | None, str], ...]:
+        """Read active manual evidence without changing its persisted shape."""
+        refs = [
+            (room_id, target_id)
+            for (room_id, target_id), bucket in self._records.items()
+            if (room_id, target_id) in self._manual_off
+            or (bucket and bucket[-1].source is OwnershipSource.MANUAL)
+        ]
+        refs.extend((None, target_id) for target_id in self.legacy_manual_target_ids())
+        return tuple(refs)
 
     def prune_stale_manual(
         self,
@@ -356,26 +389,14 @@ class RoomLightingOwnershipJournal:
     def return_room_to_automatic(
         self, room_id: str, target_ids: Iterable[str], at: int
     ) -> tuple[str, ...]:
-        """Apply an explicit whole-room return to automatic control.
+        """Keep manual holds until the common durable release can prove them.
 
-        This is deliberately distinct from the settings action above.  A user
-        can assign it only to a confirmed physical switch gesture, so clearing
-        the manual-off record is safe and remains auditable as AUTO ownership.
+        A return gesture is not a confirmed automatic command.  Recording AUTO
+        here would fabricate ownership and could later authorize a light-off.
+        The deny-only HH-008.b stage intentionally leaves the journal intact.
         """
-
-        returned: list[str] = []
-        for target_id in sorted(set(target_ids)):
-            key = (room_id, target_id)
-            had_manual = key in self._manual_off or (
-                bool(self._records.get(key))
-                and self._records[key][-1].source is OwnershipSource.MANUAL
-            )
-            self._manual_off.pop(key, None)
-            self._records.pop(key, None)
-            self.record_auto(room_id, target_id, at, confirmed=True)
-            if had_manual:
-                returned.append(target_id)
-        return tuple(returned)
+        del room_id, target_ids, at
+        return ()
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -566,6 +587,19 @@ class RoomLightingOwnershipJournal:
                     and moment >= 0
                 ):
                     self._manual_off[(room_id, target_id)] = moment
+                elif (
+                    isinstance(target_id, str)
+                    and target_id
+                    and type(moment) is int
+                    and moment >= 0
+                ):
+                    # ``to_payload`` has emitted legacy manual-off entries as
+                    # a list since the room-aware format was introduced. Keep
+                    # their missing room key instead of erasing the hold on
+                    # the next restart.
+                    previous = self._legacy_manual_off.get(target_id)
+                    if previous is None or moment > previous:
+                        self._legacy_manual_off[target_id] = moment
         raw_morning = payload.get("morning")
         if isinstance(raw_morning, (list, tuple)):
             for raw in raw_morning:
@@ -626,6 +660,63 @@ def _ownership_record(raw: object) -> OwnershipSnapshot | None:
         )
     except (OwnershipViolation, ValueError, TypeError):
         return None
+
+
+def legacy_manual_authority_plan(
+    journal: RoomLightingOwnershipJournal,
+    configs: Iterable[RoomLightingConfig],
+) -> tuple[tuple[str, ...], bool]:
+    """Map legacy manual target ids to unique physical light entities.
+
+    The result is deliberately read-only.  Legacy target ids had no room key,
+    so a missing or multiply-owned light target cannot be guessed.  Auxiliary
+    fan ids are outside the manual-light boundary and are ignored rather than
+    becoming a fabricated light claim.
+    """
+    configs = tuple(configs)
+    light_entities: dict[str, list[str | None]] = {}
+    auxiliary_ids: set[str] = set()
+    auxiliary_by_room: dict[str, set[str]] = {}
+    for config in configs:
+        for target in config.devices.light_targets:
+            light_entities.setdefault(target.id, []).append(target.entity_id)
+        auxiliary_ids.update(target.id for target in config.devices.auxiliaries)
+        auxiliary_by_room[config.room_id] = {
+            target.id for target in config.devices.auxiliaries
+        }
+
+    entities: list[str] = []
+    uncertain = False
+    for room_id, target_id in journal.manual_authority_target_refs():
+        candidates = (
+            [
+                target.entity_id
+                for config in configs
+                if config.room_id == room_id
+                for target in config.devices.light_targets
+                if target.id == target_id
+            ]
+            if room_id is not None
+            else light_entities.get(target_id, [])
+        )
+        if len(candidates) != 1:
+            is_auxiliary = target_id in (
+                auxiliary_ids if room_id is None
+                else auxiliary_by_room.get(room_id, set())
+            )
+            if not is_auxiliary:
+                uncertain = True
+            continue
+        entity_id = candidates[0]
+        if not isinstance(entity_id, str) or not entity_id.startswith(
+            ("light.", "switch.")
+        ):
+            uncertain = True
+            continue
+        entities.append(entity_id)
+    if len(set(entities)) != len(entities):
+        uncertain = True
+    return tuple(sorted(set(entities))), uncertain
 
 
 class HomeAssistantRoomLightingOwnershipStore:
@@ -888,59 +979,35 @@ class RoomLightingRuntime:
                 *self._exact_power_by_entity,
             )
         }
-        # Legacy journals were keyed by target id only; attach them to rooms
-        # now that the room/target mapping is known.
-        legacy_ambiguous = any(
-            sum(
-                record.target_id in (
-                    config.devices.light_target_ids
-                    | frozenset(item.id for item in config.devices.auxiliaries)
-                )
-                for config in self._configs.values()
-            ) != 1
-            for record in self._ownership._legacy_records
-        ) or any(
-            sum(
-                target_id in (
-                    config.devices.light_target_ids
-                    | frozenset(item.id for item in config.devices.auxiliaries)
-                )
-                for config in self._configs.values()
-            ) != 1
-            for target_id in self._ownership._legacy_manual_off
-        )
-        self._ownership.migrate_legacy(
-            {
-                room_id: config.devices.light_target_ids
-                | frozenset(item.id for item in config.devices.auxiliaries)
-                for room_id, config in self._configs.items()
-            }
+        # Legacy journals were keyed by target id only.  Build the exact
+        # physical-light plan before mutating or pruning that evidence, then
+        # latch every resolvable manual hold into the shared deny in one batch.
+        # A missing or ambiguous target remains in the journal and closes the
+        # authority instead of being silently forgotten.
+        legacy_entities, legacy_uncertain = legacy_manual_authority_plan(
+            self._ownership, self._configs.values()
         )
         authority = self._manual_light_authority
+        legacy_imported = False
         if authority is not None:
-            if legacy_ambiguous:
+            if legacy_uncertain:
                 authority.mark_unhealthy()
-            legacy_payload = self._ownership.to_payload()
-            legacy_keys = {
-                (item.get("roomId"), item.get("targetId"))
-                for key in ("records", "manualOff")
-                for item in legacy_payload[key]
-                if isinstance(item, Mapping)
-                and (key == "manualOff" or item.get("source") == "manual")
-            }
-            for room_id, target_id in legacy_keys:
-                config = self._configs.get(room_id)
-                target = config.devices.target(target_id) if config is not None else None
-                entity_id = getattr(target, "entity_id", None)
-                if not isinstance(entity_id, str):
-                    authority.mark_unhealthy()
-                elif entity_id.startswith(("light.", "switch.")):
-                    authority.capture_legacy(entity_id, source="room")
             try:
+                for entity_id in legacy_entities:
+                    authority.capture_legacy(entity_id, source="room")
                 await authority.async_drain()
+                legacy_imported = True
             except Exception:  # noqa: BLE001 - all automatic light routes stay closed
                 authority.mark_unhealthy()
                 _LOGGER.exception("room manual light migration failed")
+        if legacy_imported:
+            self._ownership.migrate_legacy(
+                {
+                    room_id: config.devices.light_target_ids
+                    | frozenset(item.id for item in config.devices.auxiliaries)
+                    for room_id, config in self._configs.items()
+                }
+            )
         # Stale manual holds (protection window expired on an off light) would
         # otherwise block automation forever after a restart.
         self._ownership.prune_stale_manual(

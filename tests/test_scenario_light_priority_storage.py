@@ -34,6 +34,25 @@ class MemoryStore:
         self.payload = json.loads(json.dumps(payload))
 
 
+def test_manual_entity_snapshot_survives_removed_catalog_entry() -> None:
+    store = MemoryStore()
+    store.payload = {
+        "version": 1,
+        "records": [{
+            "entityId": "light.removed_from_catalog",
+            "targetId": "former_target",
+            "ownership": "manual",
+            "evidenceRevision": None,
+        }],
+    }
+    priority = LightAutomationPriority(store)
+    asyncio.run(priority.async_load())
+    assert priority.manual_entity_ids() == frozenset({"light.removed_from_catalog"})
+    assert priority.manual_claim_entity_ids(frozenset({"light.removed_from_catalog"})) == (
+        frozenset({"light.removed_from_catalog"})
+    )
+
+
 def test_previous_generation_never_restores_automatic_off_authority() -> None:
     store = MemoryStore(recovered_previous=True)
     now = datetime.now(timezone.utc)

@@ -621,11 +621,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     domain_data["manual_light_authority"] = manual_light_authority
     # Old scenario records do not carry a proved deadline. Copy them into
     # the common store before any automatic event subscription can run.
-    for device in scenario_catalog.devices.values():
-        entity_id = getattr(device, "entity_id", None)
-        if isinstance(entity_id, str) and entity_id.startswith(("light.", "switch.")) and (
-            entity_id in light_priority.manual_claim_entity_ids(frozenset({entity_id}))
-        ):
+    for entity_id in light_priority.manual_entity_ids():
+        if isinstance(entity_id, str) and entity_id.startswith(("light.", "switch.")):
             manual_light_authority.capture_legacy(entity_id, source="scenario")
     try:
         await manual_light_authority.async_drain()

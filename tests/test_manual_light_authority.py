@@ -186,6 +186,56 @@ async def test_old_duplicate_after_new_action_does_not_extend_deadline() -> None
     assert authority.record("light.demo").deadline_ms == 3_600_020
 
 
+async def test_legacy_import_is_idempotent_and_never_overwrites_newer_evidence() -> None:
+    store = _Store()
+    authority = ManualLightAuthority(store)
+    await authority.async_load()
+    authority.capture("light.demo", "on", "service", "newer", observed_at_ms=20)
+    assert not authority.capture_legacy("light.demo", source="room")
+    await authority.async_drain()
+    record = authority.record("light.demo")
+    assert record is not None
+    assert (record.source, record.fingerprint, record.observed_at_ms) == (
+        "service", "newer", 20,
+    )
+
+    legacy = ManualLightAuthority(_Store())
+    assert legacy.capture_legacy("light.legacy", source="room")
+    assert not legacy.capture_legacy("light.legacy", source="room")
+    await legacy.async_drain()
+    assert legacy.record("light.legacy").source == "room"
+
+
+async def test_legacy_import_racing_a_save_stays_pending_until_durable() -> None:
+    class _SlowStore(_Store):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.writes = 0
+
+        async def async_save(self, payload):
+            self.writes += 1
+            if self.writes == 1:
+                self.started.set()
+                await self.release.wait()
+            self.payload = payload
+
+    store = _SlowStore()
+    authority = ManualLightAuthority(store)
+    assert authority.capture("light.new", "on", "service", "new")
+    draining = asyncio.create_task(authority.async_drain())
+    await store.started.wait()
+    assert authority.capture_legacy("light.legacy", source="room")
+    assert authority.blocks("light.legacy")
+    store.release.set()
+    await draining
+    assert store.writes == 2
+    assert {item["entityId"] for item in store.payload["records"]} == {
+        "light.new", "light.legacy",
+    }
+
+
 async def test_invalid_persisted_record_fails_closed() -> None:
     store = _Store()
     store.payload = {"version": 2, "records": [{"entityId": "light.demo"}]}

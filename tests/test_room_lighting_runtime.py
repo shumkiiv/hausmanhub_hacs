@@ -38,6 +38,7 @@ from custom_components.hausman_hub.application.room_lighting_runtime import (
     AWAY_ENTITY_ID,
     RoomLightingOwnershipJournal,
     RoomLightingRuntime,
+    legacy_manual_authority_plan,
 )
 from custom_components.hausman_hub.application.manual_light_authority import (
     ManualLightAuthority,
@@ -796,6 +797,30 @@ async def test_shared_manual_priority_blocks_room_runtime_dispatch() -> None:
     assert executor.calls == []
 
 
+async def test_legacy_300_second_release_setting_cannot_bypass_shared_deny() -> None:
+    from custom_components.hausman_hub.domain.scenario_controls import ScenarioControlPolicy
+
+    assert ScenarioControlPolicy().manual_release_seconds == 300
+    hass = _FakeHass()
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    authority = ManualLightAuthority()
+    authority.capture("light.demo_main", "off", "service", "manual-off")
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor,
+        manual_light_authority=authority, seed_away=True,
+    )
+    config = config_from_payload(_config_payload(commands_enabled=True))
+
+    receipt = await runtime.async_execute_command(
+        config, PlannedCommand("light_main", LightAction.TURN_ON)
+    )
+
+    assert authority.blocks("light.demo_main")
+    assert receipt["reason"] == "manual_light_priority"
+    assert executor.calls == []
+
+
 async def test_runtime_start_publishes_related_graph_before_startup_release() -> None:
     from custom_components.hausman_hub.application.manual_light_authority import ManualLightAuthority
     hass = _FakeHass()
@@ -1261,6 +1286,7 @@ async def test_ambiguous_legacy_room_record_closes_all_lights() -> None:
         }],
         "manualOff": [], "morning": [],
     }
+    before = dict(ownership_store.payload)
     second = _config_payload()
     second["roomId"] = "room_other"
     authority = ManualLightAuthority(_AuthorityStore())
@@ -1276,6 +1302,44 @@ async def test_ambiguous_legacy_room_record_closes_all_lights() -> None:
         assert authority.blocks("light.unrelated")
     finally:
         await runtime.stop()
+    assert ownership_store.payload == before
+
+
+async def test_legacy_journal_is_not_migrated_when_authority_save_fails() -> None:
+    class _FailingAuthorityStore:
+        recovered_previous = False
+
+        async def async_load(self):
+            return {"version": 2, "records": [], "recentFingerprints": []}
+
+        async def async_save(self, _payload):
+            raise RuntimeError("authority storage unavailable")
+
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    ownership_store = _MemoryOwnershipStore()
+    ownership_store.payload = {
+        "version": 1,
+        "records": [{
+            "targetId": "light_main", "source": "manual",
+            "confirmed": True, "at": _NOW_MS,
+        }],
+        "manualOff": [{"targetId": "light_main", "at": _NOW_MS}],
+        "morning": [],
+    }
+    before = dict(ownership_store.payload)
+    authority = ManualLightAuthority(_FailingAuthorityStore())
+    await authority.async_load()
+    runtime = _make_runtime(
+        hass, ownership_store=ownership_store, manual_light_authority=authority,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        assert authority.unhealthy
+        assert runtime._ownership.has_legacy()  # type: ignore[attr-defined]
+    finally:
+        await runtime.stop()
+    assert ownership_store.payload == before
 
 
 async def test_manual_off_protection_survives_restart() -> None:
@@ -1719,7 +1783,7 @@ async def test_device_trigger_sequence_selects_progressive_configured_steps() ->
         await runtime.stop()
 
 
-async def test_device_trigger_return_to_auto_clears_manual_off_without_calling_light() -> None:
+async def test_device_trigger_return_to_auto_keeps_manual_hold_without_calling_light() -> None:
     hass = _FakeHass()
     hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
     hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
@@ -1742,9 +1806,9 @@ async def test_device_trigger_return_to_auto_clears_manual_off_without_calling_l
         _, action, _ = api.attached[0]
         await action({}, None)  # type: ignore[operator]
         assert executor.calls == []
-        assert runtime._ownership.last_manual_off_at(_ROOM_ID, {"light_main"}) is None  # type: ignore[attr-defined]
+        assert runtime._ownership.last_manual_off_at(_ROOM_ID, {"light_main"}) == _NOW_MS  # type: ignore[attr-defined]
         ownership = runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"})  # type: ignore[attr-defined]
-        assert ownership[-1].source is OwnershipSource.AUTO
+        assert ownership[-1].source is OwnershipSource.MANUAL
     finally:
         await runtime.stop()
 
@@ -2269,7 +2333,7 @@ async def test_service_event_ownership_is_scoped_to_room() -> None:
         await runtime.stop()
 
 
-def test_ownership_journal_migration_skips_ambiguous_target_id() -> None:
+def test_ownership_journal_migration_preserves_ambiguous_target_id() -> None:
     journal = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
     journal.restore(
         {
@@ -2293,7 +2357,55 @@ def test_ownership_journal_migration_skips_ambiguous_target_id() -> None:
     assert journal.snapshots_for("room_b", {"chandelier"}) == ()
     assert journal.last_manual_off_at("room_a", {"chandelier"}) is None
     assert journal.last_manual_off_at("room_b", {"chandelier"}) is None
-    assert not journal.has_legacy()
+    assert journal.has_legacy()
+    assert journal.to_payload()["records"] == [{
+        "targetId": "chandelier", "source": "manual",
+        "confirmed": True, "at": 4_000,
+    }]
+    assert journal.to_payload()["manualOff"] == [{"targetId": "chandelier", "at": 4_000}]
+    restored = RoomLightingOwnershipJournal()
+    restored.restore(journal.to_payload())
+    assert restored.has_legacy()
+    assert restored.to_payload() == journal.to_payload()
+
+
+def test_legacy_manual_authority_plan_requires_one_physical_light_mapping() -> None:
+    def journal_for(*target_ids: str) -> RoomLightingOwnershipJournal:
+        journal = RoomLightingOwnershipJournal()
+        journal.restore({
+            "version": 1,
+            "records": [
+                {"targetId": target_id, "source": "manual", "confirmed": True, "at": 1}
+                for target_id in target_ids
+            ],
+            "manualOff": [],
+        })
+        return journal
+
+    exact = SimpleNamespace(
+        room_id="room", devices=SimpleNamespace(
+            light_targets=(SimpleNamespace(id="main", entity_id="light.main"),),
+            auxiliaries=(SimpleNamespace(id="fan", entity_id="switch.fan"),),
+        ),
+    )
+    assert legacy_manual_authority_plan(journal_for("main"), (exact,)) == (
+        ("light.main",), False,
+    )
+    assert legacy_manual_authority_plan(journal_for("missing"), (exact,)) == ((), True)
+    assert legacy_manual_authority_plan(journal_for("fan"), (exact,)) == ((), False)
+
+    duplicate = SimpleNamespace(
+        room_id="room", devices=SimpleNamespace(
+            light_targets=(
+                SimpleNamespace(id="main", entity_id="light.main"),
+                SimpleNamespace(id="alias", entity_id="light.main"),
+            ),
+            auxiliaries=(),
+        ),
+    )
+    assert legacy_manual_authority_plan(journal_for("main", "alias"), (duplicate,)) == (
+        ("light.main",), True,
+    )
 
 
 def test_ownership_journal_prunes_stale_manual_only_when_light_off() -> None:
