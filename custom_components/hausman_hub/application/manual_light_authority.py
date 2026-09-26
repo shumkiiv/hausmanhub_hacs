@@ -114,11 +114,14 @@ class ManualLightAuthority:
 
     def blocking_evidence(self, entity_id: str) -> ManualLightRecord | None:
         """Return linked evidence without copying it to a sibling entity."""
-        for related in self._related_sources.related(entity_id):
-            record = self.record(related)
-            if record is not None:
-                return record
-        return None
+        own = self.record(entity_id)
+        if own is not None:
+            return own
+        records = [
+            record for related in self._related_sources.related(entity_id)
+            if (record := self.record(related)) is not None
+        ]
+        return max(records, key=lambda record: (record.generation, record.entity_id), default=None)
 
     def mark_unhealthy(self) -> None:
         """Close every automatic light route after ambiguous attribution."""

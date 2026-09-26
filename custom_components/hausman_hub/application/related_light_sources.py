@@ -2,17 +2,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from types import MappingProxyType
+from typing import Iterable, Mapping
 
 
 @dataclass(frozen=True, slots=True)
 class RelatedLightSources:
     ready: bool
-    components: dict[str, frozenset[str]]
+    components: Mapping[str, frozenset[str]]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "components", MappingProxyType(dict(self.components)))
 
     @classmethod
     def from_configs(cls, configs: Iterable[object]) -> "RelatedLightSources":
         components: dict[str, frozenset[str]] = {}
+        owners: dict[str, str] = {}
         for config in configs:
             entities: list[str] = []
             for target in config.devices.light_targets:
@@ -22,6 +27,10 @@ class RelatedLightSources:
                 entities.append(entity_id)
             component = frozenset(entities)
             for entity_id in component:
+                owner = owners.get(entity_id)
+                if owner is not None and owner != config.room_id:
+                    return cls(False, {})
+                owners[entity_id] = config.room_id
                 existing = components.get(entity_id)
                 if existing is not None and existing != component:
                     return cls(False, {})

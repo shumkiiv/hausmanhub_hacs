@@ -44,7 +44,7 @@ async def test_capture_is_durable_and_duplicate_is_not_extended() -> None:
 
 
 def test_related_light_sources_extend_deny_without_copying_record() -> None:
-    config = SimpleNamespace(devices=SimpleNamespace(light_targets=(
+    config = SimpleNamespace(room_id="room", devices=SimpleNamespace(light_targets=(
         SimpleNamespace(entity_id="light.primary"),
         SimpleNamespace(entity_id="switch.alternate"),
     )))
@@ -58,13 +58,40 @@ def test_related_light_sources_extend_deny_without_copying_record() -> None:
 
 
 def test_related_light_sources_fail_closed_when_target_has_no_entity() -> None:
-    config = SimpleNamespace(devices=SimpleNamespace(light_targets=(
+    config = SimpleNamespace(room_id="room", devices=SimpleNamespace(light_targets=(
         SimpleNamespace(entity_id=None),
     )))
     authority = ManualLightAuthority()
     authority.set_related_sources(RelatedLightSources.from_configs((config,)))
     assert authority.blocks("light.any")
     assert authority.barrier_reason_for("light.any") == "attribution_uncertain"
+
+
+def test_related_light_sources_empty_ready_and_cross_room_collision_closed() -> None:
+    assert RelatedLightSources.from_configs(()).ready
+    room_a = SimpleNamespace(room_id="room_a", devices=SimpleNamespace(light_targets=(
+        SimpleNamespace(entity_id="light.shared"),
+    )))
+    room_b = SimpleNamespace(room_id="room_b", devices=SimpleNamespace(light_targets=(
+        SimpleNamespace(entity_id="light.shared"),
+    )))
+    graph = RelatedLightSources.from_configs((room_a, room_b))
+    assert not graph.ready
+    with pytest.raises(TypeError):
+        graph.components["light.injected"] = frozenset(("light.injected",))
+
+
+def test_related_evidence_prefers_own_then_latest_generation() -> None:
+    config = SimpleNamespace(room_id="room", devices=SimpleNamespace(light_targets=(
+        SimpleNamespace(entity_id="light.a"), SimpleNamespace(entity_id="switch.b"),
+        SimpleNamespace(entity_id="light.c"),
+    )))
+    authority = ManualLightAuthority()
+    authority.set_related_sources(RelatedLightSources.from_configs((config,)))
+    authority.capture("light.a", "on", "service", "a", observed_at_ms=1)
+    authority.capture("switch.b", "off", "service", "b", observed_at_ms=2)
+    assert authority.blocking_evidence("light.a").entity_id == "light.a"
+    assert authority.blocking_evidence("light.c").entity_id == "switch.b"
 
 
 async def test_storage_failure_remains_deny_only() -> None:
