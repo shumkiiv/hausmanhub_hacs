@@ -141,6 +141,21 @@ class _MemoryStore:
         return self.configs.pop(room_id, None) is not None
 
 
+class _DelayedMemoryStore(_MemoryStore):
+    """Hold one configuration save open to inspect the concurrent status read."""
+
+    def __init__(self, config: object) -> None:
+        super().__init__()
+        self.configs[config.room_id] = config
+        self.upsert_started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def async_upsert(self, config) -> None:
+        self.upsert_started.set()
+        await self.release.wait()
+        self.configs[config.room_id] = config
+
+
 class _SpyExecutor:
     def __init__(self) -> None:
         self.calls: list[object] = []
@@ -632,6 +647,70 @@ class RoomLightingApiTest(unittest.TestCase):
             self.assertEqual("attribution_uncertain", returned["reason"])
             self.assertEqual("attribution_uncertain", returned["sources"][0]["reason"])
             _validate("room-lighting-status.schema.json", status.payload)
+
+        asyncio.run(flow())
+
+    def test_pending_changed_config_cannot_reopen_stale_manual_graph(self) -> None:
+        """Status stays fail-closed while a changed topology is being saved."""
+        from custom_components.hausman_hub.application.manual_light_authority import (
+            ManualLightAuthority,
+        )
+        from custom_components.hausman_hub.application.related_light_sources import (
+            RelatedLightSources,
+        )
+        from custom_components.hausman_hub.application.room_lighting_service import (
+            RoomLightingService,
+        )
+        from custom_components.hausman_hub.domain.room_lighting import (
+            config_from_payload,
+        )
+
+        async def flow() -> None:
+            room_id = "room_demo_entry"
+            initial = config_from_payload(_config_payload(room_id))
+            store = _DelayedMemoryStore(initial)
+            authority = ManualLightAuthority()
+            authority.set_related_sources(RelatedLightSources.from_configs((initial,)))
+            self.hass.data["hausman_hub"][self.api.DATA_ROOM_LIGHTING_SERVICE] = (
+                RoomLightingService(
+                    store,
+                    topology_invalidator=authority.invalidate_related_sources,
+                )
+            )
+            self.hass.data["hausman_hub"]["manual_light_authority"] = authority
+
+            changed = _config_payload(room_id)
+            changed["devices"]["light_targets"].append({
+                "id": "light_secondary", "name": "Второй свет", "kind": "light",
+                "entityId": "light.demo_secondary", "role": "other", "groupId": None,
+                "brightness": True, "color_temperature": False,
+                "autoControl": True, "autoAdoptOverride": None,
+            })
+            put = asyncio.create_task(self.config_view.put(
+                _json_request(self._config_path(room_id), changed, room_id=room_id)
+            ))
+            await store.upsert_started.wait()
+
+            authority.set_related_sources(RelatedLightSources.from_configs((initial,)))
+            self.assertEqual(
+                "attribution_uncertain", authority.barrier_reason_for("light.demo_main")
+            )
+            status = await self.status_view.get(
+                _request(
+                    self.api.ROOM_LIGHTING_STATUS_PATH.format(room_id=room_id),
+                    room_id=room_id,
+                )
+            )
+            self.assertEqual(200, status.status)
+            returned = status.payload["manual_control_return"]
+            self.assertEqual("attribution_uncertain", returned["reason"])
+            self.assertTrue(returned["active"])
+            self.assertEqual("attribution_uncertain", returned["sources"][0]["reason"])
+            _validate("room-lighting-status.schema.json", status.payload)
+
+            store.release.set()
+            saved = await put
+            self.assertEqual(200, saved.status)
 
         asyncio.run(flow())
 

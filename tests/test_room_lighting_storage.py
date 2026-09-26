@@ -6,7 +6,8 @@ import asyncio
 import sys
 import types
 import unittest
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from custom_components.hausman_hub.application.room_lighting_service import (
     DEFAULT_TEMPLATE_ID,
@@ -328,6 +329,26 @@ class RoomLightingTopologyInvalidationTest(unittest.IsolatedAsyncioTestCase):
         return authority
 
     async def test_changed_put_invalidates_before_delayed_save(self) -> None:
+        from custom_components.hausman_hub.application.room_lighting_ha_executor import (
+            RoomLightingHaExecutor,
+        )
+        from custom_components.hausman_hub.application.scenario_executor import (
+            ScenarioExecutor,
+        )
+        from custom_components.hausman_hub.application.scenarios import (
+            ScenarioCatalog,
+            ScenarioDeviceAction,
+            ScenarioDeviceEntry,
+        )
+        from custom_components.hausman_hub.domain.room_lighting_engine import (
+            LightAction,
+            PlannedCommand,
+        )
+        from custom_components.hausman_hub.domain.scenarios import (
+            ScenarioAction,
+            ScenarioActionType,
+        )
+
         initial = self._config()
         store = _DelayedMutationStore(initial)
         authority = self._authority(initial)
@@ -344,6 +365,65 @@ class RoomLightingTopologyInvalidationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             "attribution_uncertain", authority.barrier_reason_for("switch.demo_a")
         )
+        self.assertTrue(authority.blocks("switch.demo_a"))
+
+        room_hass = SimpleNamespace(
+            services=SimpleNamespace(async_call=AsyncMock()),
+            states=SimpleNamespace(
+                get=lambda _entity_id: SimpleNamespace(state="off", attributes={})
+            ),
+        )
+        room_executor = RoomLightingHaExecutor(
+            {target.id: target for target in initial.devices.light_targets},
+            manual_light_authority=authority,
+        )
+        room_receipt = await room_executor.execute(
+            room_hass,
+            PlannedCommand("light_demo_a", LightAction.TURN_ON),
+            automatic=True,
+        )
+        self.assertFalse(room_receipt.sent)
+        room_hass.services.async_call.assert_not_awaited()
+
+        scenario_hass = SimpleNamespace(
+            services=SimpleNamespace(async_call=AsyncMock()),
+            states=SimpleNamespace(
+                get=lambda _entity_id: SimpleNamespace(state="off", attributes={})
+            ),
+        )
+        scenario_device = ScenarioDeviceEntry(
+            target_id="room_light",
+            name="Свет тамбура",
+            entity_id="switch.demo_a",
+            actions=(
+                ScenarioDeviceAction(
+                    "turn_on", "Включить", "switch", "turn_on", frozenset()
+                ),
+            ),
+        )
+        catalog = ScenarioCatalog({"room_light": scenario_device}, {})
+
+        async def run_callback(*_args: object, **_kwargs: object) -> dict[str, object]:
+            return {}
+
+        scenario_executor = ScenarioExecutor(
+            scenario_hass,
+            catalog,
+            run_callback,
+            manual_light_authority=authority,
+        )
+        scenario_receipt = await scenario_executor._device_action_receipt(
+            ScenarioAction(
+                id="automatic_room_light",
+                type=ScenarioActionType.DEVICE_ACTION,
+                target_id="room_light",
+                action_id="turn_on",
+            ),
+            {"action_id": "automatic_room_light", "status": "pending"},
+            automatic=True,
+        )
+        self.assertEqual("manual_light_priority", scenario_receipt.get("error"))
+        scenario_hass.services.async_call.assert_not_awaited()
         store.release.set()
         await pending
 
