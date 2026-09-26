@@ -78,13 +78,11 @@ class ManualLightAuthorityEvents:
             return
         try:
             while True:
+                ambiguous_domains = self._ambiguous_startup_domains
+                self._ambiguous_startup_domains = set()
+                for domain in ambiguous_domains:
+                    self._authority.mark_selector_uncertain(domain)
                 managed = frozenset(self._managed_entities())
-                if any(
-                    entity.startswith(f"{domain}.")
-                    for domain in self._ambiguous_startup_domains
-                    for entity in managed
-                ):
-                    self._authority.mark_unhealthy()
                 batch = self._startup_evidence
                 self._startup_evidence = []
                 for evidence in batch:
@@ -93,7 +91,7 @@ class ManualLightAuthorityEvents:
                 await self._authority.async_drain()
                 # An event may arrive while the verified save is in flight.
                 # The loop drains that new generation before opening dispatch.
-                if not self._startup_evidence:
+                if not self._startup_evidence and not self._ambiguous_startup_domains:
                     self._managed_ready = True
                     self._authority.finish_startup_observation()
                     return
@@ -175,33 +173,10 @@ class ManualLightAuthorityEvents:
         if service not in {"turn_on", "turn_off", "toggle"}:
             return
         service_data = data.get("service_data")
-        if not isinstance(service_data, Mapping):
-            if not self._managed_ready:
-                self._ambiguous_startup_domains.add(domain)
-            elif any(entity.startswith(f"{domain}.") for entity in self._managed_entities()):
-                self._authority.mark_unhealthy()
+        entities = _exact_service_entities(service_data, domain)
+        if entities is None:
+            self._mark_selector_uncertain(domain)
             return
-        raw_entities = service_data.get("entity_id")
-        if isinstance(raw_entities, str):
-            entities = (raw_entities,)
-        elif isinstance(raw_entities, (list, tuple)) and all(
-            isinstance(item, str) for item in raw_entities
-        ):
-            entities = tuple(raw_entities)
-        else:
-            # An area, device or selector may include managed lights. The
-            # scope is unknown at this boundary, so close every light route.
-            if not self._managed_ready:
-                self._ambiguous_startup_domains.add(domain)
-            elif any(entity.startswith(f"{domain}.") for entity in self._managed_entities()):
-                self._authority.mark_unhealthy()
-            return
-        if any(not entity_id.startswith(f"{domain}.") for entity_id in entities):
-            # HA also accepts broad strings such as ``entity_id: all``.
-            if not self._managed_ready:
-                self._ambiguous_startup_domains.add(domain)
-            elif any(entity.startswith(f"{domain}.") for entity in self._managed_entities()):
-                self._authority.mark_unhealthy()
         managed = frozenset(self._managed_entities()) if self._managed_ready else None
         action = {"turn_on": "on", "turn_off": "off", "toggle": "unknown"}[service]
         for entity_id in entities:
@@ -222,6 +197,13 @@ class ManualLightAuthorityEvents:
                     entity_id, action, context, "service",
                     event_identity=getattr(event, "time_fired", None) or id(event),
                 )
+
+    def _mark_selector_uncertain(self, domain: str) -> None:
+        """Preserve a broad service's domain without inventing target actions."""
+        if self._managed_ready:
+            self._authority.mark_selector_uncertain(domain)
+            return
+        self._ambiguous_startup_domains.add(domain)
 
     def state_event(self, event: object) -> None:
         data = getattr(event, "data", None)
@@ -259,3 +241,31 @@ class ManualLightAuthorityEvents:
                 event_identity=getattr(new_state, "last_changed", None)
                 or getattr(new_state, "last_updated", None),
             )
+
+
+def _exact_service_entities(
+    service_data: object, domain: str
+) -> tuple[str, ...] | None:
+    """Accept only an explicit, non-broad entity set for a service call."""
+    if not isinstance(service_data, Mapping):
+        return None
+    if any(key in service_data for key in ("area_id", "device_id", "label_id")):
+        return None
+    raw_entities = service_data.get("entity_id")
+    if isinstance(raw_entities, str):
+        entities = (raw_entities,)
+    elif isinstance(raw_entities, list) and raw_entities and all(
+        isinstance(item, str) for item in raw_entities
+    ):
+        entities = tuple(raw_entities)
+    else:
+        return None
+    if any(
+        not entity_id
+        or entity_id in {"all", f"{domain}.all"}
+        or entity_id == f"{domain}."
+        or not entity_id.startswith(f"{domain}.")
+        for entity_id in entities
+    ):
+        return None
+    return entities

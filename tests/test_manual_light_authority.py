@@ -440,7 +440,9 @@ async def test_switch_light_event_and_selector_uncertainty() -> None:
         data={"domain": "switch", "service": "turn_on",
               "service_data": {"area_id": "unknown"}},
     ))
-    assert authority.unhealthy
+    assert not authority.unhealthy
+    assert authority.blocks("switch.lamp")
+    assert authority.barrier_reason_for("switch.lamp") == "selector_uncertain"
     await asyncio.gather(*hass.tasks)
 
 
@@ -453,7 +455,99 @@ def test_broad_entity_id_string_cannot_bypass_managed_light_attribution() -> Non
         data={"domain": "light", "service": "turn_on",
               "service_data": {"entity_id": "all"}},
     ))
-    assert authority.unhealthy
+    assert not authority.unhealthy
+    assert authority.blocks("light.demo")
+    assert authority.barrier_reason_for("light.demo") == "selector_uncertain"
+
+
+def test_selector_uncertainty_is_domain_scoped_to_related_sources() -> None:
+    config = SimpleNamespace(room_id="room", devices=SimpleNamespace(light_targets=(
+        SimpleNamespace(entity_id="light.primary"),
+        SimpleNamespace(entity_id="switch.alternate"),
+    )))
+    authority = ManualLightAuthority()
+    authority.set_related_sources(RelatedLightSources.from_configs((config,)))
+    authority.mark_selector_uncertain("light")
+    assert authority.blocks("light.primary")
+    assert authority.blocks("switch.alternate")
+    assert not authority.blocks("switch.unrelated")
+    assert authority.barrier_reason_for("light.primary") == "selector_uncertain"
+    authority.invalidate_related_sources()
+    assert authority.barrier_reason_for("light.primary") == "attribution_uncertain"
+
+
+async def test_state_transition_never_clears_selector_uncertainty() -> None:
+    authority = ManualLightAuthority()
+    listener = ManualLightAuthorityEvents(
+        SimpleNamespace(), authority, lambda: {"light.demo"}, None, lambda: None,
+    )
+    authority.mark_selector_uncertain("light")
+    observed = datetime.now(timezone.utc)
+    listener.state_event(SimpleNamespace(
+        data={
+            "entity_id": "light.demo",
+            "old_state": SimpleNamespace(state="off"),
+            "new_state": SimpleNamespace(
+                state="on", last_changed=observed, attributes={},
+            ),
+        },
+        context=SimpleNamespace(id="manual-state"),
+    ))
+    assert authority.barrier_reason_for("light.demo") == "selector_uncertain"
+
+
+def test_broad_or_malformed_service_never_captures_partial_manual_action() -> None:
+    authority = ManualLightAuthority()
+    listener = ManualLightAuthorityEvents(
+        SimpleNamespace(), authority,
+        lambda: {"light.first", "light.second"}, None, lambda: None,
+    )
+    for service_data in (
+        {},
+        {"entity_id": []},
+        {"entity_id": ("light.first",)},
+        {"entity_id": ["light.first", "all"]},
+        {"entity_id": ["light.first", "switch.other"]},
+        {"entity_id": "light.all"},
+        {"entity_id": "light.first", "area_id": "area"},
+        {"device_id": "device"},
+        {"label_id": "label"},
+    ):
+        listener.service_event(SimpleNamespace(
+            data={"domain": "light", "service": "turn_on", "service_data": service_data},
+            context=SimpleNamespace(id=f"broad-{service_data!r}"), time_fired=1,
+        ))
+    assert authority.record("light.first") is None
+    assert authority.record("light.second") is None
+    assert authority.barrier_reason_for("light.first") == "selector_uncertain"
+    assert not authority.unhealthy
+
+
+async def test_exact_service_list_captures_each_target_only() -> None:
+    class _Hass:
+        def __init__(self) -> None:
+            self.tasks = []
+
+        def async_create_task(self, coroutine):
+            task = asyncio.create_task(coroutine)
+            self.tasks.append(task)
+            return task
+
+    hass = _Hass()
+    authority = ManualLightAuthority()
+    listener = ManualLightAuthorityEvents(
+        hass, authority, lambda: {"light.first", "light.second"}, None, lambda: None,
+    )
+    listener.service_event(SimpleNamespace(
+        data={"domain": "light", "service": "turn_off", "service_data": {
+            "entity_id": ["light.first", "light.second"],
+        }},
+        context=SimpleNamespace(id="exact-list"), time_fired=1,
+    ))
+    assert authority.record("light.first").action == "off"
+    assert authority.record("light.second").action == "off"
+    assert authority.barrier_reason_for("light.first") is None
+    await asyncio.gather(*hass.tasks)
 
 
 def test_event_subscription_registers_both_sync_boundaries() -> None:
@@ -661,6 +755,57 @@ async def test_room_only_event_during_startup_drain_is_not_lost() -> None:
     assert {item["entityId"] for item in store.payload["records"]} == managed
     assert authority.record("light.room_b").action == "on"
     assert not authority.blocks("light.unrelated")
+
+
+async def test_selector_during_startup_drain_is_applied_before_dispatch_opens() -> None:
+    class _SlowStore(_Store):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.delay = False
+
+        async def async_save(self, payload):
+            if self.delay:
+                self.started.set()
+                await self.release.wait()
+            self.payload = payload
+
+    store = _SlowStore()
+    authority = ManualLightAuthority(store)
+    await authority.async_load()
+    store.delay = True
+    callbacks = {}
+
+    class _Bus:
+        def async_listen(self, event_type, callback):
+            callbacks[event_type] = callback
+            return lambda: None
+
+    listener = ManualLightAuthorityEvents(
+        SimpleNamespace(bus=_Bus()), authority, lambda: {"light.room_a"},
+        None, lambda: None,
+    )
+    listener.start(buffer_startup=True)
+    callbacks["call_service"](SimpleNamespace(
+        data={"domain": "light", "service": "turn_on", "service_data": {
+            "entity_id": "light.room_a",
+        }},
+        context=SimpleNamespace(id="startup-exact"), time_fired=1,
+    ))
+    completion = asyncio.create_task(listener.async_complete_startup())
+    await store.started.wait()
+    callbacks["call_service"](SimpleNamespace(
+        data={"domain": "light", "service": "turn_on", "service_data": {
+            "area_id": "unknown",
+        }},
+        context=SimpleNamespace(id="startup-selector"), time_fired=2,
+    ))
+    store.release.set()
+    await completion
+    assert authority.record("light.room_a").action == "on"
+    assert not authority.unhealthy
+    assert authority.barrier_reason_for("light.room_a") == "selector_uncertain"
 
 
 def test_startup_wiring_drains_room_events_before_activation() -> None:

@@ -606,6 +606,43 @@ class RoomLightingApiTest(unittest.TestCase):
 
         asyncio.run(flow())
 
+    def test_status_projects_selector_uncertainty_to_related_sibling(self) -> None:
+        from custom_components.hausman_hub.application.manual_light_authority import ManualLightAuthority
+        from custom_components.hausman_hub.application.related_light_sources import RelatedLightSources
+
+        async def flow() -> None:
+            room_id = "room_demo_entry"
+            config = _config_payload(room_id)
+            config["devices"]["light_targets"].append({
+                "id": "switch_related", "name": "Связанный свет", "kind": "switch",
+                "entityId": "switch.demo_related", "role": "other", "groupId": None,
+                "brightness": False, "color_temperature": False,
+                "autoControl": True, "autoAdoptOverride": None,
+            })
+            response = await self.config_view.put(_json_request(self._config_path(room_id), config, room_id=room_id))
+            self.assertEqual(200, response.status)
+            authority = ManualLightAuthority()
+            authority.set_related_sources(RelatedLightSources.from_configs((
+                SimpleNamespace(room_id=room_id, devices=SimpleNamespace(light_targets=(
+                    SimpleNamespace(entity_id="light.demo_main"), SimpleNamespace(entity_id="switch.demo_related"),
+                ))),
+            )))
+            authority.mark_selector_uncertain("light")
+            self.hass.data["hausman_hub"]["manual_light_authority"] = authority
+            request = _request(self.api.ROOM_LIGHTING_STATUS_PATH.format(room_id=room_id), room_id=room_id)
+            status = (await self.status_view.get(request)).payload
+            returned = status["manual_control_return"]
+            self.assertEqual((True, "selector_uncertain", "blocked"), (
+                returned["active"], returned["reason"], returned["scope"],
+            ))
+            self.assertEqual({
+                "light.demo_main": "selector_uncertain",
+                "switch.demo_related": "selector_uncertain",
+            }, {source["entityId"]: source["reason"] for source in returned["sources"]})
+            _validate("room-lighting-status.schema.json", status)
+
+        asyncio.run(flow())
+
     def test_registered_service_closes_fresh_config_until_runtime_rebuilds_graph(self) -> None:
         """A saved room must not inherit the previous topology's authority."""
         from custom_components.hausman_hub.application.manual_light_authority import (

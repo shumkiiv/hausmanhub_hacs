@@ -56,6 +56,11 @@ class ManualLightAuthority:
         self._writer = asyncio.Lock()
         self._related_sources = RelatedLightSources(True, {})
         self._related_sources_invalidated = False
+        # Service selectors (area/device/label/all) cannot be expanded safely
+        # at this event boundary.  Keep this evidence by HA service domain;
+        # it is monotonic for the running authority and is never inferred away
+        # by a later state transition.
+        self._selector_uncertain_domains: set[str] = set()
 
     def set_related_sources(self, graph: RelatedLightSources) -> None:
         """Atomically replace the only relation graph; an invalid graph denies all."""
@@ -65,6 +70,12 @@ class ManualLightAuthority:
     def invalidate_related_sources(self) -> None:
         self._related_sources_invalidated = True
         self._related_sources = RelatedLightSources(False, {})
+
+    def mark_selector_uncertain(self, domain: str) -> None:
+        """Deny only graph components that could have matched a selector."""
+        if domain not in {"light", "switch"}:
+            raise ValueError("manual light selector domain is invalid")
+        self._selector_uncertain_domains.add(domain)
 
     @property
     def seeded_empty_store(self) -> bool:
@@ -98,6 +109,12 @@ class ManualLightAuthority:
             return global_reason
         if not self._related_sources.ready:
             return "attribution_uncertain"
+        if any(
+            related.startswith(f"{domain}.")
+            for related in self._related_sources.related(entity_id)
+            for domain in self._selector_uncertain_domains
+        ):
+            return "selector_uncertain"
         return None
 
     def begin_startup_observation(self) -> None:
@@ -114,7 +131,7 @@ class ManualLightAuthority:
     def blocks(self, entity_id: str) -> bool:
         # First slice: the clock never releases a manual choice. A later
         # migration must prove every other condition before using deadline.
-        if self.unhealthy or not self._related_sources.ready:
+        if self.barrier_reason_for(entity_id) is not None:
             return True
         return any(
             related in self._pending or related in self._records
