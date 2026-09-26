@@ -177,6 +177,30 @@ def test_full_payload_round_trips() -> None:
     assert config_from_payload(encoded).to_dict() == encoded
 
 
+@pytest.mark.parametrize("priority_seconds", [15, 3600, 86400])
+def test_manual_control_return_serializes_bounded_room_priority(
+    priority_seconds: int,
+) -> None:
+    payload = _payload()
+    payload["manualControlReturn"] = {"prioritySeconds": priority_seconds}
+    encoded = config_from_payload(payload).to_dict()
+    assert encoded["manualControlReturn"] == {"prioritySeconds": priority_seconds}
+    assert config_from_payload(encoded).to_dict() == encoded
+
+
+def test_legacy_room_config_gets_manual_control_return_default() -> None:
+    encoded = config_from_payload(_payload()).to_dict()
+    assert encoded["manualControlReturn"] == {"prioritySeconds": 3600}
+
+
+@pytest.mark.parametrize("priority_seconds", [14, 86401, True])
+def test_manual_control_return_rejects_invalid_priority(priority_seconds: object) -> None:
+    payload = _payload()
+    payload["manualControlReturn"] = {"prioritySeconds": priority_seconds}
+    with pytest.raises(RoomLightingViolation):
+        config_from_payload(payload)
+
+
 def test_brightness_zero_is_not_absence_and_none_is_preserved() -> None:
     config = config_from_payload(_payload())
     how = config.schedule[0].how

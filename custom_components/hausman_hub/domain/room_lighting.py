@@ -905,6 +905,21 @@ class ManualOffProtection:
 
 
 @dataclass(frozen=True, slots=True)
+class ManualControlReturn:
+    """Per-room manual priority duration, normalized for legacy documents."""
+
+    priority_seconds: int = 3600
+
+    def __post_init__(self) -> None:
+        _integer(
+            self.priority_seconds,
+            "manual control return priority",
+            minimum=15,
+            maximum=86400,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class AwayReturn:
     restore: RestoreMode = RestoreMode.BY_CURRENT_CONDITIONS
 
@@ -1028,6 +1043,7 @@ class RoomLightingConfig:
     away_behavior: AwayBehavior
     auto_adopt: bool
     updated_at: int
+    manual_control_return: ManualControlReturn = field(default_factory=ManualControlReturn)
     commands_enabled: bool = False
     illumination: Illumination | None = None
     timers: Timers | None = None
@@ -1055,6 +1071,8 @@ class RoomLightingConfig:
             raise RoomLightingViolation("room lighting config requires dimming")
         if not isinstance(self.manual_off_protection, ManualOffProtection):
             raise RoomLightingViolation("room lighting config requires manual off protection")
+        if not isinstance(self.manual_control_return, ManualControlReturn):
+            raise RoomLightingViolation("manual control return block is invalid")
         if not isinstance(self.away_behavior, AwayBehavior):
             raise RoomLightingViolation("room lighting config requires away behaviour")
         _flag(self.auto_adopt, "auto adopt flag")
@@ -1220,6 +1238,9 @@ class RoomLightingConfig:
                 "releaseMode": self.manual_off_protection.release_mode.value,
                 "stableAbsenceSeconds": self.manual_off_protection.stable_absence_seconds,
                 "priority": self.manual_off_protection.priority,
+            },
+            "manualControlReturn": {
+                "prioritySeconds": self.manual_control_return.priority_seconds,
             },
             "awayBehavior": _away_to_payload(self.away_behavior),
             "autoAdopt": self.auto_adopt,
@@ -1723,6 +1744,13 @@ def _manual_off_from_payload(payload: object) -> ManualOffProtection:
     )
 
 
+def _manual_control_return_from_payload(payload: object) -> ManualControlReturn:
+    if payload is None:
+        return ManualControlReturn()
+    data = _as_dict(payload, "manual control return")
+    return ManualControlReturn(priority_seconds=data.get("prioritySeconds", 3600))
+
+
 def _away_from_payload(payload: object) -> AwayBehavior:
     data = _as_dict(payload, "away behaviour")
     returned = data.get("return")
@@ -1804,6 +1832,9 @@ def room_lighting_config_from_payload(payload: object) -> RoomLightingConfig:
         dimming=_dimming_from_payload(_require(data, "dimming", "dimming")),
         manual_off_protection=_manual_off_from_payload(
             _require(data, "manualOffProtection", "manual off protection")
+        ),
+        manual_control_return=_manual_control_return_from_payload(
+            data.get("manualControlReturn")
         ),
         away_behavior=_away_from_payload(_require(data, "awayBehavior", "away behaviour")),
         auto_adopt=_require(data, "autoAdopt", "auto adopt"),
