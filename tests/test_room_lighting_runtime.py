@@ -2095,6 +2095,123 @@ async def test_return_to_auto_noop_skips_evaluation_and_write_for_two_targets() 
         await runtime.stop()
 
 
+async def test_explicit_return_removes_old_auto_history_without_evaluation() -> None:
+    class _AuthorityStore(_MemoryOwnershipStore):
+        recovered_previous = False
+
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "on", last_changed=_NOW_DT)
+    authority_store = _AuthorityStore()
+    authority = ManualLightAuthority(authority_store)
+    await authority.async_load()
+    ownership_store = _MemoryOwnershipStore()
+    executor = _SpyExecutor()
+    api = _FakeDeviceAutomationApi()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor,
+        payload=_trigger_config_payload(action="return_to_auto"),
+        ownership_store=ownership_store, manual_light_authority=authority,
+        device_automation_api=api,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        runtime._ownership.record_auto(_ROOM_ID, "light_main", _NOW_MS - 1)  # type: ignore[attr-defined]
+        runtime._ownership.record_manual(_ROOM_ID, "light_main", _NOW_MS)  # type: ignore[attr-defined]
+        authority.capture("light.demo_main", "on", "device_trigger", "manual-on", observed_at_ms=_NOW_MS)
+        await authority.async_drain()
+        processed: list[object] = []
+
+        async def unexpected_process(*_args, **_kwargs):
+            processed.append(True)
+
+        runtime.async_process = unexpected_process  # type: ignore[method-assign]
+        _, action, _ = api.attached[0]
+        returned = await action({}, None)  # type: ignore[operator]
+
+        assert returned is None
+        assert runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"}) == ()  # type: ignore[attr-defined]
+        assert authority.record("light.demo_main") is None
+        assert not authority.blocks("light.demo_main")
+        assert ownership_store.saves == 1
+        assert processed == []
+        assert executor.calls == []
+    finally:
+        await runtime.stop()
+
+
+async def test_explicit_return_refuses_manual_off_journal_mismatch() -> None:
+    class _AuthorityStore(_MemoryOwnershipStore):
+        recovered_previous = False
+
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    authority = ManualLightAuthority(_AuthorityStore())
+    await authority.async_load()
+    ownership_store = _MemoryOwnershipStore()
+    runtime = _make_runtime(
+        hass, ownership_store=ownership_store, manual_light_authority=authority,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        runtime._ownership.record_manual(_ROOM_ID, "light_main", turned_off=True)  # type: ignore[attr-defined]
+        authority.capture("light.demo_main", "on", "device_trigger", "common-on", observed_at_ms=_NOW_MS)
+        await authority.async_drain()
+
+        assert await runtime.async_return_room_to_automatic(_ROOM_ID) == ()
+        assert authority.record("light.demo_main").action == "on"
+        assert authority.blocks("light.demo_main")
+        assert runtime._ownership.last_manual_off_at(_ROOM_ID, {"light_main"}) == _NOW_MS  # type: ignore[attr-defined]
+        assert ownership_store.payload is None
+    finally:
+        await runtime.stop()
+
+
+async def test_explicit_return_refuses_common_on_without_matching_room_manual_on() -> None:
+    class _AuthorityStore(_MemoryOwnershipStore):
+        recovered_previous = False
+
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "on", last_changed=_NOW_DT)
+    authority = ManualLightAuthority(_AuthorityStore())
+    await authority.async_load()
+    ownership_store = _MemoryOwnershipStore()
+    runtime = _make_runtime(
+        hass, ownership_store=ownership_store, manual_light_authority=authority,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        runtime._ownership.record_auto(_ROOM_ID, "light_main", _NOW_MS)  # type: ignore[attr-defined]
+        authority.capture("light.demo_main", "on", "service", "common-on", observed_at_ms=_NOW_MS)
+        await authority.async_drain()
+
+        assert await runtime.async_return_room_to_automatic(_ROOM_ID) == ()
+        assert authority.record("light.demo_main").action == "on"
+        assert authority.blocks("light.demo_main")
+        assert ownership_store.payload is None
+    finally:
+        await runtime.stop()
+
+
+def test_return_history_preserves_newer_manual_and_never_old_auto() -> None:
+    journal = RoomLightingOwnershipJournal(now_ms=lambda: _NOW_MS)
+    journal.record_auto(_ROOM_ID, "light_main", _NOW_MS - 2)
+    journal.record_manual(_ROOM_ID, "light_main", _NOW_MS - 1)
+    boundary = journal.manual_return_boundary()
+    journal.record_manual(_ROOM_ID, "light_main", _NOW_MS)
+
+    assert journal.release_room_manual_history_through(
+        _ROOM_ID, {"light_main"}, {"light_main"}, through_generation=boundary
+    ) == ("light_main",)
+    records = journal.snapshots_for(_ROOM_ID, {"light_main"})
+    assert len(records) == 1
+    assert records[0] == OwnershipSnapshot(
+        "light_main", OwnershipSource.MANUAL, True, _NOW_MS
+    )
+
+
 async def test_device_trigger_shadow_toggle_off_marks_manual_off() -> None:
     hass = _FakeHass()
     hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)

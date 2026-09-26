@@ -9,9 +9,13 @@ import pytest
 
 from custom_components.hausman_hub.application.manual_light_authority import (
     ManualLightAuthority,
+    ManualLightReturnToken,
     valid_manual_light_authority_payload,
 )
 from custom_components.hausman_hub.application.related_light_sources import RelatedLightSources
+from custom_components.hausman_hub.application.manual_light_auto_return import (
+    ManualLightAutoReturn,
+)
 from custom_components.hausman_hub.manual_light_authority_events import (
     ManualLightAuthorityEvents,
     room_light_entity_ids,
@@ -184,6 +188,240 @@ async def test_old_duplicate_after_new_action_does_not_extend_deadline() -> None
         "light.demo", "on", "service", "first", observed_at_ms=30
     )
     assert authority.record("light.demo").deadline_ms == 3_600_020
+
+
+async def test_explicit_return_requires_full_nonlegacy_manual_on_scope() -> None:
+    store = _Store()
+    authority = ManualLightAuthority(store)
+    await authority.async_load()
+    config = SimpleNamespace(room_id="room", devices=SimpleNamespace(light_targets=(
+        SimpleNamespace(entity_id="light.primary"),
+        SimpleNamespace(entity_id="switch.alternate"),
+    )))
+    authority.set_related_sources(RelatedLightSources.from_configs((config,)))
+    authority.capture("light.primary", "on", "service", "on", observed_at_ms=1)
+    await authority.async_drain()
+
+    assert await authority.async_begin_explicit_return(("light.primary",)) is None
+    token = await authority.async_begin_explicit_return(
+        ("light.primary", "switch.alternate")
+    )
+    assert token is not None
+    assert authority.blocks("light.primary")
+    assert authority.barrier_reason == "return_pending"
+    authority.async_finish_explicit_return(token, persisted=True)
+    assert not authority.blocks("light.primary")
+    assert authority.record("light.primary") is None
+    assert store.payload["records"] == []
+
+
+async def test_explicit_return_never_erases_manual_event_captured_during_save() -> None:
+    class _SlowStore(_Store):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.writes = 0
+
+        async def async_save(self, payload):
+            self.writes += 1
+            if self.writes == 3:
+                self.started.set()
+                await self.release.wait()
+            self.payload = payload
+
+    store = _SlowStore()
+    authority = ManualLightAuthority(store)
+    await authority.async_load()
+    authority.capture("light.demo", "on", "service", "old", observed_at_ms=1)
+    await authority.async_drain()
+    releasing = asyncio.create_task(
+        authority.async_begin_explicit_return(("light.demo",))
+    )
+    await store.started.wait()
+    assert authority.capture("light.demo", "off", "service", "new", observed_at_ms=2)
+    store.release.set()
+    token = await releasing
+    assert token is not None
+    authority.async_finish_explicit_return(token, persisted=True)
+    assert authority.record("light.demo").action == "off"
+    assert authority.blocks("light.demo")
+    await authority.async_drain()
+    assert store.payload["records"][0]["action"] == "off"
+
+
+@pytest.mark.parametrize("new_action", ("on", "off"))
+async def test_explicit_return_fence_rejects_event_drained_before_waiting_return(
+    new_action: str,
+) -> None:
+    class _SlowStore(_Store):
+        def __init__(self) -> None:
+            super().__init__()
+            self.writes = 0
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def async_save(self, payload):
+            self.writes += 1
+            if self.writes == 3:
+                self.started.set()
+                await self.release.wait()
+            self.payload = payload
+
+    store = _SlowStore()
+    authority = ManualLightAuthority(store)
+    await authority.async_load()
+    authority.capture("light.demo", "on", "service", "old", observed_at_ms=1)
+    await authority.async_drain()
+    authority.capture("light.other", "on", "service", "other", observed_at_ms=2)
+    draining = asyncio.create_task(authority.async_drain())
+    await store.started.wait()
+    returning = asyncio.create_task(
+        authority.async_begin_explicit_return(("light.demo",))
+    )
+    await asyncio.sleep(0)
+    assert authority.capture("light.demo", new_action, "service", "new", observed_at_ms=3)
+    store.release.set()
+    await draining
+
+    assert await returning is None
+    record = authority.record("light.demo")
+    assert record is not None and record.action == new_action
+    assert authority.blocks("light.demo")
+    assert any(
+        item["entityId"] == "light.demo" and item["action"] == new_action
+        for item in store.payload["records"]
+    )
+
+
+async def test_explicit_return_persists_unrelated_pre_writer_fingerprint() -> None:
+    class _SlowStore(_Store):
+        def __init__(self) -> None:
+            super().__init__()
+            self.writes = 0
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def async_save(self, payload):
+            self.writes += 1
+            if self.writes == 3:
+                self.started.set()
+                await self.release.wait()
+            self.payload = payload
+
+    store = _SlowStore()
+    authority = ManualLightAuthority(store)
+    await authority.async_load()
+    authority.capture("light.demo", "on", "service", "old", observed_at_ms=1)
+    await authority.async_drain()
+    authority.capture("light.blocker", "on", "service", "blocker", observed_at_ms=2)
+    draining = asyncio.create_task(authority.async_drain())
+    await store.started.wait()
+    returning = asyncio.create_task(
+        authority.async_begin_explicit_return(("light.demo",))
+    )
+    await asyncio.sleep(0)
+    assert authority.capture("light.other", "off", "service", "other", observed_at_ms=3)
+    store.release.set()
+    await draining
+    token = await returning
+    assert token is not None
+    authority.async_finish_explicit_return(token, persisted=True)
+    assert {item["entityId"] for item in store.payload["records"]} == {
+        "light.blocker", "light.other"
+    }
+    assert "other" in store.payload["recentFingerprints"]
+
+    restored = ManualLightAuthority(store)
+    await restored.async_load()
+    assert not restored.capture("light.other", "off", "service", "other", observed_at_ms=4)
+
+
+async def test_explicit_return_store_failure_remains_global_deny() -> None:
+    class _FailOnReleaseStore(_Store):
+        def __init__(self) -> None:
+            super().__init__()
+            self.writes = 0
+
+        async def async_save(self, payload):
+            self.writes += 1
+            if self.writes == 3:
+                raise RuntimeError("release storage")
+            self.payload = payload
+
+    authority = ManualLightAuthority(_FailOnReleaseStore())
+    await authority.async_load()
+    authority.capture("light.demo", "on", "service", "on", observed_at_ms=1)
+    await authority.async_drain()
+    with pytest.raises(RuntimeError):
+        await authority.async_begin_explicit_return(("light.demo",))
+    assert authority.blocks("light.other")
+    assert authority.barrier_reason == "storage_unavailable"
+
+
+async def test_cancelled_explicit_return_remains_global_deny_and_token_is_scoped() -> None:
+    class _SlowStore(_Store):
+        def __init__(self) -> None:
+            super().__init__()
+            self.writes = 0
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def async_save(self, payload):
+            self.writes += 1
+            if self.writes == 3:
+                self.started.set()
+                await self.release.wait()
+            self.payload = payload
+
+    store = _SlowStore()
+    authority = ManualLightAuthority(store)
+    await authority.async_load()
+    authority.capture("light.demo", "on", "service", "on", observed_at_ms=1)
+    await authority.async_drain()
+    pending = asyncio.create_task(
+        authority.async_begin_explicit_return(("light.demo",))
+    )
+    await store.started.wait()
+    pending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+    assert authority.blocks("light.other")
+    assert authority.barrier_reason == "storage_unavailable"
+    with pytest.raises(RuntimeError):
+        authority.async_finish_explicit_return(
+            ManualLightReturnToken(frozenset(("light.demo",)), 1, 1),
+            persisted=True,
+        )
+
+
+async def test_cancelled_room_history_save_remains_global_deny() -> None:
+    authority = ManualLightAuthority(_Store())
+    await authority.async_load()
+    authority.capture("light.demo", "on", "service", "on", observed_at_ms=1)
+    await authority.async_drain()
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def persist_room_history() -> bool:
+        started.set()
+        await release.wait()
+        return True
+
+    task = asyncio.create_task(
+        ManualLightAutoReturn(authority).async_return(
+            ("light.demo",),
+            room_history_is_releasable=lambda: True,
+            release_room_history=lambda: ("light-target",),
+            persist_room_history=persist_room_history,
+        )
+    )
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert authority.blocks("light.other")
+    assert authority.barrier_reason == "storage_unavailable"
 
 
 async def test_legacy_import_is_idempotent_and_never_overwrites_newer_evidence() -> None:

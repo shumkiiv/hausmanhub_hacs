@@ -76,6 +76,7 @@ from .power_evidence import (
     trusted_target_state,
 )
 from .room_lighting_ha_executor import RoomLightingHaExecutor
+from .manual_light_auto_return import ManualLightAutoReturn
 from .room_lighting_ha_state import RoomLightingHaStateProvider, _resolve_timezone
 from .room_power_migration import (
     EXACT_POWER_TARGET_MANIFEST,
@@ -190,6 +191,12 @@ class RoomLightingOwnershipJournal:
         # for the first presence survives midnight.
         self._morning: dict[str, dict[str, object]] = {}
         self._dirty = False
+        # The physical return gesture has to distinguish history that existed
+        # before it from a manual action delivered while a durable write waits.
+        self._manual_generation = 0
+        self._manual_record_generation: dict[tuple[str, str], int] = {}
+        self._manual_off_generation: dict[tuple[str, str], int] = {}
+        self._revision = 0
 
     @property
     def dirty(self) -> bool:
@@ -197,6 +204,20 @@ class RoomLightingOwnershipJournal:
 
     def mark_clean(self) -> None:
         self._dirty = False
+
+    @property
+    def revision(self) -> int:
+        return self._revision
+
+    def mark_clean_if_revision(self, revision: int) -> bool:
+        if self._revision != revision:
+            return False
+        self._dirty = False
+        return True
+
+    def _mark_dirty(self) -> None:
+        self._revision += 1
+        self._dirty = True
 
     def record_manual(
         self,
@@ -212,9 +233,12 @@ class RoomLightingOwnershipJournal:
             target_id, OwnershipSource.MANUAL, confirmed, moment
         )
         self._append(room_id, record)
+        self._manual_generation += 1
+        self._manual_record_generation[(room_id, target_id)] = self._manual_generation
         if turned_off:
             self._manual_off[(room_id, target_id)] = moment
-        self._dirty = True
+            self._manual_off_generation[(room_id, target_id)] = self._manual_generation
+        self._mark_dirty()
         return record
 
     def record_auto(
@@ -228,7 +252,7 @@ class RoomLightingOwnershipJournal:
         moment = self._now_ms() if at is None else at
         record = OwnershipSnapshot(target_id, OwnershipSource.AUTO, confirmed, moment)
         self._append(room_id, record)
-        self._dirty = True
+        self._mark_dirty()
         return record
 
     def _append(self, room_id: str, record: OwnershipSnapshot) -> None:
@@ -283,7 +307,7 @@ class RoomLightingOwnershipJournal:
         self._legacy_records = unresolved_records
         self._legacy_manual_off = unresolved_manual_off
         if migrated:
-            self._dirty = True
+            self._mark_dirty()
 
     def legacy_manual_target_ids(self) -> frozenset[str]:
         """Read-only legacy manual targets for migration into shared authority."""
@@ -337,10 +361,12 @@ class RoomLightingOwnershipJournal:
             if light_on.get((room_id, target_id), False):
                 continue
             self._manual_off.pop((room_id, target_id), None)
+            self._manual_off_generation.pop((room_id, target_id), None)
             self._records.pop((room_id, target_id), None)
+            self._manual_record_generation.pop((room_id, target_id), None)
             removed = True
         if removed:
-            self._dirty = True
+            self._mark_dirty()
 
     def snapshots_for(
         self, room_id: str, target_ids: Iterable[str]
@@ -381,9 +407,10 @@ class RoomLightingOwnershipJournal:
             if not bucket or bucket[-1].source is not OwnershipSource.MANUAL:
                 continue
             self._records.pop(key, None)
+            self._manual_record_generation.pop(key, None)
             cleared.append(target_id)
         if cleared:
-            self._dirty = True
+            self._mark_dirty()
         return tuple(cleared)
 
     def return_room_to_automatic(
@@ -472,7 +499,7 @@ class RoomLightingOwnershipJournal:
             )
             return
         self._morning[room_id] = {"date": date_value, "at": at}
-        self._dirty = True
+        self._mark_dirty()
 
     def mark_morning_waiting(
         self, room_id: str, date_value: str, boundary_ms: int, at: int
@@ -495,7 +522,7 @@ class RoomLightingOwnershipJournal:
             "waiting": True,
             "boundaryMs": boundary_ms,
         }
-        self._dirty = True
+        self._mark_dirty()
 
     def release_room_manual_holds(
         self, room_id: str, target_ids, *, before_ms: int
@@ -530,12 +557,14 @@ class RoomLightingOwnershipJournal:
                         self._records[key] = kept
                     else:
                         self._records.pop(key, None)
+                    self._manual_record_generation.pop(key, None)
             moment = self._manual_off.get(key)
             if moment is not None and moment < before_ms:
                 del self._manual_off[key]
+                self._manual_off_generation.pop(key, None)
                 removed += 1
         if removed:
-            self._dirty = True
+            self._mark_dirty()
         return removed
 
     def restore(self, payload: object) -> None:
@@ -543,9 +572,13 @@ class RoomLightingOwnershipJournal:
 
         self._records = {}
         self._manual_off = {}
+        self._manual_record_generation = {}
+        self._manual_off_generation = {}
         self._legacy_records = []
         self._legacy_manual_off = {}
         self._morning = {}
+        self._manual_generation = 0
+        self._revision = 0
         if not isinstance(payload, Mapping):
             self._dirty = False
             return
@@ -558,6 +591,8 @@ class RoomLightingOwnershipJournal:
                 room_id = raw.get("roomId") if isinstance(raw, Mapping) else None
                 if isinstance(room_id, str) and room_id:
                     self._append(room_id, record)
+                    if record.source is OwnershipSource.MANUAL:
+                        self._manual_record_generation[(room_id, record.target_id)] = 0
                 else:
                     self._legacy_records.append(record)
         raw_manual_off = payload.get("manualOff")
@@ -587,6 +622,7 @@ class RoomLightingOwnershipJournal:
                     and moment >= 0
                 ):
                     self._manual_off[(room_id, target_id)] = moment
+                    self._manual_off_generation[(room_id, target_id)] = 0
                 elif (
                     isinstance(target_id, str)
                     and target_id
@@ -635,6 +671,95 @@ class RoomLightingOwnershipJournal:
                     continue
                 self._morning[room_id] = {"date": raw.get("date"), "at": at}
         self._dirty = False
+
+    def manual_return_boundary(self) -> int:
+        """Freeze the manual-event generation at the return gesture."""
+
+        return self._manual_generation
+
+    def room_history_is_releasable(
+        self,
+        room_id: str,
+        target_ids: Iterable[str],
+        authority_target_ids: Iterable[str],
+        *,
+        through_generation: int,
+    ) -> bool:
+        """Match common manual-ON evidence to room history, fail closed."""
+
+        scope = tuple(target_ids)
+        evidence = frozenset(authority_target_ids)
+        if not evidence or not evidence <= set(scope):
+            return False
+        for target_id in evidence:
+            bucket = self._records.get((room_id, target_id), ())
+            latest = bucket[-1] if bucket else None
+            if (
+                latest is None
+                or latest.source is not OwnershipSource.MANUAL
+                or not latest.confirmed
+            ):
+                return False
+
+        return not any(
+            (room_id, target_id) in self._manual_off
+            and self._manual_off_generation.get((room_id, target_id), 0)
+            <= through_generation
+            for target_id in target_ids
+        )
+
+    def release_room_manual_history_through(
+        self,
+        room_id: str,
+        target_ids: Iterable[str],
+        authority_target_ids: Iterable[str],
+        *,
+        through_generation: int,
+    ) -> tuple[str, ...] | None:
+        """Remove only pre-gesture manual history for the exact room scope.
+
+        A manual event observed while a storage write is outstanding has a
+        later generation and wins, even if a test clock gives both events the
+        same millisecond.
+        """
+
+        if not self.room_history_is_releasable(
+            room_id, target_ids, authority_target_ids,
+            through_generation=through_generation,
+        ):
+            return None
+        cleared: list[str] = []
+        for target_id in sorted(set(target_ids)):
+            key = (room_id, target_id)
+            changed = False
+            bucket = self._records.get(key, [])
+            manual_generation = self._manual_record_generation.get(key, 0)
+            if manual_generation <= through_generation:
+                # Do not leave an old AUTO behind. It could later be mistaken
+                # for current ownership and authorize an automatic OFF.
+                if bucket:
+                    self._records.pop(key, None)
+                    changed = True
+                self._manual_record_generation.pop(key, None)
+            else:
+                # A fresh manual action won while the two stores were being
+                # reconciled. Keep only that current manual evidence, never a
+                # pre-gesture AUTO record.
+                newest_manual = next(
+                    (record for record in reversed(bucket)
+                     if record.source is OwnershipSource.MANUAL),
+                    None,
+                )
+                if newest_manual is None:
+                    return None
+                if bucket != [newest_manual]:
+                    self._records[key] = [newest_manual]
+                    changed = True
+            if changed:
+                cleared.append(target_id)
+        if cleared:
+            self._mark_dirty()
+        return tuple(cleared)
 
 
 def _single_room_for(
@@ -1164,18 +1289,44 @@ class RoomLightingRuntime:
             return cleared
 
     async def async_return_room_to_automatic(self, room_id: str) -> tuple[str, ...]:
-        """Keep the return gesture inert until durable release is available."""
+        """Release only a proved manual ON through both durable journals."""
 
         async with self._lock:
             config = self._configs.get(room_id)
+            authority = self._manual_light_authority
             if config is None:
                 raise ValueError("room lighting configuration is unavailable")
+            if self._ownership_store is None:
+                return ()
+            # An unresolved target-id-only record has no exact room scope, so
+            # this gesture cannot honestly remove its legacy counterpart.
+            if self._ownership.has_legacy():
+                return ()
+            from .manual_light_authority import ManualLightAuthority
+            if not isinstance(authority, ManualLightAuthority):
+                return ()
             target_ids = tuple(target.id for target in config.devices.light_targets)
-            returned = self._ownership.return_room_to_automatic(
-                room_id, target_ids, self._now_ms()
+            entity_ids = tuple(target.entity_id for target in config.devices.light_targets)
+            if any(not isinstance(entity_id, str) for entity_id in entity_ids):
+                return ()
+            authority_target_ids = tuple(
+                target.id
+                for target in config.devices.light_targets
+                if authority.record(target.entity_id) is not None
             )
-            if returned:
-                await self._persist_ownership()
+            boundary = self._ownership.manual_return_boundary()
+            returned = await ManualLightAutoReturn(authority).async_return(
+                entity_ids,
+                room_history_is_releasable=lambda: self._ownership.room_history_is_releasable(
+                    room_id, target_ids, authority_target_ids,
+                    through_generation=boundary,
+                ),
+                release_room_history=lambda: self._ownership.release_room_manual_history_through(
+                    room_id, target_ids, authority_target_ids,
+                    through_generation=boundary,
+                ),
+                persist_room_history=self._persist_ownership,
+            )
             return returned
 
     async def async_execute_command(
@@ -1738,8 +1889,8 @@ class RoomLightingRuntime:
                     subtype,
                     ",".join(returned),
                 )
-                if returned and self._running:
-                    await self.async_process((config.room_id,))
+                # This gesture only changes durable attribution.  It neither
+                # manufactures AUTO ownership nor evaluates or commands light.
                 continue
             # A press is a manual intent regardless of the command flag.
             for target_id in target_ids:
@@ -4958,20 +5109,22 @@ class RoomLightingRuntime:
             return
         self._create_task(self._persist_ownership())
 
-    async def _persist_ownership(self) -> None:
-        if self._ownership_store is None or not self._ownership.dirty:
-            return
+    async def _persist_ownership(self) -> bool:
+        if self._ownership_store is None:
+            return False
+        if not self._ownership.dirty:
+            return True
         async with self._save_lock:
-            if not self._ownership.dirty:
-                return
-            try:
-                await self._ownership_store.async_save(  # type: ignore[attr-defined]
-                    self._ownership.to_payload()
-                )
-            except Exception:  # noqa: BLE001 - retry on the next mutation
-                _LOGGER.warning("room lighting ownership save failed")
-                return
-            self._ownership.mark_clean()
+            while self._ownership.dirty:
+                revision = self._ownership.revision
+                payload = self._ownership.to_payload()
+                try:
+                    await self._ownership_store.async_save(payload)  # type: ignore[attr-defined]
+                except Exception:  # noqa: BLE001 - retry on the next mutation
+                    _LOGGER.warning("room lighting ownership save failed")
+                    return False
+                self._ownership.mark_clean_if_revision(revision)
+            return True
 
     def _create_task(self, coroutine: object) -> None:
         if self._hass is None:
