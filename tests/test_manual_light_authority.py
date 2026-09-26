@@ -236,6 +236,55 @@ async def test_legacy_import_racing_a_save_stays_pending_until_durable() -> None
     }
 
 
+async def test_dispatch_barrier_does_not_stop_durable_legacy_import() -> None:
+    store = _Store()
+    authority = ManualLightAuthority(store)
+    authority.begin_startup_observation()
+    await authority.async_load()
+    assert authority.unhealthy and authority.persistence_ready
+    assert authority.capture_legacy("light.legacy", source="room")
+    assert not authority.has_durable_import(("light.legacy",))
+    authority.mark_unhealthy()
+    await authority.async_drain()
+    assert authority.has_durable_import(("light.legacy",))
+    assert authority.blocks("light.other")
+    assert store.payload["records"][0]["entityId"] == "light.legacy"
+
+
+async def test_event_during_legacy_save_drains_while_startup_is_blocked() -> None:
+    class _SlowStore(_Store):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.writes = 0
+
+        async def async_save(self, payload):
+            self.writes += 1
+            if self.writes == 2:
+                self.started.set()
+                await self.release.wait()
+            self.payload = payload
+
+    store = _SlowStore()
+    authority = ManualLightAuthority(store)
+    authority.begin_startup_observation()
+    await authority.async_load()
+    authority.capture_legacy("light.legacy", source="room")
+    draining = asyncio.create_task(authority.async_drain())
+    await store.started.wait()
+    authority.capture("light.event", "on", "service", "event", observed_at_ms=1)
+    assert not authority.has_durable_import(("light.legacy",))
+    store.release.set()
+    await draining
+    assert store.writes == 3
+    assert authority.has_durable_import(("light.legacy", "light.event"))
+    assert {record["entityId"] for record in store.payload["records"]} == {
+        "light.legacy", "light.event",
+    }
+    assert authority.blocks("light.unrelated")
+
+
 async def test_invalid_persisted_record_fails_closed() -> None:
     store = _Store()
     store.payload = {"version": 2, "records": [{"entityId": "light.demo"}]}

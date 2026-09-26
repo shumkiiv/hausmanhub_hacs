@@ -46,7 +46,8 @@ class ManualLightAuthority:
         self._generation = 0
         self._recent: dict[str, int] = {}
         self._ready = store is None
-        self._failed = False
+        self._storage_failed = False
+        self._dispatch_failed = False
         self._recovery = False
         # An event can be lost if the process dies before its async save.
         # A loaded file alone therefore cannot prove a clean observation gap.
@@ -88,14 +89,23 @@ class ManualLightAuthority:
     @property
     def unhealthy(self) -> bool:
         return (
-            not self._ready or self._failed or self._recovery
-            or self._restart_uncertain or self._startup_observation_pending
+            not self._ready
+            or self._storage_failed
+            or self._dispatch_failed
+            or self._recovery
+            or self._restart_uncertain
+            or self._startup_observation_pending
         )
+
+    @property
+    def persistence_ready(self) -> bool:
+        """A loaded durable store can accept evidence despite dispatch barriers."""
+        return self._store is not None and self._ready and not self._storage_failed
 
     @property
     def barrier_reason(self) -> str | None:
         """Expose the global deny cause without promising an expiry."""
-        if not self._ready or self._failed or self._recovery:
+        if not self._ready or self._storage_failed or self._dispatch_failed or self._recovery:
             return "storage_unavailable"
         if self._restart_uncertain:
             return "restart_uncertain"
@@ -129,12 +139,11 @@ class ManualLightAuthority:
         return self._pending.get(entity_id) or self._records.get(entity_id)
 
     def has_durable_import(self, entity_ids: Iterable[str]) -> bool:
-        """Whether a legacy batch is durably present in the common store."""
+        """Whether every imported entity is persisted, regardless of dispatch."""
         return (
-            self._store is not None
-            and not self.unhealthy
+            self.persistence_ready
             and not self._pending
-            and all(self.record(entity_id) is not None for entity_id in entity_ids)
+            and all(entity_id in self._records for entity_id in entity_ids)
         )
 
     def blocks(self, entity_id: str) -> bool:
@@ -160,7 +169,7 @@ class ManualLightAuthority:
 
     def mark_unhealthy(self) -> None:
         """Close every automatic light route after ambiguous attribution."""
-        self._failed = True
+        self._dispatch_failed = True
 
     async def async_load(self) -> None:
         if self._store is None:
@@ -207,7 +216,7 @@ class ManualLightAuthority:
             )
             self._ready = True
         except Exception:
-            self._failed = True
+            self._storage_failed = True
             raise
 
     def capture(
@@ -231,7 +240,7 @@ class ManualLightAuthority:
         if entity_id not in self._records and entity_id not in self._pending and (
             len(self._records) + len(self._pending) >= MAX_RECORDS
         ):
-            self._failed = True
+            self._storage_failed = True
             raise RuntimeError("manual light authority is full")
         observed = int(time.time() * 1000) if observed_at_ms is None else observed_at_ms
         if type(observed) is not int or observed < 0:
@@ -276,7 +285,7 @@ class ManualLightAuthority:
 
     async def async_drain(self) -> None:
         async with self._writer:
-            while self._pending and not self._failed:
+            while self._pending and not self._storage_failed:
                 generation = self._generation
                 snapshot = dict(self._records)
                 snapshot.update(self._pending)
@@ -293,7 +302,7 @@ class ManualLightAuthority:
                     if self._store is not None:
                         await self._store.async_save(copy.deepcopy(payload))
                 except Exception:
-                    self._failed = True
+                    self._storage_failed = True
                     raise
                 self._records = snapshot
                 # A later event can arrive during save. Only the verified

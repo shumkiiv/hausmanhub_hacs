@@ -985,53 +985,25 @@ class RoomLightingRuntime:
                 *self._exact_power_by_entity,
             )
         }
-        # Legacy journals were keyed by target id only.  Build the exact
-        # physical-light plan before mutating or pruning that evidence, then
-        # latch every resolvable manual hold into the shared deny in one batch.
-        # A missing or ambiguous target remains in the journal and closes the
-        # authority instead of being silently forgotten.
+        # Legacy journals were keyed by target id only. Import the complete
+        # unambiguous batch into durable shared authority while keeping the
+        # original ownership payload unchanged for rollback. A missing or
+        # ambiguous target closes dispatch without importing a partial batch.
         legacy_entities, legacy_uncertain = legacy_manual_authority_plan(
             self._ownership, self._configs.values()
         )
         authority = self._manual_light_authority
-        legacy_imported = False
         if authority is not None:
             if legacy_uncertain:
                 authority.mark_unhealthy()
-            if not authority.unhealthy:
+            elif authority.persistence_ready:
                 try:
                     for entity_id in legacy_entities:
                         authority.capture_legacy(entity_id, source="room")
                     await authority.async_drain()
-                    legacy_imported = authority.has_durable_import(legacy_entities)
                 except Exception:  # noqa: BLE001 - all automatic light routes stay closed
                     authority.mark_unhealthy()
                     _LOGGER.exception("room manual light migration failed")
-        if legacy_imported:
-            self._ownership.migrate_legacy(
-                {
-                    room_id: config.devices.light_target_ids
-                    | frozenset(item.id for item in config.devices.auxiliaries)
-                    for room_id, config in self._configs.items()
-                }
-            )
-        if legacy_imported:
-            # Stale manual holds (protection window expired on an off light)
-            # are mutable only after the shared authority proved the complete
-            # import durable. Otherwise a failed migration could erase a hold.
-            self._ownership.prune_stale_manual(
-                now=self._now_ms(),
-                minimum_interval_seconds={
-                    room_id: (
-                        config.manual_off_protection.minimum_interval_seconds
-                        if config.manual_off_protection.enabled
-                        else 0
-                    )
-                    for room_id, config in self._configs.items()
-                },
-                light_on=self._light_on_by_target(),
-                presence_active=self._presence_active_by_room(),
-            )
         try:
             # Exact power sources are subscribed separately below so a live map
             # change can add or remove them without touching the core tracker.
@@ -1189,14 +1161,7 @@ class RoomLightingRuntime:
             return cleared
 
     async def async_return_room_to_automatic(self, room_id: str) -> tuple[str, ...]:
-        """Explicitly return a whole room to auto control without a device call.
-
-        Unlike the narrow settings action, a physical switch that is configured
-        as "return to auto" is an unambiguous user intent.  It may clear a
-        manual-off protection, but never changes a lamp by itself.  The normal
-        room evaluation that follows still decides whether any physical command
-        is appropriate.
-        """
+        """Keep the return gesture inert until durable release is available."""
 
         async with self._lock:
             config = self._configs.get(room_id)

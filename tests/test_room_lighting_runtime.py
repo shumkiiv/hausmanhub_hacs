@@ -8,6 +8,7 @@ directly: with per-room ``commandsEnabled=false`` the executor is never called.
 from __future__ import annotations
 
 import asyncio
+import copy
 import importlib
 from datetime import datetime, time, timezone
 import logging
@@ -1271,6 +1272,52 @@ async def test_legacy_room_manual_record_migrates_before_dispatch() -> None:
         await runtime.stop()
 
 
+@pytest.mark.parametrize("store_state", ("new", "existing", "recovered"))
+async def test_legacy_import_in_production_startup_order_preserves_old_payload(
+    store_state: str,
+) -> None:
+    class _AuthorityStore(_MemoryOwnershipStore):
+        recovered_previous = False
+
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    ownership_store = _MemoryOwnershipStore()
+    ownership_store.payload = {
+        "version": 1,
+        "records": [{"targetId": "light_main", "source": "manual", "confirmed": True, "at": 1}],
+        "manualOff": [{"targetId": "light_main", "at": 1}],
+        "morning": [],
+    }
+    before = copy.deepcopy(ownership_store.payload)
+    authority_store = _AuthorityStore()
+    if store_state != "new":
+        authority_store.payload = {"version": 2, "records": [], "recentFingerprints": []}
+    authority_store.recovered_previous = store_state == "recovered"
+    authority = ManualLightAuthority(authority_store)
+    authority.begin_startup_observation()
+    await authority.async_load()
+    assert authority.unhealthy and authority.persistence_ready
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor,
+        ownership_store=ownership_store, manual_light_authority=authority,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        assert authority.has_durable_import(("light.demo_main",))
+        assert authority.record("light.demo_main").legacy
+        assert authority.blocks("light.demo_main")
+        assert authority.blocks("light.unrelated")
+        await runtime.async_process([_ROOM_ID])
+        assert executor.calls == []
+        assert runtime._ownership.has_legacy()  # type: ignore[attr-defined]
+        assert runtime._ownership.last_manual_off_at(_ROOM_ID, {"light_main"}) is None  # type: ignore[attr-defined]
+    finally:
+        await runtime.stop()
+    assert ownership_store.payload == before
+    assert ownership_store.saves == 0
+
+
 async def test_ambiguous_legacy_room_record_closes_all_lights() -> None:
     class _AuthorityStore(_MemoryOwnershipStore):
         recovered_previous = False
@@ -1329,13 +1376,20 @@ async def test_legacy_journal_is_not_migrated_when_authority_save_fails() -> Non
     }
     before = dict(ownership_store.payload)
     authority = ManualLightAuthority(_FailingAuthorityStore())
+    authority.begin_startup_observation()
     await authority.async_load()
+    executor = _SpyExecutor()
     runtime = _make_runtime(
-        hass, ownership_store=ownership_store, manual_light_authority=authority,
+        hass, commands_enabled=True, executor=executor,
+        ownership_store=ownership_store, manual_light_authority=authority,
     )
     await runtime.start(hass, "entry")
     try:
         assert authority.unhealthy
+        assert not authority.persistence_ready
+        assert not authority.has_durable_import(("light.demo_main",))
+        assert authority.blocks("light.unrelated")
+        assert executor.calls == []
         assert runtime._ownership.has_legacy()  # type: ignore[attr-defined]
     finally:
         await runtime.stop()
@@ -1358,8 +1412,12 @@ async def test_mixed_legacy_mapping_skips_all_journal_mutation_and_pruning() -> 
         "manualOff": [{"targetId": "light_main", "at": 1}], "morning": [],
     }
     before = dict(ownership_store.payload)
-    authority = ManualLightAuthority(_AuthorityStore())
+    authority_store = _AuthorityStore()
+    authority = ManualLightAuthority(authority_store)
+    authority.begin_startup_observation()
     await authority.async_load()
+    seeded = copy.deepcopy(authority_store.payload)
+    seed_writes = authority_store.saves
     runtime = _make_runtime(
         hass, ownership_store=ownership_store, manual_light_authority=authority,
     )
@@ -1367,6 +1425,8 @@ async def test_mixed_legacy_mapping_skips_all_journal_mutation_and_pruning() -> 
     try:
         assert authority.unhealthy
         assert authority.record("light.demo_main") is None
+        assert authority_store.payload == seeded
+        assert authority_store.saves == seed_writes
         assert runtime._ownership.has_legacy()  # type: ignore[attr-defined]
     finally:
         await runtime.stop()
@@ -1409,6 +1469,40 @@ async def test_failed_authority_preserves_modern_manual_hold_from_pruning() -> N
     finally:
         await runtime.stop()
     assert ownership_store.payload == before
+
+
+async def test_successful_legacy_import_keeps_stale_old_manual_hold_for_rollback() -> None:
+    class _AuthorityStore(_MemoryOwnershipStore):
+        recovered_previous = False
+
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    ownership_store = _MemoryOwnershipStore()
+    ownership_store.payload = {
+        "version": 1,
+        "records": [{
+            "roomId": _ROOM_ID, "targetId": "light_main", "source": "manual",
+            "confirmed": True, "at": 0,
+        }],
+        "manualOff": [{"roomId": _ROOM_ID, "targetId": "light_main", "at": 0}],
+        "morning": [],
+    }
+    before = copy.deepcopy(ownership_store.payload)
+    authority = ManualLightAuthority(_AuthorityStore())
+    authority.begin_startup_observation()
+    await authority.async_load()
+    runtime = _make_runtime(
+        hass, ownership_store=ownership_store, manual_light_authority=authority,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        assert authority.has_durable_import(("light.demo_main",))
+        assert runtime._ownership.last_manual_off_at(_ROOM_ID, {"light_main"}) == 0  # type: ignore[attr-defined]
+        assert runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"})[-1].source is OwnershipSource.MANUAL  # type: ignore[attr-defined]
+    finally:
+        await runtime.stop()
+    assert ownership_store.payload == before
+    assert ownership_store.saves == 0
 
 
 async def test_manual_off_protection_survives_restart() -> None:
