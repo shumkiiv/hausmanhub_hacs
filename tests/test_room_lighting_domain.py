@@ -17,6 +17,11 @@ from custom_components.hausman_hub.domain.room_lighting import (
     room_lighting_violations,
 )
 from custom_components.hausman_hub.domain.room_lighting_auxiliary import BathroomTimes
+from custom_components.hausman_hub.domain.manual_control_return import (
+    DEFAULT_PRIORITY_SECONDS,
+    MAX_PRIORITY_SECONDS,
+    MIN_PRIORITY_SECONDS,
+)
 from custom_components.hausman_hub.domain.room_lighting_engine import (
     bathroom_auxiliary_inputs,
 )
@@ -177,7 +182,10 @@ def test_full_payload_round_trips() -> None:
     assert config_from_payload(encoded).to_dict() == encoded
 
 
-@pytest.mark.parametrize("priority_seconds", [15, 3600, 86400])
+@pytest.mark.parametrize(
+    "priority_seconds",
+    [MIN_PRIORITY_SECONDS, DEFAULT_PRIORITY_SECONDS, MAX_PRIORITY_SECONDS],
+)
 def test_manual_control_return_serializes_bounded_room_priority(
     priority_seconds: int,
 ) -> None:
@@ -190,10 +198,14 @@ def test_manual_control_return_serializes_bounded_room_priority(
 
 def test_legacy_room_config_gets_manual_control_return_default() -> None:
     encoded = config_from_payload(_payload()).to_dict()
-    assert encoded["manualControlReturn"] == {"prioritySeconds": 3600}
+    assert encoded["manualControlReturn"] == {
+        "prioritySeconds": DEFAULT_PRIORITY_SECONDS
+    }
 
 
-@pytest.mark.parametrize("priority_seconds", [14, 86401, True])
+@pytest.mark.parametrize(
+    "priority_seconds", [MIN_PRIORITY_SECONDS - 1, MAX_PRIORITY_SECONDS + 1, True]
+)
 def test_manual_control_return_rejects_invalid_priority(priority_seconds: object) -> None:
     payload = _payload()
     payload["manualControlReturn"] = {"prioritySeconds": priority_seconds}

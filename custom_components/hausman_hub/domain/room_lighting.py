@@ -15,6 +15,11 @@ import re
 from typing import Any
 
 from .light_curve import LightCurveProfile
+from .manual_control_return import (
+    DEFAULT_PRIORITY_SECONDS,
+    MAX_PRIORITY_SECONDS,
+    MIN_PRIORITY_SECONDS,
+)
 
 
 ROOM_LIGHTING_CONFIG_NAME = "hausman-hub-room-lighting-config"
@@ -908,14 +913,14 @@ class ManualOffProtection:
 class ManualControlReturn:
     """Per-room manual priority duration, normalized for legacy documents."""
 
-    priority_seconds: int = 3600
+    priority_seconds: int = DEFAULT_PRIORITY_SECONDS
 
     def __post_init__(self) -> None:
         _integer(
             self.priority_seconds,
             "manual control return priority",
-            minimum=15,
-            maximum=86400,
+            minimum=MIN_PRIORITY_SECONDS,
+            maximum=MAX_PRIORITY_SECONDS,
         )
 
 
@@ -1748,7 +1753,9 @@ def _manual_control_return_from_payload(payload: object) -> ManualControlReturn:
     if payload is None:
         return ManualControlReturn()
     data = _as_dict(payload, "manual control return")
-    return ManualControlReturn(priority_seconds=data.get("prioritySeconds", 3600))
+    return ManualControlReturn(
+        priority_seconds=data.get("prioritySeconds", DEFAULT_PRIORITY_SECONDS)
+    )
 
 
 def _away_from_payload(payload: object) -> AwayBehavior:
