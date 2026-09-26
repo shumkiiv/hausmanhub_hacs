@@ -87,9 +87,12 @@ class ManualLightAuthority:
         return None
 
     def barrier_reason_for(self, entity_id: str) -> str | None:
+        global_reason = self.barrier_reason
+        if global_reason is not None:
+            return global_reason
         if not self._related_sources.ready:
             return "attribution_uncertain"
-        return self.barrier_reason
+        return None
 
     def begin_startup_observation(self) -> None:
         """Close dispatch until the full room entity set has been restored."""

@@ -65,6 +65,8 @@ def test_related_light_sources_fail_closed_when_target_has_no_entity() -> None:
     authority.set_related_sources(RelatedLightSources.from_configs((config,)))
     assert authority.blocks("light.any")
     assert authority.barrier_reason_for("light.any") == "attribution_uncertain"
+    authority.mark_unhealthy()
+    assert authority.barrier_reason_for("light.any") == "storage_unavailable"
 
 
 def test_related_light_sources_empty_ready_and_cross_room_collision_closed() -> None:

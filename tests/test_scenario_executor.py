@@ -438,6 +438,27 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("manual_light_priority", receipt.get("error"))
         self.hass.services.async_call.assert_not_awaited()
 
+    async def test_related_room_light_blocks_alternate_switch_final_dispatch(self) -> None:
+        from custom_components.hausman_hub.application.related_light_sources import RelatedLightSources
+        self.catalog._devices["relay_light"] = ScenarioDeviceEntry(
+            target_id="relay_light", name="Альтернативный свет", entity_id="switch.hall_light",
+            actions=(ScenarioDeviceAction("turn_on", "On", "switch", "turn_on", frozenset()),),
+        )
+        self.hass.state_values["switch.hall_light"] = SimpleNamespace(state="off", attributes={})
+        room = SimpleNamespace(room_id="room", commands_enabled=False, devices=SimpleNamespace(light_targets=(
+            SimpleNamespace(entity_id="light.living_room"), SimpleNamespace(entity_id="switch.hall_light"),
+        )))
+        authority = ManualLightAuthority()
+        authority.set_related_sources(RelatedLightSources.from_configs((room,)))
+        authority.capture("light.living_room", "on", "service", "linked-manual")
+        executor = ScenarioExecutor(self.hass, self.catalog, self.executor._run_callback,
+                                    manual_light_authority=authority)
+        action = ScenarioAction(id="alternate", type=ScenarioActionType.DEVICE_ACTION,
+                                target_id="relay_light", action_id="turn_on")
+        receipt = await executor._device_action_receipt(action, {"action_id": action.id, "status": "pending"}, automatic=True)
+        self.assertEqual("manual_light_priority", receipt.get("error"))
+        self.hass.services.async_call.assert_not_awaited()
+
     async def test_conflicting_room_writer_blocks_scenario_physical_call(self) -> None:
         self.hass.state_values["light.living_room"] = SimpleNamespace(
             state="off", attributes={}
