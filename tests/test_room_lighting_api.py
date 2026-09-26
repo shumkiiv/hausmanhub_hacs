@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 import unittest
 
 from jsonschema import Draft202012Validator
@@ -552,6 +553,40 @@ class RoomLightingApiTest(unittest.TestCase):
             self.assertEqual("blocked", returned["scope"])
             self.assertIsNone(returned["since"])
             self.assertIsNone(returned["remaining_seconds"])
+            _validate("room-lighting-status.schema.json", status)
+
+        asyncio.run(flow())
+
+    def test_status_projects_related_sibling_manual_evidence(self) -> None:
+        from custom_components.hausman_hub.application.manual_light_authority import ManualLightAuthority
+        from custom_components.hausman_hub.application.related_light_sources import RelatedLightSources
+
+        async def flow() -> None:
+            room_id = "room_demo_entry"
+            config = _config_payload(room_id)
+            config["devices"]["light_targets"].append({
+                "id": "switch_related", "name": "Связанный свет", "kind": "switch",
+                "entityId": "switch.demo_related", "role": "other", "groupId": None,
+                "brightness": False, "color_temperature": False,
+                "autoControl": True, "autoAdoptOverride": None,
+            })
+            response = await self.config_view.put(_json_request(self._config_path(room_id), config, room_id=room_id))
+            self.assertEqual(200, response.status)
+            authority = ManualLightAuthority()
+            graph = RelatedLightSources.from_configs((
+                SimpleNamespace(room_id=room_id, devices=SimpleNamespace(light_targets=(
+                    SimpleNamespace(entity_id="light.demo_main"), SimpleNamespace(entity_id="switch.demo_related"),
+                ))),
+            ))
+            authority.set_related_sources(graph)
+            authority.capture("light.demo_main", "on", "service", "related-api", observed_at_ms=2_000)
+            self.hass.data["hausman_hub"]["manual_light_authority"] = authority
+            request = _request(self.api.ROOM_LIGHTING_STATUS_PATH.format(room_id=room_id), room_id=room_id)
+            status = (await self.status_view.get(request)).payload
+            returned = status["manual_control_return"]
+            self.assertEqual(("blocked", "manual_on_wait", 2), (returned["scope"], returned["reason"], returned["since"]))
+            sibling = next(item for item in returned["sources"] if item["entityId"] == "switch.demo_related")
+            self.assertEqual((True, "blocked", "manual_on_wait"), (sibling["active"], sibling["scope"], sibling["reason"]))
             _validate("room-lighting-status.schema.json", status)
 
         asyncio.run(flow())
