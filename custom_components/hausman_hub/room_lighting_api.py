@@ -873,6 +873,9 @@ def _manual_control_return_status(
             "entityId": target.entity_id,
             "active": reason != "none",
             "reason": reason,
+            # The current authority is deny-only. Do not advertise the future
+            # limited dimming permission until its runtime permit exists.
+            "scope": "blocked" if reason != "none" else "normal",
         }
         if record is not None:
             source["source"] = record.source
@@ -891,6 +894,7 @@ def _manual_control_return_status(
     return {
         "active": active,
         "reason": aggregate_reason,
+        "scope": "blocked" if active else "normal",
         "expires_at": None,
         "remaining_seconds": None if active else 0,
         "since": (

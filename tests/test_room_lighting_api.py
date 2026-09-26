@@ -360,6 +360,7 @@ class RoomLightingApiTest(unittest.TestCase):
             returned = status.payload["manual_control_return"]
             self.assertTrue(returned["active"])
             self.assertEqual("manual_only_target", returned["reason"])
+            self.assertEqual("blocked", returned["scope"])
             self.assertIsNone(returned["expires_at"])
             self.assertIsNone(returned["remaining_seconds"])
             self.assertIsNone(returned["since"])
@@ -367,6 +368,7 @@ class RoomLightingApiTest(unittest.TestCase):
                 "light.demo_main": "manual_on_wait",
                 "switch.demo_lamp": "manual_only_target",
             }, {source["entityId"]: source["reason"] for source in returned["sources"]})
+            self.assertTrue(all(source["scope"] == "blocked" for source in returned["sources"]))
             _validate("room-lighting-status.schema.json", status.payload)
 
             authority.mark_unhealthy()
@@ -427,10 +429,10 @@ class RoomLightingApiTest(unittest.TestCase):
             inactive = (await self.status_view.get(request)).payload
             self.assertEqual({
                 "active": False, "reason": "none", "expires_at": None,
-                "remaining_seconds": 0, "since": None,
+                "scope": "normal", "remaining_seconds": 0, "since": None,
                 "sources": [{
                     "entityId": "light.demo_main", "active": False,
-                    "reason": "none",
+                    "reason": "none", "scope": "normal",
                 }],
             }, inactive["manual_control_return"])
             _validate("room-lighting-status.schema.json", inactive)
@@ -443,9 +445,11 @@ class RoomLightingApiTest(unittest.TestCase):
             returned = manual_off["manual_control_return"]
             self.assertTrue(returned["active"])
             self.assertEqual("manual_off_wait", returned["reason"])
+            self.assertEqual("blocked", returned["scope"])
             self.assertEqual(2, returned["since"])
             self.assertIsNone(returned["remaining_seconds"])
             self.assertEqual("manual_off_wait", returned["sources"][0]["reason"])
+            self.assertEqual("blocked", returned["sources"][0]["scope"])
             _validate("room-lighting-status.schema.json", manual_off)
 
             initial = ManualLightAuthority()
