@@ -192,6 +192,7 @@ class ScriptedLightModule:
 def light_profile(profile_id: str = "first-light-1") -> CapabilityProfile:
     return CapabilityProfile(
         profile_id=profile_id,
+        version=1,
         source="first-stand",
         properties={
             "on": PropertyRule(
@@ -226,6 +227,26 @@ def light_profile(profile_id: str = "first-light-1") -> CapabilityProfile:
                 max_age_ms=MAX_AGE_MS,
                 confirmation="post_dispatch_report",
                 tolerance=BRIGHTNESS_TOLERANCE,
+                confirmation_timeout_ms=CONFIRMATION_TIMEOUT_MS,
+                dispatch_timeout_ms=1000,
+                readback_delay_ms=None,
+            ),
+            # Battery reports exist on the device; they confirm nothing and
+            # refresh only their own property age (S-T02-like isolation).
+            "battery": PropertyRule(
+                property="battery",
+                unit="pct",
+                readable=True,
+                writable=False,
+                min_value=Decimal(0),
+                max_value=Decimal(100),
+                step=Decimal(1),
+                allowed_values=None,
+                report_mode="on_change",
+                state_source="test.z2m/battery",
+                max_age_ms=MAX_AGE_MS,
+                confirmation="none",
+                tolerance=None,
                 confirmation_timeout_ms=CONFIRMATION_TIMEOUT_MS,
                 dispatch_timeout_ms=1000,
                 readback_delay_ms=None,

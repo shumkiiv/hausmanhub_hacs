@@ -199,8 +199,13 @@ class CapabilityProfile:
     """Passport of one resource's capabilities (S-02)."""
 
     profile_id: str
+    version: int
     source: str
     properties: Mapping[str, PropertyRule]
+
+    def __post_init__(self) -> None:
+        if isinstance(self.version, bool) or not isinstance(self.version, int):
+            raise CoreServiceError("CapabilityProfile.version must be int")
 
 
 class ManualStatus(Enum):
@@ -494,6 +499,10 @@ class CoreCommandService:
         evaluation = entry.instance.evaluate(frame, None)
         if evaluation.module_id != module_id:
             raise CoreServiceError("evaluation module mismatch")
+        if evaluation.constraints:
+            # Constraint arbitration is outside the FIRST scope; non-empty
+            # sets are rejected instead of being silently ignored (K-05).
+            raise CoreServiceError("constraints_are_out_of_first_scope")
         previous = self._needs.get(module_id, ())
         canonical: list[Proposal] = []
         for proposal in evaluation.proposals:
@@ -563,6 +572,7 @@ class CoreCommandService:
             self._candidate[resource_id] = outcome.hold_wait.next_candidate
         else:
             self._candidate[resource_id] = CandidateHold(outcome.target, None)
+        decision_id = self._next_id("dec")
         operation: Operation | None = None
         if outcome.target is not None:
             operation = self._enqueue_target(
@@ -570,10 +580,11 @@ class CoreCommandService:
                 outcome.target,
                 accepted=outcome.accepted,
                 origin=Origin.AUTOMATION,
+                decision_id=decision_id,
             )
             self._selected_target[resource_id] = outcome.target
         self._explanations[resource_id] = DecisionExplanation(
-            decision_id=self._next_id("dec"),
+            decision_id=decision_id,
             resource_id=resource_id,
             accepted=outcome.accepted,
             withdrawn=withdrawn,
@@ -622,16 +633,21 @@ class CoreCommandService:
         accepted: tuple[Proposal, ...],
         origin: Origin,
         request_id: str | None = None,
+        decision_id: str | None = None,
+        no_op_decided: bool | None = None,
     ) -> Operation:
         """Queue one target as an operation; a fresh matching fact with no
-        unresolved sent operation becomes an explicit no_op (K-08)."""
+        unresolved sent operation becomes an explicit no_op (K-08). The
+        caller may pass a pre-computed ``no_op_decided`` (manual path) so
+        the decision is taken against the world before any cancellation."""
 
         record = self.record(resource_id)
         spec = self.spec(resource_id)
         chosen = accepted[0] if accepted else None
+        resolved_decision_id = decision_id or self._next_id("dec")
         common = {
             "resource_id": resource_id,
-            "decision_id": self._next_id("dec"),
+            "decision_id": resolved_decision_id,
             "origin": origin,
             "target": target,
             "generation": record.generation,
@@ -655,11 +671,13 @@ class CoreCommandService:
                     self._mark_terminal(
                         pending, OperationPhase.SUPERSEDED, REASON_SUPERSEDED
                     )
-        if (
-            not self._unresolved_sent_exists(resource_id)
-            and self._fact_matches(resource_id, target)
-            and self._facts_fresh(resource_id, target)
-        ):
+        if no_op_decided is None:
+            no_op_decided = (
+                not self._unresolved_sent_exists(resource_id)
+                and self._fact_matches(resource_id, target)
+                and self._facts_fresh(resource_id, target)
+            )
+        if no_op_decided:
             operation = Operation(
                 operation_id=self._next_id("op"),
                 phase=OperationPhase.NO_OP,
@@ -760,11 +778,11 @@ class CoreCommandService:
                 # re-permit it (K-08: one application dispatch).
                 self._taken.pop(operation.resource_id, None)
                 continue
-            denial = self._final_permit(operation)
-            if denial is not None:
-                self._apply_permit_denial(operation, denial)
+            decision = self._final_permit(operation)
+            if isinstance(decision, PermitDenial):
+                self._apply_permit_denial(operation, decision)
                 continue
-            self._dispatch_operation(operation)
+            self._dispatch_operation(operation, decision)
 
     def drain(self) -> None:
         """One permitted executor tick: timeouts, dequeue, dispatch."""
@@ -773,7 +791,9 @@ class CoreCommandService:
         self.take_ready()
         self.run_taken()
 
-    def _final_permit(self, operation: Operation) -> PermitDenial | None:
+    def _final_permit(
+        self, operation: Operation
+    ) -> DispatchPermit | PermitDenial:
         record = self.record(operation.resource_id)
         permit = issue_dispatch_permit(
             operation=operation,
@@ -806,8 +826,7 @@ class CoreCommandService:
                 reason_code="permit_reuse",
             )
         self._consumed_permits.add(permit.permit_id)
-        operation.evidence_refs = operation.evidence_refs + (permit.permit_id,)
-        return None
+        return permit
 
     def _apply_permit_denial(
         self, operation: Operation, denial: PermitDenial
@@ -825,7 +844,9 @@ class CoreCommandService:
                 operation, OperationPhase.CANCELLED, denial.reason_code
             )
 
-    def _dispatch_operation(self, operation: Operation) -> None:
+    def _dispatch_operation(
+        self, operation: Operation, permit: DispatchPermit
+    ) -> None:
         resource_id = operation.resource_id
         profile = self._adapter.capabilities(resource_id)
         entity_id = self._bindings[resource_id]
@@ -834,7 +855,7 @@ class CoreCommandService:
             entity_id,
             profile,
             operation.operation_id,
-            operation.evidence_refs[-1] if operation.evidence_refs else "",
+            permit.permit_id,
         )
         if isinstance(prepared, ValidationIssue):
             self._mark_terminal(
@@ -853,6 +874,9 @@ class CoreCommandService:
             operation.dispatch_started_at_mono_ms + timeout
         )
         operation.pre_dispatch_sequence = self._max_sequence(resource_id)
+        operation.evidence_refs = operation.evidence_refs + (
+            permit.permit_id,
+        )
         # Persisting the dispatching phase precedes the physical call (K-08).
         self._commit_state()
         outcome = self._adapter.dispatch_once(prepared, self._transport)
@@ -1087,18 +1111,12 @@ class CoreCommandService:
         except StorageUnavailable:
             # The internal auto ban stays; the request is not accepted.
             raise
-        # 5. accepted: swap in-memory state and publish.
+        # 5. accepted: swap in-memory state, publish, release the barrier.
         self._records[resource_id] = next_record
         self._scope_revisions.clear()
         self._scope_revisions.update(next_scope)
-        receipt = ManualReceipt(
-            request_id=request_id,
-            status=ManualStatus.ACCEPTED,
-            reason_code=None,
-            operation_id=None,
-            control_revision=next_record.control_revision,
-            generation=next_record.generation,
-        )
+        self._deny_barrier.discard(resource_id)
+        decision_id = self._next_id("dec")
         if no_op_now:
             # 6. accepted manual intent with a fresh matching fact (K-08):
             # the acceptance itself is recorded, zero dispatches happen.
@@ -1108,6 +1126,8 @@ class CoreCommandService:
                 accepted=(),
                 origin=Origin.MANUAL,
                 request_id=request_id,
+                decision_id=decision_id,
+                no_op_decided=True,
             )
             receipt = ManualReceipt(
                 request_id=request_id,
@@ -1124,6 +1144,8 @@ class CoreCommandService:
                 accepted=(),
                 origin=Origin.MANUAL,
                 request_id=request_id,
+                decision_id=decision_id,
+                no_op_decided=False,
             )
             receipt = ManualReceipt(
                 request_id=request_id,
@@ -1135,7 +1157,41 @@ class CoreCommandService:
             )
             # Manual execution runs immediately: it does not wait behind an
             # observing foreign device, and the transport call has returned.
-            self._dispatch_operation(operation)
+            decision = self._final_permit(operation)
+            if isinstance(decision, PermitDenial):
+                self._apply_permit_denial(operation, decision)
+            else:
+                self._dispatch_operation(operation, decision)
+        self._explanations[resource_id] = DecisionExplanation(
+            decision_id=decision_id,
+            resource_id=resource_id,
+            accepted=(),
+            withdrawn=(),
+            rejected=(),
+            target_result=target,
+            result_reason=(
+                REASON_NO_OP if no_op_now else "manual_intent_accepted"
+            ),
+            current_facts=tuple(
+                FactView(
+                    property=name,
+                    value=fact.value,
+                    quality=fact.quality,
+                    evidence=fact.evidence_kind,
+                    observed_at_mono_ms=fact.received_at_mono_ms,
+                )
+                for name, fact in sorted(self._facts[resource_id].items())
+            ),
+            operation_id=receipt.operation_id,
+            next_condition=None,
+            next_check_at_mono_ms=None,
+            evidence_refs=(),
+            rule_versions={
+                "config_revision": self._config_revisions.get(resource_id, 0),
+                "control_revision": next_record.control_revision,
+                "generation": next_record.generation,
+            },
+        )
         self._receipts[request_id] = receipt
         self._receipt_fingerprints[request_id] = fingerprint
         return receipt

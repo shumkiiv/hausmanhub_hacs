@@ -66,13 +66,11 @@ class LightDeviceAdapter:
         binding_revisions: Mapping[str, int],
         boot_id: str,
         id_factory,
-        source_epoch: str = "test.epoch1",
     ) -> None:
         self._profiles = dict(profiles_by_resource)
         self._binding_revisions = dict(binding_revisions)
         self._boot_id = boot_id
         self._id_factory = id_factory
-        self._source_epoch = source_epoch
 
     def capabilities(self, resource_id: str) -> CapabilityProfile:
         return self._profiles[resource_id]
@@ -171,6 +169,10 @@ class LightDeviceAdapter:
         binding_revision = self._binding_revisions[resource_id]
         received_mono = int(raw["received_at_mono_ms"])  # type: ignore[arg-type]
         received_utc = int(raw.get("received_at_utc_ms", 0))  # type: ignore[arg-type]
+        if "source_id" not in raw or "source_epoch" not in raw:
+            raise ValueError("raw event must carry source_id and source_epoch")
+        source_id = str(raw["source_id"])
+        source_epoch = str(raw["source_epoch"])
         observations: list[Observation] = []
         for name in sorted(properties):
             observations.append(
@@ -187,10 +189,8 @@ class LightDeviceAdapter:
                     source_sequence=(
                         int(sequence) if sequence is not None else None  # type: ignore[arg-type]
                     ),
-                    source_id=str(raw.get("source_id", "test.z2m")),
-                    source_epoch=str(
-                        raw.get("source_epoch", self._source_epoch)
-                    ),
+                    source_id=source_id,
+                    source_epoch=source_epoch,
                     quality=_QUALITY_BY_RAW[evidence_raw],
                     evidence_kind=_EVIDENCE_BY_RAW[evidence_raw],
                     binding_revision=binding_revision,
@@ -203,11 +203,14 @@ class LightDeviceAdapter:
 
     def _unit_of(self, resource_id: str, property_name: str) -> str:
         profile = self._profiles.get(resource_id)
-        if profile is not None:
-            rule = profile.properties.get(property_name)
-            if rule is not None:
-                return rule.unit
-        return "bool"
+        if profile is None:
+            raise ValueError(f"no capability profile for {resource_id}")
+        rule = profile.properties.get(property_name)
+        if rule is None:
+            raise ValueError(
+                f"property {property_name} is outside the capability profile"
+            )
+        return rule.unit
 
     @staticmethod
     def _attribution_of(raw: Mapping[str, object]) -> ObservationAttribution:

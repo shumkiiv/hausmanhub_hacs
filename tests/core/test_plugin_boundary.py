@@ -33,17 +33,24 @@ from conftest import (
     owner_proposal,
 )
 
-HAUSMAN_ROOT = (
-    Path(__file__)
-    .resolve()
-    .parents[2]
-    / "custom_components"
-    / "hausman_hub"
-)
+HAUSMAN_REPO_ROOT = Path(__file__).resolve().parents[2]
+HAUSMAN_ROOT = HAUSMAN_REPO_ROOT / "custom_components" / "hausman_hub"
 CORE_PACKAGES = (
     HAUSMAN_ROOT / "domain" / "core",
     HAUSMAN_ROOT / "application" / "core",
     HAUSMAN_ROOT / "adapters" / "core",
+)
+
+# Stand-only strings that must never appear in production code.
+STAND_ONLY_STRINGS = (
+    "test.main",
+    "test.lighting",
+    "test.other",
+    "test.z2m",
+    "test.epoch1",
+    "light.test_main",
+    "test.episode1",
+    "test.ui",
 )
 
 
@@ -52,7 +59,7 @@ def _python_files(root: Path) -> list[Path]:
 
 
 def _module_name(file: Path) -> str:
-    relative = file.relative_to(HAUSMAN_ROOT.parent)
+    relative = file.relative_to(HAUSMAN_REPO_ROOT)
     parts = list(relative.with_suffix("").parts)
     if parts[-1] == "__init__":
         parts = parts[:-1]
@@ -62,9 +69,12 @@ def _module_name(file: Path) -> str:
 def _resolve_relative(node: ast.ImportFrom, module: str) -> str | None:
     if node.level == 0:
         return node.module
-    package_parts = module.split(".")
-    for _ in range(node.level - 1):
-        package_parts = package_parts[:-1]
+    package_parts = module.split(".")[:-1]
+    steps_up = node.level - 1
+    if steps_up > len(package_parts):
+        raise ValueError(f"unresolvable relative import in {module}")
+    if steps_up:
+        package_parts = package_parts[: len(package_parts) - steps_up]
     base = ".".join(package_parts)
     if node.module:
         return f"{base}.{node.module}" if base else node.module
@@ -186,9 +196,8 @@ def test_production_code_has_no_stand_specific_branches():
     for package in CORE_PACKAGES:
         for file in package.rglob("*.py"):
             source = file.read_text(encoding="utf-8")
-            assert "test.main" not in source, file
-            assert "test.lighting" not in source, file
-            assert "test.other" not in source, file
+            for stand_string in STAND_ONLY_STRINGS:
+                assert stand_string not in source, (file, stand_string)
 
 
 def test_third_module_connects_through_plain_registry():
@@ -218,6 +227,7 @@ def test_third_module_connects_through_plain_registry():
 def _switch_profile() -> CapabilityProfile:
     return CapabilityProfile(
         profile_id="first-switch-1",
+        version=1,
         source="first-stand",
         properties={
             "on": PropertyRule(

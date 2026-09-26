@@ -372,10 +372,7 @@ class Proposal:
         require_enum(self.kind, ProposalKind, "kind")
         if not isinstance(self.target, (LightStateTarget, SwitchStateTarget)):
             raise CoreTypeError("Proposal.target has an unsupported type")
-        if not isinstance(self.policy_priority, bool) and not isinstance(
-            self.policy_priority, int
-        ):
-            raise CoreTypeError("policy_priority must be int")
+        require_int(self.policy_priority, "policy_priority")
         if not (
             MIN_POLICY_PRIORITY
             <= self.policy_priority

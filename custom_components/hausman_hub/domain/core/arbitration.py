@@ -182,9 +182,20 @@ def arbitrate(
     )
 
     if spec.arbitration is ArbitrationMode.ANY_ON:
-        pool = on_demands or target_demands
-        if pool:
-            return _decide(outcome, pool, previous_selected, candidate, stability, now_mono_ms)
+        # any_on is driven by require_on needs only (K-05); whole-target
+        # proposals are not an any_on demand.
+        for item in target_demands:
+            rejected.append(
+                RejectedNeed(
+                    module_id=item.module_id,
+                    proposal_id=item.proposal_id,
+                    reason_code="kind_not_acceptable",
+                )
+            )
+        if on_demands:
+            return _decide(
+                outcome, on_demands, previous_selected, candidate, stability, now_mono_ms
+            )
         return _resolve_idle(
             outcome, spec, record, auto_proof_exists, candidate, stability, now_mono_ms
         )

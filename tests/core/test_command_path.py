@@ -40,11 +40,13 @@ ANY_ON = "any_on"
 
 
 def _auto_on40_confirmed(stand):
-    """Run the F-01 flow so the stand ends in the confirmed state; the
-    owner module withdraws its one-shot demand afterwards (an Evaluation
-    replaces the whole previous set)."""
+    """Run the F-11 setup: an any_on REQUIRE_ON demand of the owner module
+    turns the lamp on and is confirmed; the owner then withdraws its
+    one-shot demand (an Evaluation replaces the whole previous set)."""
 
-    stand.modules[OWNER_MODULE].queue_proposal(owner_proposal())
+    stand.modules[OWNER_MODULE].queue_proposal(
+        owner_proposal(kind=ProposalKind.REQUIRE_ON)
+    )
     stand.service.process_module_event(OWNER_MODULE, "ev-start")
     stand.clock.advance(1)
     stand.service.drain()
