@@ -1179,20 +1179,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 core_shadow_room_id
             )
             if room_config is not None:
-                core_branch = RoomLightingCoreBranch(
-                    branch_config=CoreBranchConfig(
-                        room_id=core_shadow_room_id,
-                        config=room_config,
-                    ),
-                    store_path=Path(hass.config.config_dir)
-                    / f"hausman_hub.core_shadow_{core_shadow_room_id}.json",
-                )
-                domain_data["core_lighting_branch"] = core_branch
-                room_lighting_runtime.set_core_input_port(
-                    core_branch.handle_runtime_event
-                )
-                core_branch.activate_shadow()
-                entry.async_on_unload(core_branch.deactivate)
+                try:
+                    core_branch = RoomLightingCoreBranch(
+                        branch_config=CoreBranchConfig(
+                            room_id=core_shadow_room_id,
+                            config=room_config,
+                        ),
+                        store_path=Path(hass.config.config_dir)
+                        / f"hausman_hub.core_shadow_{core_shadow_room_id}.json",
+                    )
+                    core_branch.activate_shadow()
+                except Exception:  # noqa: BLE001 - optional branch isolation
+                    _LOGGER.exception(
+                        "core lighting branch failed to start; continuing "
+                        "without it"
+                    )
+                else:
+                    domain_data["core_lighting_branch"] = core_branch
+                    room_lighting_runtime.set_core_input_port(core_branch)
+                    entry.async_on_unload(
+                        room_lighting_runtime._notify_core_stop
+                    )
+                    entry.async_on_unload(core_branch.deactivate)
     # No automatic route may open until room-only light events received while
     # the room catalog loaded have been attributed and durably drained.
     await manual_light_events.async_complete_startup()

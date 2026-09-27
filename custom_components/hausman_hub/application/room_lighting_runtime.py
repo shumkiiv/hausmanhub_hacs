@@ -1196,6 +1196,7 @@ class RoomLightingRuntime:
     def cancel(self) -> None:
         if not self._running and not self._unsubscribers:
             return
+        self._notify_core_stop()
         # Invalidate any pending away-on debounce so it cannot fire after stop.
         self._away_generation += 1
         if (
@@ -1233,17 +1234,18 @@ class RoomLightingRuntime:
     ) -> None:
         self._core_input_port = port
 
-    async def stop(self) -> None:
-        if self._core_input_port is not None:
-            # The new core branch unsubscribes with the runtime; a stop
-            # notification lets it release timers and flush its own store.
+    def _notify_core_stop(self) -> None:
+        if self._core_input_port is None:
+            return
+        stop_hook = getattr(self._core_input_port, "on_runtime_stop", None)
+        if callable(stop_hook):
             try:
-                stop_hook = getattr(self._core_input_port, "on_runtime_stop")
-                result = stop_hook()
-                if result is not None and hasattr(result, "__await__"):
-                    await result
+                stop_hook()
             except Exception:  # noqa: BLE001 - isolation by design
                 _LOGGER.exception("core input port stop failed")
+
+    async def stop(self) -> None:
+        self._notify_core_stop()
         self.cancel()
 
     def _load_trackers(self) -> None:

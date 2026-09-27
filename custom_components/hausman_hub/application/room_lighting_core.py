@@ -152,13 +152,13 @@ class RoomLightingCoreBranch:
             episode_of_proposal=None,
             id_factory=self._id_factory(),
         )
+        clock_trust = self._clock.wall_clock_trust()
         if self._store.load() is not None:
             # Restart: rebuild from the durable image (K-10) and keep the
             # SHADOW mode regardless of what was persisted.
-            self._service = CoreCommandService.restore(**restore_kwargs)
-            # The shadow branch stays shadow regardless of what the image
-            # came from (R-01: closed sending by construction).
-            self._service._core_mode = ModuleMode.SHADOW
+            self._service = CoreCommandService.restore(
+                **restore_kwargs, clock_trust=clock_trust, core_mode=ModuleMode.SHADOW
+            )
         else:
             self._service = CoreCommandService(
                 **restore_kwargs,
@@ -166,15 +166,6 @@ class RoomLightingCoreBranch:
                 initial_records=self._initial_records(branch_config.config),
             )
         self._event_counter = 0
-
-    def _id_factory(self):
-        state = {"n": 0}
-
-        def factory() -> str:
-            state["n"] += 1
-            return str(state["n"])
-
-        return factory
 
     # -- mode --------------------------------------------------------------
 
@@ -199,6 +190,13 @@ class RoomLightingCoreBranch:
         """Called by the legacy runtime on stop: flush the store."""
 
         self._store.flush()
+
+    def __call__(
+        self, entity_id: str, old_state: object, new_state: object
+    ) -> None:
+        """Port entry: the runtime calls the branch directly."""
+
+        self.handle_runtime_event(entity_id, old_state, new_state)
 
     # -- input -------------------------------------------------------------
 

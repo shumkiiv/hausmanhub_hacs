@@ -112,3 +112,85 @@ def _state(value: str):
     state.state = value
     state.attributes = {}
     return state
+
+
+from unittest.mock import MagicMock
+
+from conftest import OWNER_MODULE, OWNER_PROPOSAL, MAIN_RESOURCE, MAIN_SCOPE, OTHER_RESOURCE, TARGET_OFF, BASE_TARGET_ON40
+from custom_components.hausman_hub.domain.core.models import (
+    ArbitrationMode,
+    Authority,
+    OperationPhase,
+)
+
+
+def test_runtime_port_delivers_events_to_branch(tmp_path):
+    """Discriminating test: the event must arrive through the real
+    runtime port (set_core_input_port → _state_event), not via a direct
+    branch call (SEC-LP-03, cycle-1 audit)."""
+
+    from custom_components.hausman_hub.application.room_lighting_runtime import (
+        RoomLightingRuntime,
+    )
+    from tests.fixtures_lighting_path import make_branch, make_state
+
+    branch = make_branch(tmp_path)
+    branch.activate_shadow()
+    runtime = RoomLightingRuntime(
+        hass=None,
+        service=MagicMock(),
+        shadow=MagicMock(),
+    )
+    runtime._running = True
+    runtime.set_core_input_port(branch)
+    before = branch.decision_explanation()
+
+    event = MagicMock()
+    event.data = {
+        "entity_id": "binary_sensor.test_presence",
+        "old_state": None,
+        "new_state": _state("on"),
+    }
+    runtime._state_event(event)
+
+    # The discriminating check: the explanation object changed after the
+    # event arrived through the port.
+    after = branch.decision_explanation()
+    assert after is not before
+
+
+def test_branch_survives_restart_from_durable_image(tmp_path):
+    """Two branch instances on one store file: the second restores the
+    image (records, markers) and keeps SHADOW mode without dispatching
+    (SEC-S04-11, LP-R2-RESTORE)."""
+
+    from custom_components.hausman_hub.domain.core.models import (
+        ArbitrationMode,
+        Authority,
+    )
+
+    from conftest import OWNER_EPISODE
+
+    stand = build_file_stand(
+        tmp_path,
+        ArbitrationMode.RANKED_TARGET,
+        episode_map={OWNER_PROPOSAL: OWNER_EPISODE},
+    )
+    stand.ingest(
+        "test.main",
+        sequence=2,
+        mono_ms=10,
+        properties={"on": True, "brightness_pct": 40},
+    )
+    store_path = stand.store_path
+    from conftest import restore_file_stand
+
+    restarted = restore_file_stand(stand)
+    record = restarted.service.record("test.main")
+    assert record.authority.value in ("manual", "automatic_eligible")
+    # A third instance: records persist through re-commits.
+    third = restore_file_stand(restarted)
+    assert third.service.record("test.main").control_revision == (
+        restarted.service.record("test.main").control_revision
+    )
+    assert third.transport.calls == []

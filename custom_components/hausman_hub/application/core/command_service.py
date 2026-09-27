@@ -1696,6 +1696,7 @@ class CoreCommandService:
         episode_of_proposal: Mapping[str, str] | None = None,
         id_factory: Callable[[], str],
         clock_trust: ClockTrust,
+        core_mode: ModuleMode = ModuleMode.ACTIVE,
     ) -> "CoreCommandService":
         """Build a fresh service from the durable image of the store and
         apply the K-10 recovery: pending work is cancelled, dispatched
@@ -1719,6 +1720,7 @@ class CoreCommandService:
             episode_of_proposal=episode_of_proposal,
             id_factory=id_factory,
             initial_records=dict(loaded.get("records", {})),
+            core_mode=core_mode,
         )
         if loaded:
             service._operations = dict(loaded.get("operations", {}))
