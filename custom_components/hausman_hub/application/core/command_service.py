@@ -1273,11 +1273,7 @@ class CoreCommandService:
         monotonic boundary data belongs to a dead process (K-10)."""
 
         restored = operation.operation_id in self._restored_operation_ids
-        cross_boot = (
-            self._image_boot_id is not None
-            and self._image_boot_id != self._clock.boot_id()
-        )
-        if restored and cross_boot:
+        if restored:
             # K-10: the monotonic boundary data of a dead process is not
             # comparable with new observations; a restored operation is
             # never confirmed across a restart.
@@ -1597,6 +1593,7 @@ class CoreCommandService:
             for operation in self._operations.values()
             if operation.phase
             in (
+                OperationPhase.QUEUED,
                 OperationPhase.TAKEN,
                 OperationPhase.DISPATCHING,
                 OperationPhase.OBSERVING,
@@ -1685,7 +1682,12 @@ class CoreCommandService:
         if loaded:
             service._operations = dict(loaded.get("operations", {}))
             service._image_boot_id = loaded.get("boot_id")
-            service._restored_operation_ids = set(service._operations)
+            # Provenance: every operation of the loaded image originates
+            # from the previous process, plus the persisted restored
+            # markers; this survives later re-commits (SEC-S04-11).
+            service._restored_operation_ids = set(
+                loaded.get("restored_operation_ids", [])
+            ) | set(service._operations)
             # The id floor is computed from the loaded operations, not
             # from an empty map (SEC-S04-10).
             max_suffix = 0

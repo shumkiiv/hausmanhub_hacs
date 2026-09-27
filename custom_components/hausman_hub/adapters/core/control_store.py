@@ -99,6 +99,7 @@ def validate_image_shape(raw: Mapping) -> None:
         "schema_version",
         *_REQUIRED_SECTIONS,
         _BOOT_ID,
+        "restored_operation_ids",
     }
     if unknown:
         raise StoreImageError(f"unknown image sections: {sorted(unknown)}")
@@ -158,7 +159,17 @@ class FileControlStore:
         """Read and fully validate the stored image; ``None`` when the
         store is empty. A damaged image raises and closes the store."""
 
-        if not self._path.exists():
+        try:
+            # The existence check is inside the guarded path too: a file
+            # system error here closes the store instead of escaping
+            # (SEC-S04-02 residual).
+            file_missing = not self._path.exists()
+        except OSError as exc:
+            self._closed = True
+            raise StoreImageError(f"store path unavailable: {exc}") from exc
+        if file_missing:
+            self._closed = False
+            self._commit_revision = 0
             return None
         try:
             # The whole load path — read, shape, decode and revision — is
@@ -458,6 +469,9 @@ def encode_state(state: Mapping) -> dict:
             operation_id: list(key)
             for operation_id, key in state.get(_CONFIRM_KEYS, {}).items()
         },
+        "restored_operation_ids": sorted(
+            state.get("restored_operation_ids", [])
+        ),
         _EPISODE_LOCKS: dict(state.get(_EPISODE_LOCKS, {})),
         _SCOPE_REVISIONS: {
             key: _strict_int(value, f"scope_revisions[{key}]")

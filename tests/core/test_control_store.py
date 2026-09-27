@@ -28,6 +28,8 @@ from conftest import MAIN_RESOURCE, FaultInjector
 
 STORE_FILE = "control_store.json"
 
+STORE_FILE = "control_store.json"
+
 
 def make_state(control_revision: int, commit_revision: int) -> dict:
     record = ControlRecord(

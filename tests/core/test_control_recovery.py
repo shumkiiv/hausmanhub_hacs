@@ -26,6 +26,10 @@ from custom_components.hausman_hub.domain.core.recovery import (
     evaluate_clock_trust,
 )
 
+from custom_components.hausman_hub.adapters.core.control_store import (
+    FileControlStore,
+    StoreImageError,
+)
 from conftest import (
     BASE_TARGET_ON40,
     MAIN_ENTITY,
@@ -625,3 +629,152 @@ def test_sec_s04_03_restarted_ownership_stays_closed():
         expected_control_revision=12,
     )
     assert manual_receipt.status is ManualStatus.ACCEPTED
+
+
+def test_sec_s04_11b_durable_observing_with_timestamp_never_confirms():
+    """Durable OBSERVING with a real dispatch timestamp: after a restart
+    (new boot) a fresh device report must not turn it into a late
+    confirmation (SEC-S04-11 residual, non-retained evidence)."""
+
+    from custom_components.hausman_hub.domain.core.models import (
+        ArbitrationMode,
+    )
+
+    stand = build_file_stand(
+        tmp_path_fixture(),
+        ArbitrationMode.RANKED_TARGET,
+        episode_map={OWNER_PROPOSAL: OWNER_EPISODE},
+    )
+    stand.modules[OWNER_MODULE].queue_proposal(owner_proposal())
+    stand.service.process_module_event(OWNER_MODULE, "ev-1")
+    stand.clock.advance(1)
+    stand.service.drain()
+    operation = stand.service.operations(MAIN_RESOURCE)[-1]
+    assert operation.phase is OperationPhase.OBSERVING
+    assert operation.dispatch_started_at_mono_ms is not None
+    restarted = restore_file_stand(stand)
+    operation = restarted.service.operations(MAIN_RESOURCE)[-1]
+    assert operation.phase is OperationPhase.UNKNOWN
+    # A fresh, well-typed report of the new process must not confirm the
+    # restored operation.
+    result = restarted.ingest(
+        MAIN_RESOURCE,
+        sequence=2,
+        mono_ms=5,
+        properties={"on": True, "brightness_pct": 40},
+    )
+    assert result == "recorded"
+    assert operation.phase is OperationPhase.UNKNOWN
+    assert restarted.service.record(MAIN_RESOURCE).auto_proof is None
+
+
+def test_sec_s04_02_missing_boot_id_stays_fail_closed():
+    from custom_components.hausman_hub.domain.core.models import (
+        ArbitrationMode,
+    )
+
+    stand = build_file_stand(
+        tmp_path_fixture(),
+        ArbitrationMode.RANKED_TARGET,
+        episode_map={OWNER_PROPOSAL: OWNER_EPISODE},
+    )
+    stand.modules[OWNER_MODULE].queue_proposal(owner_proposal())
+    stand.service.process_module_event(OWNER_MODULE, "ev-1")
+    # Persist an image whose boot_id is absent: provenance is kept per
+    # operation, so the missing id stays fail-closed (SEC-S04-11).
+    import json
+
+    image = stand.service._build_image()
+    image.pop("boot_id", None)
+    stand.store.commit(stand.store.commit_revision, image)
+    restarted = restore_file_stand(stand)
+    restarted.clock.advance(1)
+    restarted.service.drain()
+    assert restarted.transport.calls == []
+    operation = restarted.service.operations(MAIN_RESOURCE)[-1]
+    assert operation.phase is OperationPhase.CANCELLED
+
+
+def test_sec_s04_08_queued_occupies_capacity():
+    from custom_components.hausman_hub.application.core.command_service import (
+        CapacityExceeded,
+        Operation,
+        OperationPhase,
+        Origin,
+    )
+    from custom_components.hausman_hub.domain.core.models import (
+        ArbitrationMode,
+    )
+
+    stand = build_file_stand(
+        tmp_path_fixture(),
+        ArbitrationMode.RANKED_TARGET,
+        module_specs={
+            OWNER_MODULE: MAIN_RESOURCE,
+            "test.other_module": OTHER_RESOURCE,
+        },
+    )
+    # Seed 1023 unresolved outcomes of counted phases into the image.
+    image = stand.service._build_image()
+    for index in range(1023):
+        image["operations"][f"seed-{index}"] = Operation(
+            operation_id=f"seed-{index}",
+            resource_id=OTHER_RESOURCE,
+            decision_id=f"seeddec-{index}",
+            origin=Origin.AUTOMATION,
+            target=BASE_TARGET_ON40,
+            generation=7,
+            control_revision=12,
+            config_revision=2,
+            binding_revision=3,
+            scope_revisions={},
+            created_at_mono_ms=0,
+            phase=OperationPhase.UNKNOWN,
+            reason_code="seed",
+        )
+    stand.store.commit(stand.store.commit_revision, image)
+    restarted = restore_file_stand(stand)
+    # One queued target of the other resource is accepted (1023+1=1024).
+    restarted.modules["test.other_module"].queue_proposal(
+        owner_proposal(
+            proposal_id="other.q1",
+            resource_id=OTHER_RESOURCE,
+            module_id="test.other_module",
+        )
+    )
+    restarted.service.process_module_event("test.other_module", "ev-q1")
+    # A queued target of ANOTHER resource would exceed the limit and is
+    # refused before acceptance; replacing a same-resource pending target
+    # does not consume extra capacity.
+    restarted.modules[OWNER_MODULE].queue_proposal(owner_proposal())
+    with pytest.raises(CapacityExceeded):
+        restarted.service.process_module_event(OWNER_MODULE, "ev-main-over")
+    # The accepted queued target is still there, nothing was deleted.
+    assert restarted.service.record(OTHER_RESOURCE).control_revision == 12
+
+
+def test_sec_s04_02_exists_error_closes_existing_store(tmp_path, monkeypatch):
+    import pathlib
+
+    from custom_components.hausman_hub.application.core.command_service import (
+        StorageUnavailable,
+    )
+    from test_control_store import STORE_FILE, make_state
+
+    path = tmp_path / STORE_FILE
+    store = FileControlStore(path)
+    store.commit(0, make_state(control_revision=12, commit_revision=0))
+
+    def broken_exists(self):
+        raise OSError("exists failed")
+
+    monkeypatch.setattr(pathlib.Path, "exists", broken_exists)
+    with pytest.raises(StoreImageError):
+        store.load()
+    assert store.healthy() is False
+    # Until an explicit reload succeeds, the closed store refuses writes.
+    with pytest.raises(StorageUnavailable):
+        store.commit(store.commit_revision, make_state(control_revision=13, commit_revision=0))
+    monkeypatch.undo()
+    store.load()
+    assert store.healthy() is True
