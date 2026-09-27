@@ -717,5 +717,5 @@ def build_file_stand(
         module_specs=module_specs,
         episode_map=episode_map,
         use_file_store=True,
-        store_path=Path(tmp_path) / "control_store.json",
+        store_path=str(Path(tmp_path) / "control_store.json"),
     )

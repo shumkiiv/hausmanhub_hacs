@@ -10,7 +10,7 @@ entity ids stay inside the input adapter; the core sees resource ids.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..adapters.core.clock import SystemClock
@@ -28,6 +28,9 @@ from ..domain.core.models import (
 )
 from ..domain.lighting_plugin import LightingPlugin
 from ..domain.room_lighting import RoomLightingConfig
+
+if TYPE_CHECKING:
+    from pathlib import Path
 from .core.command_service import (
     CoreCommandService,
     CoreServiceError,
@@ -86,7 +89,7 @@ class RoomLightingCoreBranch:
         self,
         *,
         branch_config: CoreBranchConfig,
-        store_path: Path,
+        store_path: str | Path,
     ) -> None:
         # The shadow branch is intentionally Hass-independent: closed
         # transport, own store, own clock.
@@ -94,7 +97,7 @@ class RoomLightingCoreBranch:
         self._clock = SystemClock()
         self._transport = ClosedTransport()
         room_id = branch_config.room_id
-        self._store_path = Path(store_path)
+        self._store_path = str(store_path)
         self._store = FileControlStore(self._store_path)
         self._bindings = self._bindings_from(branch_config.config)
         self._input_adapter = RoomLightingInputAdapter(

@@ -4,10 +4,7 @@ with the transport closed by construction."""
 from __future__ import annotations
 
 from conftest import build_file_stand
-from test_lighting_plugin import (
-    _config,
-    _observation,
-)
+from test_lighting_plugin import _config
 from custom_components.hausman_hub.application.room_lighting_core import (
     CoreBranchConfig,
     RoomLightingCoreBranch,
@@ -29,12 +26,6 @@ def _branch(tmp_path):
     branch.activate_shadow()
     return branch
 
-
-def _frame_observations(now_utc_ms: int):
-    return [
-        _observation("test_mirror", "on", False, now_utc_ms),
-        _observation("sensor_presence", "occupancy", True, now_utc_ms),
-    ]
 
 
 def _observation(resource_id, property_name, value, mono_ms):
