@@ -922,7 +922,7 @@ def test_sec_s04_11c_provenance_survives_image_recommit():
     )
 
 
-def test_sec_s04_08_manual_replacement_of_own_pending_at_full_capacity():
+def test_sec_s04_08_manual_replacement_at_full_capacity_future_composition():
     """At full capacity a manual command replacing the resource's own
     pending automatic target must be accepted: it frees the slot it
     occupies (SEC-S04-08 residual, future composition)."""
