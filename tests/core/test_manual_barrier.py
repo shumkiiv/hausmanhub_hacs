@@ -34,8 +34,10 @@ from conftest import (
     OWNER_PROPOSAL,
     SCOPE_START_REVISION,
     TARGET_OFF,
+    build_file_stand,
     build_stand,
     owner_proposal,
+    restore_file_stand,
 )
 
 
@@ -288,3 +290,53 @@ def test_idem02_receipt_survives_storage_failure_during_dispatch():
     )
     assert second.status is ManualStatus.ACCEPTED
     assert stand.service.dispatch_count() == 1
+
+
+def test_idem02_file_store_variant_keeps_the_receipt(tmp_path):
+    from custom_components.hausman_hub.domain.core.models import ArbitrationMode
+
+    stand = build_file_stand(
+        tmp_path,
+        ArbitrationMode.RANKED_TARGET,
+        episode_map={OWNER_PROPOSAL: OWNER_EPISODE},
+    )
+    # Facts: the lamp reports ON40 itself, so a manual OFF must dispatch.
+    stand.ingest(
+        MAIN_RESOURCE,
+        sequence=2,
+        mono_ms=10,
+        properties={"on": True, "brightness_pct": 40},
+    )
+    stand.store.fail_at_commit_revisions.add(stand.store.commit_revision + 2)
+    with pytest.raises(StorageUnavailable):
+        _manual_off(stand, "req-file-idem")
+    assert stand.transport.calls == []
+    operation = stand.service.operations(MAIN_RESOURCE)[-1]
+    assert operation.phase is OperationPhase.FAILED
+    assert operation.reason_code == "storage_unavailable_before_send"
+    record = stand.service.record(MAIN_RESOURCE)
+    assert record.authority is Authority.MANUAL
+    # Replay on the same instance: same receipt, no re-send.
+    replay = _manual_off(stand, "req-file-idem", expected_revision=CONTROL_REVISION_START + 1)
+    assert replay.idempotent_replay is True
+    assert replay.operation_id == operation.operation_id
+    assert stand.service.dispatch_count() == 0
+    # Restart: the receipt and the manual hold are restored from the file.
+    restarted = restore_file_stand(stand)
+    replay2 = _manual_off(restarted, "req-file-idem", expected_revision=CONTROL_REVISION_START + 1)
+    assert replay2.idempotent_replay is True
+    assert replay2.operation_id == operation.operation_id
+    record = restarted.service.record(MAIN_RESOURCE)
+    assert record.authority is Authority.MANUAL
+    assert restarted.service.dispatch_count() == 0
+    restarted.store.fail_at_commit_revisions.clear()
+    restarted.ingest(
+        MAIN_RESOURCE,
+        sequence=3,
+        mono_ms=5,
+        properties={"on": True, "brightness_pct": 40},
+    )
+    fresh = _manual_off(restarted, "req-file-fresh", expected_revision=CONTROL_REVISION_START + 1)
+    assert fresh.status is ManualStatus.ACCEPTED
+    assert restarted.service.dispatch_count() == 1
+    assert restarted.transport.calls[-1] == ("light", "turn_off", MAIN_ENTITY, {})

@@ -180,6 +180,37 @@ def test_adapters_core_has_no_ha_binding_in_first():
     assert not _has_ha_import(adapter_files)
 
 
+def test_core_layers_have_no_file_io():
+    """Domain and application never touch the filesystem; the file store
+    lives in the adapter layer only (S-04, CA-02)."""
+
+    forbidden_names = {"open", "Path"}
+    forbidden_modules = ("pathlib", "os", "tempfile", "shutil", "json")
+    for package in (CORE_PACKAGES[0], CORE_PACKAGES[1]):
+        for file in package.rglob("*.py"):
+            tree = ast.parse(file.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    if isinstance(node, ast.Import):
+                        names = [alias.name for alias in node.names]
+                    else:
+                        names = [node.module or ""]
+                    for name in names:
+                        root = name.split(".")[0]
+                        assert root not in forbidden_modules, (file, name)
+                if isinstance(node, ast.Call) and isinstance(
+                    node.func, ast.Name
+                ):
+                    assert node.func.id not in forbidden_names, (
+                        file,
+                        node.func.id,
+                    )
+                if isinstance(node, ast.Call) and isinstance(
+                    node.func, ast.Attribute
+                ):
+                    assert node.func.attr != "write_text", file
+
+
 def test_core_never_reads_the_wall_clock_directly():
     for file in [*(CORE_PACKAGES[0]).rglob("*.py"), *(CORE_PACKAGES[1]).rglob("*.py")]:
         tree = ast.parse(file.read_text(encoding="utf-8"))

@@ -15,6 +15,13 @@ from enum import Enum
 from typing import Callable, Mapping, Protocol, runtime_checkable
 
 from ...domain.core.arbitration import ArbitrationOutcome, CandidateHold, arbitrate
+from ...domain.core.recovery import (
+    ClockTrust,
+    REASON_RESTART_PENDING_CANCELLED,
+    REASON_RESTART_UNCERTAIN,
+    classify_restored_operation,
+    evaluate_clock_trust,
+)
 from ...domain.core.models import (
     REASON_CONFIRMATION_TIMEOUT,
     REASON_MANUAL_OVERRIDE,
@@ -93,6 +100,16 @@ class CommitConflict(CoreServiceError):
     pass
 
 
+class CapacityExceeded(CoreServiceError):
+    """Store capacity is exhausted; the request is refused before
+    acceptance instead of silently dropping protected records (S-05)."""
+
+
+RECEIPT_WINDOW_MS = 24 * 60 * 60 * 1000
+MAX_RECEIPTS_IN_WINDOW = 2048
+MAX_UNRESOLVED_OPERATIONS = 1024
+
+
 @runtime_checkable
 class ClockPort(Protocol):
     """Injected time source; domain and application never read the OS."""
@@ -114,6 +131,8 @@ class ControlStorePort(Protocol):
     def commit(
         self, expected_commit_revision: int, next_state: Mapping[str, object]
     ) -> None: ...
+
+    def load(self) -> Mapping[str, object] | None: ...
 
 
 @runtime_checkable
@@ -311,6 +330,8 @@ class CoreCommandService:
         }
         self._report_groups: dict[tuple, list[Observation]] = {}
         self._confirm_keys: dict[str, tuple] = {}
+        self._dispatching: dict[str, str] = {}
+        self._receipt_times: dict[str, int] = {}
         self._episode_locks: dict[tuple[str, str], str] = {}
         self._receipts: dict[str, ManualReceipt] = {}
         self._receipt_fingerprints: dict[str, tuple] = {}
@@ -474,13 +495,34 @@ class CoreCommandService:
     # ------------------------------------------------------------------
     # store
 
-    def _commit_state(self) -> None:
-        image = {
-            "schema_version": STORE_SCHEMA_VERSION,
+    def _build_image(self) -> dict:
+        """One whole image: rights, operations, receipts, replay keys and
+        the critical protection history (S-04). The store stamps its own
+        commit revision before becoming durable."""
+        return {
+            "commit_revision": self._store.commit_revision,
             "records": dict(self._records),
-            "episode_locks": dict(self._episode_locks),
+            "operations": dict(self._operations),
+            "receipts": dict(self._receipts),
+            "receipt_times": dict(self._receipt_times),
+            "receipt_fingerprints": {
+                request_id: list(fingerprint)
+                for request_id, fingerprint in self._receipt_fingerprints.items()
+            },
+            "confirm_keys": {
+                operation_id: list(key)
+                for operation_id, key in self._confirm_keys.items()
+            },
+            "episode_locks": {
+                f"{resource}|{episode}": reason
+                for (resource, episode), reason in self._episode_locks.items()
+            },
+            "scope_revisions": dict(self._scope_revisions),
+            "config_revisions": dict(self._config_revisions),
         }
-        self._store.commit(self._store.commit_revision, image)
+
+    def _commit_state(self) -> None:
+        self._store.commit(self._store.commit_revision, self._build_image())
 
     # ------------------------------------------------------------------
     # module events (auto path)
@@ -727,6 +769,10 @@ class CoreCommandService:
     ) -> None:
         self._operations[operation.operation_id] = operation
         self._resource_ops[resource_id].append(operation.operation_id)
+        # A pending operation is part of the durable image the moment it
+        # is accepted (S-04): after a restart it must be visible to be
+        # cancelled honestly instead of being silently replayed.
+        self._commit_state()
 
     def _mark_terminal(
         self,
@@ -803,11 +849,13 @@ class CoreCommandService:
             self._dispatch_operation(operation, decision)
 
     def drain(self) -> None:
-        """One permitted executor tick: timeouts, dequeue, dispatch."""
+        """One permitted executor tick: timeouts, dequeue, durable
+        dispatching record, transport call."""
 
         self.advance_timeouts()
         self.take_ready()
         self.run_taken()
+        self.run_dispatching()
 
     def _final_permit(
         self, operation: Operation
@@ -865,6 +913,11 @@ class CoreCommandService:
     def _dispatch_operation(
         self, operation: Operation, permit: DispatchPermit
     ) -> None:
+        """Stage one: prepare and durably record the dispatching phase.
+        The physical call happens only in the follow-up executor step
+        ``run_dispatching``, which re-checks the deny barrier directly
+        before the transport (S-04)."""
+
         resource_id = operation.resource_id
         profile = self._adapter.capabilities(resource_id)
         entity_id = self._bindings[resource_id]
@@ -880,49 +933,81 @@ class CoreCommandService:
                 operation, OperationPhase.REJECTED, "invalid_profile"
             )
             return
-        rule = profile.properties.get("on")
-        timeout = (
-            rule.confirmation_timeout_ms
-            if rule
-            else FALLBACK_CONFIRMATION_TIMEOUT_MS
-        )
         operation.phase = OperationPhase.DISPATCHING
         operation.evidence_refs = operation.evidence_refs + (
             permit.permit_id,
         )
         # Persisting the dispatching phase precedes the physical call (K-08);
         # when the store refuses the record, the call must not happen and
-        # the non-send is provable (SEC-FIRST-IDEM-01). The dispatch
-        # timestamp marks the transport boundary only after the record is
-        # durable, so a failed record never counts as a dispatch.
+        # the non-send is provable (SEC-FIRST-IDEM-01).
         try:
             self._commit_state()
         except StorageUnavailable:
             self._taken.pop(resource_id, None)
+            self._dispatching.pop(resource_id, None)
             self._mark_terminal(
                 operation,
                 OperationPhase.FAILED,
                 REASON_STORAGE_BEFORE_SEND,
             )
             raise
-        started = self._clock.now_mono_ms()
-        operation.dispatch_started_at_mono_ms = started
-        operation.confirmation_deadline_mono_ms = started + timeout
-        operation.pre_dispatch_sequence = self._max_sequence(resource_id)
-        outcome = self._adapter.dispatch_once(prepared, self._transport)
-        # The transport call has returned: the resource slot is free again.
         self._taken.pop(resource_id, None)
-        if outcome.status is TransportStatus.ACCEPTED:
-            operation.phase = OperationPhase.OBSERVING
-        elif outcome.proven_not_sent:
-            self._mark_terminal(operation, OperationPhase.FAILED, "not_sent")
-        else:
-            operation.phase = OperationPhase.UNKNOWN
-            operation.reason_code = "transport_error_unknown_outcome"
-            if operation.origin_automation and operation.episode_id:
-                self._episode_locks[(resource_id, operation.episode_id)] = (
-                    "transport_error_unknown_outcome"
+        self._dispatching[resource_id] = operation.operation_id
+
+    def run_dispatching(self) -> None:
+        """Stage two: the transport boundary. The deny barrier is re-checked
+        here, after the durable dispatching record and directly before the
+        physical call (S-04; D-15)."""
+
+        for resource_id in list(self._dispatching.keys()):
+            operation = self._operations[self._dispatching.pop(resource_id)]
+            if operation.phase is not OperationPhase.DISPATCHING:
+                continue
+            if resource_id in self._deny_barrier:
+                # A newer manual intent closed the window after this
+                # record became durable: the older automatic call is not
+                # sent (S-04; D-15).
+                self._mark_terminal(
+                    operation,
+                    OperationPhase.CANCELLED,
+                    "deny_barrier_active",
                 )
+                continue
+            profile = self._adapter.capabilities(resource_id)
+            rule = profile.properties.get("on")
+            timeout = (
+                rule.confirmation_timeout_ms
+                if rule
+                else FALLBACK_CONFIRMATION_TIMEOUT_MS
+            )
+            started = self._clock.now_mono_ms()
+            operation.dispatch_started_at_mono_ms = started
+            operation.confirmation_deadline_mono_ms = started + timeout
+            operation.pre_dispatch_sequence = self._max_sequence(resource_id)
+            prepared = self._adapter.prepare(
+                operation.target,
+                self._bindings[resource_id],
+                profile,
+                operation.operation_id,
+                operation.evidence_refs[-1],
+            )
+            if isinstance(prepared, ValidationIssue):
+                self._mark_terminal(
+                    operation, OperationPhase.REJECTED, "invalid_profile"
+                )
+                continue
+            outcome = self._adapter.dispatch_once(prepared, self._transport)
+            if outcome.status is TransportStatus.ACCEPTED:
+                operation.phase = OperationPhase.OBSERVING
+            elif outcome.proven_not_sent:
+                self._mark_terminal(operation, OperationPhase.FAILED, "not_sent")
+            else:
+                operation.phase = OperationPhase.UNKNOWN
+                operation.reason_code = "transport_error_unknown_outcome"
+                if operation.origin_automation and operation.episode_id:
+                    self._episode_locks[
+                        (resource_id, operation.episode_id)
+                    ] = "transport_error_unknown_outcome"
         self._commit_state()
 
     def _max_sequence(self, resource_id: str) -> int | None:
@@ -1221,6 +1306,13 @@ class CoreCommandService:
         expected_control_revision: int,
         policy_revision: int = DEFAULT_MANUAL_POLICY_REVISION,
     ) -> ManualReceipt:
+        """Manual intake in the S-04 order: barrier first, then one commit
+        that durably contains the accepted rights AND the acceptance
+        receipt, then publication and permitted execution (SEC-FIRST-IDEM-01:
+        the accepted request_id is never lost to a later storage failure).
+        A no_op acceptance still records the manual hold and bumps
+        generation/revision (K-07)."""
+
         resource_id = self.resolve_resource_id(resource_ref)
         fingerprint = (resource_id, action_id, target)
         previous = self._receipts.get(request_id)
@@ -1236,6 +1328,7 @@ class CoreCommandService:
                     idempotent_replay=True,
                 )
             raise IdempotencyConflict(request_id)
+        self._ensure_capacity(self._clock.now_utc_ms())
         record = self.record(resource_id)
         if record.control_revision != expected_control_revision:
             raise RevisionConflict(
@@ -1244,9 +1337,9 @@ class CoreCommandService:
             )
         # 2. deny-only barrier closes automatic dispatch immediately.
         self._deny_barrier.add(resource_id)
-        # no_op is judged against the world before anything is cancelled:
-        # an already-sent operation with an undetermined outcome forbids it
-        # (K-08: the older OFF does not legalize a no_op manual OFF).
+        # The no_op decision is taken against the world before anything is
+        # cancelled: an already-sent operation with an undetermined outcome
+        # forbids it (K-08).
         no_op_now = (
             not self._unresolved_sent_exists(resource_id)
             and self._fact_matches(resource_id, target)
@@ -1299,77 +1392,80 @@ class CoreCommandService:
         next_scope = dict(self._scope_revisions)
         for group in spec.manual_scopes:
             next_scope[group] = next_scope.get(group, 0) + 1
+        decision_id = self._next_id("dec")
+        operation = Operation(
+            operation_id=self._next_id("op"),
+            resource_id=resource_id,
+            decision_id=decision_id,
+            origin=Origin.MANUAL,
+            target=target,
+            generation=next_record.generation,
+            control_revision=next_record.control_revision,
+            config_revision=self._config_revisions.get(resource_id, 0),
+            binding_revision=spec.binding_revision,
+            scope_revisions={
+                group: next_scope[group]
+                for group in spec.manual_scopes
+                if group in next_scope
+            },
+            created_at_mono_ms=self._clock.now_mono_ms(),
+            phase=(
+                OperationPhase.NO_OP if no_op_now else OperationPhase.QUEUED
+            ),
+            reason_code=REASON_NO_OP if no_op_now else None,
+            request_id=request_id,
+            expires_at_mono_ms=None,
+        )
+        receipt = ManualReceipt(
+            request_id=request_id,
+            status=(
+                ManualStatus.NO_OP if no_op_now else ManualStatus.ACCEPTED
+            ),
+            reason_code=REASON_NO_OP if no_op_now else None,
+            operation_id=operation.operation_id,
+            control_revision=next_record.control_revision,
+            generation=next_record.generation,
+        )
+        # 4. One commit of the whole acceptance (S-04): rights, groups,
+        # the accepted operation and its receipt are durable together, so
+        # a later storage failure can never lose the accepted request.
+        image = self._build_image()
+        image["records"] = {**image["records"], resource_id: next_record}
+        image["operations"] = {
+            **image["operations"],
+            operation.operation_id: operation,
+        }
+        image["receipts"] = {**image["receipts"], request_id: receipt}
+        image["receipt_fingerprints"] = {
+            **image["receipt_fingerprints"],
+            request_id: list(fingerprint),
+        }
+        image["receipt_times"] = {
+            **image["receipt_times"],
+            request_id: now_utc,
+        }
         try:
-            # 4. one commit of the accepted authority (S-04).
-            self._store.commit(
-                self._store.commit_revision,
-                {
-                    "schema_version": STORE_SCHEMA_VERSION,
-                    "records": {
-                        **self._records,
-                        resource_id: next_record,
-                    },
-                    "episode_locks": dict(self._episode_locks),
-                },
-            )
+            self._store.commit(self._store.commit_revision, image)
         except StorageUnavailable:
             # The internal auto ban stays; the request is not accepted.
             raise
-        # 5. accepted: swap in-memory state, publish, release the barrier.
+        # 5. accepted: publish the whole accepted state (receipt included)
+        # before the registration commit, so no follow-up commit can
+        # overwrite the durable receipt with an older picture (S-04).
         self._records[resource_id] = next_record
         self._scope_revisions.clear()
         self._scope_revisions.update(next_scope)
-        self._deny_barrier.discard(resource_id)
-        decision_id = self._next_id("dec")
-        if no_op_now:
-            # 6. accepted manual intent with a fresh matching fact (K-08):
-            # the acceptance itself is recorded, zero dispatches happen.
-            no_op = self._enqueue_target(
-                resource_id,
-                target,
-                origin=Origin.MANUAL,
-                request_id=request_id,
-                decision_id=decision_id,
-                no_op_decided=True,
-            )
-            receipt = ManualReceipt(
-                request_id=request_id,
-                status=ManualStatus.NO_OP,
-                reason_code=REASON_NO_OP,
-                operation_id=no_op.operation_id,
-                control_revision=next_record.control_revision,
-                generation=next_record.generation,
-            )
-        else:
-            operation = self._enqueue_target(
-                resource_id,
-                target,
-                origin=Origin.MANUAL,
-                request_id=request_id,
-                decision_id=decision_id,
-                no_op_decided=False,
-            )
-            receipt = ManualReceipt(
-                request_id=request_id,
-                status=ManualStatus.ACCEPTED,
-                reason_code=None,
-                operation_id=operation.operation_id,
-                control_revision=next_record.control_revision,
-                generation=next_record.generation,
-            )
-        # The acceptance result is durable in-memory before any execution:
-        # a storage failure during dispatch must not make the accepted
-        # request_id unknown (SEC-FIRST-IDEM-01).
         self._receipts[request_id] = receipt
         self._receipt_fingerprints[request_id] = fingerprint
-        if not no_op_now:
-            # Manual execution runs immediately: it does not wait behind an
-            # observing foreign device, and the transport call has returned.
-            decision = self._final_permit(operation)
-            if isinstance(decision, PermitDenial):
-                self._apply_permit_denial(operation, decision)
-            else:
-                self._dispatch_operation(operation, decision)
+        self._receipt_times[request_id] = now_utc
+        # The acceptance image already contains the operation; publishing
+        # it in memory must not fire a second, diverging commit.
+        self._operations[operation.operation_id] = operation
+        self._resource_ops[resource_id].append(operation.operation_id)
+        self._deny_barrier.discard(resource_id)
+        explanation_reason = REASON_NO_OP if no_op_now else (
+            "manual_intent_accepted"
+        )
         self._explanations[resource_id] = DecisionExplanation(
             decision_id=decision_id,
             resource_id=resource_id,
@@ -1377,9 +1473,7 @@ class CoreCommandService:
             withdrawn=(),
             rejected=(),
             target_result=target,
-            result_reason=(
-                REASON_NO_OP if no_op_now else "manual_intent_accepted"
-            ),
+            result_reason=explanation_reason,
             current_facts=tuple(
                 FactView(
                     property=name,
@@ -1390,7 +1484,7 @@ class CoreCommandService:
                 )
                 for name, fact in sorted(self._facts[resource_id].items())
             ),
-            operation_id=receipt.operation_id,
+            operation_id=operation.operation_id,
             next_condition=None,
             next_check_at_mono_ms=None,
             evidence_refs=(),
@@ -1400,11 +1494,143 @@ class CoreCommandService:
                 "generation": next_record.generation,
             },
         )
-        self._receipts[request_id] = receipt
-        self._receipt_fingerprints[request_id] = fingerprint
+        if not no_op_now:
+            # Manual execution runs immediately: it does not wait behind an
+            # observing foreign device, and the transport call has returned.
+            decision = self._final_permit(operation)
+            if isinstance(decision, PermitDenial):
+                self._apply_permit_denial(operation, decision)
+            else:
+                self._dispatch_operation(operation, decision)
+                self.run_dispatching()
         return receipt
 
     # ------------------------------------------------------------------
+    # store capacity (S-05): exhausted capacity refuses new accepted
+    # work instead of silently dropping protected records.
+
+    def _ensure_capacity(self, now_utc_ms: int) -> None:
+        self._prune_expired_receipts(now_utc_ms)
+        active_receipts = sum(
+            1
+            for accepted_at in self._receipt_times.values()
+            if now_utc_ms - accepted_at < RECEIPT_WINDOW_MS
+        )
+        if active_receipts >= MAX_RECEIPTS_IN_WINDOW:
+            raise CapacityExceeded("receipt_window_full")
+        unresolved = sum(
+            1
+            for operation in self._operations.values()
+            if operation.phase is OperationPhase.UNKNOWN
+        )
+        if unresolved >= MAX_UNRESOLVED_OPERATIONS:
+            raise CapacityExceeded("unresolved_operations_full")
+
+    def _prune_expired_receipts(self, now_utc_ms: int) -> None:
+        expired = [
+            request_id
+            for request_id, accepted_at in self._receipt_times.items()
+            if now_utc_ms - accepted_at >= RECEIPT_WINDOW_MS
+        ]
+        for request_id in expired:
+            self._receipts.pop(request_id, None)
+            self._receipt_fingerprints.pop(request_id, None)
+            self._receipt_times.pop(request_id, None)
+
+    # restore after restart (K-10, S-04/S-05)
+
+    @classmethod
+    def restore(
+        cls,
+        *,
+        clock: ClockPort,
+        store: ControlStorePort,
+        adapter: DeviceAdapterPort,
+        transport: TransportPort,
+        specs: Mapping[str, ResourceSpec],
+        bindings: Mapping[str, str],
+        modules: Mapping[str, ModuleEntry],
+        stability_profiles: Mapping[str, StabilityProfile],
+        config_revisions: Mapping[str, int],
+        scope_revisions: Mapping[str, int],
+        episode_of_proposal: Mapping[str, str] | None = None,
+        id_factory: Callable[[], str],
+        clock_trust: ClockTrust,
+    ) -> "CoreCommandService":
+        """Build a fresh service from the durable image of the store and
+        apply the K-10 recovery: pending work is cancelled, dispatched
+        work without a durable outcome becomes unknown. An untrusted
+        clock never extends rights (S-05)."""
+
+        loaded = store.load()
+        service = cls(
+            clock=clock,
+            store=store,
+            adapter=adapter,
+            transport=transport,
+            specs=specs,
+            bindings=bindings,
+            modules=modules,
+            stability_profiles=stability_profiles,
+            config_revisions=loaded.get("config_revisions")
+            or dict(config_revisions),
+            scope_revisions=loaded.get("scope_revisions")
+            or dict(scope_revisions),
+            episode_of_proposal=episode_of_proposal,
+            id_factory=id_factory,
+            initial_records=dict(loaded.get("records", {})),
+        )
+        if loaded:
+            service._operations = dict(loaded.get("operations", {}))
+            for operation_id, operation in service._operations.items():
+                service._resource_ops.setdefault(
+                    operation.resource_id, []
+                ).append(operation_id)
+            service._receipts = dict(loaded.get("receipts", {}))
+            service._receipt_times = dict(loaded.get("receipt_times", {}))
+            service._receipt_fingerprints = {
+                request_id: tuple(fingerprint)
+                for request_id, fingerprint in loaded.get(
+                    "receipt_fingerprints", {}
+                ).items()
+            }
+            service._confirm_keys = {
+                operation_id: tuple(key)
+                for operation_id, key in loaded.get("confirm_keys", {}).items()
+            }
+            service._episode_locks = dict(loaded.get("episode_locks", {}))
+            for operation in list(service._operations.values()):
+                decision = classify_restored_operation(operation.phase)
+                if decision.phase is not operation.phase:
+                    operation.phase = decision.phase
+                    operation.reason_code = decision.reason_code
+                    if (
+                        operation.origin_automation
+                        and operation.episode_id
+                        and decision.reason_code == REASON_RESTART_UNCERTAIN
+                    ):
+                        service._episode_locks[
+                            (operation.resource_id, operation.episode_id)
+                        ] = REASON_RESTART_UNCERTAIN
+            if not clock_trust.trusted:
+                for resource_id, record in list(service._records.items()):
+                    if (
+                        record.authority is Authority.AUTOMATIC_ELIGIBLE
+                        and record.manual is None
+                    ):
+                        service._records[resource_id] = replace(
+                            record,
+                            uncertainty_reason=(
+                                "clock_uncertain"
+                                if record.uncertainty_reason is None
+                                else record.uncertainty_reason
+                            ),
+                        )
+        # Persist the recovery outcomes so the visible state matches the
+        # durable truth before any new work is accepted.
+        service._commit_state()
+        return service
+
     # projection
 
     def resource_view(self, resource_ref: str) -> ResourceView:

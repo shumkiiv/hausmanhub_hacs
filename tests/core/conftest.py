@@ -10,10 +10,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import Decimal
+from pathlib import Path
 from typing import Mapping
 
 import pytest
 
+from custom_components.hausman_hub.adapters.core.control_store import FileControlStore
 from custom_components.hausman_hub.adapters.core.light import LightDeviceAdapter
 from custom_components.hausman_hub.application.core.command_service import (
     CapabilityProfile,
@@ -76,6 +78,7 @@ class FakeClock:
     def __init__(self) -> None:
         self.mono_ms = 0
         self.utc_ms = START_UTC_MS
+        self.platform_sync_confirmed = True
 
     def now_mono_ms(self) -> int:
         return self.mono_ms
@@ -104,6 +107,9 @@ class MemoryStore:
     def state(self) -> Mapping | None:
         return self.images[-1] if self.images else None
 
+    def load(self) -> Mapping | None:
+        return self.state
+
     def commit(self, expected_commit_revision: int, next_state: Mapping) -> None:
         failing = self.fail_next_commit or (
             self.commit_revision + 1 in self.fail_at_commit_revisions
@@ -124,6 +130,7 @@ class FakeTransport:
         self.calls: list[tuple] = []
         self.fail_next = False
         self.prove_not_sent_on_fail = False
+        self.on_call = None
 
     def call(self, prepared) -> TransportOutcome:
         self.calls.append(
@@ -134,6 +141,8 @@ class FakeTransport:
                 dict(prepared.data),
             )
         )
+        if self.on_call is not None:
+            self.on_call()
         if self.fail_next:
             self.fail_next = False
             return TransportOutcome(
@@ -312,17 +321,32 @@ class Counter:
         return str(self.value)
 
 
+class FaultInjector:
+    """One-shot named failure points of the file store (D-08, D-12)."""
+
+    def __init__(self) -> None:
+        self.faults: dict[str, Exception] = {}
+
+    def __call__(self, point: str) -> None:
+        fault = self.faults.pop(point, None)
+        if fault is not None:
+            raise fault
+
+
 @dataclass
 class Stand:
     """Assembled stand: service plus the doubles tests drive directly."""
 
     service: CoreCommandService
     clock: FakeClock
-    store: MemoryStore
+    store: object
     transport: FakeTransport
     adapter: LightDeviceAdapter
     modules: dict = field(default_factory=dict)
     counter: Counter = field(default_factory=Counter)
+    specs: dict = field(default_factory=dict)
+    bindings: dict = field(default_factory=dict)
+    store_path: object = None
 
     def raw_report(
         self,
@@ -364,6 +388,8 @@ def build_stand(
     module_specs: Mapping[str, str] | None = None,
     episode_map: Mapping[str, str] | None = None,
     extra_specs: Mapping[str, ResourceSpec] | None = None,
+    use_file_store: bool = False,
+    store_path=None,
 ) -> Stand:
     """Assemble the whole stand with production candidate code only.
 
@@ -373,8 +399,6 @@ def build_stand(
     """
 
     clock = FakeClock()
-    store = MemoryStore()
-    transport = FakeTransport()
     counter = Counter()
     specs = {
         MAIN_RESOURCE: main_spec(arbitration_mode),
@@ -382,6 +406,13 @@ def build_stand(
     }
     if extra_specs:
         specs.update(extra_specs)
+    if use_file_store:
+        injector = FaultInjector()
+        store = FileControlStore(Path(store_path), fault_injector=injector)
+        store.injector = injector
+    else:
+        store = MemoryStore()
+    transport = FakeTransport()
     if module_specs is None:
         module_specs = {OWNER_MODULE: MAIN_RESOURCE}
     profiles = {
@@ -467,6 +498,9 @@ def build_stand(
         adapter=adapter,
         modules=script_modules,
         counter=counter,
+        specs=dict(specs),
+        bindings=dict(bindings),
+        store_path=store_path,
     )
     # Initial facts of the passport: main and other OFF from device_report.
     stand.ingest(MAIN_RESOURCE, sequence=1, mono_ms=0, properties={"on": False})
@@ -542,3 +576,130 @@ def arbitration_mode_from_flag(any_on: bool):
     from custom_components.hausman_hub.domain.core.models import ArbitrationMode
 
     return ArbitrationMode.ANY_ON if any_on else ArbitrationMode.RANKED_TARGET
+
+
+def restore_file_stand(
+    stand: Stand,
+    platform_sync: bool = True,
+    episode_map: Mapping[str, str] | None = None,
+) -> Stand:
+    """Build a brand-new service from the durable image of the file store:
+    new clock (mono restarts at zero), new transport, new adapter; nothing
+    is carried over from the old instance in memory."""
+
+    from custom_components.hausman_hub.application.core.command_service import (
+        CoreCommandService as Service,
+    )
+    from custom_components.hausman_hub.domain.core.recovery import (
+        evaluate_clock_trust,
+    )
+
+    clock = FakeClock()
+    clock.utc_ms = stand.clock.utc_ms
+    clock.platform_sync_confirmed = platform_sync
+    counter = Counter()
+    transport = FakeTransport()
+    injector = FaultInjector()
+    store = FileControlStore(stand.store_path, fault_injector=injector)
+    store.injector = injector
+    profiles = {
+        resource_id: light_profile() for resource_id in stand.specs
+    }
+    adapter = LightDeviceAdapter(
+        profiles_by_resource=profiles,
+        binding_revisions={
+            resource_id: BINDING_REVISION_START
+            for resource_id in stand.specs
+        },
+        boot_id="test.boot2",
+        id_factory=counter.next,
+    )
+    entries: dict[str, ModuleEntry] = {}
+    for module_id, module in stand.modules.items():
+        resource_id = module_spec_resource(stand, module_id)
+        entries[module_id] = ModuleEntry(
+            manifest=ModuleManifest(
+                module_id=module_id,
+                api_version=1,
+                config_schema_version=1,
+                resource_roles=("light",),
+                allowed_proposal_kinds=(
+                    ProposalKind.TARGET,
+                    ProposalKind.REQUIRE_ON,
+                ),
+                observation_subscriptions=(resource_id,),
+                policy_priority=50,
+            ),
+            instance=module,
+        )
+    trust = evaluate_clock_trust(
+        platform_sync_confirmed=platform_sync,
+        previous_utc_ms=None,
+        previous_mono_ms=None,
+        current_utc_ms=clock.utc_ms,
+        current_mono_ms=clock.mono_ms,
+    )
+    service = Service.restore(
+        clock=clock,
+        store=store,
+        adapter=adapter,
+        transport=transport,
+        specs=stand.specs,
+        bindings=dict(stand.bindings),
+        modules=entries,
+        stability_profiles={
+            "default": StabilityProfile(
+                profile_id="default",
+                candidate_hold_ms=0,
+                min_on_ms=0,
+                min_off_ms=0,
+                min_mode_change_ms=0,
+            )
+        },
+        config_revisions={
+            resource_id: CONFIG_REVISION_START for resource_id in stand.specs
+        },
+        scope_revisions={
+            MAIN_SCOPE: SCOPE_START_REVISION,
+            OTHER_SCOPE: SCOPE_START_REVISION,
+        },
+        episode_of_proposal=dict(episode_map or {}),
+        id_factory=counter.next,
+        clock_trust=trust,
+    )
+    return Stand(
+        service=service,
+        clock=clock,
+        store=store,
+        transport=transport,
+        adapter=adapter,
+        modules=dict(stand.modules),
+        counter=counter,
+        specs=dict(stand.specs),
+        bindings=dict(stand.bindings),
+        store_path=stand.store_path,
+    )
+
+
+def module_spec_resource(stand: Stand, module_id: str) -> str:
+    """Resource a module subscribed to in the original build."""
+    if module_id == OWNER_MODULE:
+        return MAIN_RESOURCE
+    if module_id in ("test.module_a", "test.module_b"):
+        return MAIN_RESOURCE
+    return OTHER_RESOURCE
+
+
+def build_file_stand(
+    tmp_path,
+    arbitration_mode,
+    module_specs: Mapping[str, str] | None = None,
+    episode_map: Mapping[str, str] | None = None,
+) -> Stand:
+    return build_stand(
+        arbitration_mode,
+        module_specs=module_specs,
+        episode_map=episode_map,
+        use_file_store=True,
+        store_path=Path(tmp_path) / "control_store.json",
+    )
