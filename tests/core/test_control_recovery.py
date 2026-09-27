@@ -14,11 +14,13 @@ import pytest
 from custom_components.hausman_hub.application.core.command_service import (
     CapacityExceeded,
     ManualStatus,
+    Operation,
     StorageUnavailable,
 )
 from custom_components.hausman_hub.domain.core.models import (
     Authority,
     OperationPhase,
+    Origin,
     ProposalKind,
     REASON_CONFIRMATION_TIMEOUT,
 )
@@ -778,3 +780,123 @@ def test_sec_s04_02_exists_error_closes_existing_store(tmp_path, monkeypatch):
     monkeypatch.undo()
     store.load()
     assert store.healthy() is True
+
+
+def test_sec_s04_08_manual_replacement_of_own_pending_at_full_capacity():
+    """At full capacity a manual command replacing the resource's own
+    pending automatic target must be accepted: it frees the slot it
+    occupies (SEC-S04-08 residual, audit scenario)."""
+
+    from custom_components.hausman_hub.domain.core.models import (
+        ArbitrationMode,
+    )
+
+    stand = build_file_stand(
+        tmp_path_fixture(),
+        ArbitrationMode.RANKED_TARGET,
+        episode_map={OWNER_PROPOSAL: OWNER_EPISODE},
+    )
+    # Seed 1023 unresolved outcomes on the other resource.
+    image = stand.service._build_image()
+    for index in range(1023):
+        image["operations"][f"seed-{index}"] = Operation(
+            operation_id=f"seed-{index}",
+            resource_id=OTHER_RESOURCE,
+            decision_id=f"seeddec-{index}",
+            origin=Origin.AUTOMATION,
+            target=BASE_TARGET_ON40,
+            generation=7,
+            control_revision=12,
+            config_revision=2,
+            binding_revision=3,
+            scope_revisions={},
+            created_at_mono_ms=0,
+            phase=OperationPhase.UNKNOWN,
+            reason_code="seed",
+        )
+    stand.store.commit(stand.store.commit_revision, image)
+    restarted = restore_file_stand(stand)
+    # One pending automatic target of main (not dispatched yet).
+    restarted.modules[OWNER_MODULE].queue_proposal(owner_proposal())
+    restarted.service.process_module_event(OWNER_MODULE, "ev-1")
+    unresolved = restarted.service._count_unresolved_operations()
+    assert unresolved == 1024
+    # The manual command replaces that pending target: freed 1, added 1 —
+    # the future composition stays within the limit.
+    receipt = _manual(restarted, "req-replace", expected=12)
+    assert receipt.status is ManualStatus.ACCEPTED
+    assert restarted.service.dispatch_count() == 0
+    auto_operation = [
+        operation
+        for operation in restarted.service.operations(MAIN_RESOURCE)
+        if operation.module_id == OWNER_MODULE
+    ][-1]
+    assert auto_operation.phase is OperationPhase.CANCELLED
+    assert restarted.transport.calls == []
+
+
+def test_sec_s04_08_no_op_manual_at_full_capacity_adds_nothing():
+    from custom_components.hausman_hub.domain.core.models import (
+        ArbitrationMode,
+    )
+
+    stand = build_file_stand(
+        tmp_path_fixture(),
+        ArbitrationMode.RANKED_TARGET,
+        episode_map={OWNER_PROPOSAL: OWNER_EPISODE},
+    )
+    image = stand.service._build_image()
+    for index in range(1024):
+        image["operations"][f"seed-{index}"] = Operation(
+            operation_id=f"seed-{index}",
+            resource_id=OTHER_RESOURCE,
+            decision_id=f"seeddec-{index}",
+            origin=Origin.AUTOMATION,
+            target=TARGET_OFF,
+            generation=7,
+            control_revision=12,
+            config_revision=2,
+            binding_revision=3,
+            scope_revisions={},
+            created_at_mono_ms=0,
+            phase=OperationPhase.NO_OP,
+            reason_code="seed",
+        )
+    stand.store.commit(stand.store.commit_revision, image)
+    restarted = restore_file_stand(stand)
+    # NO_OP manual adds no unresolved operation: accepted even at the
+    # exact limit (seeded NO_OP ops are terminal and do not count).
+    restarted.ingest(
+        MAIN_RESOURCE, sequence=2, mono_ms=5, properties={"on": False}
+    )
+    receipt = _manual(restarted, "req-noop", expected=12)
+    assert receipt.status is ManualStatus.NO_OP
+
+
+def test_sec_s04_11c_provenance_survives_image_recommit():
+    """The per-operation provenance markers persist through restore's own
+    commit and a later reload: a second restart still marks the same
+    operations as restored (SEC-S04-11 residual serialization)."""
+
+    from custom_components.hausman_hub.domain.core.models import (
+        ArbitrationMode,
+    )
+
+    stand = build_file_stand(
+        tmp_path_fixture(),
+        ArbitrationMode.RANKED_TARGET,
+        episode_map={OWNER_PROPOSAL: OWNER_EPISODE},
+    )
+    stand.modules[OWNER_MODULE].queue_proposal(owner_proposal())
+    stand.service.process_module_event(OWNER_MODULE, "ev-1")
+    stand.clock.advance(1)
+    stand.service.drain()
+    first_restarted = restore_file_stand(stand)
+    assert first_restarted.service._restored_operation_ids
+    # The restore commit wrote the markers into the image; a second
+    # restart keeps them.
+    second_restarted = restore_file_stand(first_restarted)
+    assert (
+        second_restarted.service._restored_operation_ids
+        == first_restarted.service._restored_operation_ids
+    )

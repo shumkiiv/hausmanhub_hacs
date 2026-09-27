@@ -224,6 +224,7 @@ class FileControlStore:
             *_REQUIRED_SECTIONS,
             "schema_version",
             _BOOT_ID,
+            "restored_operation_ids",
         }
         if unknown_sections:
             raise StoreImageError(

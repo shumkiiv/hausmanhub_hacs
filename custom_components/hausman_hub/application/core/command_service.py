@@ -522,6 +522,9 @@ class CoreCommandService:
         return {
             "commit_revision": self._store.commit_revision,
             "boot_id": self._clock.boot_id(),
+            "restored_operation_ids": sorted(
+                self._restored_operation_ids
+            ),
             "records": dict(self._records),
             "operations": dict(self._operations),
             "receipts": dict(self._receipts),
@@ -761,7 +764,9 @@ class CoreCommandService:
             # A queued target occupies store capacity until it resolves;
             # superseded pending targets freed their slot above, so the
             # check counts the true occupancy (SEC-S04-08).
-            self._ensure_capacity(self._clock.now_utc_ms())
+            self._ensure_operation_capacity(
+                self._count_unresolved_operations() + 1, resource_id
+            )
         if no_op_decided:
             operation = Operation(
                 operation_id=self._next_id("op"),
@@ -1397,15 +1402,13 @@ class CoreCommandService:
                     idempotent_replay=True,
                 )
             raise IdempotencyConflict(request_id)
-        self._ensure_capacity(self._clock.now_utc_ms())
+        self._ensure_receipt_capacity(self._clock.now_utc_ms())
         record = self.record(resource_id)
         if record.control_revision != expected_control_revision:
             raise RevisionConflict(
                 f"expected {expected_control_revision}, "
                 f"actual {record.control_revision}"
             )
-        # 2. deny-only barrier closes automatic dispatch immediately.
-        self._deny_barrier.add(resource_id)
         # The no_op decision is taken against the world before anything is
         # cancelled: an already-sent operation with an undetermined outcome
         # forbids it (K-08).
@@ -1414,6 +1417,26 @@ class CoreCommandService:
             and self._fact_matches(resource_id, target)
             and self._facts_fresh(resource_id, target, require_all=True)
         )
+        # Capacity is judged by the FUTURE composition (SEC-S04-08
+        # residual): the manual acceptance frees this resource's own
+        # pending and in-flight slots and adds one unresolved operation
+        # only for a dispatched (non-no_op) acceptance.
+        unresolved_total = self._count_unresolved_operations()
+        freed = self._pending_slots_of(
+            resource_id,
+            (
+                OperationPhase.QUEUED,
+                OperationPhase.TAKEN,
+                OperationPhase.DISPATCHING,
+                OperationPhase.OBSERVING,
+            ),
+        )
+        added = 0 if no_op_now else 1
+        self._ensure_operation_capacity(
+            unresolved_total - freed + added, resource_id
+        )
+        # 2. deny-only barrier closes automatic dispatch immediately.
+        self._deny_barrier.add(resource_id)
         # Pending automatic commands of this resource only (K-07).
         for operation_id in list(self._resource_ops[resource_id]):
             operation = self._operations[operation_id]
@@ -1579,7 +1602,7 @@ class CoreCommandService:
     # store capacity (S-05): exhausted capacity refuses new accepted
     # work instead of silently dropping protected records.
 
-    def _ensure_capacity(self, now_utc_ms: int) -> None:
+    def _ensure_receipt_capacity(self, now_utc_ms: int) -> None:
         self._prune_expired_receipts(now_utc_ms)
         active_receipts = sum(
             1
@@ -1588,7 +1611,9 @@ class CoreCommandService:
         )
         if active_receipts >= MAX_RECEIPTS_IN_WINDOW:
             raise CapacityExceeded("receipt_window_full")
-        unresolved = sum(
+
+    def _count_unresolved_operations(self) -> int:
+        return sum(
             1
             for operation in self._operations.values()
             if operation.phase
@@ -1600,8 +1625,21 @@ class CoreCommandService:
                 OperationPhase.UNKNOWN,
             )
         )
-        if unresolved >= MAX_UNRESOLVED_OPERATIONS:
+
+    def _ensure_operation_capacity(
+        self, future_unresolved: int, resource_id: str
+    ) -> None:
+        if future_unresolved > MAX_UNRESOLVED_OPERATIONS:
             raise CapacityExceeded("unresolved_operations_full")
+
+    def _pending_slots_of(
+        self, resource_id: str, phases: tuple[OperationPhase, ...]
+    ) -> int:
+        return sum(
+            1
+            for operation_id in self._resource_ops.get(resource_id, ())
+            if self._operations[operation_id].phase in phases
+        )
 
     def _prune_expired_receipts(self, now_utc_ms: int) -> None:
         if not self._clock.wall_clock_trust().trusted:
