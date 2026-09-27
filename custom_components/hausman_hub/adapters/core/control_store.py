@@ -147,6 +147,11 @@ class FileControlStore:
     def commit_revision(self) -> int:
         return self._commit_revision
 
+    def healthy(self) -> bool:
+        # After an undefined write the store stays closed until an
+        # explicit reload re-syncs it with the durable truth (S-04).
+        return not self._closed
+
     # -- port ------------------------------------------------------------
 
     def load(self) -> dict | None:

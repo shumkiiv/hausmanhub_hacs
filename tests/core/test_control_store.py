@@ -171,9 +171,12 @@ def test_d16_next_image_with_invalid_record_is_rejected_wholesale(tmp_path):
     # programming error: the commit is refused before anything is written
     # and the last good image stays intact (D-16 store half).
     bad_state = make_state(control_revision=11, commit_revision=0)
-    bad_state["records"][MAIN_RESOURCE] = {"generation": True}
+    from conftest import OTHER_RESOURCE
+
+    bad_state["records"][OTHER_RESOURCE] = {"generation": True}
     with pytest.raises(Exception):
         store.commit(store.commit_revision, bad_state)
+    # The last good image, including the untouched other record, stays.
     reloaded = FileControlStore(path).load()
     assert reloaded["records"][MAIN_RESOURCE].control_revision == 10
 

@@ -67,7 +67,6 @@ from ...domain.core.permit import (
 MANUAL_PRIORITY_DEFAULT_MS = 3_600_000
 MANUAL_OFF_EXTRA_MINIMUM_MS = 600_000
 DEFAULT_MANUAL_POLICY_REVISION = 2
-STORE_SCHEMA_VERSION = 1
 FALLBACK_MAX_AGE_MS = 60_000
 FALLBACK_CONFIRMATION_TIMEOUT_MS = 10_000
 
@@ -135,6 +134,8 @@ class ControlStorePort(Protocol):
     ) -> None: ...
 
     def load(self) -> Mapping[str, object] | None: ...
+
+    def healthy(self) -> bool: ...
 
 
 @runtime_checkable
@@ -399,6 +400,9 @@ class CoreCommandService:
     def scope_revision(self, group_id: str) -> int:
         return self._scope_revisions.get(group_id, 0)
 
+    def receipt(self, request_id: str) -> ManualReceipt | None:
+        return self._receipts.get(request_id)
+
     def _next_id(self, prefix: str) -> str:
         # Identifiers never repeat across restarts: restored operations
         # keep their ids, so new ids must stay above the restored maximum
@@ -477,16 +481,15 @@ class CoreCommandService:
 
         for operation_id in self._resource_ops[resource_id]:
             operation = self._operations[operation_id]
-            if operation.dispatch_started_at_mono_ms is None:
-                continue
+            # The phase decides, never the dispatch timestamp: a durable
+            # DISPATCHING record may exist without a recorded timestamp,
+            # and a restored UNKNOWN is unresolved regardless of it
+            # (SEC-S04-06).
             if operation.phase in (
                 OperationPhase.DISPATCHING,
                 OperationPhase.OBSERVING,
+                OperationPhase.UNKNOWN,
             ):
-                return True
-            # A restored unknown outcome is unresolved even when the old
-            # process never recorded its dispatch timestamp (SEC-S04-06).
-            if operation.phase is OperationPhase.UNKNOWN:
                 return True
         return False
 
@@ -995,6 +998,19 @@ class CoreCommandService:
         here, after the durable dispatching record and directly before the
         physical call (S-04; D-15)."""
 
+        if not self._store.healthy():
+            # The store closed after an undefined write: prepared calls
+            # are withdrawn until an explicit reload and verification
+            # (SEC-S04-01); their persisted records stay DISPATCHING and
+            # become unknown on recovery.
+            for resource_id in list(self._dispatching):
+                operation = self._operations[self._dispatching.pop(resource_id)]
+                self._mark_terminal(
+                    operation,
+                    OperationPhase.CANCELLED,
+                    "storage_unavailable",
+                )
+            return
         for resource_id in list(self._dispatching.keys()):
             operation = self._operations[self._dispatching.pop(resource_id)]
             if operation.phase is not OperationPhase.DISPATCHING:
@@ -1604,9 +1620,13 @@ class CoreCommandService:
                 if operation_id is not None
                 else None
             )
-            if operation is not None and not operation.is_terminal():
-                # Active or unknown operations keep their replay keys
-                # (S-05, SEC-S04-09).
+            if operation is not None and (
+                not operation.is_terminal()
+                or operation.phase is OperationPhase.UNKNOWN
+            ):
+                # Active and unknown outcomes keep their replay keys even
+                # after 24 hours; UNKNOWN is terminal in the phase enum
+                # but its outcome is not resolved (S-05, SEC-S04-09).
                 continue
             self._receipts.pop(request_id, None)
             self._receipt_fingerprints.pop(request_id, None)
@@ -1656,8 +1676,10 @@ class CoreCommandService:
             initial_records=dict(loaded.get("records", {})),
         )
         if loaded:
-            service._image_boot_id = loaded.get("boot_id")
+            service._operations = dict(loaded.get("operations", {}))
             service._restored_operation_ids = set(service._operations)
+            # The id floor is computed from the loaded operations, not
+            # from an empty map (SEC-S04-10).
             max_suffix = 0
             for identifier in list(service._operations) + list(
                 loaded.get("receipts", {})
@@ -1666,7 +1688,6 @@ class CoreCommandService:
                     if part.isdigit():
                         max_suffix = max(max_suffix, int(part))
             service._id_floor = max_suffix
-            service._operations = dict(loaded.get("operations", {}))
             for operation_id, operation in service._operations.items():
                 service._resource_ops.setdefault(
                     operation.resource_id, []
@@ -1711,6 +1732,20 @@ class CoreCommandService:
                                 else record.uncertainty_reason
                             ),
                         )
+            for resource_id, record in list(service._records.items()):
+                if (
+                    record.auto_proof is not None
+                    and record.uncertainty_reason is None
+                ):
+                    # Restored ownership cannot prove observation
+                    # continuity across the restart: the proof stays as
+                    # history, but automatic actions stay closed until a
+                    # fresh trusted recalculation re-establishes them
+                    # (SEC-S04-03). Manual commands are not affected.
+                    service._records[resource_id] = replace(
+                        record,
+                        uncertainty_reason="restart_continuity_unproven",
+                    )
         # Persist the recovery outcomes so the visible state matches the
         # durable truth before any new work is accepted.
         service._commit_state()

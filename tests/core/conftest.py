@@ -120,6 +120,9 @@ class MemoryStore:
     def load(self) -> Mapping | None:
         return self.state
 
+    def healthy(self) -> bool:
+        return True
+
     def commit(self, expected_commit_revision: int, next_state: Mapping) -> None:
         failing = self.fail_next_commit or (
             self.commit_revision + 1 in self.fail_at_commit_revisions

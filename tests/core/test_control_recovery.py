@@ -31,6 +31,7 @@ from conftest import (
     BASE_TARGET_ON40,
     MAIN_ENTITY,
     MAIN_RESOURCE,
+    MAIN_SCOPE,
     OTHER_RESOURCE,
     OWNER_EPISODE,
     OWNER_MODULE,
@@ -111,6 +112,9 @@ def test_d02_accepted_manual_survives_restart_with_its_receipt():
     assert record.control_revision == 13
     assert record.generation == 8
     assert record.authority is Authority.MANUAL
+    # The manual scope revision of the room is part of the same
+    # acceptance image (SEC-S04-04).
+    assert restarted.service.scope_revision(MAIN_SCOPE) == 5
     # The same request returns the same durable receipt, not a new
     # acceptance.
     replay = _manual(restarted, "req-d02", expected=13)
@@ -494,3 +498,131 @@ def test_d15_barrier_set_by_failed_manual_blocks_the_old_call():
         OperationPhase.CANCELLED,
         OperationPhase.SUPERSEDED_AFTER_DISPATCH,
     )
+
+
+def test_sec_s04_10_no_id_collision_after_restart():
+    from custom_components.hausman_hub.domain.core.models import (
+        ArbitrationMode,
+    )
+
+    stand = build_file_stand(
+        tmp_path_fixture(),
+        ArbitrationMode.RANKED_TARGET,
+        episode_map={OWNER_PROPOSAL: OWNER_EPISODE},
+    )
+    receipt = _manual(stand, "req-alpha")
+    assert receipt.status is ManualStatus.NO_OP
+    original_operations = [
+        operation.operation_id
+        for operation in stand.service.operations(MAIN_RESOURCE)
+    ]
+    # Two more operations appear after the restart; their ids must not
+    # collide with the restored ones even though the counter restarted.
+    restarted = restore_file_stand(stand)
+    receipt_b = _manual(restarted, "req-beta", expected=13)
+    assert receipt_b.status is ManualStatus.ACCEPTED
+    restarted.ingest(
+        MAIN_RESOURCE,
+        sequence=2,
+        mono_ms=10,
+        properties={"on": True, "brightness_pct": 40},
+    )
+    receipt_c = _manual(restarted, "req-gamma", expected=14)
+    assert receipt_c.status is ManualStatus.ACCEPTED
+    ids = [
+        operation.operation_id
+        for operation in restarted.service.operations(MAIN_RESOURCE)
+    ]
+    assert len(ids) == len(set(ids)), "operation ids collided after restart"
+    for operation_id in original_operations:
+        assert operation_id in ids
+    # The receipt of the restored acceptance still points at its own
+    # operation, not at a silently replaced one.
+    restored_receipt = restarted.service.receipt("req-alpha")
+    assert restored_receipt is not None
+    assert restored_receipt.operation_id in ids
+
+
+def test_sec_s04_11_restored_operation_never_confirms_after_restart():
+    from custom_components.hausman_hub.domain.core.models import (
+        ArbitrationMode,
+    )
+
+    stand = build_file_stand(
+        tmp_path_fixture(),
+        ArbitrationMode.RANKED_TARGET,
+        episode_map={OWNER_PROPOSAL: OWNER_EPISODE},
+    )
+    stand.modules[OWNER_MODULE].queue_proposal(owner_proposal())
+    stand.service.process_module_event(OWNER_MODULE, "ev-1")
+    stand.clock.advance(1)
+    # Durable dispatching without a call, then restart.
+    stand.service.advance_timeouts()
+    stand.service.take_ready()
+    stand.service.run_taken()
+    restarted = restore_file_stand(stand)
+    operation = restarted.service.operations(MAIN_RESOURCE)[-1]
+    assert operation.phase is OperationPhase.UNKNOWN
+    # A fresh, well-typed device report arrives in the new process.
+    result = restarted.ingest(
+        MAIN_RESOURCE,
+        sequence=2,
+        mono_ms=5,
+        properties={"on": True, "brightness_pct": 40},
+    )
+    # A restored operation is never confirmed across the restart
+    # (SEC-S04-11): its boundary data belongs to a dead process.
+    assert result == "recorded"
+    assert operation.phase is OperationPhase.UNKNOWN
+    assert restarted.service.record(MAIN_RESOURCE).auto_proof is None
+
+
+def test_sec_s04_03_restarted_ownership_stays_closed():
+    from custom_components.hausman_hub.domain.core.models import (
+        ArbitrationMode,
+    )
+    from custom_components.hausman_hub.application.core.command_service import (
+        ManualStatus,
+    )
+    from conftest import auto_on40_confirmed_anyon
+
+    stand = build_file_stand(
+        tmp_path_fixture(),
+        ArbitrationMode.ANY_ON,
+        module_specs={
+            OWNER_MODULE: MAIN_RESOURCE,
+            "test.module_a": MAIN_RESOURCE,
+            "test.module_b": MAIN_RESOURCE,
+        },
+        episode_map={OWNER_PROPOSAL: OWNER_EPISODE},
+    )
+    auto_on40_confirmed_anyon(stand)
+    assert stand.service.record(MAIN_RESOURCE).auto_proof is not None
+    # Restart with fully trusted clocks: the recorded proof stays as
+    # history but does not act until continuity is re-established.
+    restarted = restore_file_stand(stand)
+    record = restarted.service.record(MAIN_RESOURCE)
+    assert record.auto_proof is not None
+    assert record.uncertainty_reason == "restart_continuity_unproven"
+    # A fresh auto proposal cannot dispatch on the old proof.
+    restarted.modules["test.module_a"].queue_proposal(
+        owner_proposal(
+            proposal_id="a",
+            module_id="test.module_a",
+            kind=ProposalKind.REQUIRE_ON,
+        )
+    )
+    restarted.service.process_module_event("test.module_a", "ev-a")
+    restarted.clock.advance(1)
+    restarted.service.drain()
+    assert restarted.transport.calls == []
+    # Manual commands are not affected by the continuity closure.
+    manual_receipt = restarted.service.submit_manual(
+        resource_ref=MAIN_RESOURCE,
+        request_id="req-manual-after-restart",
+        action_id="manual.off",
+        target=TARGET_OFF,
+        source="test.ui",
+        expected_control_revision=12,
+    )
+    assert manual_receipt.status is ManualStatus.ACCEPTED
