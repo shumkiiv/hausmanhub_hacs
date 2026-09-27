@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .recovery import REASON_CLOCK_UNCERTAIN
 from .models import (
     REASON_BINDING_CHANGED,
     REASON_CONFIG_CHANGED,
@@ -62,6 +63,7 @@ def issue_dispatch_permit(
     required_facts_fresh: bool,
     episode_locked: bool,
     last_state_change_mono_ms: int | None,
+    clock_trusted: bool,
     permit_id: str,
 ) -> DispatchPermit | PermitDenial:
     """Run every pre-dispatch condition once, in order (K-08)."""
@@ -76,6 +78,8 @@ def issue_dispatch_permit(
 
     if core_mode is not ModuleMode.ACTIVE:
         return denial(REASON_CORE_NOT_ACTIVE)
+    if not clock_trusted:
+        return denial(REASON_CLOCK_UNCERTAIN)
     if operation.is_terminal():
         return denial(REASON_CORE_NOT_ACTIVE, "operation is not dispatchable")
     if operation.generation != record.generation:

@@ -89,6 +89,16 @@ class FakeClock:
     def boot_id(self) -> str:
         return BOOT_ID
 
+    def wall_clock_trust(self):
+        from custom_components.hausman_hub.domain.core.recovery import (
+            ClockTrust,
+        )
+
+        return ClockTrust(
+            trusted=self.platform_sync_confirmed,
+            reason=None if self.platform_sync_confirmed else "test",
+        )
+
     def advance(self, delta_ms: int) -> None:
         self.mono_ms += delta_ms
         self.utc_ms += delta_ms

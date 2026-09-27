@@ -120,6 +120,8 @@ class ClockPort(Protocol):
 
     def boot_id(self) -> str: ...
 
+    def wall_clock_trust(self) -> ClockTrust: ...
+
 
 @runtime_checkable
 class ControlStorePort(Protocol):
@@ -332,6 +334,9 @@ class CoreCommandService:
         self._confirm_keys: dict[str, tuple] = {}
         self._dispatching: dict[str, str] = {}
         self._receipt_times: dict[str, int] = {}
+        self._image_boot_id: str | None = None
+        self._id_floor = 0
+        self._restored_operation_ids: set[str] = set()
         self._episode_locks: dict[tuple[str, str], str] = {}
         self._receipts: dict[str, ManualReceipt] = {}
         self._receipt_fingerprints: dict[str, tuple] = {}
@@ -395,7 +400,18 @@ class CoreCommandService:
         return self._scope_revisions.get(group_id, 0)
 
     def _next_id(self, prefix: str) -> str:
-        return f"{prefix}-{self._id_factory()}"
+        # Identifiers never repeat across restarts: restored operations
+        # keep their ids, so new ids must stay above the restored maximum
+        # (SEC-S04-M1).
+        while True:
+            candidate = f"{prefix}-{self._id_factory()}"
+            suffix = candidate.rsplit("-", 1)[-1]
+            if suffix.isdigit() and int(suffix) <= self._id_floor:
+                self._id_floor = max(self._id_floor, int(suffix))
+                continue
+            if suffix.isdigit():
+                self._id_floor = int(suffix)
+            return candidate
 
     def _stability_for(self, resource_id: str) -> StabilityProfile:
         spec = self.spec(resource_id)
@@ -466,8 +482,11 @@ class CoreCommandService:
             if operation.phase in (
                 OperationPhase.DISPATCHING,
                 OperationPhase.OBSERVING,
-                OperationPhase.UNKNOWN,
             ):
+                return True
+            # A restored unknown outcome is unresolved even when the old
+            # process never recorded its dispatch timestamp (SEC-S04-06).
+            if operation.phase is OperationPhase.UNKNOWN:
                 return True
         return False
 
@@ -719,6 +738,7 @@ class CoreCommandService:
             "request_id": request_id,
             "module_id": chosen.module_id if chosen else None,
         }
+        self._ensure_capacity(self._clock.now_utc_ms())
         if origin is Origin.AUTOMATION:
             # A newer decision replaces still-unsent targets of this
             # resource, including when the new decision is a no_op (K-08).
@@ -771,8 +791,21 @@ class CoreCommandService:
         self._resource_ops[resource_id].append(operation.operation_id)
         # A pending operation is part of the durable image the moment it
         # is accepted (S-04): after a restart it must be visible to be
-        # cancelled honestly instead of being silently replayed.
-        self._commit_state()
+        # cancelled honestly instead of being silently replayed. When the
+        # store refuses the image, the in-memory registration is rolled
+        # back so memory never keeps an acceptance the store declined.
+        try:
+            self._commit_state()
+        except Exception:
+            self._operations.pop(operation.operation_id, None)
+            if operation.operation_id in self._resource_ops.get(
+                resource_id, []
+            ):
+                self._resource_ops[resource_id].remove(
+                    operation.operation_id
+                )
+            self._taken.pop(resource_id, None)
+            raise
 
     def _mark_terminal(
         self,
@@ -881,6 +914,7 @@ class CoreCommandService:
             last_state_change_mono_ms=self._last_state_change.get(
                 operation.resource_id
             ),
+            clock_trusted=self._clock.wall_clock_trust().trusted,
             permit_id=self._next_id("pm"),
         )
         if isinstance(permit, PermitDenial):
@@ -942,7 +976,7 @@ class CoreCommandService:
         # the non-send is provable (SEC-FIRST-IDEM-01).
         try:
             self._commit_state()
-        except StorageUnavailable:
+        except (StorageUnavailable, OSError) as exc:
             self._taken.pop(resource_id, None)
             self._dispatching.pop(resource_id, None)
             self._mark_terminal(
@@ -950,7 +984,9 @@ class CoreCommandService:
                 OperationPhase.FAILED,
                 REASON_STORAGE_BEFORE_SEND,
             )
-            raise
+            if isinstance(exc, StorageUnavailable):
+                raise
+            raise StorageUnavailable(str(exc)) from exc
         self._taken.pop(resource_id, None)
         self._dispatching[resource_id] = operation.operation_id
 
@@ -973,6 +1009,13 @@ class CoreCommandService:
                     "deny_barrier_active",
                 )
                 continue
+            # The full permission is re-issued directly at the transport
+            # boundary: TTL, facts, revisions and ownership may have
+            # changed since the durable record (SEC-S04-05).
+            decision = self._final_permit(operation)
+            if isinstance(decision, PermitDenial):
+                self._apply_permit_denial(operation, decision)
+                continue
             profile = self._adapter.capabilities(resource_id)
             rule = profile.properties.get("on")
             timeout = (
@@ -989,7 +1032,7 @@ class CoreCommandService:
                 self._bindings[resource_id],
                 profile,
                 operation.operation_id,
-                operation.evidence_refs[-1],
+                decision.permit_id,
             )
             if isinstance(prepared, ValidationIssue):
                 self._mark_terminal(
@@ -1207,8 +1250,15 @@ class CoreCommandService:
         a single invalid member makes the whole group unusable. A manually
         attributed member never contributes to confirming an *automatic*
         operation — in any phase, even combined with later non-manual
-        members of the same group (SEC-FIRST-OWN-02-R2)."""
+        members of the same group (SEC-FIRST-OWN-02-R2). Confirmations of
+        operations restored from another boot are not attempted: their
+        monotonic boundary data belongs to a dead process (K-10)."""
 
+        if operation.operation_id in self._restored_operation_ids:
+            # K-10: the monotonic boundary data of a dead process is not
+            # comparable with new observations; a restored operation is
+            # never confirmed across a restart.
+            return False
         if operation.origin_automation:
             for observation in group:
                 if (
@@ -1444,6 +1494,7 @@ class CoreCommandService:
             **image["receipt_times"],
             request_id: now_utc,
         }
+        image["scope_revisions"] = next_scope
         try:
             self._store.commit(self._store.commit_revision, image)
         except StorageUnavailable:
@@ -1521,18 +1572,42 @@ class CoreCommandService:
         unresolved = sum(
             1
             for operation in self._operations.values()
-            if operation.phase is OperationPhase.UNKNOWN
+            if operation.phase
+            in (
+                OperationPhase.TAKEN,
+                OperationPhase.DISPATCHING,
+                OperationPhase.OBSERVING,
+                OperationPhase.UNKNOWN,
+            )
         )
         if unresolved >= MAX_UNRESOLVED_OPERATIONS:
             raise CapacityExceeded("unresolved_operations_full")
 
     def _prune_expired_receipts(self, now_utc_ms: int) -> None:
+        if not self._clock.wall_clock_trust().trusted:
+            # Untrusted time never deletes protection history (S-05,
+            # SEC-S04-07).
+            return
         expired = [
             request_id
             for request_id, accepted_at in self._receipt_times.items()
             if now_utc_ms - accepted_at >= RECEIPT_WINDOW_MS
         ]
         for request_id in expired:
+            operation_id = (
+                self._receipts[request_id].operation_id
+                if request_id in self._receipts
+                else None
+            )
+            operation = (
+                self._operations.get(operation_id)
+                if operation_id is not None
+                else None
+            )
+            if operation is not None and not operation.is_terminal():
+                # Active or unknown operations keep their replay keys
+                # (S-05, SEC-S04-09).
+                continue
             self._receipts.pop(request_id, None)
             self._receipt_fingerprints.pop(request_id, None)
             self._receipt_times.pop(request_id, None)
@@ -1562,7 +1637,7 @@ class CoreCommandService:
         work without a durable outcome becomes unknown. An untrusted
         clock never extends rights (S-05)."""
 
-        loaded = store.load()
+        loaded = store.load() or {}
         service = cls(
             clock=clock,
             store=store,
@@ -1581,6 +1656,16 @@ class CoreCommandService:
             initial_records=dict(loaded.get("records", {})),
         )
         if loaded:
+            service._image_boot_id = loaded.get("boot_id")
+            service._restored_operation_ids = set(service._operations)
+            max_suffix = 0
+            for identifier in list(service._operations) + list(
+                loaded.get("receipts", {})
+            ):
+                for part in str(identifier).split("-"):
+                    if part.isdigit():
+                        max_suffix = max(max_suffix, int(part))
+            service._id_floor = max_suffix
             service._operations = dict(loaded.get("operations", {}))
             for operation_id, operation in service._operations.items():
                 service._resource_ops.setdefault(

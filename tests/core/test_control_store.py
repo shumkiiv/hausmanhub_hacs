@@ -127,6 +127,10 @@ def test_d08_atomic_write_survives_injected_faults(tmp_path):
     injector = FaultInjector()
     store = FileControlStore(path, fault_injector=injector)
     store.commit(0, make_state(control_revision=10, commit_revision=0))
+    from custom_components.hausman_hub.application.core.command_service import (
+        StorageUnavailable,
+    )
+
     for point in (
         "tmp_open",
         "tmp_write",
@@ -136,15 +140,21 @@ def test_d08_atomic_write_survives_injected_faults(tmp_path):
         "reread",
     ):
         injector.faults[point] = OSError(point, "injected")
-        with pytest.raises(OSError):
+        with pytest.raises(StorageUnavailable):
+            store.commit(store.commit_revision, make_state(control_revision=11, commit_revision=0))
+        # The failed store stays closed until an explicit reload: the
+        # write outcome was undefined (SEC-S04-01).
+        with pytest.raises(StorageUnavailable):
             store.commit(store.commit_revision, make_state(control_revision=11, commit_revision=0))
         # No half-written temporary file is left behind.
         leftovers = [
             p.name for p in path.parent.iterdir() if p.name.endswith(".tmp")
         ]
         assert leftovers == []
-        # Whatever is on disk is a whole image, never a mix.
-        reloaded = FileControlStore(path).load()
+        # An explicit reload re-syncs with whatever whole image is on
+        # disk; it is never a mix.
+        store = FileControlStore(path, fault_injector=injector)
+        reloaded = store.load()
         assert reloaded["records"][MAIN_RESOURCE].control_revision in (10, 11)
     # A clean commit works afterwards and lands completely.
     store.commit(store.commit_revision, make_state(control_revision=11, commit_revision=0))

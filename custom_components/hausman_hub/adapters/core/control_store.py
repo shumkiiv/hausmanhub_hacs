@@ -50,6 +50,7 @@ _CONFIRM_KEYS = "confirm_keys"
 _EPISODE_LOCKS = "episode_locks"
 _SCOPE_REVISIONS = "scope_revisions"
 _CONFIG_REVISIONS = "config_revisions"
+_BOOT_ID = "boot_id"
 
 # Checkpoints where a test may inject an OSError/TimeoutError to emulate
 # a failing or interrupted file operation (S-T04, D-08, D-12).
@@ -68,6 +69,61 @@ class StoreImageError(Exception):
     the touched store is closed for changes until a human decides."""
 
 
+_REQUIRED_SECTIONS = (
+    _COMMIT,
+    _RECORDS,
+    _OPERATIONS,
+    _RECEIPTS,
+    _RECEIPT_TIMES,
+    _RECEIPT_FINGERPRINTS,
+    _CONFIRM_KEYS,
+    _EPISODE_LOCKS,
+    _SCOPE_REVISIONS,
+    _CONFIG_REVISIONS,
+)
+
+
+def _strict_int(value: object, name: str) -> int:
+    if type(value) is not int:
+        raise StoreImageError(f"{name} must be an exact int: {value!r}")
+    return value
+
+
+def validate_image_shape(raw: Mapping) -> None:
+    """Strict whole-image validation before writing and after reading
+    (SEC-S04-02): exact types, mandatory sections, no unknown sections."""
+
+    if not isinstance(raw, Mapping):
+        raise StoreImageError("stored image is not an object")
+    unknown = set(raw) - {
+        "schema_version",
+        *_REQUIRED_SECTIONS,
+        _BOOT_ID,
+    }
+    if unknown:
+        raise StoreImageError(f"unknown image sections: {sorted(unknown)}")
+    if raw.get("schema_version") != IMAGE_SCHEMA_VERSION or type(
+        raw.get("schema_version")
+    ) is not int:
+        raise StoreImageError(
+            f"unsupported schema_version: {raw.get('schema_version')!r}"
+        )
+    _strict_int(raw.get(_COMMIT), _COMMIT)
+    for section in (
+        _RECORDS,
+        _OPERATIONS,
+        _RECEIPTS,
+        _RECEIPT_TIMES,
+        _RECEIPT_FINGERPRINTS,
+        _CONFIRM_KEYS,
+        _EPISODE_LOCKS,
+        _SCOPE_REVISIONS,
+        _CONFIG_REVISIONS,
+    ):
+        if not isinstance(raw.get(section), Mapping):
+            raise StoreImageError(f"section {section} must be an object")
+
+
 class FileControlStore:
     """File implementation of the ControlStore port."""
 
@@ -81,6 +137,7 @@ class FileControlStore:
         self.fail_next_commit = False
         self.fail_forever = False
         self.fail_at_commit_revisions: set[int] = set()
+        self._closed = False
         self._commit_revision = 0
         loaded = self.load()
         if loaded is not None:
@@ -98,18 +155,19 @@ class FileControlStore:
 
         if not self._path.exists():
             return None
-        raw = json.loads(self._path.read_text(encoding="utf-8"))
-        if not isinstance(raw, Mapping):
-            raise StoreImageError("stored image is not an object")
-        if raw.get("schema_version") != IMAGE_SCHEMA_VERSION:
-            raise StoreImageError(
-                f"unsupported schema_version: {raw.get('schema_version')!r}"
-            )
+        try:
+            raw = json.loads(self._path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise StoreImageError(f"stored image is unreadable: {exc}") from exc
+        validate_image_shape(raw)
         state = decode_state(raw)
-        self._commit_revision = int(state[_COMMIT])
+        self._commit_revision = _strict_int(state[_COMMIT], _COMMIT)
+        self._closed = False
         return state
 
     def commit(self, expected_commit_revision: int, next_state: Mapping) -> None:
+        if self._closed:
+            raise StorageUnavailable("store closed after an earlier failure")
         if self.fail_forever:
             raise StorageUnavailable("file store outage")
         if self.fail_next_commit:
@@ -122,12 +180,30 @@ class FileControlStore:
                 f"expected {expected_commit_revision}, "
                 f"actual {self._commit_revision}"
             )
-        encoded = encode_state(next_state)
-        if not isinstance(encoded, dict):
-            raise StorageUnavailable("image encoding produced a non-object")
-        encoded[_COMMIT] = expected_commit_revision + 1
-        encoded["schema_version"] = IMAGE_SCHEMA_VERSION
-        self._write_atomic(encoded)
+        try:
+            encoded = encode_state(next_state)
+            if not isinstance(encoded, dict):
+                raise StorageUnavailable(
+                    "image encoding produced a non-object"
+                )
+            encoded[_COMMIT] = expected_commit_revision + 1
+            encoded["schema_version"] = IMAGE_SCHEMA_VERSION
+            validate_image_shape(encoded)
+        except StorageUnavailable:
+            raise
+        except Exception as exc:
+            # A refused next image changes nothing on disk (D-16).
+            raise StoreImageError(f"next image is invalid: {exc}") from exc
+        try:
+            self._write_atomic(encoded)
+        except StorageUnavailable:
+            raise
+        except (OSError, ValueError) as exc:
+            # The write may or may not have completed: the outcome is
+            # undefined, so the store is closed until an explicit reload
+            # (SEC-S04-01).
+            self._closed = True
+            raise StorageUnavailable(f"file store write failed: {exc}") from exc
         # durable only after verified re-read of the whole image
         self._commit_revision = expected_commit_revision + 1
 
@@ -196,17 +272,24 @@ def _encode_target(target: Target) -> dict:
 
 
 def _decode_target(raw: Mapping) -> Target:
-    if raw["kind"] == "switch_state":
-        return SwitchStateTarget(on=bool(raw["on"]))
-    return LightStateTarget(
-        on=bool(raw["on"]),
-        brightness_pct=(
-            None
-            if raw.get("brightness_pct") is None
-            else Decimal(str(raw["brightness_pct"]))
-        ),
-        color_temperature_k=raw.get("color_temperature_k"),
-    )
+    kind = raw.get("kind")
+    on = raw.get("on")
+    if type(on) is not bool:
+        raise StoreImageError(f"target 'on' must be a bool: {on!r}")
+    if kind == "switch_state":
+        return SwitchStateTarget(on=on)
+    if kind == "light_state":
+        brightness = raw.get("brightness_pct")
+        if brightness is not None:
+            brightness = Decimal(str(brightness))
+            if not brightness.is_finite():
+                raise StoreImageError("brightness must be finite")
+        return LightStateTarget(
+            on=on,
+            brightness_pct=brightness,
+            color_temperature_k=raw.get("color_temperature_k"),
+        )
+    raise StoreImageError(f"unknown target kind: {kind!r}")
 
 
 def _encode_fingerprint_part(part: object) -> object:
@@ -266,6 +349,7 @@ def encode_state(state: Mapping) -> dict:
         }
     image = {
         _COMMIT: state[_COMMIT],
+        _BOOT_ID: state.get(_BOOT_ID),
         _RECORDS: {
             resource_id: {
                 "resource_id": record.resource_id,
@@ -449,6 +533,7 @@ def decode_state(raw: Mapping) -> dict:
             episode_locks[(resource_id, episode_id)] = reason
         return {
             _COMMIT: raw[_COMMIT],
+            _BOOT_ID: raw.get(_BOOT_ID),
             _RECORDS: records,
             _OPERATIONS: operations,
             _RECEIPTS: receipts,

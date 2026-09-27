@@ -375,7 +375,11 @@ def test_d12_storage_outage_closes_dependent_records():
     stand.store.injector.faults["tmp_write"] = OSError(
         28, "No space left on device"
     )
-    with pytest.raises(OSError):
+    from custom_components.hausman_hub.application.core.command_service import (
+        StorageUnavailable as SU,
+    )
+
+    with pytest.raises(SU):
         _manual(stand, "req-d12")
     assert stand.transport.calls == []
     # While the outage lasts, dependent writes of the other resource are
@@ -388,15 +392,18 @@ def test_d12_storage_outage_closes_dependent_records():
             mono_ms=10,
             properties={"on": True},
         )
-    # After recovery the store works again.
-    stand.store.fail_forever = False
-    stand.ingest(
+    # Recovery goes through an explicit reload of the whole image: a new
+    # store instance re-syncs with the durable truth.
+    restarted = restore_file_stand(stand)
+    restarted.ingest(
         OTHER_RESOURCE,
         sequence=2,
         mono_ms=10,
         properties={"on": True},
     )
-    assert stand.service.record(OTHER_RESOURCE).control_revision == 12
+    record = restarted.service.record(OTHER_RESOURCE)
+    assert record.control_revision == 12
+    assert record.generation == 7
 
 
 def test_d13_capacity_refuses_before_acceptance():
