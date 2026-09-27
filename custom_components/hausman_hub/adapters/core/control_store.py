@@ -161,9 +161,23 @@ class FileControlStore:
         if not self._path.exists():
             return None
         try:
-            raw = json.loads(self._path.read_text(encoding="utf-8"))
+            raw = json.loads(
+                self._path.read_text(encoding="utf-8"),
+                parse_constant=lambda name: (_ for _ in ()).throw(
+                    StoreImageError(f"non-finite number: {name}")
+                ),
+            )
+        except StoreImageError:
+            self._closed = True
+            raise
         except Exception as exc:
+            # A failing load closes the existing instance too: it must
+            # never overwrite a file it could not verify (SEC-S04-02).
+            self._closed = True
             raise StoreImageError(f"stored image is unreadable: {exc}") from exc
+        if not isinstance(raw, Mapping):
+            self._closed = True
+            raise StoreImageError("stored image is not an object")
         validate_image_shape(raw)
         state = decode_state(raw)
         self._commit_revision = _strict_int(state[_COMMIT], _COMMIT)
@@ -185,6 +199,29 @@ class FileControlStore:
                 f"expected {expected_commit_revision}, "
                 f"actual {self._commit_revision}"
             )
+        # The ORIGINAL next state is checked before encoding: a missing or
+        # unknown section, or a wrong revision type, is refused without
+        # any silent normalization (SEC-S04-02).
+        if not isinstance(next_state, Mapping):
+            raise StoreImageError("next state must be an object")
+        missing = [
+            section
+            for section in _REQUIRED_SECTIONS
+            if section not in next_state
+        ]
+        if missing:
+            raise StoreImageError(f"missing sections: {missing}")
+        unknown_sections = set(next_state) - {
+            *_REQUIRED_SECTIONS,
+            "schema_version",
+            _BOOT_ID,
+        }
+        if unknown_sections:
+            raise StoreImageError(
+                f"unknown next-state sections: {sorted(unknown_sections)}"
+            )
+        if "commit_revision" in next_state:
+            _strict_int(next_state["commit_revision"], _COMMIT)
         try:
             encoded = encode_state(next_state)
             if not isinstance(encoded, dict):
@@ -201,13 +238,13 @@ class FileControlStore:
             raise StoreImageError(f"next image is invalid: {exc}") from exc
         try:
             self._write_atomic(encoded)
-        except StorageUnavailable:
-            raise
-        except (OSError, ValueError) as exc:
-            # The write may or may not have completed: the outcome is
-            # undefined, so the store is closed until an explicit reload
-            # (SEC-S04-01).
+        except Exception as exc:
+            # Any failure of the file stage — including a verification
+            # re-read mismatch — leaves the outcome undefined, so the
+            # store closes until an explicit reload (SEC-S04-01).
             self._closed = True
+            if isinstance(exc, StorageUnavailable):
+                raise
             raise StorageUnavailable(f"file store write failed: {exc}") from exc
         # durable only after verified re-read of the whole image
         self._commit_revision = expected_commit_revision + 1
@@ -233,6 +270,7 @@ class FileControlStore:
                     destination,
                     ensure_ascii=False,
                     separators=(",", ":"),
+                    allow_nan=False,
                 )
                 destination.flush()
                 self._inject("file_fsync")
@@ -424,8 +462,18 @@ def encode_state(state: Mapping) -> dict:
             for operation_id, key in state.get(_CONFIRM_KEYS, {}).items()
         },
         _EPISODE_LOCKS: dict(state.get(_EPISODE_LOCKS, {})),
-        _SCOPE_REVISIONS: dict(state.get(_SCOPE_REVISIONS, {})),
-        _CONFIG_REVISIONS: dict(state.get(_CONFIG_REVISIONS, {})),
+        _SCOPE_REVISIONS: {
+            key: _strict_int(value, f"scope_revisions[{key}]")
+            for key, value in state.get(_SCOPE_REVISIONS, {}).items()
+        },
+        _CONFIG_REVISIONS: {
+            key: _strict_int(value, f"config_revisions[{key}]")
+            for key, value in state.get(_CONFIG_REVISIONS, {}).items()
+        },
+        _RECEIPT_TIMES: {
+            key: _strict_int(value, f"receipt_times[{key}]")
+            for key, value in state.get(_RECEIPT_TIMES, {}).items()
+        },
     }
     return image
 

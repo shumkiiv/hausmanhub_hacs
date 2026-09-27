@@ -17,10 +17,8 @@ from typing import Callable, Mapping, Protocol, runtime_checkable
 from ...domain.core.arbitration import ArbitrationOutcome, CandidateHold, arbitrate
 from ...domain.core.recovery import (
     ClockTrust,
-    REASON_RESTART_PENDING_CANCELLED,
     REASON_RESTART_UNCERTAIN,
     classify_restored_operation,
-    evaluate_clock_trust,
 )
 from ...domain.core.models import (
     REASON_CONFIRMATION_TIMEOUT,
@@ -741,7 +739,6 @@ class CoreCommandService:
             "request_id": request_id,
             "module_id": chosen.module_id if chosen else None,
         }
-        self._ensure_capacity(self._clock.now_utc_ms())
         if origin is Origin.AUTOMATION:
             # A newer decision replaces still-unsent targets of this
             # resource, including when the new decision is a no_op (K-08).
@@ -754,12 +751,16 @@ class CoreCommandService:
                     self._mark_terminal(
                         pending, OperationPhase.SUPERSEDED, REASON_SUPERSEDED
                     )
-        if no_op_decided is None:
-            no_op_decided = (
-                not self._unresolved_sent_exists(resource_id)
-                and self._fact_matches(resource_id, target)
-                and self._facts_fresh(resource_id, target, require_all=True)
-            )
+        no_op_decided = (
+            not self._unresolved_sent_exists(resource_id)
+            and self._fact_matches(resource_id, target)
+            and self._facts_fresh(resource_id, target, require_all=True)
+        ) if no_op_decided is None else no_op_decided
+        if not no_op_decided:
+            # A queued target occupies store capacity until it resolves;
+            # superseded pending targets freed their slot above, so the
+            # check counts the true occupancy (SEC-S04-08).
+            self._ensure_capacity(self._clock.now_utc_ms())
         if no_op_decided:
             operation = Operation(
                 operation_id=self._next_id("op"),
@@ -1270,7 +1271,12 @@ class CoreCommandService:
         operations restored from another boot are not attempted: their
         monotonic boundary data belongs to a dead process (K-10)."""
 
-        if operation.operation_id in self._restored_operation_ids:
+        restored = operation.operation_id in self._restored_operation_ids
+        cross_boot = (
+            self._image_boot_id is not None
+            and self._image_boot_id != self._clock.boot_id()
+        )
+        if restored and cross_boot:
             # K-10: the monotonic boundary data of a dead process is not
             # comparable with new observations; a restored operation is
             # never confirmed across a restart.

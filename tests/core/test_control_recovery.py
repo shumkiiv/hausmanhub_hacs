@@ -21,7 +21,6 @@ from custom_components.hausman_hub.domain.core.models import (
     OperationPhase,
     ProposalKind,
     REASON_CONFIRMATION_TIMEOUT,
-    REASON_OWNERSHIP_UNPROVEN,
 )
 from custom_components.hausman_hub.domain.core.recovery import (
     evaluate_clock_trust,
