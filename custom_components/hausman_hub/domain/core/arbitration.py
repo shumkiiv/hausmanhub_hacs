@@ -58,6 +58,7 @@ class ArbitrationOutcome:
     target: Target | None = None
     result_reason: str | None = None
     hold_wait: HoldWait | None = None
+    chosen: Proposal | None = None
     evidence_refs: tuple[str, ...] = field(default=())
 
 
@@ -165,11 +166,11 @@ def arbitrate(
                 )
             )
 
-    def outcome(**kwargs: object) -> ArbitrationOutcome:
+    def outcome(accepted: tuple[Proposal, ...], **kwargs: object) -> ArbitrationOutcome:
         return ArbitrationOutcome(
             resource_id=spec.resource_id,
             mode=spec.arbitration.value,
-            accepted=tuple(accepted),
+            accepted=accepted,
             rejected=tuple(rejected),
             **kwargs,  # type: ignore[arg-type]
         )
@@ -183,7 +184,7 @@ def arbitrate(
 
     if spec.arbitration is ArbitrationMode.ANY_ON:
         # any_on is driven by require_on needs only (K-05); whole-target
-        # proposals are not an any_on demand.
+        # proposals are not an any_on demand and must not stay in accepted.
         for item in target_demands:
             rejected.append(
                 RejectedNeed(
@@ -192,25 +193,53 @@ def arbitrate(
                     reason_code="kind_not_acceptable",
                 )
             )
+        accepted = on_demands
         if on_demands:
             return _decide(
-                outcome, on_demands, previous_selected, candidate, stability, now_mono_ms
+                outcome,
+                accepted,
+                on_demands,
+                previous_selected,
+                candidate,
+                stability,
+                now_mono_ms,
             )
         return _resolve_idle(
-            outcome, spec, record, auto_proof_exists, candidate, stability, now_mono_ms
+            outcome,
+            accepted,
+            spec,
+            record,
+            auto_proof_exists,
+            candidate,
+            stability,
+            now_mono_ms,
         )
 
     if target_demands:
         return _decide(
-            outcome, target_demands, previous_selected, candidate, stability, now_mono_ms
+            outcome,
+            tuple(accepted),
+            target_demands,
+            previous_selected,
+            candidate,
+            stability,
+            now_mono_ms,
         )
     return _resolve_idle(
-        outcome, spec, record, auto_proof_exists, candidate, stability, now_mono_ms
+        outcome,
+        tuple(accepted),
+        spec,
+        record,
+        auto_proof_exists,
+        candidate,
+        stability,
+        now_mono_ms,
     )
 
 
 def _decide(
     outcome_factory,
+    accepted: tuple[Proposal, ...],
     pool: tuple[Proposal, ...],
     previous_selected: Target | None,
     candidate: CandidateHold,
@@ -221,15 +250,23 @@ def _decide(
     hold = _settle_hold(chosen.target, candidate, stability, now_mono_ms)
     if hold is not None:
         return outcome_factory(
+            accepted,
             target=None,
             result_reason=REASON_STABILITY_HOLD,
             hold_wait=hold,
+            chosen=chosen,
         )
-    return outcome_factory(target=chosen.target, result_reason="demand")
+    return outcome_factory(
+        accepted,
+        target=chosen.target,
+        result_reason="demand",
+        chosen=chosen,
+    )
 
 
 def _resolve_idle(
     outcome_factory,
+    accepted: tuple[Proposal, ...],
     spec: ResourceSpec,
     record: ControlRecord,
     auto_proof_exists: bool,
@@ -242,14 +279,19 @@ def _resolve_idle(
     OFF (K-05)."""
 
     if spec.idle_target is None:
-        return outcome_factory(target=None, result_reason=REASON_NO_DEMAND)
+        return outcome_factory(accepted, target=None, result_reason=REASON_NO_DEMAND)
     if not auto_proof_exists or record.auto_proof is None:
         return outcome_factory(
-            target=None, result_reason=REASON_OWNERSHIP_UNPROVEN
+            accepted, target=None, result_reason=REASON_OWNERSHIP_UNPROVEN
         )
     hold = _settle_hold(spec.idle_target, candidate, stability, now_mono_ms)
     if hold is not None:
         return outcome_factory(
-            target=None, result_reason=REASON_STABILITY_HOLD, hold_wait=hold
+            accepted,
+            target=None,
+            result_reason=REASON_STABILITY_HOLD,
+            hold_wait=hold,
         )
-    return outcome_factory(target=spec.idle_target, result_reason="idle_target")
+    return outcome_factory(
+        accepted, target=spec.idle_target, result_reason="idle_target"
+    )

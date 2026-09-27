@@ -66,10 +66,12 @@ def _module_name(file: Path) -> str:
     return ".".join(parts)
 
 
-def _resolve_relative(node: ast.ImportFrom, module: str) -> str | None:
+def _resolve_relative(
+    node: ast.ImportFrom, module: str, is_package: bool
+) -> str | None:
     if node.level == 0:
         return node.module
-    package_parts = module.split(".")[:-1]
+    package_parts = module.split(".") if is_package else module.split(".")[:-1]
     steps_up = node.level - 1
     if steps_up > len(package_parts):
         raise ValueError(f"unresolvable relative import in {module}")
@@ -84,13 +86,14 @@ def _resolve_relative(node: ast.ImportFrom, module: str) -> str | None:
 def _imports_of(file: Path) -> set[str]:
     tree = ast.parse(file.read_text(encoding="utf-8"))
     module = _module_name(file)
+    is_package = file.name == "__init__.py"
     found: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 found.add(alias.name)
         elif isinstance(node, ast.ImportFrom):
-            resolved = _resolve_relative(node, module)
+            resolved = _resolve_relative(node, module, is_package)
             if resolved:
                 found.add(resolved)
     return found

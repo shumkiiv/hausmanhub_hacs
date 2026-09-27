@@ -42,21 +42,11 @@ ANY_ON = "any_on"
 def _auto_on40_confirmed(stand):
     """Run the F-11 setup: an any_on REQUIRE_ON demand of the owner module
     turns the lamp on and is confirmed; the owner then withdraws its
-    one-shot demand (an Evaluation replaces the whole previous set)."""
+    one-shot demand. See conftest.auto_on40_confirmed_anyon."""
 
-    stand.modules[OWNER_MODULE].queue_proposal(
-        owner_proposal(kind=ProposalKind.REQUIRE_ON)
-    )
-    stand.service.process_module_event(OWNER_MODULE, "ev-start")
-    stand.clock.advance(1)
-    stand.service.drain()
-    stand.ingest(
-        MAIN_RESOURCE,
-        sequence=2,
-        mono_ms=100,
-        properties={"on": True, "brightness_pct": 40},
-    )
-    stand.service.process_module_event(OWNER_MODULE, "ev-start-gone")
+    from conftest import auto_on40_confirmed_anyon
+
+    auto_on40_confirmed_anyon(stand)
 
 
 def test_f01_confirmed_on40(ranked_stand):
@@ -355,6 +345,42 @@ def test_f13_ranked_tie_break_without_previous(order):
     assert stand.service.dispatch_count() == 1
     # Equal priority: the smallest (module_id, proposal_id) wins.
     assert stand.transport.calls[-1][3] == {"brightness_pct": 40}
+
+
+def test_episode01_metadata_follows_the_chosen_proposal(ranked_stand):
+    stand = ranked_stand
+    module = stand.modules[OWNER_MODULE]
+    proposal_a = owner_proposal(proposal_id="a", target=BASE_TARGET_ON40)
+    proposal_b = owner_proposal(proposal_id="b", target=_on60())
+    # Order [b, a]: the tie-break selects "a"; the operation must carry
+    # the episode of "a", not of the first array element (SEC-FIRST-EPISODE-01).
+    module.queue_proposal(proposal_b)
+    module.queue_proposal(proposal_a)
+    stand.service.process_module_event(OWNER_MODULE, "ev-1")
+    stand.clock.advance(1)
+    stand.service.drain()
+    first = stand.service.operations(MAIN_RESOURCE)[-1]
+    assert first.episode_id == "a"
+    assert first.target == BASE_TARGET_ON40
+    assert stand.service.dispatch_count() == 1
+    stand.clock.advance(10000)
+    stand.service.advance_timeouts()
+    assert (
+        stand.service.episode_lock_reason(MAIN_RESOURCE, "a")
+        == REASON_CONFIRMATION_TIMEOUT
+    )
+    # Reordering the same demands selects "a" again: the unknown outcome
+    # of episode "a" keeps blocking the repeat.
+    for order in ([proposal_a, proposal_b], [proposal_b, proposal_a]):
+        module.queue_proposal(order[0])
+        module.queue_proposal(order[1])
+        stand.service.process_module_event(OWNER_MODULE, f"ev-{order[0].proposal_id}")
+        stand.service.drain()
+        latest = stand.service.operations(MAIN_RESOURCE)[-1]
+        assert latest.episode_id == "a"
+        assert latest.phase is OperationPhase.REJECTED
+        assert latest.reason_code == "repeat_blocked_unknown_outcome"
+    assert stand.service.dispatch_count() == 1
 
 
 def _on60():

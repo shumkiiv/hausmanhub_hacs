@@ -164,6 +164,8 @@ REASON_MANUAL_OVERRIDE = "manual_override"
 REASON_CONFIRMATION_TIMEOUT = "confirmation_timeout"
 REASON_STORAGE_UNAVAILABLE = "storage_unavailable"
 REASON_TARGET_UNCHANGED = "target_unchanged"
+REASON_MANUAL_EVIDENCE = "manual_observation_attribution"
+REASON_STORAGE_BEFORE_SEND = "storage_unavailable_before_send"
 
 MIN_POLICY_PRIORITY = 0
 MAX_POLICY_PRIORITY = 100

@@ -20,6 +20,7 @@ from custom_components.hausman_hub.domain.core.models import (
 )
 
 from conftest import (
+    BASE_TARGET_ON40,
     CONTROL_REVISION_START,
     GENERATION_START,
     MAIN_ENTITY,
@@ -28,6 +29,7 @@ from conftest import (
     OTHER_ENTITY,
     OTHER_RESOURCE,
     OTHER_SCOPE,
+    OWNER_EPISODE,
     OWNER_MODULE,
     OWNER_PROPOSAL,
     SCOPE_START_REVISION,
@@ -197,3 +199,92 @@ def test_f12_failed_commit_keeps_auto_closed_and_no_manual_success(
     assert receipt.status is ManualStatus.NO_OP
     assert receipt.control_revision == CONTROL_REVISION_START + 1
     assert stand.service.dispatch_count() == 0
+
+
+def test_idem01_replay_conflict_and_revision_rules(ranked_stand):
+    from custom_components.hausman_hub.application.core.command_service import (
+        IdempotencyConflict,
+        RevisionConflict,
+    )
+
+    stand = ranked_stand
+    first = _manual_off(stand, "req-idem")
+    assert first.status is ManualStatus.NO_OP
+    # Same request id with the same content: identical receipt, no state
+    # change and no new manual hold timer.
+    replay = _manual_off(stand, "req-idem")
+    assert replay.operation_id == first.operation_id
+    assert replay.status is first.status
+    assert replay.control_revision == first.control_revision
+    assert replay.generation == first.generation
+    assert replay.reason_code == first.reason_code
+    assert replay.idempotent_replay is True
+    record = stand.service.record(MAIN_RESOURCE)
+    assert record.control_revision == CONTROL_REVISION_START + 1
+    assert record.manual is not None
+    # The replay did not restart the hold: the proven time is unchanged.
+    assert record.manual.proven_at_utc_ms == 0
+    assert record.manual.priority_until_utc_ms == 0 + 3_600_000
+    # Same request id with different content: explicit conflict.
+    with pytest.raises(IdempotencyConflict):
+        stand.service.submit_manual(
+            resource_ref=MAIN_RESOURCE,
+            request_id="req-idem",
+            action_id="manual.other",
+            target=BASE_TARGET_ON40,
+            source="test.ui",
+            expected_control_revision=record.control_revision,
+        )
+    # A wrong expected revision is refused without any state change.
+    with pytest.raises(RevisionConflict):
+        _manual_off(stand, "req-other", expected_revision=CONTROL_REVISION_START)
+
+
+from conftest import BASE_TARGET_ON40  # noqa: E402
+
+
+def test_idem02_receipt_survives_storage_failure_during_dispatch():
+    from custom_components.hausman_hub.domain.core.models import ArbitrationMode
+
+    stand = build_stand(
+        ArbitrationMode.RANKED_TARGET,
+        episode_map={OWNER_PROPOSAL: OWNER_EPISODE},
+    )
+    # Facts: the lamp reports ON40 itself, so a manual OFF must dispatch.
+    stand.ingest(
+        MAIN_RESOURCE,
+        sequence=2,
+        mono_ms=10,
+        properties={"on": True, "brightness_pct": 40},
+    )
+    # Stand so far made two commits (two initial ingests + this report is
+    # the third). Manual acceptance is the next commit, the dispatching
+    # record the one after; fail exactly the dispatching record.
+    stand.store.fail_at_commit_revisions.add(stand.store.commit_revision + 2)
+    with pytest.raises(StorageUnavailable):
+        _manual_off(stand, "req-idem2", expected_revision=CONTROL_REVISION_START)
+    # The physical call never happened and the acceptance receipt stands.
+    assert stand.transport.calls == []
+    assert stand.service.dispatch_count() == 0
+    record = stand.service.record(MAIN_RESOURCE)
+    assert record.authority is Authority.MANUAL
+    operation = stand.service.operations(MAIN_RESOURCE)[-1]
+    assert operation.phase is OperationPhase.FAILED
+    assert operation.reason_code == "storage_unavailable_before_send"
+    # Replaying the original request returns the same receipt, no re-send.
+    replay = _manual_off(stand, "req-idem2", expected_revision=CONTROL_REVISION_START + 1)
+    assert replay.idempotent_replay is True
+    assert replay.operation_id == operation.operation_id
+    assert stand.service.dispatch_count() == 0
+    # After the store recovers a new request works normally.
+    stand.store.fail_at_commit_revisions.clear()
+    second = stand.service.submit_manual(
+        resource_ref=MAIN_RESOURCE,
+        request_id="req-idem2-second",
+        action_id="manual.second",
+        target=TARGET_OFF,
+        source="test.ui",
+        expected_control_revision=CONTROL_REVISION_START + 1,
+    )
+    assert second.status is ManualStatus.ACCEPTED
+    assert stand.service.dispatch_count() == 1

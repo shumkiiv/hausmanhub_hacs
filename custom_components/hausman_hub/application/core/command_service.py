@@ -34,6 +34,7 @@ from ...domain.core.models import (
     ModuleManifest,
     ModuleMode,
     Observation,
+    ObservationAttribution,
     ObservationSnapshot,
     Operation,
     OperationPhase,
@@ -41,6 +42,8 @@ from ...domain.core.models import (
     Proposal,
     Quality,
     REASON_CONFIG_CHANGED,
+    REASON_MANUAL_EVIDENCE,
+    REASON_STORAGE_BEFORE_SEND,
     ResourceSpec,
     StabilityProfile,
     Target,
@@ -389,34 +392,42 @@ class CoreCommandService:
             fact = self._facts[resource_id].get(name)
             if fact is None:
                 return False
-            rule = profile.properties.get(name)
-            if rule is not None and rule.tolerance is not None:
-                actual = Decimal(str(fact.value))
-                limit = Decimal(str(expected))
-                if abs(actual - limit) > rule.tolerance:
-                    return False
-            elif isinstance(expected, bool):
-                if bool(fact.value) is not expected:
-                    return False
-            elif fact.value != expected:
+            if not _value_matches(
+                fact.value, expected, profile.properties.get(name)
+            ):
                 return False
         return True
 
-    def _facts_fresh(self, resource_id: str, target: Target) -> bool:
-        """Freshness of the facts the decision relies on: the current
-        switching state. Target-only properties (a brightness we are about
-        to set from OFF) need no prior reading."""
+    def _facts_fresh(
+        self, resource_id: str, target: Target, require_all: bool = False
+    ) -> bool:
+        """Freshness of the facts the decision relies on.
+
+        Dispatch precondition: fresh trusted knowledge of the current
+        switching state. ``no_op`` matching (``require_all``) proves every
+        requested property, so every one of them must be fresh and
+        trusted (quality and evidence included, SEC-FIRST-FACT-01)."""
 
         profile = self._adapter.capabilities(resource_id)
-        state_property = "on"
-        if state_property not in requested_properties(target):
-            return True
-        rule = profile.properties.get(state_property)
-        fact = self._facts[resource_id].get(state_property)
-        if fact is None:
-            return False
-        max_age = rule.max_age_ms if rule else FALLBACK_MAX_AGE_MS
-        return self._clock.now_mono_ms() - fact.received_at_mono_ms <= max_age
+        if require_all:
+            names = list(requested_properties(target))
+        else:
+            names = (
+                ["on"] if "on" in requested_properties(target) else []
+            )
+        for name in names:
+            rule = profile.properties.get(name)
+            fact = self._facts[resource_id].get(name)
+            if fact is None:
+                return False
+            if fact.quality is not Quality.FRESH:
+                return False
+            if fact.evidence_kind in (Evidence.OPTIMISTIC, Evidence.RESTORED):
+                return False
+            max_age = rule.max_age_ms if rule else FALLBACK_MAX_AGE_MS
+            if self._clock.now_mono_ms() - fact.received_at_mono_ms > max_age:
+                return False
+        return True
 
     def _unresolved_sent_exists(self, resource_id: str) -> bool:
         """A dispatch with an undetermined outcome exists (K-08 no_op)."""
@@ -578,8 +589,8 @@ class CoreCommandService:
             operation = self._enqueue_target(
                 resource_id,
                 outcome.target,
-                accepted=outcome.accepted,
                 origin=Origin.AUTOMATION,
+                chosen=outcome.chosen,
                 decision_id=decision_id,
             )
             self._selected_target[resource_id] = outcome.target
@@ -630,8 +641,8 @@ class CoreCommandService:
         self,
         resource_id: str,
         target: Target,
-        accepted: tuple[Proposal, ...],
         origin: Origin,
+        chosen: Proposal | None = None,
         request_id: str | None = None,
         decision_id: str | None = None,
         no_op_decided: bool | None = None,
@@ -639,11 +650,12 @@ class CoreCommandService:
         """Queue one target as an operation; a fresh matching fact with no
         unresolved sent operation becomes an explicit no_op (K-08). The
         caller may pass a pre-computed ``no_op_decided`` (manual path) so
-        the decision is taken against the world before any cancellation."""
+        the decision is taken against the world before any cancellation.
+        Operation metadata (episode, TTL, module) comes from the proposal
+        the arbitration actually selected, never from array position."""
 
         record = self.record(resource_id)
         spec = self.spec(resource_id)
-        chosen = accepted[0] if accepted else None
         resolved_decision_id = decision_id or self._next_id("dec")
         common = {
             "resource_id": resource_id,
@@ -675,7 +687,7 @@ class CoreCommandService:
             no_op_decided = (
                 not self._unresolved_sent_exists(resource_id)
                 and self._fact_matches(resource_id, target)
-                and self._facts_fresh(resource_id, target)
+                and self._facts_fresh(resource_id, target, require_all=True)
             )
         if no_op_decided:
             operation = Operation(
@@ -869,16 +881,28 @@ class CoreCommandService:
             else FALLBACK_CONFIRMATION_TIMEOUT_MS
         )
         operation.phase = OperationPhase.DISPATCHING
-        operation.dispatch_started_at_mono_ms = self._clock.now_mono_ms()
-        operation.confirmation_deadline_mono_ms = (
-            operation.dispatch_started_at_mono_ms + timeout
-        )
-        operation.pre_dispatch_sequence = self._max_sequence(resource_id)
         operation.evidence_refs = operation.evidence_refs + (
             permit.permit_id,
         )
-        # Persisting the dispatching phase precedes the physical call (K-08).
-        self._commit_state()
+        # Persisting the dispatching phase precedes the physical call (K-08);
+        # when the store refuses the record, the call must not happen and
+        # the non-send is provable (SEC-FIRST-IDEM-01). The dispatch
+        # timestamp marks the transport boundary only after the record is
+        # durable, so a failed record never counts as a dispatch.
+        try:
+            self._commit_state()
+        except StorageUnavailable:
+            self._taken.pop(resource_id, None)
+            self._mark_terminal(
+                operation,
+                OperationPhase.FAILED,
+                REASON_STORAGE_BEFORE_SEND,
+            )
+            raise
+        started = self._clock.now_mono_ms()
+        operation.dispatch_started_at_mono_ms = started
+        operation.confirmation_deadline_mono_ms = started + timeout
+        operation.pre_dispatch_sequence = self._max_sequence(resource_id)
         outcome = self._adapter.dispatch_once(prepared, self._transport)
         # The transport call has returned: the resource slot is free again.
         self._taken.pop(resource_id, None)
@@ -909,10 +933,19 @@ class CoreCommandService:
     def ingest_observation(self, observation: Observation) -> str:
         resource_id = self.resolve_resource_id(observation.resource_id)
         self._facts[resource_id][observation.property] = observation
+        if observation.attribution is ObservationAttribution.MANUAL:
+            # Proven manual intervention is processed before any
+            # confirmation correlation: it never confirms an automatic
+            # operation and closes the automatic rights (SEC-FIRST-OWN-02).
+            self._apply_manual_evidence(resource_id)
+            self._commit_state()
+            return "manual_evidence"
         confirmation_key = (
             resource_id,
             observation.source_sequence,
             observation.received_at_mono_ms,
+            observation.source_id,
+            observation.source_epoch,
         )
         self._report_groups.setdefault(confirmation_key, []).append(
             observation
@@ -934,10 +967,49 @@ class CoreCommandService:
         self._commit_state()
         return result
 
+    def _apply_manual_evidence(self, resource_id: str) -> None:
+        """A manually attributed device report voids automatic ownership:
+        pending and in-flight automatic operations are withdrawn, the
+        proof is revoked and the rights become visibly uncertain until a
+        proper manual intake or a fresh recalculation resolves them."""
+
+        for operation_id in list(self._resource_ops[resource_id]):
+            operation = self._operations[operation_id]
+            if operation.phase in (OperationPhase.QUEUED, OperationPhase.TAKEN):
+                self._mark_terminal(
+                    operation,
+                    OperationPhase.CANCELLED,
+                    REASON_MANUAL_EVIDENCE,
+                )
+            elif operation.phase in (
+                OperationPhase.DISPATCHING,
+                OperationPhase.OBSERVING,
+            ):
+                self._mark_terminal(
+                    operation,
+                    OperationPhase.SUPERSEDED_AFTER_DISPATCH,
+                    REASON_MANUAL_EVIDENCE,
+                )
+        record = self.record(resource_id)
+        if record.authority is not Authority.MANUAL:
+            self._records[resource_id] = replace(
+                record,
+                authority=Authority.UNCERTAIN,
+                automatic_scope=AutomaticScope.NONE,
+                auto_proof=None,
+                uncertainty_reason=REASON_MANUAL_EVIDENCE,
+            )
+        else:
+            self._records[resource_id] = replace(record, auto_proof=None)
+
     def _try_confirm(
         self, operation: Operation, confirmation_key: tuple
     ) -> str | None:
-        """Five confirmation conditions of S-03, all mandatory."""
+        """Five confirmation conditions of S-03, all mandatory and checked
+        for every member of the report group (SEC-FIRST-CONF-02): a mixed
+        or contradictory group never confirms. Lateness is decided by the
+        acceptance time against the deadline, not only by the phase
+        (SEC-FIRST-CONF-01)."""
 
         resource_id = operation.resource_id
         profile = self._adapter.capabilities(resource_id)
@@ -946,61 +1018,90 @@ class CoreCommandService:
             rule.confirmation if rule else "post_dispatch_report"
         )
         group = self._report_groups.get(confirmation_key, [])
-        by_property = {
-            observation.property: observation for observation in group
-        }
+        seen: dict[str, object] = {}
+        sample_received: int | None = None
+        for observation in group:
+            if (
+                confirmation_mode == "post_dispatch_report"
+                and observation.evidence_kind is not Evidence.DEVICE_REPORT
+            ):
+                return None
+            if observation.quality is not Quality.FRESH:
+                return None
+            if observation.binding_revision != operation.binding_revision:
+                return None
+            if operation.dispatch_started_at_mono_ms is None:
+                return None
+            if (
+                observation.received_at_mono_ms
+                < operation.dispatch_started_at_mono_ms
+            ):
+                return None
+            if observation.source_sequence is None:
+                return None
+            if (
+                operation.pre_dispatch_sequence is not None
+                and observation.source_sequence
+                <= operation.pre_dispatch_sequence
+            ):
+                return None
+            if observation.property in seen and (
+                seen[observation.property] != observation.value
+            ):
+                # Contradictory values inside one report group: ambiguous
+                # feedback cannot confirm anything (S-03 condition 5).
+                return None
+            seen.setdefault(observation.property, observation.value)
+            sample_received = observation.received_at_mono_ms
         required = requested_properties(operation.target)
-        if not all(name in by_property for name in required):
-            return None
-        sample = group[0]
-        if (
-            confirmation_mode == "post_dispatch_report"
-            and sample.evidence_kind is not Evidence.DEVICE_REPORT
-        ):
-            return None
-        if sample.binding_revision != operation.binding_revision:
-            return None
-        if sample.received_at_mono_ms < operation.dispatch_started_at_mono_ms:
-            return None
-        if sample.source_sequence is None:
-            return None
-        if (
-            operation.pre_dispatch_sequence is not None
-            and sample.source_sequence <= operation.pre_dispatch_sequence
-        ):
+        if not all(name in seen for name in required):
             return None
         for name, expected in required.items():
-            observation = by_property[name]
-            rule_property = profile.properties.get(name)
-            if rule_property is not None and rule_property.tolerance is not None:
-                actual = Decimal(str(observation.value))
-                limit = Decimal(str(expected))
-                if abs(actual - limit) > rule_property.tolerance:
-                    return None
-            elif isinstance(expected, bool):
-                if bool(observation.value) is not expected:
-                    return None
-            elif observation.value != expected:
+            if not _value_matches(
+                seen[name], expected, profile.properties.get(name)
+            ):
                 return None
-        late = operation.phase is OperationPhase.UNKNOWN
+        assert sample_received is not None
+        deadline = operation.confirmation_deadline_mono_ms
+        late = operation.phase is OperationPhase.UNKNOWN or (
+            deadline is not None and sample_received > deadline
+        )
         operation.phase = (
             OperationPhase.CONFIRMED_LATE
             if late
             else OperationPhase.CONFIRMED
         )
-        operation.reason_code = "confirmed_by_device_report"
+        operation.reason_code = (
+            "confirmed_late_by_device_report"
+            if late
+            else "confirmed_by_device_report"
+        )
         if not late:
-            self._last_state_change[resource_id] = sample.received_at_mono_ms
             record = self.record(resource_id)
             if (
                 operation.origin_automation
                 and record.manual is None
                 and record.generation == operation.generation
             ):
-                self._records[resource_id] = replace(
-                    record,
-                    auto_proof=_build_auto_proof(operation, by_property),
-                )
+                if operation.target_requires_on:
+                    # Ownership proof exists only for a confirmed automatic
+                    # ON (K-07; SEC-FIRST-OWN-01).
+                    by_property = {
+                        observation.property: observation
+                        for observation in group
+                    }
+                    self._records[resource_id] = replace(
+                        record,
+                        auto_proof=_build_auto_proof(operation, by_property),
+                    )
+                    self._last_state_change[resource_id] = sample_received
+                else:
+                    # A confirmed automatic OFF leaves no ownership: the
+                    # lamp no longer matches any previous turn-on proof.
+                    self._records[resource_id] = replace(
+                        record, auto_proof=None
+                    )
+                    self._last_state_change[resource_id] = sample_received
         self._commit_state()
         return "confirmed_late" if late else "confirmed"
 
@@ -1046,7 +1147,7 @@ class CoreCommandService:
         no_op_now = (
             not self._unresolved_sent_exists(resource_id)
             and self._fact_matches(resource_id, target)
-            and self._facts_fresh(resource_id, target)
+            and self._facts_fresh(resource_id, target, require_all=True)
         )
         # Pending automatic commands of this resource only (K-07).
         for operation_id in list(self._resource_ops[resource_id]):
@@ -1123,7 +1224,6 @@ class CoreCommandService:
             no_op = self._enqueue_target(
                 resource_id,
                 target,
-                accepted=(),
                 origin=Origin.MANUAL,
                 request_id=request_id,
                 decision_id=decision_id,
@@ -1141,7 +1241,6 @@ class CoreCommandService:
             operation = self._enqueue_target(
                 resource_id,
                 target,
-                accepted=(),
                 origin=Origin.MANUAL,
                 request_id=request_id,
                 decision_id=decision_id,
@@ -1155,6 +1254,12 @@ class CoreCommandService:
                 control_revision=next_record.control_revision,
                 generation=next_record.generation,
             )
+        # The acceptance result is durable in-memory before any execution:
+        # a storage failure during dispatch must not make the accepted
+        # request_id unknown (SEC-FIRST-IDEM-01).
+        self._receipts[request_id] = receipt
+        self._receipt_fingerprints[request_id] = fingerprint
+        if not no_op_now:
             # Manual execution runs immediately: it does not wait behind an
             # observing foreign device, and the transport call has returned.
             decision = self._final_permit(operation)
@@ -1235,6 +1340,29 @@ class CoreCommandService:
             control_revision=record.control_revision,
             generation=record.generation,
         )
+
+
+def _value_matches(
+    actual: object, expected: object, rule: PropertyRule | None
+) -> bool:
+    """Strict typed comparison (SEC-FIRST-VAL-01): a bool expectation
+    matches only a real bool, numeric expectations only real numbers
+    within the passport tolerance. Strings and other foreign types never
+    confirm anything."""
+
+    if isinstance(expected, bool):
+        return isinstance(actual, bool) and actual is expected
+    if isinstance(actual, bool) or not isinstance(
+        actual, (bool, int, float, Decimal)
+    ):
+        return False
+    if rule is not None and rule.tolerance is not None:
+        try:
+            deviation = abs(Decimal(str(actual)) - Decimal(str(expected)))
+        except Exception:
+            return False
+        return deviation <= rule.tolerance
+    return actual == expected
 
 
 def _build_auto_proof(

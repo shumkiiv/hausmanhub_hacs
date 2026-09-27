@@ -8,6 +8,7 @@ Zigbee2MQTT uses its HA MQTT entity; no Yandex transport exists here.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Mapping
 
 from ...application.core.command_service import (
@@ -191,7 +192,9 @@ class LightDeviceAdapter:
                     ),
                     source_id=source_id,
                     source_epoch=source_epoch,
-                    quality=_QUALITY_BY_RAW[evidence_raw],
+                    quality=self._quality_of(
+                        resource_id, name, properties[name], evidence_raw
+                    ),
                     evidence_kind=_EVIDENCE_BY_RAW[evidence_raw],
                     binding_revision=binding_revision,
                     observation_revision=received_mono,
@@ -200,6 +203,49 @@ class LightDeviceAdapter:
                 )
             )
         return tuple(observations)
+
+    def _quality_of(
+        self,
+        resource_id: str,
+        property_name: str,
+        value: object,
+        evidence_raw: str,
+    ) -> Quality:
+        """A value that violates the passport type or range cannot arrive
+        fresh: it is recorded as invalid and never confirms anything
+        (SEC-FIRST-VAL-01)."""
+
+        quality = _QUALITY_BY_RAW[evidence_raw]
+        if not self._value_valid(resource_id, property_name, value):
+            return Quality.INVALID
+        return quality
+
+    def _value_valid(
+        self, resource_id: str, property_name: str, value: object
+    ) -> bool:
+        profile = self._profiles.get(resource_id)
+        if profile is None:
+            return False
+        rule = profile.properties.get(property_name)
+        if rule is None:
+            return False
+        boolean_like = rule.allowed_values is not None and set(
+            rule.allowed_values
+        ) == {"true", "false"}
+        if boolean_like:
+            return isinstance(value, bool)
+        if rule.min_value is not None or rule.max_value is not None:
+            if isinstance(value, bool) or not isinstance(
+                value, (int, float, Decimal)
+            ):
+                return False
+            number = Decimal(str(value))
+            if rule.min_value is not None and number < rule.min_value:
+                return False
+            if rule.max_value is not None and number > rule.max_value:
+                return False
+            return True
+        return isinstance(value, (bool, int, float, Decimal, str))
 
     def _unit_of(self, resource_id: str, property_name: str) -> str:
         profile = self._profiles.get(resource_id)

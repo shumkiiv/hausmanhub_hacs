@@ -98,13 +98,17 @@ class MemoryStore:
         self.commit_revision = 0
         self.images: list[Mapping] = []
         self.fail_next_commit = False
+        self.fail_at_commit_revisions: set[int] = set()
 
     @property
     def state(self) -> Mapping | None:
         return self.images[-1] if self.images else None
 
     def commit(self, expected_commit_revision: int, next_state: Mapping) -> None:
-        if self.fail_next_commit:
+        failing = self.fail_next_commit or (
+            self.commit_revision + 1 in self.fail_at_commit_revisions
+        )
+        if failing:
             self.fail_next_commit = False
             raise StorageUnavailable("test store commit failure")
         if expected_commit_revision != self.commit_revision:
@@ -499,6 +503,26 @@ def owner_proposal(
         config_revision=config_revision,
         reason_code="test.reason",
     )
+
+
+def auto_on40_confirmed_anyon(stand) -> None:
+    """F-11 setup: an any_on REQUIRE_ON demand of the owner module turns
+    the lamp on and is confirmed; the owner then withdraws its one-shot
+    demand (an Evaluation replaces the whole previous set)."""
+
+    stand.modules[OWNER_MODULE].queue_proposal(
+        owner_proposal(kind=ProposalKind.REQUIRE_ON)
+    )
+    stand.service.process_module_event(OWNER_MODULE, "ev-start")
+    stand.clock.advance(1)
+    stand.service.drain()
+    stand.ingest(
+        MAIN_RESOURCE,
+        sequence=2,
+        mono_ms=100,
+        properties={"on": True, "brightness_pct": 40},
+    )
+    stand.service.process_module_event(OWNER_MODULE, "ev-start-gone")
 
 
 @pytest.fixture

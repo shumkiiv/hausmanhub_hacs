@@ -15,13 +15,17 @@ from custom_components.hausman_hub.application.core.command_service import (
 from custom_components.hausman_hub.domain.core.models import (
     OperationPhase,
     REASON_CONFIRMATION_TIMEOUT,
+    REASON_OWNERSHIP_UNPROVEN,
 )
 
 from conftest import (
+    BASE_TARGET_ON40,
     MAIN_ENTITY,
     MAIN_RESOURCE,
+    OWNER_EPISODE,
     OWNER_MODULE,
     OWNER_PROPOSAL,
+    auto_on40_confirmed_anyon,
     build_stand,
     owner_proposal,
 )
@@ -161,3 +165,211 @@ def test_readback_is_not_used_in_first(ranked_stand):
     # One physical call, zero readback requests: the transport log holds
     # only the single turn_on call.
     assert len(stand.transport.calls) == 1
+
+
+def test_own01_confirmed_off_clears_ownership_proof():
+    from custom_components.hausman_hub.domain.core.models import (
+        ArbitrationMode,
+    )
+
+    stand = build_stand(
+        ArbitrationMode.ANY_ON,
+        module_specs={
+            OWNER_MODULE: MAIN_RESOURCE,
+            "test.module_a": MAIN_RESOURCE,
+            "test.module_b": MAIN_RESOURCE,
+        },
+        episode_map={OWNER_PROPOSAL: OWNER_EPISODE},
+    )
+    auto_on40_confirmed_anyon(stand)
+    assert stand.service.record(MAIN_RESOURCE).auto_proof is not None
+    # Idle OFF acts on the proof, then the device confirms the OFF.
+    stand.service.process_module_event("test.module_a", "ev-a-gone")
+    stand.service.drain()
+    stand.ingest(
+        MAIN_RESOURCE,
+        sequence=3,
+        mono_ms=200,
+        properties={"on": False},
+    )
+    # A confirmed automatic OFF leaves no ownership proof behind
+    # (SEC-FIRST-OWN-01). Two dispatches so far: turn_on and idle OFF.
+    assert stand.service.record(MAIN_RESOURCE).auto_proof is None
+    assert stand.service.dispatch_count() == 2
+    # The lamp is on again by a plain device report; nobody owns it.
+    # A require_on demand changes nothing, and after its withdrawal the
+    # idle OFF is forbidden: ownership unproven (no dispatch either way).
+    from custom_components.hausman_hub.domain.core.models import ProposalKind
+
+    stand.ingest(
+        MAIN_RESOURCE,
+        sequence=4,
+        mono_ms=300,
+        properties={"on": True, "brightness_pct": 40},
+    )
+    stand.modules["test.module_a"].queue_proposal(
+        owner_proposal(
+            proposal_id="a",
+            module_id="test.module_a",
+            kind=ProposalKind.REQUIRE_ON,
+        )
+    )
+    stand.service.process_module_event("test.module_a", "ev-a")
+    assert stand.service.dispatch_count() == 2
+    stand.service.process_module_event("test.module_a", "ev-a-gone")
+    stand.service.drain()
+    assert stand.service.dispatch_count() == 2
+    explanation = stand.service.explanation(MAIN_RESOURCE)
+    assert explanation.result_reason == REASON_OWNERSHIP_UNPROVEN
+
+
+def test_own02_manual_attribution_report_never_confirms_auto(ranked_stand):
+    from custom_components.hausman_hub.domain.core.models import Authority
+
+    stand = ranked_stand
+    _dispatch_on40(stand)
+    stand.clock.advance(99)
+    raw = stand.raw_report(
+        MAIN_RESOURCE, 2, 100, {"on": True, "brightness_pct": 40}
+    )
+    raw["attribution"] = "manual"
+    result = "unset"
+    for observation in stand.adapter.normalize(raw):
+        result = stand.service.ingest_observation(observation)
+    assert result == "manual_evidence"
+    record = stand.service.record(MAIN_RESOURCE)
+    assert record.auto_proof is None
+    assert record.authority is Authority.UNCERTAIN
+    assert record.uncertainty_reason == "manual_observation_attribution"
+    operation = stand.service.operations(MAIN_RESOURCE)[-1]
+    assert (
+        operation.phase is OperationPhase.SUPERSEDED_AFTER_DISPATCH
+    )
+    # The closed rights also stop the next automatic attempt.
+    stand.modules[OWNER_MODULE].queue_proposal(owner_proposal())
+    stand.service.process_module_event(OWNER_MODULE, "ev-2")
+    stand.service.drain()
+    assert stand.service.dispatch_count() == 1
+
+
+def test_conf01_deadline_decides_lateness(ranked_stand):
+    stand = ranked_stand
+    _dispatch_on40(stand)  # dispatch at mono 1, deadline 10001
+    # A report exactly at the deadline is on time (FIRST section 3).
+    stand.clock.advance(10000)
+    result = stand.ingest(
+        MAIN_RESOURCE,
+        sequence=2,
+        mono_ms=10001,
+        properties={"on": True, "brightness_pct": 40},
+    )
+    assert result == "confirmed"
+    assert stand.service.record(MAIN_RESOURCE).auto_proof is not None
+    # Fresh scenario: a report after the deadline, observed before the
+    # timeout tick, is late and never creates ownership.
+    from custom_components.hausman_hub.domain.core.models import ArbitrationMode
+
+    stand2 = build_stand(
+        ArbitrationMode.RANKED_TARGET,
+        episode_map={OWNER_PROPOSAL: OWNER_EPISODE},
+    )
+    _dispatch_on40(stand2)
+    stand2.clock.advance(10001)
+    result = stand2.ingest(
+        MAIN_RESOURCE,
+        sequence=2,
+        mono_ms=10002,
+        properties={"on": True, "brightness_pct": 40},
+    )
+    assert result == "confirmed_late"
+    assert stand2.service.record(MAIN_RESOURCE).auto_proof is None
+    operation = stand2.service.operations(MAIN_RESOURCE)[-1]
+    assert operation.phase is OperationPhase.CONFIRMED_LATE
+
+
+def test_conf02_mixed_evidence_group_is_ambiguous(ranked_stand):
+    stand = ranked_stand
+    _dispatch_on40(stand)
+    stand.clock.advance(99)
+    # Two messages with one key: a real wrong report plus an optimistic
+    # matching one. Together they are ambiguous and confirm nothing.
+    real = stand.raw_report(
+        MAIN_RESOURCE, 2, 100, {"on": True, "brightness_pct": 10}
+    )
+    for observation in stand.adapter.normalize(real):
+        stand.service.ingest_observation(observation)
+    optimistic = stand.raw_report(
+        MAIN_RESOURCE, 2, 100, {"on": True, "brightness_pct": 40},
+        evidence="optimistic",
+    )
+    for observation in stand.adapter.normalize(optimistic):
+        stand.service.ingest_observation(observation)
+    stand.clock.advance(9901)
+    stand.service.advance_timeouts()
+    view = stand.service.resource_view(MAIN_RESOURCE)
+    assert view.operation_phase == "unknown"
+    assert stand.service.record(MAIN_RESOURCE).auto_proof is None
+
+
+def test_val01_wrongly_typed_value_never_confirms(ranked_stand):
+    stand = ranked_stand
+    _dispatch_on40(stand)
+    stand.clock.advance(99)
+    result = stand.ingest(
+        MAIN_RESOURCE,
+        sequence=2,
+        mono_ms=100,
+        properties={"on": "false", "brightness_pct": 40},
+    )
+    # The string "false" is an invalid boolean: it must not be read as
+    # True and must not confirm the ON command (SEC-FIRST-VAL-01).
+    assert result == "recorded"
+    stand.clock.advance(10000)
+    stand.service.advance_timeouts()
+    view = stand.service.resource_view(MAIN_RESOURCE)
+    assert view.operation_phase == "unknown"
+    facts = {fact.property: fact for fact in view.facts}
+    assert facts["on"].value == "false"
+    assert stand.service.record(MAIN_RESOURCE).auto_proof is None
+
+
+def test_fact01_freshness_covers_quality_and_all_matched_properties(
+    ranked_stand,
+):
+    # (a) A retained (stale) fact cannot justify an automatic dispatch.
+    stand = ranked_stand
+    stand.ingest(
+        MAIN_RESOURCE,
+        sequence=2,
+        mono_ms=10,
+        properties={"on": True},
+        evidence="retained",
+    )
+    stand.modules[OWNER_MODULE].queue_proposal(owner_proposal())
+    stand.service.process_module_event(OWNER_MODULE, "ev-1")
+    stand.service.drain()
+    assert stand.service.dispatch_count() == 0
+    view = stand.service.resource_view(MAIN_RESOURCE)
+    assert view.operation_phase == "cancelled"
+    # (b) A no_op needs every requested property fresh: fresh ON but an
+    # aged brightness fact forces a real dispatch instead of a silent no_op.
+    stand2 = ranked_stand
+    stand2.ingest(
+        MAIN_RESOURCE, sequence=2, mono_ms=0, properties={"on": True, "brightness_pct": 40}
+    )
+    stand2.ingest(MAIN_RESOURCE, sequence=3, mono_ms=61000, properties={"on": True})
+    stand2.clock.advance(61001)
+    receipt = stand2.service.submit_manual(
+        resource_ref=MAIN_RESOURCE,
+        request_id="req-fresh",
+        action_id="manual.on40",
+        target=BASE_TARGET_ON40,
+        source="test.ui",
+        expected_control_revision=12,
+    )
+    from custom_components.hausman_hub.application.core.command_service import (
+        ManualStatus,
+    )
+
+    assert receipt.status is ManualStatus.ACCEPTED
+    assert stand2.service.dispatch_count() == 1
