@@ -122,7 +122,7 @@ class RoomLightingCoreBranch:
         self._mode = self.MODE_OFF
         self._module_id = self._module.module_id
         self._counter = {"n": 0}
-        self._service = CoreCommandService(
+        restore_kwargs = dict(
             clock=self._clock,
             store=self._store,
             adapter=self._input_adapter,
@@ -149,10 +149,22 @@ class RoomLightingCoreBranch:
                 for resource_id in self._resource_ids(branch_config.config)
             },
             scope_revisions={},
-            core_mode=ModuleMode.SHADOW,
+            episode_of_proposal=None,
             id_factory=self._id_factory(),
-            initial_records=self._initial_records(branch_config.config),
         )
+        if self._store.load() is not None:
+            # Restart: rebuild from the durable image (K-10) and keep the
+            # SHADOW mode regardless of what was persisted.
+            self._service = CoreCommandService.restore(**restore_kwargs)
+            # The shadow branch stays shadow regardless of what the image
+            # came from (R-01: closed sending by construction).
+            self._service._core_mode = ModuleMode.SHADOW
+        else:
+            self._service = CoreCommandService(
+                **restore_kwargs,
+                core_mode=ModuleMode.SHADOW,
+                initial_records=self._initial_records(branch_config.config),
+            )
         self._event_counter = 0
 
     def _id_factory(self):
@@ -183,12 +195,21 @@ class RoomLightingCoreBranch:
     def deactivate(self) -> None:
         self._mode = self.MODE_OFF
 
+    def on_runtime_stop(self) -> None:
+        """Called by the legacy runtime on stop: flush the store."""
+
+        self._store.flush()
+
     # -- input -------------------------------------------------------------
 
     def handle_runtime_event(
         self, entity_id: str, old_state: object, new_state: object
     ) -> None:
         if self._mode is not self.MODE_SHADOW:
+            return
+        if entity_id == "__clock__":
+            # Minute boundary: the schedule recalculation tick.
+            self._process_room_event()
             return
         observation = self._input_adapter.observation(
             entity_id, old_state, new_state

@@ -900,7 +900,7 @@ class RoomLightingRuntime:
         away_entity_id: str | None = None,
         light_priority: object | None = None,
         manual_light_authority: object | None = None,
-        core_input_port: Callable[[str, str, object, object], None] | None = None,
+        core_input_port: Callable[[str, object, object], None] | None = None,
     ) -> None:
         # Optional input port of the new core branch (HH-014.b lighting
         # path): immutable event snapshots are delivered BEFORE the legacy
@@ -1229,7 +1229,7 @@ class RoomLightingRuntime:
         self._unsubscribers.clear()
 
     def set_core_input_port(
-        self, port: Callable[[str, str, object, object], None]
+        self, port: Callable[[str, object, object], None]
     ) -> None:
         self._core_input_port = port
 
@@ -1473,7 +1473,6 @@ class RoomLightingRuntime:
             try:
                 self._core_input_port(
                     entity_id,
-                    "state_changed",
                     data.get("old_state"),
                     data.get("new_state"),
                 )
@@ -1599,6 +1598,11 @@ class RoomLightingRuntime:
     def _clock_event(self, _now: object) -> None:
         if not self._running:
             return
+        if self._core_input_port is not None:
+            try:
+                self._core_input_port("__clock__", None, None)
+            except Exception:  # noqa: BLE001 - isolation by design
+                _LOGGER.exception("core input clock tick failed")
         self._create_task(self.async_process())
 
     @_ha_callback

@@ -153,6 +153,9 @@ class FileControlStore:
         # explicit reload re-syncs it with the durable truth (S-04).
         return not self._closed
 
+    def flush(self) -> None:
+        """Every commit already fsyncs; nothing buffered to flush."""
+
     # -- port ------------------------------------------------------------
 
     def load(self) -> dict | None:
