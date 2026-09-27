@@ -646,6 +646,45 @@ def test_own02_r2_manual_report_never_resolves_unknown_auto(ranked_stand):
     assert stand.service.record(MAIN_RESOURCE).authority is Authority.UNCERTAIN
 
 
+def test_own02_r2b_manual_member_poisons_the_group_for_auto(ranked_stand):
+    from custom_components.hausman_hub.domain.core.models import Authority
+
+    stand = ranked_stand
+    _dispatch_on40(stand)
+    stand.clock.advance(10000)
+    stand.service.advance_timeouts()
+    operation = stand.service.operations(MAIN_RESOURCE)[-1]
+    assert operation.phase is OperationPhase.UNKNOWN
+    # 1) A manually attributed report is stored but never confirms auto.
+    manual = stand.raw_report(
+        MAIN_RESOURCE, 2, 11000, {"on": True, "brightness_pct": 40}
+    )
+    manual["attribution"] = "manual"
+    for observation in stand.adapter.normalize(manual):
+        stand.service.ingest_observation(observation)
+    # 2) A later ordinary member of the SAME group (same resource,
+    #    sequence, time, source) must not combine with it either.
+    ordinary = stand.raw_report(MAIN_RESOURCE, 2, 11000, {"brightness_pct": 40})
+    result = "unset"
+    for observation in stand.adapter.normalize(ordinary):
+        result = stand.service.ingest_observation(observation)
+    assert result == "recorded"
+    # The timed-out automatic operation stays unknown: no false late
+    # confirmation from any mix of manual and ordinary members
+    # (SEC-FIRST-OWN-02-R2).
+    operation = stand.service.operations(MAIN_RESOURCE)[-1]
+    assert operation.phase is OperationPhase.UNKNOWN
+    assert operation.reason_code == REASON_CONFIRMATION_TIMEOUT
+    assert (
+        stand.service.episode_lock_reason(MAIN_RESOURCE, OWNER_EPISODE)
+        == REASON_CONFIRMATION_TIMEOUT
+    )
+    assert stand.service.record(MAIN_RESOURCE).auto_proof is None
+    assert stand.service.record(MAIN_RESOURCE).authority is Authority.UNCERTAIN
+    # The manual hold itself is unaffected by the recorded evidence.
+    assert stand.service.dispatch_count() == 1
+
+
 def test_val01_r2_overflow_is_a_mismatch_not_a_crash(ranked_stand):
     from decimal import Decimal
 

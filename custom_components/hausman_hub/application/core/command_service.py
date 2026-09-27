@@ -42,7 +42,6 @@ from ...domain.core.models import (
     Proposal,
     Quality,
     REASON_AMBIGUOUS_FEEDBACK_REVOKED,
-    REASON_AMBIGUOUS_FEEDBACK_REVOKED,
     REASON_CONFIG_CHANGED,
     REASON_MANUAL_EVIDENCE,
     REASON_STORAGE_BEFORE_SEND,
@@ -1120,8 +1119,18 @@ class CoreCommandService:
         self, operation: Operation, group: list[Observation]
     ) -> bool:
         """S-03 member checks applied to every observation of the group;
-        a single invalid member makes the whole group unusable."""
+        a single invalid member makes the whole group unusable. A manually
+        attributed member never contributes to confirming an *automatic*
+        operation — in any phase, even combined with later non-manual
+        members of the same group (SEC-FIRST-OWN-02-R2)."""
 
+        if operation.origin_automation:
+            for observation in group:
+                if (
+                    observation.attribution
+                    is ObservationAttribution.MANUAL
+                ):
+                    return False
         profile = self._adapter.capabilities(operation.resource_id)
         rule = profile.properties.get("on")
         confirmation_mode = (
