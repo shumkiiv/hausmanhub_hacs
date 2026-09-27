@@ -17,6 +17,7 @@ from .models import (
     REASON_GENERATION_CHANGED,
     REASON_MANUAL_PRIORITY,
     REASON_MIN_STATE_TIME,
+    REASON_OWNERSHIP_UNPROVEN,
     REASON_REPEAT_BLOCKED_UNKNOWN,
     REASON_SCOPE_CHANGED,
     REASON_TTL_EXPIRED,
@@ -99,6 +100,15 @@ def issue_dispatch_permit(
         return denial(REASON_UNCERTAIN_RIGHTS, record.uncertainty_reason)
     if record.uncertainty_reason is not None:
         return denial(REASON_UNCERTAIN_RIGHTS, record.uncertainty_reason)
+    if (
+        operation.origin_automation
+        and not operation.target_requires_on
+        and record.auto_proof is None
+    ):
+        # An automatic OFF needs proven ownership at the dispatch boundary
+        # too (SEC-FIRST-CONF-02-R2): a decision made earlier on valid
+        # proof cannot survive the proof's revocation.
+        return denial(REASON_OWNERSHIP_UNPROVEN)
     if episode_locked and operation.origin_automation:
         return denial(REASON_REPEAT_BLOCKED_UNKNOWN)
     if not required_facts_fresh:

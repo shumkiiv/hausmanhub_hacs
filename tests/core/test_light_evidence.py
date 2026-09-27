@@ -511,3 +511,173 @@ def test_val01_r1_non_finite_number_becomes_invalid(ranked_stand):
     facts = {fact.property: fact for fact in view.facts}
     assert facts["brightness_pct"].quality.value == "invalid"
     assert stand.service.record(MAIN_RESOURCE).auto_proof is None
+
+
+def test_conf02_r2_revoked_proof_blocks_queued_idle_off():
+    from custom_components.hausman_hub.domain.core.models import (
+        ArbitrationMode,
+        OperationPhase,
+    )
+
+    stand = build_stand(
+        ArbitrationMode.RANKED_TARGET,
+        episode_map={OWNER_PROPOSAL: OWNER_EPISODE},
+    )
+    stand.modules[OWNER_MODULE].queue_proposal(owner_proposal())
+    stand.service.process_module_event(OWNER_MODULE, "ev-1")
+    stand.clock.advance(1)
+    stand.service.drain()
+    stand.ingest(
+        MAIN_RESOURCE,
+        sequence=2,
+        mono_ms=100,
+        properties={"on": True, "brightness_pct": 40},
+    )
+    assert stand.service.record(MAIN_RESOURCE).auto_proof is not None
+    # Idle OFF is queued on the valid proof...
+    stand.service.process_module_event(OWNER_MODULE, "ev-1-gone")
+    # ...then the group of the ON confirmation becomes contradictory and
+    # the proof is revoked.
+    contradiction = stand.raw_report(
+        MAIN_RESOURCE, 2, 100, {"brightness_pct": 10}
+    )
+    for observation in stand.adapter.normalize(contradiction):
+        stand.service.ingest_observation(observation)
+    assert stand.service.record(MAIN_RESOURCE).auto_proof is None
+    # The queued idle-OFF must not dispatch without proven ownership.
+    stand.clock.advance(1)
+    stand.service.drain()
+    assert stand.service.dispatch_count() == 1
+    assert stand.transport.calls == [
+        ("light", "turn_on", MAIN_ENTITY, {"brightness_pct": 40})
+    ]
+    idle_off = stand.service.operations(MAIN_RESOURCE)[-1]
+    assert idle_off.phase is OperationPhase.CANCELLED
+    assert idle_off.reason_code == "ownership_unproven"
+
+
+def test_conf02_r3_revocation_covers_manual_and_auto_off(ranked_stand):
+    # (a) A confirmed manual command is revoked by a later contradiction
+    # of the same report group (no proof, no episode lock for manual).
+    stand = ranked_stand
+    receipt = stand.service.submit_manual(
+        resource_ref=MAIN_RESOURCE,
+        request_id="req-manual",
+        action_id="manual.on40",
+        target=BASE_TARGET_ON40,
+        source="test.ui",
+        expected_control_revision=12,
+    )
+    assert receipt.status is ManualStatus.ACCEPTED
+    result = stand.ingest(
+        MAIN_RESOURCE,
+        sequence=2,
+        mono_ms=50,
+        properties={"on": True, "brightness_pct": 40},
+    )
+    assert result == "confirmed"
+    contradiction = stand.raw_report(MAIN_RESOURCE, 2, 50, {"on": False})
+    for observation in stand.adapter.normalize(contradiction):
+        stand.service.ingest_observation(observation)
+    operation = stand.service.operations(MAIN_RESOURCE)[-1]
+    assert operation.phase is OperationPhase.UNKNOWN
+    assert operation.reason_code == "ambiguous_feedback_revoked"
+    # (b) A confirmed automatic OFF is revoked the same way.
+    from custom_components.hausman_hub.domain.core.models import ArbitrationMode
+
+    stand2 = build_stand(
+        ArbitrationMode.RANKED_TARGET,
+        episode_map={OWNER_PROPOSAL: OWNER_EPISODE},
+    )
+    stand2.modules[OWNER_MODULE].queue_proposal(owner_proposal())
+    stand2.service.process_module_event(OWNER_MODULE, "ev-1")
+    stand2.clock.advance(1)
+    stand2.service.drain()
+    stand2.ingest(
+        MAIN_RESOURCE,
+        sequence=2,
+        mono_ms=100,
+        properties={"on": True, "brightness_pct": 40},
+    )
+    stand2.service.process_module_event(OWNER_MODULE, "ev-1-gone")
+    stand2.clock.advance(100)
+    stand2.service.drain()
+    off_result = stand2.ingest(
+        MAIN_RESOURCE, sequence=3, mono_ms=200, properties={"on": False}
+    )
+    assert off_result == "confirmed"
+    off_contradiction = stand2.raw_report(
+        MAIN_RESOURCE, 3, 200, {"on": True}
+    )
+    for observation in stand2.adapter.normalize(off_contradiction):
+        stand2.service.ingest_observation(observation)
+    off_operation = stand2.service.operations(MAIN_RESOURCE)[-1]
+    assert off_operation.phase is OperationPhase.UNKNOWN
+    assert off_operation.reason_code == "ambiguous_feedback_revoked"
+
+
+def test_own02_r2_manual_report_never_resolves_unknown_auto(ranked_stand):
+    from custom_components.hausman_hub.domain.core.models import Authority
+
+    stand = ranked_stand
+    _dispatch_on40(stand)
+    stand.clock.advance(10000)
+    stand.service.advance_timeouts()
+    operation = stand.service.operations(MAIN_RESOURCE)[-1]
+    assert operation.phase is OperationPhase.UNKNOWN
+    raw = stand.raw_report(
+        MAIN_RESOURCE, 2, 11000, {"on": True, "brightness_pct": 40}
+    )
+    raw["attribution"] = "manual"
+    result = "unset"
+    for observation in stand.adapter.normalize(raw):
+        result = stand.service.ingest_observation(observation)
+    # A manually attributed report must not turn the timed-out automatic
+    # operation into a (late) confirmation (SEC-FIRST-OWN-02-R2).
+    operation = stand.service.operations(MAIN_RESOURCE)[-1]
+    assert result == "manual_evidence"
+    assert operation.phase is OperationPhase.UNKNOWN
+    assert operation.reason_code == REASON_CONFIRMATION_TIMEOUT
+    assert (
+        stand.service.episode_lock_reason(MAIN_RESOURCE, OWNER_EPISODE)
+        == REASON_CONFIRMATION_TIMEOUT
+    )
+    assert stand.service.record(MAIN_RESOURCE).auto_proof is None
+    assert stand.service.record(MAIN_RESOURCE).authority is Authority.UNCERTAIN
+
+
+def test_val01_r2_overflow_is_a_mismatch_not_a_crash(ranked_stand):
+    from decimal import Decimal
+
+    from custom_components.hausman_hub.application.core.command_service import (
+        ManualStatus,
+        _value_matches,
+    )
+    from conftest import light_profile
+
+    stand = ranked_stand
+    # A huge but finite value is stored as invalid and never crashes the
+    # numeric comparison (SEC-FIRST-VAL-01-R2).
+    stand.ingest(
+        MAIN_RESOURCE,
+        sequence=2,
+        mono_ms=10,
+        properties={"on": True, "brightness_pct": Decimal("1E+1000000")},
+    )
+    rule = light_profile().properties["brightness_pct"]
+    assert (
+        _value_matches(Decimal("1E+1000000"), Decimal(40), rule) is False
+    )
+    receipt = stand.service.submit_manual(
+        resource_ref=MAIN_RESOURCE,
+        request_id="req-huge",
+        action_id="manual.on40",
+        target=BASE_TARGET_ON40,
+        source="test.ui",
+        expected_control_revision=12,
+    )
+    # The manual acceptance completes: the invalid fact forbids a no_op,
+    # so a real command is dispatched instead of an exception.
+    assert receipt.status is ManualStatus.ACCEPTED
+    assert stand.service.dispatch_count() == 1
+    assert stand.transport.calls[-1][1] == "turn_on"

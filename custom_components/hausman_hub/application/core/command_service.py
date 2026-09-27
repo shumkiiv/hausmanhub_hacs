@@ -41,6 +41,8 @@ from ...domain.core.models import (
     Origin,
     Proposal,
     Quality,
+    REASON_AMBIGUOUS_FEEDBACK_REVOKED,
+    REASON_AMBIGUOUS_FEEDBACK_REVOKED,
     REASON_CONFIG_CHANGED,
     REASON_MANUAL_EVIDENCE,
     REASON_STORAGE_BEFORE_SEND,
@@ -309,7 +311,7 @@ class CoreCommandService:
             resource_id: {} for resource_id in self._specs
         }
         self._report_groups: dict[tuple, list[Observation]] = {}
-        self._proof_keys: dict[str, tuple] = {}
+        self._confirm_keys: dict[str, tuple] = {}
         self._episode_locks: dict[tuple[str, str], str] = {}
         self._receipts: dict[str, ManualReceipt] = {}
         self._receipt_fingerprints: dict[str, tuple] = {}
@@ -392,6 +394,10 @@ class CoreCommandService:
         for name, expected in requested_properties(target).items():
             fact = self._facts[resource_id].get(name)
             if fact is None:
+                return False
+            if fact.quality is Quality.INVALID:
+                # An invalid value never matches, and it must never reach
+                # the numeric comparison (SEC-FIRST-VAL-01-R2).
                 return False
             if not _value_matches(
                 fact.value, expected, profile.properties.get(name)
@@ -963,6 +969,13 @@ class CoreCommandService:
                 continue
             if operation.dispatch_started_at_mono_ms is None:
                 continue
+            if (
+                observation.attribution is ObservationAttribution.MANUAL
+                and operation.origin_automation
+            ):
+                # A manually attributed report never resolves an automatic
+                # operation, in any phase (SEC-FIRST-OWN-02-R2).
+                continue
             outcome = self._try_confirm(operation, confirmation_key)
             if outcome is not None:
                 result = outcome
@@ -970,7 +983,7 @@ class CoreCommandService:
         # A confirmation already issued for this report group must not
         # survive a later contradiction inside the same group
         # (SEC-FIRST-CONF-02, both arrival orders).
-        self._revalidate_proof_group(confirmation_key)
+        self._revalidate_confirm_group(confirmation_key)
         self._commit_state()
         return result
 
@@ -1054,6 +1067,10 @@ class CoreCommandService:
             if late
             else "confirmed_by_device_report"
         )
+        # Every confirmed operation is linked to its report group, so a
+        # later contradiction revokes the result regardless of origin or
+        # proof creation (SEC-FIRST-CONF-02-R3).
+        self._confirm_keys[operation.operation_id] = confirmation_key
         record = self.record(resource_id)
         if late:
             # The outcome stayed undetermined through the whole deadline
@@ -1075,7 +1092,6 @@ class CoreCommandService:
                 # same generation (SEC-FIRST-OWN-01); a newer authority
                 # change would have moved the generation and is kept.
                 self._records[resource_id] = replace(record, auto_proof=None)
-                self._proof_keys.pop(operation.operation_id, None)
         elif operation.origin_automation and record.manual is None and (
             record.generation == operation.generation
         ):
@@ -1090,14 +1106,12 @@ class CoreCommandService:
                     record,
                     auto_proof=_build_auto_proof(operation, by_property),
                 )
-                self._proof_keys[operation.operation_id] = confirmation_key
             else:
                 # A confirmed automatic OFF leaves no ownership: the
                 # lamp no longer matches any previous turn-on proof.
                 self._records[resource_id] = replace(
                     record, auto_proof=None
                 )
-                self._proof_keys.pop(operation.operation_id, None)
             self._last_state_change[resource_id] = sample_received
         self._commit_state()
         return "confirmed_late" if late else "confirmed"
@@ -1148,26 +1162,30 @@ class CoreCommandService:
             seen.setdefault(observation.property, observation.value)
         return True
 
-    def _revalidate_proof_group(self, confirmation_key: tuple) -> None:
-        """If a group whose proof was already issued later becomes
-        contradictory or invalid, the proof is revoked and the operation
-        falls back to an unknown outcome with a visible ambiguity reason
-        (SEC-FIRST-CONF-02, both arrival orders)."""
+    def _revalidate_confirm_group(self, confirmation_key: tuple) -> None:
+        """If a confirmed result was issued from a report group that later
+        becomes contradictory or invalid, the result is revoked for **any**
+        confirmed operation of that group — automatic ON with proof,
+        automatic OFF, manual or late confirmation (SEC-FIRST-CONF-02-R3).
+        The proof is cleared only when it belongs to the revoked
+        operation; a later ambiguous outcome blocks the operation's
+        episode."""
 
-        for operation_id, key in list(self._proof_keys.items()):
+        for operation_id, key in list(self._confirm_keys.items()):
             if key != confirmation_key:
                 continue
             operation = self._operations.get(operation_id)
-            if operation is None or operation.phase is not (
-                OperationPhase.CONFIRMED
+            if operation is None or operation.phase not in (
+                OperationPhase.CONFIRMED,
+                OperationPhase.CONFIRMED_LATE,
             ):
                 continue
             group = self._report_groups.get(confirmation_key, [])
             if self._group_members_valid(operation, group):
                 continue
             operation.phase = OperationPhase.UNKNOWN
-            operation.reason_code = "ambiguous_feedback_revoked"
-            self._proof_keys.pop(operation_id, None)
+            operation.reason_code = REASON_AMBIGUOUS_FEEDBACK_REVOKED
+            self._confirm_keys.pop(operation_id, None)
             record = self.record(operation.resource_id)
             if (
                 record.auto_proof is not None
@@ -1179,7 +1197,7 @@ class CoreCommandService:
             if operation.origin_automation and operation.episode_id:
                 self._episode_locks[
                     (operation.resource_id, operation.episode_id)
-                ] = "ambiguous_feedback_revoked"
+                ] = REASON_AMBIGUOUS_FEEDBACK_REVOKED
 
     # ------------------------------------------------------------------
     # manual path (S-04 order)
@@ -1440,7 +1458,13 @@ def _value_matches(
     if not actual_number.is_finite() or not expected_number.is_finite():
         return False
     if rule is not None and rule.tolerance is not None:
-        return abs(actual_number - expected_number) <= rule.tolerance
+        try:
+            # The subtraction itself can overflow the decimal context for
+            # huge finite values; that is a mismatch, not a crash
+            # (SEC-FIRST-VAL-01-R2).
+            return abs(actual_number - expected_number) <= rule.tolerance
+        except (ArithmeticError, ValueError):
+            return False
     return actual == expected
 
 

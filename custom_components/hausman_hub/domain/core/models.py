@@ -166,6 +166,7 @@ REASON_STORAGE_UNAVAILABLE = "storage_unavailable"
 REASON_TARGET_UNCHANGED = "target_unchanged"
 REASON_MANUAL_EVIDENCE = "manual_observation_attribution"
 REASON_STORAGE_BEFORE_SEND = "storage_unavailable_before_send"
+REASON_AMBIGUOUS_FEEDBACK_REVOKED = "ambiguous_feedback_revoked"
 
 MIN_POLICY_PRIORITY = 0
 MAX_POLICY_PRIORITY = 100
