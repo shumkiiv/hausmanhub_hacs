@@ -900,7 +900,13 @@ class RoomLightingRuntime:
         away_entity_id: str | None = None,
         light_priority: object | None = None,
         manual_light_authority: object | None = None,
+        core_input_port: Callable[[str, str, object, object], None] | None = None,
     ) -> None:
+        # Optional input port of the new core branch (HH-014.b lighting
+        # path): immutable event snapshots are delivered BEFORE the legacy
+        # ownership history changes. The port never dispatches; the legacy
+        # executor stays the only writer.
+        self._core_input_port = core_input_port
         self._hass = hass
         self._service = service
         self._shadow = shadow
@@ -1222,7 +1228,22 @@ class RoomLightingRuntime:
                 _LOGGER.error("room lighting runtime cleanup failed")
         self._unsubscribers.clear()
 
+    def set_core_input_port(
+        self, port: Callable[[str, str, object, object], None]
+    ) -> None:
+        self._core_input_port = port
+
     async def stop(self) -> None:
+        if self._core_input_port is not None:
+            # The new core branch unsubscribes with the runtime; a stop
+            # notification lets it release timers and flush its own store.
+            try:
+                stop_hook = getattr(self._core_input_port, "on_runtime_stop")
+                result = stop_hook()
+                if result is not None and hasattr(result, "__await__"):
+                    await result
+            except Exception:  # noqa: BLE001 - isolation by design
+                _LOGGER.exception("core input port stop failed")
         self.cancel()
 
     def _load_trackers(self) -> None:
@@ -1445,6 +1466,21 @@ class RoomLightingRuntime:
             entity_id = data.get("entity_id")
         if not isinstance(entity_id, str):
             return
+        if self._core_input_port is not None:
+            # Immutable snapshot before the legacy history changes. Errors
+            # of the new branch never affect the legacy path (delivery
+            # HH-014.b lighting path: physical sending stays closed).
+            try:
+                self._core_input_port(
+                    entity_id,
+                    "state_changed",
+                    data.get("old_state"),
+                    data.get("new_state"),
+                )
+            except Exception:  # noqa: BLE001 - isolation by design
+                _LOGGER.exception(
+                    "core input port failed for %s", entity_id
+                )
         rooms = self._rooms_by_entity.get(entity_id)
         if not rooms:
             return

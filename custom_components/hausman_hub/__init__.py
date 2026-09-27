@@ -11,6 +11,7 @@ strict climate-call executor used by trial, managed ticks, and settings applicat
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from collections.abc import Callable, Mapping
 from datetime import timedelta
 import logging
@@ -1164,6 +1165,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         domain_data[DATA_ROOM_LIGHTING_RUNTIME] = room_lighting_runtime
         await room_lighting_runtime.start(hass, entry.entry_id)
         entry.async_on_unload(room_lighting_runtime.cancel)
+        # Optional new-core shadow branch (HH-014.b lighting path): OFF
+        # unless the entry explicitly names a room. The branch never
+        # dispatches; the legacy writer above stays the only author.
+        core_shadow_room_id = entry.data.get("core_shadow_room_id")
+        if isinstance(core_shadow_room_id, str) and core_shadow_room_id:
+            from .application.room_lighting_core import (
+                CoreBranchConfig,
+                RoomLightingCoreBranch,
+            )
+
+            room_config = await room_lighting_service.async_get_config(
+                core_shadow_room_id
+            )
+            if room_config is not None:
+                core_branch = RoomLightingCoreBranch(
+                    branch_config=CoreBranchConfig(
+                        room_id=core_shadow_room_id,
+                        config=room_config,
+                    ),
+                    store_path=Path(hass.config.config_dir)
+                    / f"hausman_hub.core_shadow_{core_shadow_room_id}.json",
+                )
+                domain_data["core_lighting_branch"] = core_branch
+                room_lighting_runtime.set_core_input_port(
+                    core_branch.handle_runtime_event
+                )
+                core_branch.activate_shadow()
+                entry.async_on_unload(core_branch.deactivate)
     # No automatic route may open until room-only light events received while
     # the room catalog loaded have been attributed and durably drained.
     await manual_light_events.async_complete_startup()

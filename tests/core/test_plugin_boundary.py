@@ -154,6 +154,19 @@ def test_domain_core_never_reaches_ha_application_or_adapters():
     )
 
 
+def test_lighting_path_application_file_is_ha_and_adapter_free():
+    path = (
+        HAUSMAN_ROOT
+        / "application"
+        / "room_lighting_core.py"
+    )
+    assert path.exists()
+    source = path.read_text(encoding="utf-8")
+    assert "from homeassistant" not in source
+    assert "import homeassistant" not in source
+    assert "from ...adapters" not in source
+
+
 def test_application_core_is_ha_and_adapter_free():
     application_files = _python_files(CORE_PACKAGES[1])
     assert application_files, "application/core files are missing"
@@ -174,10 +187,22 @@ def test_application_core_is_ha_and_adapter_free():
     )
 
 
-def test_adapters_core_has_no_ha_binding_in_first():
+def test_adapters_core_ha_bindings_are_limited_to_the_clock():
+    """The clock adapter is the one sanctioned HA touchpoint of the
+    branch (UTC reading); the closed transport proves no device call
+    exists regardless (SEC-S04-01, CA-02)."""
+
     adapter_files = _python_files(CORE_PACKAGES[2])
     assert adapter_files, "adapters/core files are missing"
-    assert not _has_ha_import(adapter_files)
+    ha_files = [
+        file
+        for file in adapter_files
+        if any(
+            imported == "homeassistant" or imported.startswith("homeassistant.")
+            for imported in _imports_of(file)
+        )
+    ]
+    assert all(file.name == "clock.py" for file in ha_files), ha_files
 
 
 def test_core_layers_have_no_file_io():

@@ -627,6 +627,14 @@ class CoreCommandService:
                 tuple(withdrawn_by_resource.get(resource_id, ())),
             )
 
+    def evaluate_resource(self, resource_id: str) -> None:
+        """Run one arbitration cycle for the resource's current needs.
+
+        The shadow branch calls this for every room resource after module
+        events: even a no-demand cycle must leave an explanation."""
+
+        self._arbitrate_resource(resource_id, ())
+
     def _arbitrate_resource(
         self, resource_id: str, withdrawn: tuple[Proposal, ...]
     ) -> None:
