@@ -67,9 +67,9 @@ def _select_by_priority(
     previous_selected: Target | None,
 ) -> Proposal:
     """Tie-break of K-05: highest ``policy_priority``; on a tie keep the
-    previously selected target if it is still present and allowed; otherwise
-    the smallest ``(module_id, proposal_id)`` in ASCII order. Arrival order
-    of packages never decides."""
+    previously selected target if it is still present and allowed,
+    choosing deterministically by ``(module_id, proposal_id)`` so array
+    order never decides; otherwise the smallest pair in ASCII order."""
 
     top_priority = max(proposal.policy_priority for proposal in proposals)
     equals = [
@@ -78,9 +78,15 @@ def _select_by_priority(
         if proposal.policy_priority == top_priority
     ]
     if previous_selected is not None:
-        for proposal in equals:
-            if proposal.target == previous_selected:
-                return proposal
+        matches = [
+            proposal
+            for proposal in equals
+            if proposal.target == previous_selected
+        ]
+        if matches:
+            return min(
+                matches, key=lambda item: (item.module_id, item.proposal_id)
+            )
     return min(equals, key=lambda item: (item.module_id, item.proposal_id))
 
 

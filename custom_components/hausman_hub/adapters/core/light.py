@@ -239,7 +239,14 @@ class LightDeviceAdapter:
                 value, (int, float, Decimal)
             ):
                 return False
-            number = Decimal(str(value))
+            try:
+                number = Decimal(str(value))
+            except Exception:
+                # NaN and infinity are handled here as plain invalid
+                # values instead of an exception (SEC-FIRST-VAL-01-R1).
+                return False
+            if not number.is_finite():
+                return False
             if rule.min_value is not None and number < rule.min_value:
                 return False
             if rule.max_value is not None and number > rule.max_value:

@@ -383,6 +383,38 @@ def test_episode01_metadata_follows_the_chosen_proposal(ranked_stand):
     assert stand.service.dispatch_count() == 1
 
 
+def test_episode01_r1_equal_targets_choose_deterministically(ranked_stand):
+    stand = ranked_stand
+    module = stand.modules[OWNER_MODULE]
+    proposal_a = owner_proposal(proposal_id="a", target=BASE_TARGET_ON40)
+    proposal_b = owner_proposal(proposal_id="b", target=BASE_TARGET_ON40)
+    # First decision: tie without a previous target selects "a".
+    module.queue_proposal(proposal_a)
+    module.queue_proposal(proposal_b)
+    stand.service.process_module_event(OWNER_MODULE, "ev-1")
+    stand.clock.advance(1)
+    stand.service.drain()
+    assert stand.service.operations(MAIN_RESOURCE)[-1].episode_id == "a"
+    stand.clock.advance(10000)
+    stand.service.advance_timeouts()
+    assert stand.service.dispatch_count() == 1
+    # Reordering equal targets with a previous selection must still land
+    # on "a": the choice is deterministic, so the unknown-outcome lock of
+    # episode "a" holds (SEC-FIRST-EPISODE-01).
+    for order in ([proposal_b, proposal_a], [proposal_a, proposal_b]):
+        module.queue_proposal(order[0])
+        module.queue_proposal(order[1])
+        stand.service.process_module_event(
+            OWNER_MODULE, f"ev-{order[0].proposal_id}-again"
+        )
+        stand.service.drain()
+        latest = stand.service.operations(MAIN_RESOURCE)[-1]
+        assert latest.episode_id == "a"
+        assert latest.phase is OperationPhase.REJECTED
+        assert latest.reason_code == "repeat_blocked_unknown_outcome"
+    assert stand.service.dispatch_count() == 1
+
+
 def _on60():
     from custom_components.hausman_hub.domain.core.models import LightStateTarget
 

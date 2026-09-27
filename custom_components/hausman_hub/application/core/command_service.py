@@ -309,6 +309,7 @@ class CoreCommandService:
             resource_id: {} for resource_id in self._specs
         }
         self._report_groups: dict[tuple, list[Observation]] = {}
+        self._proof_keys: dict[str, tuple] = {}
         self._episode_locks: dict[tuple[str, str], str] = {}
         self._receipts: dict[str, ManualReceipt] = {}
         self._receipt_fingerprints: dict[str, tuple] = {}
@@ -935,11 +936,11 @@ class CoreCommandService:
         self._facts[resource_id][observation.property] = observation
         if observation.attribution is ObservationAttribution.MANUAL:
             # Proven manual intervention is processed before any
-            # confirmation correlation: it never confirms an automatic
-            # operation and closes the automatic rights (SEC-FIRST-OWN-02).
+            # confirmation correlation: it closes the automatic rights
+            # (SEC-FIRST-OWN-02) without touching manual operations
+            # (SEC-FIRST-OWN-02-R1); a manual-origin operation may then
+            # still be confirmed by its own report.
             self._apply_manual_evidence(resource_id)
-            self._commit_state()
-            return "manual_evidence"
         confirmation_key = (
             resource_id,
             observation.source_sequence,
@@ -951,6 +952,8 @@ class CoreCommandService:
             observation
         )
         result = "recorded"
+        if observation.attribution is ObservationAttribution.MANUAL:
+            result = "manual_evidence"
         for operation_id in reversed(self._resource_ops[resource_id]):
             operation = self._operations[operation_id]
             if operation.phase not in (
@@ -964,17 +967,25 @@ class CoreCommandService:
             if outcome is not None:
                 result = outcome
                 break
+        # A confirmation already issued for this report group must not
+        # survive a later contradiction inside the same group
+        # (SEC-FIRST-CONF-02, both arrival orders).
+        self._revalidate_proof_group(confirmation_key)
         self._commit_state()
         return result
 
     def _apply_manual_evidence(self, resource_id: str) -> None:
         """A manually attributed device report voids automatic ownership:
-        pending and in-flight automatic operations are withdrawn, the
+        pending and in-flight *automatic* operations are withdrawn, the
         proof is revoked and the rights become visibly uncertain until a
-        proper manual intake or a fresh recalculation resolves them."""
+        proper manual intake or a fresh recalculation resolves them. An
+        already manual resource keeps its hold; its own operation is not
+        revoked by the report of its own action (SEC-FIRST-OWN-02-R1)."""
 
         for operation_id in list(self._resource_ops[resource_id]):
             operation = self._operations[operation_id]
+            if not operation.origin_automation:
+                continue
             if operation.phase in (OperationPhase.QUEUED, OperationPhase.TAKEN):
                 self._mark_terminal(
                     operation,
@@ -1009,50 +1020,17 @@ class CoreCommandService:
         for every member of the report group (SEC-FIRST-CONF-02): a mixed
         or contradictory group never confirms. Lateness is decided by the
         acceptance time against the deadline, not only by the phase
-        (SEC-FIRST-CONF-01)."""
+        (SEC-FIRST-CONF-01), and an episode resolved after its deadline is
+        locked the same way as a timeout (SEC-FIRST-CONF-01-R1)."""
 
         resource_id = operation.resource_id
         profile = self._adapter.capabilities(resource_id)
-        rule = profile.properties.get("on")
-        confirmation_mode = (
-            rule.confirmation if rule else "post_dispatch_report"
-        )
         group = self._report_groups.get(confirmation_key, [])
-        seen: dict[str, object] = {}
-        sample_received: int | None = None
-        for observation in group:
-            if (
-                confirmation_mode == "post_dispatch_report"
-                and observation.evidence_kind is not Evidence.DEVICE_REPORT
-            ):
-                return None
-            if observation.quality is not Quality.FRESH:
-                return None
-            if observation.binding_revision != operation.binding_revision:
-                return None
-            if operation.dispatch_started_at_mono_ms is None:
-                return None
-            if (
-                observation.received_at_mono_ms
-                < operation.dispatch_started_at_mono_ms
-            ):
-                return None
-            if observation.source_sequence is None:
-                return None
-            if (
-                operation.pre_dispatch_sequence is not None
-                and observation.source_sequence
-                <= operation.pre_dispatch_sequence
-            ):
-                return None
-            if observation.property in seen and (
-                seen[observation.property] != observation.value
-            ):
-                # Contradictory values inside one report group: ambiguous
-                # feedback cannot confirm anything (S-03 condition 5).
-                return None
-            seen.setdefault(observation.property, observation.value)
-            sample_received = observation.received_at_mono_ms
+        if not self._group_members_valid(operation, group):
+            return None
+        seen = {
+            observation.property: observation.value for observation in group
+        }
         required = requested_properties(operation.target)
         if not all(name in seen for name in required):
             return None
@@ -1061,7 +1039,7 @@ class CoreCommandService:
                 seen[name], expected, profile.properties.get(name)
             ):
                 return None
-        assert sample_received is not None
+        sample_received = group[0].received_at_mono_ms
         deadline = operation.confirmation_deadline_mono_ms
         late = operation.phase is OperationPhase.UNKNOWN or (
             deadline is not None and sample_received > deadline
@@ -1076,34 +1054,132 @@ class CoreCommandService:
             if late
             else "confirmed_by_device_report"
         )
-        if not late:
-            record = self.record(resource_id)
+        record = self.record(resource_id)
+        if late:
+            # The outcome stayed undetermined through the whole deadline
+            # window: the episode is locked exactly like a timeout,
+            # whatever order the timeout tick and the report arrive in
+            # (SEC-FIRST-CONF-01-R1).
+            if operation.origin_automation and operation.episode_id:
+                self._episode_locks[
+                    (resource_id, operation.episode_id)
+                ] = REASON_CONFIRMATION_TIMEOUT
             if (
                 operation.origin_automation
-                and record.manual is None
+                and not operation.target_requires_on
                 and record.generation == operation.generation
+                and record.auto_proof is not None
             ):
-                if operation.target_requires_on:
-                    # Ownership proof exists only for a confirmed automatic
-                    # ON (K-07; SEC-FIRST-OWN-01).
-                    by_property = {
-                        observation.property: observation
-                        for observation in group
-                    }
-                    self._records[resource_id] = replace(
-                        record,
-                        auto_proof=_build_auto_proof(operation, by_property),
-                    )
-                    self._last_state_change[resource_id] = sample_received
-                else:
-                    # A confirmed automatic OFF leaves no ownership: the
-                    # lamp no longer matches any previous turn-on proof.
-                    self._records[resource_id] = replace(
-                        record, auto_proof=None
-                    )
-                    self._last_state_change[resource_id] = sample_received
+                # A resolved automatic OFF — even confirmed after its
+                # deadline — invalidates the previous turn-on proof of the
+                # same generation (SEC-FIRST-OWN-01); a newer authority
+                # change would have moved the generation and is kept.
+                self._records[resource_id] = replace(record, auto_proof=None)
+                self._proof_keys.pop(operation.operation_id, None)
+        elif operation.origin_automation and record.manual is None and (
+            record.generation == operation.generation
+        ):
+            if operation.target_requires_on:
+                # Ownership proof exists only for a confirmed automatic
+                # ON (K-07; SEC-FIRST-OWN-01).
+                by_property = {
+                    observation.property: observation
+                    for observation in group
+                }
+                self._records[resource_id] = replace(
+                    record,
+                    auto_proof=_build_auto_proof(operation, by_property),
+                )
+                self._proof_keys[operation.operation_id] = confirmation_key
+            else:
+                # A confirmed automatic OFF leaves no ownership: the
+                # lamp no longer matches any previous turn-on proof.
+                self._records[resource_id] = replace(
+                    record, auto_proof=None
+                )
+                self._proof_keys.pop(operation.operation_id, None)
+            self._last_state_change[resource_id] = sample_received
         self._commit_state()
         return "confirmed_late" if late else "confirmed"
+
+    def _group_members_valid(
+        self, operation: Operation, group: list[Observation]
+    ) -> bool:
+        """S-03 member checks applied to every observation of the group;
+        a single invalid member makes the whole group unusable."""
+
+        profile = self._adapter.capabilities(operation.resource_id)
+        rule = profile.properties.get("on")
+        confirmation_mode = (
+            rule.confirmation if rule else "post_dispatch_report"
+        )
+        seen: dict[str, object] = {}
+        for observation in group:
+            if (
+                confirmation_mode == "post_dispatch_report"
+                and observation.evidence_kind is not Evidence.DEVICE_REPORT
+            ):
+                return False
+            if observation.quality is not Quality.FRESH:
+                return False
+            if observation.binding_revision != operation.binding_revision:
+                return False
+            if operation.dispatch_started_at_mono_ms is None:
+                return False
+            if (
+                observation.received_at_mono_ms
+                < operation.dispatch_started_at_mono_ms
+            ):
+                return False
+            if observation.source_sequence is None:
+                return False
+            if (
+                operation.pre_dispatch_sequence is not None
+                and observation.source_sequence
+                <= operation.pre_dispatch_sequence
+            ):
+                return False
+            if observation.property in seen and (
+                seen[observation.property] != observation.value
+            ):
+                # Contradictory values inside one report group: ambiguous
+                # feedback cannot confirm anything (S-03 condition 5).
+                return False
+            seen.setdefault(observation.property, observation.value)
+        return True
+
+    def _revalidate_proof_group(self, confirmation_key: tuple) -> None:
+        """If a group whose proof was already issued later becomes
+        contradictory or invalid, the proof is revoked and the operation
+        falls back to an unknown outcome with a visible ambiguity reason
+        (SEC-FIRST-CONF-02, both arrival orders)."""
+
+        for operation_id, key in list(self._proof_keys.items()):
+            if key != confirmation_key:
+                continue
+            operation = self._operations.get(operation_id)
+            if operation is None or operation.phase is not (
+                OperationPhase.CONFIRMED
+            ):
+                continue
+            group = self._report_groups.get(confirmation_key, [])
+            if self._group_members_valid(operation, group):
+                continue
+            operation.phase = OperationPhase.UNKNOWN
+            operation.reason_code = "ambiguous_feedback_revoked"
+            self._proof_keys.pop(operation_id, None)
+            record = self.record(operation.resource_id)
+            if (
+                record.auto_proof is not None
+                and record.auto_proof.operation_id == operation_id
+            ):
+                self._records[operation.resource_id] = replace(
+                    record, auto_proof=None
+                )
+            if operation.origin_automation and operation.episode_id:
+                self._episode_locks[
+                    (operation.resource_id, operation.episode_id)
+                ] = "ambiguous_feedback_revoked"
 
     # ------------------------------------------------------------------
     # manual path (S-04 order)
@@ -1346,22 +1422,25 @@ def _value_matches(
     actual: object, expected: object, rule: PropertyRule | None
 ) -> bool:
     """Strict typed comparison (SEC-FIRST-VAL-01): a bool expectation
-    matches only a real bool, numeric expectations only real numbers
-    within the passport tolerance. Strings and other foreign types never
-    confirm anything."""
+    matches only a real bool, numeric expectations only finite real
+    numbers within the passport tolerance. Strings and other foreign
+    types never confirm anything, and NaN never compares as equal."""
 
     if isinstance(expected, bool):
         return isinstance(actual, bool) and actual is expected
     if isinstance(actual, bool) or not isinstance(
-        actual, (bool, int, float, Decimal)
+        actual, (int, float, Decimal)
     ):
         return False
+    try:
+        actual_number = Decimal(str(actual))
+        expected_number = Decimal(str(expected))
+    except Exception:
+        return False
+    if not actual_number.is_finite() or not expected_number.is_finite():
+        return False
     if rule is not None and rule.tolerance is not None:
-        try:
-            deviation = abs(Decimal(str(actual)) - Decimal(str(expected)))
-        except Exception:
-            return False
-        return deviation <= rule.tolerance
+        return abs(actual_number - expected_number) <= rule.tolerance
     return actual == expected
 
 

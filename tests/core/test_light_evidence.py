@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from custom_components.hausman_hub.application.core.command_service import (
+    ManualStatus,
     TransportStatus,
 )
 from custom_components.hausman_hub.domain.core.models import (
@@ -373,3 +374,140 @@ def test_fact01_freshness_covers_quality_and_all_matched_properties(
 
     assert receipt.status is ManualStatus.ACCEPTED
     assert stand2.service.dispatch_count() == 1
+
+
+def test_own01_r1_late_off_still_invalidates_proof():
+    from custom_components.hausman_hub.domain.core.models import ArbitrationMode
+
+    stand = build_stand(
+        ArbitrationMode.RANKED_TARGET,
+        episode_map={OWNER_PROPOSAL: OWNER_EPISODE},
+    )
+    stand.modules[OWNER_MODULE].queue_proposal(owner_proposal())
+    stand.service.process_module_event(OWNER_MODULE, "ev-1")
+    stand.clock.advance(1)
+    stand.service.drain()
+    stand.ingest(
+        MAIN_RESOURCE, sequence=2, mono_ms=100,
+        properties={"on": True, "brightness_pct": 40},
+    )
+    assert stand.service.record(MAIN_RESOURCE).auto_proof is not None
+    # Idle OFF acts on the proof; its report arrives after the deadline.
+    stand.service.process_module_event(OWNER_MODULE, "ev-1-gone")
+    stand.clock.advance(100)
+    stand.service.drain()
+    stand.clock.advance(10100)
+    result = stand.ingest(
+        MAIN_RESOURCE, sequence=3, mono_ms=10201, properties={"on": False}
+    )
+    assert result == "confirmed_late"
+    # Even a late-resolved automatic OFF invalidates the stale proof.
+    assert stand.service.record(MAIN_RESOURCE).auto_proof is None
+
+
+def test_own02_r1_manual_report_confirms_only_the_manual_operation(
+    ranked_stand,
+):
+    stand = ranked_stand
+    # The lamp is off; a manual ON must physically dispatch.
+    receipt = stand.service.submit_manual(
+        resource_ref=MAIN_RESOURCE,
+        request_id="req-manual-on",
+        action_id="manual.on40",
+        target=BASE_TARGET_ON40,
+        source="test.ui",
+        expected_control_revision=12,
+    )
+    assert receipt.status is ManualStatus.ACCEPTED
+    assert stand.service.dispatch_count() == 1
+    from custom_components.hausman_hub.domain.core.models import Authority
+
+    raw = stand.raw_report(
+        MAIN_RESOURCE, 2, 100, {"on": True, "brightness_pct": 40}
+    )
+    raw["attribution"] = "manual"
+    result = "unset"
+    for observation in stand.adapter.normalize(raw):
+        result = stand.service.ingest_observation(observation)
+    # The manually attributed report legitimately confirms the manual
+    # command; authority stays manual and no auto proof appears.
+    assert result == "confirmed"
+    record = stand.service.record(MAIN_RESOURCE)
+    assert record.authority is Authority.MANUAL
+    assert record.auto_proof is None
+    operation = stand.service.operations(MAIN_RESOURCE)[-1]
+    assert operation.phase is OperationPhase.CONFIRMED
+
+
+def test_conf01_r1_late_resolution_locks_the_episode(ranked_stand):
+    stand = ranked_stand
+    _dispatch_on40(stand)
+    # The report arrives after the deadline but before the timeout tick.
+    stand.clock.advance(10001)
+    result = stand.ingest(
+        MAIN_RESOURCE,
+        sequence=2,
+        mono_ms=10002,
+        properties={"on": True, "brightness_pct": 40},
+    )
+    assert result == "confirmed_late"
+    # Both service orders of timeout tick and late report leave the same
+    # rights: the episode is locked.
+    assert (
+        stand.service.episode_lock_reason(MAIN_RESOURCE, OWNER_EPISODE)
+        == REASON_CONFIRMATION_TIMEOUT
+    )
+    stand.modules[OWNER_MODULE].queue_proposal(owner_proposal())
+    stand.service.process_module_event(OWNER_MODULE, "ev-2")
+    stand.service.drain()
+    assert stand.service.dispatch_count() == 1
+
+
+def test_conf02_r1_late_contradiction_revokes_the_proof(ranked_stand):
+    stand = ranked_stand
+    _dispatch_on40(stand)
+    stand.clock.advance(99)
+    assert stand.ingest(
+        MAIN_RESOURCE,
+        sequence=2,
+        mono_ms=100,
+        properties={"on": True, "brightness_pct": 40},
+    ) == "confirmed"
+    assert stand.service.record(MAIN_RESOURCE).auto_proof is not None
+    # A contradicting member of the same report group arrives after the
+    # confirmation: the proof is revoked with a visible ambiguity reason.
+    contradiction = stand.raw_report(
+        MAIN_RESOURCE, 2, 100, {"brightness_pct": 10}
+    )
+    for observation in stand.adapter.normalize(contradiction):
+        stand.service.ingest_observation(observation)
+    assert stand.service.record(MAIN_RESOURCE).auto_proof is None
+    operation = stand.service.operations(MAIN_RESOURCE)[-1]
+    assert operation.phase is OperationPhase.UNKNOWN
+    assert operation.reason_code == "ambiguous_feedback_revoked"
+    assert (
+        stand.service.episode_lock_reason(MAIN_RESOURCE, OWNER_EPISODE)
+        == "ambiguous_feedback_revoked"
+    )
+
+
+def test_val01_r1_non_finite_number_becomes_invalid(ranked_stand):
+    stand = ranked_stand
+    _dispatch_on40(stand)
+    stand.clock.advance(99)
+    result = stand.ingest(
+        MAIN_RESOURCE,
+        sequence=2,
+        mono_ms=100,
+        properties={"on": True, "brightness_pct": float("nan")},
+    )
+    # A NaN brightness is an invalid value, not an exception and never a
+    # confirmation (SEC-FIRST-VAL-01-R1).
+    assert result == "recorded"
+    stand.clock.advance(10000)
+    stand.service.advance_timeouts()
+    view = stand.service.resource_view(MAIN_RESOURCE)
+    assert view.operation_phase == "unknown"
+    facts = {fact.property: fact for fact in view.facts}
+    assert facts["brightness_pct"].quality.value == "invalid"
+    assert stand.service.record(MAIN_RESOURCE).auto_proof is None
