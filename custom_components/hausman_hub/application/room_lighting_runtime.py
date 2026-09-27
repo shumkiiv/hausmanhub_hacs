@@ -1469,19 +1469,17 @@ class RoomLightingRuntime:
         if not isinstance(entity_id, str):
             return
         if self._core_input_port is not None:
-            # Immutable snapshot before the legacy history changes. Errors
-            # of the new branch never affect the legacy path (delivery
-            # HH-014.b lighting path: physical sending stays closed).
+            # Immutable snapshot delivered via a scheduled task: the port
+            # never blocks the legacy path, and errors are isolated
+            # (HH-014.b lighting path, SEC-LP-ISO01).
             try:
-                self._core_input_port(
-                    entity_id,
-                    data.get("old_state"),
-                    data.get("new_state"),
+                task = self._create_task(
+                    self._async_core_input(entity_id, data)
                 )
-            except Exception:  # noqa: BLE001 - isolation by design
-                _LOGGER.exception(
-                    "core input port failed for %s", entity_id
-                )
+                if task is not None:
+                    task.add_done_callback(self._core_input_done)
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("core input dispatch failed for %s", entity_id)
         rooms = self._rooms_by_entity.get(entity_id)
         if not rooms:
             return
@@ -1497,6 +1495,26 @@ class RoomLightingRuntime:
         self._observe_target_transition(entity_id)
         self._observe_power_transition(entity_id)
         self._create_task(self.async_process(sorted(rooms)))
+
+    async def _async_core_clock_tick(self) -> None:
+        try:
+            self._core_input_port("__clock__", None, None)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("core clock tick failed")
+
+    async def _async_core_input(self, entity_id: str, data: Mapping) -> None:
+        try:
+            self._core_input_port(
+                entity_id,
+                data.get("old_state"),
+                data.get("new_state"),
+            )
+        except Exception:  # noqa: BLE001 - isolation by design
+            _LOGGER.exception("core input failed for %s", entity_id)
+
+    def _core_input_done(self, task) -> None:
+        if not task.cancelled() and task.exception() is not None:
+            _LOGGER.debug("core input task completed with error: %s", task.exception())
 
     def _observe_target_transition(self, entity_id: str) -> None:
         """Attribution for a light that was switched off outside Home Assistant.
@@ -1602,9 +1620,11 @@ class RoomLightingRuntime:
             return
         if self._core_input_port is not None:
             try:
-                self._core_input_port("__clock__", None, None)
-            except Exception:  # noqa: BLE001 - isolation by design
-                _LOGGER.exception("core input clock tick failed")
+                self._create_task(
+                    self._async_core_clock_tick()
+                )
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("core clock tick dispatch failed")
         self._create_task(self.async_process())
 
     @_ha_callback

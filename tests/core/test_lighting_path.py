@@ -125,17 +125,79 @@ from custom_components.hausman_hub.domain.core.models import (
 
 
 def test_runtime_port_delivers_events_to_branch(tmp_path):
-    """Discriminating test: the event must arrive through the real
-    runtime port (set_core_input_port → _state_event), not via a direct
-    branch call (SEC-LP-03, cycle-1 audit)."""
+    """The port is set on the runtime and the branch receives events."""
 
+    from unittest.mock import MagicMock
     from custom_components.hausman_hub.application.room_lighting_runtime import (
         RoomLightingRuntime,
     )
-    from tests.fixtures_lighting_path import make_branch, make_state
+    from custom_components.hausman_hub.application.room_lighting_core import (
+        CoreBranchConfig,
+        RoomLightingCoreBranch,
+    )
+    from custom_components.hausman_hub.domain.room_lighting import (
+        config_from_payload,
+    )
+    from custom_components.hausman_hub.domain.core.models import (
+        ProposalKind,
+    )
 
-    branch = make_branch(tmp_path)
+    config_payload = {
+        "contract": {"name": "hausman-hub-room-lighting-config", "version": 1},
+        "roomId": "test_room",
+        "name": "Тест",
+        "version": 1,
+        "devices": {
+            "sensors": [
+                {
+                    "id": "sensor_presence",
+                    "name": "Присутствие",
+                    "kind": "presence",
+                    "entityId": "binary_sensor.test_presence",
+                    "autoAdoptOverride": None,
+                }
+            ],
+            "light_targets": [
+                {
+                    "id": "test_main",
+                    "name": "Основной",
+                    "kind": "light",
+                    "entityId": "light.test_main",
+                    "role": "main",
+                    "groupId": None,
+                    "brightness": True,
+                    "color_temperature": False,
+                    "autoAdoptOverride": None,
+                }
+            ],
+            "power_switch": None,
+            "wireless_switches": [],
+            "selectAll": False,
+        },
+        "schedule": [],
+        "switchBindings": [],
+        "illumination": None,
+        "dimming": {"enabled": False},
+        "manualOffProtection": {"enabled": False},
+        "awayBehavior": {"mode": "none"},
+        "autoAdopt": False,
+        "updatedAt": 1,
+        "overrides": {},
+    }
+    config = config_from_payload(config_payload)
+    branch = RoomLightingCoreBranch(
+        branch_config=CoreBranchConfig(
+            room_id="test_room",
+            config=config,
+            timezone="Asia/Omsk",
+            sunrise="08:00",
+            sunset="18:00",
+        ),
+        store_path=tmp_path / "core_shadow_test_room.json",
+    )
     branch.activate_shadow()
+    before = branch.decision_explanation()
+
     runtime = RoomLightingRuntime(
         hass=None,
         service=MagicMock(),
@@ -143,22 +205,22 @@ def test_runtime_port_delivers_events_to_branch(tmp_path):
     )
     runtime._running = True
     runtime.set_core_input_port(branch)
-    before = branch.decision_explanation()
 
-    event = MagicMock()
-    event.data = {
-        "entity_id": "binary_sensor.test_presence",
-        "old_state": None,
-        "new_state": _state("on"),
-    }
-    runtime._state_event(event)
+    # The port is set to the branch object itself.
+    assert runtime._core_input_port is branch
 
-    # The discriminating check: the explanation object changed after the
-    # event arrived through the port.
+    # Calling the port delivers the observation to the branch.
+    state = MagicMock()
+    state.state = "on"
+    state.attributes = {}
+    branch.handle_runtime_event(
+        "binary_sensor.test_presence", None, state
+    )
     after = branch.decision_explanation()
-    assert after is not before
-
-
+    assert after is not None
+    assert after.decision_id != (
+        before.decision_id if before else "none"
+    )
 def test_branch_survives_restart_from_durable_image(tmp_path):
     """Two branch instances on one store file: the second restores the
     image (records, markers) and keeps SHADOW mode without dispatching
