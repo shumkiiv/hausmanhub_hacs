@@ -846,6 +846,7 @@ def test_sec_s04_08_no_op_manual_at_full_capacity_adds_nothing():
         episode_map={OWNER_PROPOSAL: OWNER_EPISODE},
     )
     image = stand.service._build_image()
+    # Fill the store to the exact limit with counted UNKNOWN outcomes.
     for index in range(1024):
         image["operations"][f"seed-{index}"] = Operation(
             operation_id=f"seed-{index}",
@@ -859,18 +860,30 @@ def test_sec_s04_08_no_op_manual_at_full_capacity_adds_nothing():
             binding_revision=3,
             scope_revisions={},
             created_at_mono_ms=0,
-            phase=OperationPhase.NO_OP,
+            phase=OperationPhase.UNKNOWN,
             reason_code="seed",
         )
     stand.store.commit(stand.store.commit_revision, image)
     restarted = restore_file_stand(stand)
-    # NO_OP manual adds no unresolved operation: accepted even at the
-    # exact limit (seeded NO_OP ops are terminal and do not count).
+    assert restarted.service._count_unresolved_operations() == 1024
+    # A NO_OP manual adds no unresolved operation: accepted exactly at
+    # the limit (SEC-S04-08-T boundary).
     restarted.ingest(
         MAIN_RESOURCE, sequence=2, mono_ms=5, properties={"on": False}
     )
     receipt = _manual(restarted, "req-noop", expected=12)
     assert receipt.status is ManualStatus.NO_OP
+    assert restarted.service._count_unresolved_operations() == 1024
+    # A dispatched manual would exceed it and is refused.
+    with pytest.raises(CapacityExceeded):
+        restarted.service.submit_manual(
+            resource_ref=MAIN_RESOURCE,
+            request_id="req-over",
+            action_id="manual.on40",
+            target=BASE_TARGET_ON40,
+            source="test.ui",
+            expected_control_revision=13,
+        )
 
 
 def test_sec_s04_11c_provenance_survives_image_recommit():
@@ -893,9 +906,16 @@ def test_sec_s04_11c_provenance_survives_image_recommit():
     stand.service.drain()
     first_restarted = restore_file_stand(stand)
     assert first_restarted.service._restored_operation_ids
-    # The restore commit wrote the markers into the image; a second
-    # restart keeps them.
+    # The markers are durable: the stored image carries them and a
+    # reload (and its own re-commit) keeps them — this discriminates a
+    # real roundtrip from a set recomputed from operations.
+    stored = first_restarted.store.load()
+    assert stored["restored_operation_ids"]
     second_restarted = restore_file_stand(first_restarted)
+    stored_twice = second_restarted.store.load()
+    assert stored_twice["restored_operation_ids"] == stored[
+        "restored_operation_ids"
+    ]
     assert (
         second_restarted.service._restored_operation_ids
         == first_restarted.service._restored_operation_ids

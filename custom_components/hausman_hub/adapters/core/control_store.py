@@ -602,7 +602,10 @@ def decode_state(raw: Mapping) -> dict:
             _RECORDS: records,
             _OPERATIONS: operations,
             _RECEIPTS: receipts,
-            _RECEIPT_TIMES: dict(raw[_RECEIPT_TIMES]),
+            _RECEIPT_TIMES: {
+                key: _strict_int(value, f"receipt_times[{key}]")
+                for key, value in raw[_RECEIPT_TIMES].items()
+            },
             _RECEIPT_FINGERPRINTS: {
                 request_id: tuple(
                     _decode_fingerprint_part(part) for part in fingerprint
@@ -621,10 +624,9 @@ def decode_state(raw: Mapping) -> dict:
                 key: _strict_int(value, f"config_revisions[{key}]")
                 for key, value in raw[_CONFIG_REVISIONS].items()
             },
-            _RECEIPT_TIMES: {
-                key: _strict_int(value, f"receipt_times[{key}]")
-                for key, value in raw[_RECEIPT_TIMES].items()
-            },
+            "restored_operation_ids": set(
+                raw.get("restored_operation_ids", [])
+            ),
         }
     except StoreImageError:
         raise

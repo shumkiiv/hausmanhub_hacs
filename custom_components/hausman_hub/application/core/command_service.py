@@ -333,7 +333,6 @@ class CoreCommandService:
         self._confirm_keys: dict[str, tuple] = {}
         self._dispatching: dict[str, str] = {}
         self._receipt_times: dict[str, int] = {}
-        self._image_boot_id: str | None = None
         self._id_floor = 0
         self._restored_operation_ids: set[str] = set()
         self._episode_locks: dict[tuple[str, str], str] = {}
@@ -765,7 +764,7 @@ class CoreCommandService:
             # superseded pending targets freed their slot above, so the
             # check counts the true occupancy (SEC-S04-08).
             self._ensure_operation_capacity(
-                self._count_unresolved_operations() + 1, resource_id
+                self._count_unresolved_operations() + 1
             )
         if no_op_decided:
             operation = Operation(
@@ -1432,9 +1431,7 @@ class CoreCommandService:
             ),
         )
         added = 0 if no_op_now else 1
-        self._ensure_operation_capacity(
-            unresolved_total - freed + added, resource_id
-        )
+        self._ensure_operation_capacity(unresolved_total - freed + added)
         # 2. deny-only barrier closes automatic dispatch immediately.
         self._deny_barrier.add(resource_id)
         # Pending automatic commands of this resource only (K-07).
@@ -1626,9 +1623,7 @@ class CoreCommandService:
             )
         )
 
-    def _ensure_operation_capacity(
-        self, future_unresolved: int, resource_id: str
-    ) -> None:
+    def _ensure_operation_capacity(self, future_unresolved: int) -> None:
         if future_unresolved > MAX_UNRESOLVED_OPERATIONS:
             raise CapacityExceeded("unresolved_operations_full")
 
