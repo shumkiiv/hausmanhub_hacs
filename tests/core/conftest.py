@@ -75,9 +75,10 @@ TARGET_OFF = LightStateTarget(
 class FakeClock:
     """Deterministic virtual clock; boot id matches the stand passport."""
 
-    def __init__(self) -> None:
+    def __init__(self, boot_id: str = BOOT_ID) -> None:
         self.mono_ms = 0
         self.utc_ms = START_UTC_MS
+        self.boot = boot_id
         self.platform_sync_confirmed = True
 
     def now_mono_ms(self) -> int:
@@ -87,7 +88,7 @@ class FakeClock:
         return self.utc_ms
 
     def boot_id(self) -> str:
-        return BOOT_ID
+        return self.boot
 
     def wall_clock_trust(self):
         from custom_components.hausman_hub.domain.core.recovery import (
@@ -607,7 +608,9 @@ def restore_file_stand(
         evaluate_clock_trust,
     )
 
-    clock = FakeClock()
+    # A restart is a new process: a new boot id makes the old
+    # monotonic boundary data incomparable (K-10).
+    clock = FakeClock(boot_id="test.boot2")
     clock.utc_ms = stand.clock.utc_ms
     clock.platform_sync_confirmed = platform_sync
     counter = Counter()

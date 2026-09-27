@@ -161,26 +161,24 @@ class FileControlStore:
         if not self._path.exists():
             return None
         try:
+            # The whole load path — read, shape, decode and revision — is
+            # guarded: any failure closes this instance so it can never
+            # overwrite a file it could not verify (SEC-S04-02).
             raw = json.loads(
                 self._path.read_text(encoding="utf-8"),
                 parse_constant=lambda name: (_ for _ in ()).throw(
                     StoreImageError(f"non-finite number: {name}")
                 ),
             )
+            validate_image_shape(raw)
+            state = decode_state(raw)
+            self._commit_revision = _strict_int(state[_COMMIT], _COMMIT)
         except StoreImageError:
             self._closed = True
             raise
         except Exception as exc:
-            # A failing load closes the existing instance too: it must
-            # never overwrite a file it could not verify (SEC-S04-02).
             self._closed = True
             raise StoreImageError(f"stored image is unreadable: {exc}") from exc
-        if not isinstance(raw, Mapping):
-            self._closed = True
-            raise StoreImageError("stored image is not an object")
-        validate_image_shape(raw)
-        state = decode_state(raw)
-        self._commit_revision = _strict_int(state[_COMMIT], _COMMIT)
         self._closed = False
         return state
 
@@ -448,7 +446,6 @@ def encode_state(state: Mapping) -> dict:
         },
         _OPERATIONS: operations,
         _RECEIPTS: receipts,
-        _RECEIPT_TIMES: dict(state.get(_RECEIPT_TIMES, {})),
         _RECEIPT_FINGERPRINTS: {
             request_id: [
                 _encode_fingerprint_part(part) for part in fingerprint
@@ -601,8 +598,18 @@ def decode_state(raw: Mapping) -> dict:
             },
             _CONFIRM_KEYS: confirm_keys,
             _EPISODE_LOCKS: episode_locks,
-            _SCOPE_REVISIONS: dict(raw[_SCOPE_REVISIONS]),
-            _CONFIG_REVISIONS: dict(raw[_CONFIG_REVISIONS]),
+            _SCOPE_REVISIONS: {
+                key: _strict_int(value, f"scope_revisions[{key}]")
+                for key, value in raw[_SCOPE_REVISIONS].items()
+            },
+            _CONFIG_REVISIONS: {
+                key: _strict_int(value, f"config_revisions[{key}]")
+                for key, value in raw[_CONFIG_REVISIONS].items()
+            },
+            _RECEIPT_TIMES: {
+                key: _strict_int(value, f"receipt_times[{key}]")
+                for key, value in raw[_RECEIPT_TIMES].items()
+            },
         }
     except StoreImageError:
         raise

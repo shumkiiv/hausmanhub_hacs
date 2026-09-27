@@ -521,6 +521,7 @@ class CoreCommandService:
         commit revision before becoming durable."""
         return {
             "commit_revision": self._store.commit_revision,
+            "boot_id": self._clock.boot_id(),
             "records": dict(self._records),
             "operations": dict(self._operations),
             "receipts": dict(self._receipts),
@@ -1683,6 +1684,7 @@ class CoreCommandService:
         )
         if loaded:
             service._operations = dict(loaded.get("operations", {}))
+            service._image_boot_id = loaded.get("boot_id")
             service._restored_operation_ids = set(service._operations)
             # The id floor is computed from the loaded operations, not
             # from an empty map (SEC-S04-10).
