@@ -485,6 +485,97 @@ def test_core_manual_holds_transfers_full_authority_barrier():
     assert view.evidence_id.startswith("authority.barrier.")
 
 
+def test_real_fingerprints_are_opaque_at_transfer():
+    """SEC-C6-R2-01: real authority fingerprints embed HA entity names;
+    the transfer must never copy them into the core frame."""
+
+    from custom_components.hausman_hub.application.room_lighting_runtime import (
+        RoomLightingRuntime,
+    )
+
+    class _RealFingerprintAuthority:
+        @property
+        def unhealthy(self) -> bool:
+            return False
+
+        def __init__(self) -> None:
+            self._record = MagicMock()
+            self._record.action = "on"
+            self._record.source = "hue_remote"
+            self._record.observed_at_ms = 1000
+            self._record.deadline_ms = 3_601_000
+            self._record.fingerprint = (
+                "hue_remote:light.test_main:ctx1:event9"
+            )
+
+        def record(self, entity_id):
+            return self._record
+
+        def blocks(self, entity_id):
+            return False
+
+    runtime = RoomLightingRuntime(
+        hass=None,
+        service=MagicMock(),
+        shadow=MagicMock(),
+        manual_light_authority=_RealFingerprintAuthority(),
+    )
+    target = MagicMock()
+    target.entity_id = "light.test_main"
+    room_config = MagicMock()
+    room_config.devices.light_targets = [target]
+    runtime._configs = {"room": room_config}
+
+    holds = runtime.core_manual_holds()
+    assert holds is not None
+    view = holds["light.test_main"]
+    assert view.evidence_id.startswith("auth.hold.")
+    assert "test_main" not in view.evidence_id
+    assert ":" not in view.evidence_id
+
+
+def test_stop_hook_closes_branch_input(tmp_path):
+    """SEC-C6-R2-02: after the stop hook, no thread — even one already
+    queued in the executor — can process or write."""
+
+    branch = _branch(tmp_path)
+    before = branch.decision_explanation()
+    branch.on_runtime_stop()
+    # Simulate a worker that entered the executor before the stop.
+    branch.handle_runtime_event(
+        "binary_sensor.test_presence", None, _state("on")
+    )
+    assert branch.decision_explanation() is before
+    assert branch._event_counter == 1  # only the activation cycle
+
+
+def test_transferred_hold_action_id_is_opaque(tmp_path):
+    now_ms = int(time.time() * 1000)
+    branch = _branch_with_provider(
+        tmp_path,
+        lambda: {
+            "light.test_main": ManualHoldView(
+                entity_id="light.test_main",
+                action="on",
+                source="hue_remote",
+                proven_at_utc_ms=now_ms - 1000,
+                priority_until_utc_ms=now_ms + 3_600_000,
+                evidence_id="auth.hold.0f3a",
+            )
+        },
+    )
+    branch.handle_runtime_event(
+        "binary_sensor.test_presence", None, _state("on")
+    )
+    manual = branch._service.record("test_main").manual
+    assert manual is not None
+    assert manual.action_id == "auth.hold.0f3a"
+    assert "test_main" not in manual.action_id
+    # The durable image keeps the boundary too.
+    image = branch._store.load()
+    assert image is not None
+
+
 # --- 4. observation ids are resource-scoped ---------------------------
 
 

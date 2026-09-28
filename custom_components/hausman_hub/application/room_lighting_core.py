@@ -200,6 +200,10 @@ class RoomLightingCoreBranch:
         # two events could otherwise interleave inside the branch and the
         # store. One reentrant lock makes every processing cycle atomic.
         self._lock = threading.RLock()
+        # Set by the stop hook under the same lock: after it returns, no
+        # thread — including one already queued in the executor — can
+        # process or write (SEC-C6-R2-02).
+        self._input_closed = False
         self._manual_holds_provider = manual_holds_provider
         self._target_bindings: dict[str, str] = {
             target.id: target.entity_id
@@ -229,9 +233,15 @@ class RoomLightingCoreBranch:
             self._mode = self.MODE_OFF
 
     def on_runtime_stop(self) -> None:
-        """Called by the legacy runtime on stop: flush the store."""
+        """Called by the legacy runtime on stop: close the input and flush.
+
+        The closed flag is set under the branch lock, so a worker thread
+        already inside a processing cycle finishes it first; every later
+        entry — including one still queued in the executor — is dropped
+        by the guard in the input path (SEC-C6-R2-02)."""
 
         with self._lock:
+            self._input_closed = True
             self._store.flush()
 
     def __call__(
@@ -257,7 +267,7 @@ class RoomLightingCoreBranch:
     def _handle_runtime_event_locked(
         self, entity_id: str, old_state: object, new_state: object
     ) -> None:
-        if self._mode is not self.MODE_SHADOW:
+        if self._input_closed or self._mode is not self.MODE_SHADOW:
             return
         if entity_id == "__clock__":
             # Minute boundary: the schedule recalculation tick.

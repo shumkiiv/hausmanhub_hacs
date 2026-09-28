@@ -1547,13 +1547,16 @@ class RoomLightingRuntime:
             created.add_done_callback(self._core_input_tasks.discard)
 
     async def _drain_core_input(self) -> None:
-        """Wait for in-flight core-input processing, then close the input.
+        """Wait for registered core-input tasks, then close the input.
 
-        Registered tasks are gathered first (including tasks that were
-        created but have not started yet): they still process, because
-        the closed flag is only set after the queue is empty. A task that
-        was scheduled off-loop and never registered by then hits the
-        closed guard inside the input coroutine and writes nothing."""
+        From ``stop()``: registered tasks — including ones created but
+        not started — are gathered first and still process; the closed
+        flag is only set after the queue empties. From the sync unload
+        hook (``close_and_drain_core_input``) the flag is set first, so
+        not-yet-started tasks are dropped by the guard inside the input
+        coroutine instead of writing after unload. Either way nothing
+        writes after the caller finished; the branch stop hook closes
+        the branch itself under its lock (SEC-C6-R2-02)."""
 
         while True:
             pending = [
@@ -1637,7 +1640,13 @@ class RoomLightingRuntime:
                             record.deadline_ms,
                             now_ms + MANUAL_PRIORITY_TRANSFER_MS,
                         ),
-                        evidence_id=record.fingerprint,
+                        # Opaque: real authority fingerprints embed HA
+                        # entity names and must not cross the adapter
+                        # (SEC-C6-R2-01).
+                        evidence_id=(
+                            f"auth.hold."
+                            f"{_opaque_entity_tag(record.fingerprint)}"
+                        ),
                     )
                     continue
                 if authority is not None:
@@ -1682,7 +1691,8 @@ class RoomLightingRuntime:
                                 now_ms + MANUAL_PRIORITY_TRANSFER_MS,
                             ),
                             evidence_id=(
-                                evidence.fingerprint
+                                f"auth.hold."
+                                f"{_opaque_entity_tag(evidence.fingerprint)}"
                                 if evidence is not None
                                 else (
                                     "authority.barrier."
