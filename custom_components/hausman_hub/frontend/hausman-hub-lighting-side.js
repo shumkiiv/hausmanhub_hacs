@@ -1,6 +1,7 @@
 /* Right column of the lighting section: quick actions, active lights, attention, history. */
 
 import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.296";
+import { coreControlForTarget } from "./hausman-hub-core-control.js?v=1.52.296";
 
 const LIGHTING_SIDE_SVG_NAMESPACE = "http" + "://www.w3.org/2000/svg";
 
@@ -43,11 +44,23 @@ function turnOffEntries(panel, devices) {
 }
 
 /* Commands go one by one through the shared device-actions flow with receipts and reload. */
+/* Core envelopes of transferred participants are captured before the first POST: */
+/* a mid-group catalog reload must not rewrite already confirmed actions (HH-014.b). */
 async function executeTurnOff(panel, entries) {
-  for (const entry of entries) {
+  const snapshots = entries.map((entry) => {
+    let prepared = null;
+    if (typeof panel._catalogTargets === "function") {
+      const target = panel
+        ._catalogTargets(entry.device)
+        .find((item) => item.target_id === entry.targetId);
+      prepared = target ? coreControlForTarget(target) : null;
+    }
+    return { ...entry, options: { coreControl: prepared } };
+  });
+  for (const entry of snapshots) {
     if (typeof panel._executeDeviceAction !== "function") return;
     // eslint-disable-next-line no-await-in-loop
-    await panel._executeDeviceAction(entry.targetId, "turn_off", null);
+    await panel._executeDeviceAction(entry.targetId, "turn_off", null, entry.options);
   }
 }
 

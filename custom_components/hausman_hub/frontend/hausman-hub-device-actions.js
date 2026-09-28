@@ -2,6 +2,7 @@ import { resolveIntercomQuickAction } from "./hausman-hub-navigation.js?v=1.52.2
 import { apiErrorMessage } from "./hausman-hub-error-taxonomy.js?v=1.52.296";
 import { filterCatalogActions } from "./hausman-hub-device-features.js?v=1.52.296";
 import { fullDeviceActionRequest, withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.296";
+import { coreControlForTarget, withCoreControl } from "./hausman-hub-core-control.js?v=1.52.296";
 
 const DEVICE_ACTION_EXECUTOR_API = "hausman_hub/v1/device-actions";
 
@@ -103,13 +104,32 @@ export async function executeDeviceAction(owner, targetId, actionId, value, opti
   owner._notice = "";
   owner._render();
   try {
+    // The core envelope is captured synchronously from the catalog the
+    // user acted on, before any asynchronous work (HH-014.b client).
+    // A caller-supplied snapshot (sequential group) always wins so a
+    // mid-group reload cannot rewrite confirmed actions.
+    let corePrepared = null;
+    if (options.coreControl !== undefined) {
+      corePrepared = options.coreControl;
+    } else if (target) {
+      corePrepared = coreControlForTarget(target);
+    }
+    if (corePrepared && corePrepared.refused) {
+      owner._notice = corePrepared.refused;
+      owner._error = false;
+      return;
+    }
     let payload = { targetId, actionId };
     if (value !== null && value !== undefined) payload.value = value;
     if (options.confirmedByUser === true) payload.confirmedByUser = true;
     if (options.dryRun === true) payload.dryRun = true;
     let headers;
-    if (options.dryRun !== true) {
+    // A transferred target always uses the full form: the legacy form
+    // does not allow the coreControl envelope (0.72.1), including for
+    // dry runs.
+    if (options.dryRun !== true || corePrepared !== null) {
       ({ payload, headers } = fullDeviceActionRequest(payload, deviceActionRequestId()));
+      payload = withCoreControl(payload, corePrepared, payload.requestId);
     }
     const receipt = await owner._hass.callApi(
       "POST",

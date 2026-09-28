@@ -1,0 +1,50 @@
+{
+  "devices": [
+    {
+      "target_id": "stand_light_main",
+      "name": "Основной свет стенда",
+      "entity_id": "light.stand_main",
+      "actions": [
+        {
+          "action_id": "turn_on",
+          "title": "Включить",
+          "domain": "light",
+          "service": "turn_on",
+          "allowed_fields": []
+        },
+        {
+          "action_id": "turn_off",
+          "title": "Выключить",
+          "domain": "light",
+          "service": "turn_off",
+          "allowed_fields": []
+        }
+      ],
+      "coreControlState": {
+        "version": 1,
+        "status": "unavailable"
+      }
+    },
+    {
+      "target_id": "stand_light_neighbor",
+      "name": "Соседний свет",
+      "entity_id": "light.stand_neighbor",
+      "actions": [
+        {
+          "action_id": "turn_on",
+          "title": "Включить",
+          "domain": "light",
+          "service": "turn_on",
+          "allowed_fields": []
+        },
+        {
+          "action_id": "turn_off",
+          "title": "Выключить",
+          "domain": "light",
+          "service": "turn_off",
+          "allowed_fields": []
+        }
+      ]
+    }
+  ]
+}

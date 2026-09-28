@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.http import HomeAssistantView
 
+from .application.core_manual_input import CoreManualInput
 from .application.scenario_service import (
     ScenarioNotFoundError,
     ScenarioCatalogNotReadyError,
@@ -304,6 +305,22 @@ class ScenarioCatalogView(_ScenarioView):
                 value = getattr(device, key)
                 if value is not None:
                     item[key] = value
+            core_manual_input = self._hass.data.get(DOMAIN, {}).get(
+                "core_manual_input"
+            )
+            if isinstance(core_manual_input, CoreManualInput) and (
+                core_manual_input.is_transferred(device.target_id)
+            ):
+                # Contract 0.72.2: the revision pair for the first
+                # client request. Read off the event loop — the branch
+                # lock may be contended by ticks and admissions
+                # (HH-014.b client assignment §5).
+                item["coreControlState"] = (
+                    await self._hass.async_add_executor_job(
+                        core_manual_input.core_control_state,
+                        str(device.target_id),
+                    )
+                )
             devices.append(item)
         saved_scenarios = await service.async_list_scenarios()
         scenarios = [

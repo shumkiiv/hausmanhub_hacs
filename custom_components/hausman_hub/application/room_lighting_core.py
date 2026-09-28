@@ -308,6 +308,31 @@ class RoomLightingCoreBranch:
 
         return self._service
 
+    def read_core_control_state(self, resource_id: str) -> dict:
+        """Contract 0.72.2 ``coreControlState`` of one resource.
+
+        Read under the same branch lock as ticks and admissions, so the
+        pair is a consistent snapshot. A closed branch, an unknown
+        resource or a missing profile never hides the transfer: the
+        answer is ``unavailable`` and the client must not fall back to
+        the legacy path. The caller keeps this read off the event loop
+        when the branch lock may be contended."""
+
+        with self._lock:
+            if self._input_closed:
+                return {"version": 1, "status": "unavailable"}
+            try:
+                spec = self._service.spec(resource_id)
+                record = self._service.record(resource_id)
+            except CoreServiceError:
+                return {"version": 1, "status": "unavailable"}
+            return {
+                "version": 1,
+                "status": "ready",
+                "controlRevision": record.control_revision,
+                "bindingRevision": spec.binding_revision,
+            }
+
     def admit_manual(
         self,
         *,

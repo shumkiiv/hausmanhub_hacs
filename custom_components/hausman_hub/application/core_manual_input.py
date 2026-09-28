@@ -194,6 +194,22 @@ class CoreManualInput:
         self.resolve_target(target_id)
         return "light"
 
+    def core_control_state(self, target_id: str) -> dict:
+        """Contract 0.72.2 ``coreControlState`` for one target.
+
+        Tolerant read for the catalog projection: an unknown target or
+        a missing branch answers ``unavailable`` instead of raising, so
+        one broken entry cannot hide the transfer or break the neighbor
+        devices. The caller runs this off the event loop."""
+
+        binding = self._bindings.get(target_id)
+        if binding is None:
+            return {"version": 1, "status": "unavailable"}
+        branch = self._branches.get(binding.room_id)
+        if branch is None:
+            return {"version": 1, "status": "unavailable"}
+        return branch.read_core_control_state(binding.resource_id)
+
     # ------------------------------------------------------------------
     # admission
 

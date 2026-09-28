@@ -38,6 +38,42 @@
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
     },
+    "core_control_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "status"],
+      "properties": {
+        "version": {"const": 1},
+        "status": {"enum": ["ready", "unavailable"]},
+        "controlRevision": {"type": "integer", "minimum": 0},
+        "bindingRevision": {"type": "integer", "minimum": 0}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"status": {"const": "ready"}},
+            "required": ["status"]
+          },
+          "then": {
+            "required": ["controlRevision", "bindingRevision"]
+          }
+        },
+        {
+          "if": {
+            "properties": {"status": {"const": "unavailable"}},
+            "required": ["status"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {"required": ["controlRevision"]},
+                {"required": ["bindingRevision"]}
+              ]
+            }
+          }
+        }
+      ]
+    },
     "device": {
       "type": "object",
       "additionalProperties": false,
@@ -49,6 +85,7 @@
           "type": "string",
           "pattern": "^[a-z][a-z0-9_]*\\.[a-z0-9_]+$"
         },
+        "coreControlState": {"$ref": "#/$defs/core_control_state"},
         "physical_id": {"$ref": "#/$defs/stable_id"},
         "physical_name": {"type": "string", "minLength": 1, "maxLength": 240},
         "room_id": {"$ref": "#/$defs/stable_id"},

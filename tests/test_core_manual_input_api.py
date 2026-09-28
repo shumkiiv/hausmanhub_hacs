@@ -126,6 +126,13 @@ class CoreManualInputApiTest(unittest.TestCase):
             },
             states=SimpleNamespace(get=lambda entity_id: None),
         )
+
+        def async_add_executor_job(target, *args):
+            return asyncio.get_running_loop().run_in_executor(
+                None, lambda: target(*args)
+            )
+
+        self.hass.async_add_executor_job = async_add_executor_job
         self.view = self.device_action_api.DeviceActionView(self.hass)
         self.batch_view = self.device_action_api.DeviceActionBatchView(
             self.hass
@@ -729,6 +736,111 @@ class CoreManualInputApiTest(unittest.TestCase):
         # the moved revision conflicts.
         self.assertNotEqual(first.payload, second.payload)
         self.assertEqual([], self.executor.calls)
+
+    def test_catalog_publishes_core_control_state(self):
+        """Contract 0.72.2: the real catalog view publishes the
+        revision pair for the transferred target (ready), nothing for
+        the neighbour, and unavailable after the branch stops."""
+
+        import types as types_module
+
+        scenario_api = importlib.import_module(
+            "custom_components.hausman_hub.scenario_api"
+        )
+        service = self.device_action_api.ScenarioService.__new__(
+            self.device_action_api.ScenarioService
+        )
+        transferred = SimpleNamespace(
+            target_id=stand.PUBLIC_TARGET_ID,
+            name="Основной свет стенда",
+            entity_id=stand.ENTITY_ID,
+            properties=[],
+            actions=[],
+            physical_id=None,
+            physical_name=None,
+            room_id=None,
+            room_name=None,
+            device_type=None,
+            device_type_name=None,
+            capability_name=None,
+        )
+        neighbour = SimpleNamespace(
+            target_id="light.neighbor",
+            name="Соседний свет",
+            entity_id="light.neighbor",
+            properties=[],
+            actions=[],
+            physical_id=None,
+            physical_name=None,
+            room_id=None,
+            room_name=None,
+            device_type=None,
+            device_type_name=None,
+            capability_name=None,
+        )
+        service._registry = object()  # noqa: SLF001 - the view checks readiness
+        service.current_catalog = lambda: SimpleNamespace(
+            devices={
+                stand.PUBLIC_TARGET_ID: transferred,
+                "light.neighbor": neighbour,
+            }
+        )
+
+        async def list_scenarios():
+            return []
+
+        service.async_list_scenarios = list_scenarios
+        service.__dict__["_catalog_readiness"] = {"state": "ready"}
+        self.hass.data["hausman_hub"]["scenario_service"] = service
+
+        admin = harness.reader_user("system-admin", admin=True)
+        view = scenario_api.ScenarioCatalogView(self.hass)
+        catalog_path = "/api/hausman_hub/v1/admin/scenarios/catalog"
+        response = asyncio.run(
+            view.post(
+                harness.FakeJsonRequest(
+                    "192.168.1.20", admin, catalog_path, {}
+                )
+            )
+            if False
+            else view.get(
+                harness.FakeRequest("192.168.1.20", admin, catalog_path)
+            )
+        )
+        # FakeRequest has no .query_string default matching ""... ensure
+        self.assertEqual(200, response.status)
+        devices = {
+            item["target_id"]: item for item in response.payload["devices"]
+        }
+        self.assertEqual(
+            {
+                "version": 1,
+                "status": "ready",
+                "controlRevision": self.branch.core_service.record(
+                    stand.RESOURCE_ID
+                ).control_revision,
+                "bindingRevision": self.branch.core_service.spec(
+                    stand.RESOURCE_ID
+                ).binding_revision,
+            },
+            devices[stand.PUBLIC_TARGET_ID]["coreControlState"],
+        )
+        self.assertNotIn("coreControlState", devices["light.neighbor"])
+
+        self.branch.on_runtime_stop()
+        stopped = asyncio.run(
+            view.get(
+                harness.FakeRequest("192.168.1.20", admin, catalog_path)
+            )
+        )
+        stopped_devices = {
+            item["target_id"]: item
+            for item in stopped.payload["devices"]
+        }
+        self.assertEqual(
+            {"version": 1, "status": "unavailable"},
+            stopped_devices[stand.PUBLIC_TARGET_ID]["coreControlState"],
+        )
 
     def test_mixed_dangerous_and_transferred_batch_is_refused(self):
         """A batch mixing a transferred resource with a dangerous

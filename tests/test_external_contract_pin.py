@@ -56,7 +56,7 @@ VENDORED_CONTRACT_HASHES = {
     "custom_components/hausman_hub/contracts/v1/device-action-request.schema.json": "e12f274ee8ae76a1954d159134ce253b2006f9763f3c466b9b0789770738f590",
     "custom_components/hausman_hub/contracts/v1/device-action-receipt.schema.json": "185cf1d1bc85e548c22800c8d5d80e60ce2037d5c82874d5845bdd115f9c415e",
     "custom_components/hausman_hub/contracts/v1/intercom-release-receipt.schema.json": "ea11c82a77a3fe9195513d1a915336167c81a356fa0b56cf058384daedacf947",
-    "custom_components/hausman_hub/contracts/v1/scenario-catalog.schema.json": "3b43fa73e6c254ed0f87188a9f7d50144ee43dd7542233b4dcaf32d3d2629f55",
+    "custom_components/hausman_hub/contracts/v1/scenario-catalog.schema.json": "01ef48ff9309c136cd2aef873a81a29ce7de2b110ef0ee4267953448eeafeecd",
     "custom_components/hausman_hub/contracts/v1/scenario-dry-run-result.schema.json": "533a303e6e9057efd8660972f3f1216b125cace27a152f9d029767968cc40a9f",
     "custom_components/hausman_hub/contracts/v1/operation-journal.schema.json": "3550cccabc86052c666a9fca3b2d69ba139218c50a657ca3161f7f4bdfc4b6d2",
     "custom_components/hausman_hub/contracts/v1/device-action-batch-request.schema.json": "86ba156655cbd3750420ec6a3142d440796725d77836aa320202e1b21b168171",
@@ -118,6 +118,9 @@ VENDORED_CONTRACT_HASHES = {
     "custom_components/hausman_hub/contracts/v1/fixtures/core-manual-batch-request.json": "b55be55355ec18be2f0f978653b639d1a4fa5a2f4d11525571a5850b535c28c9",
     "custom_components/hausman_hub/contracts/v1/fixtures/core-manual-single-receipt.json": "d6aa823e8a33c3e50a88a20451e0094fe4160edf7355460354f6be36d876b054",
     "custom_components/hausman_hub/contracts/v1/fixtures/core-manual-batch-receipt.json": "e0c0d20417fcf9602a0dfab213cd100591afc0ce74553db36e602420f11879e1",
+    "custom_components/hausman_hub/contracts/v1/fixtures/core-manual-catalog-ready.json": "6f0ac9e84679d13dce213d6a81a11283e68a77bfd72ad3cb72a0e5c122877346",
+    "custom_components/hausman_hub/contracts/v1/fixtures/core-manual-catalog-unavailable.json": "a399bb04b613e57e050a7a07bcb52a7a0ae8ca7c635c16f156dcd4edbaf3bed4",
+    "custom_components/hausman_hub/contracts/v1/fixtures/core-manual-catalog-legacy.json": "6cf9d4de229b5e1bed4d35aa8e3f3f9f0ac80f31397a71236a35d97a35c13c53",
 }
 
 
@@ -133,8 +136,8 @@ def test_external_contract_pin_is_explicit() -> None:
 
     assert pin == {
         "repository": "shumkiiv/hausmanhub-contracts",
-        "version": "0.72.1",
-        "commit": "e0fe03e5708cfb9aad2495239a106d41a6d36ef8",
+        "version": "0.72.2",
+        "commit": "0f56fc7e2bd6742ce2accb955b823d45264265e5",
         "canonical": False,
         "role": "runtime-consumer",
     }
