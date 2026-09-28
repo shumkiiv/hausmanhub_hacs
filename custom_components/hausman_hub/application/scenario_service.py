@@ -5573,6 +5573,7 @@ class ScenarioService:
                         dry_run=dry_run,
                         action_index=index,
                         full=core_full_receipts,
+                        value=value,
                     )
                 )
                 continue

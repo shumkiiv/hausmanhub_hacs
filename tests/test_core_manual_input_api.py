@@ -639,6 +639,35 @@ class CoreManualInputApiTest(unittest.TestCase):
             [("light.neighbor", "turn_on")], self.executor.calls
         )
 
+    def test_refused_batch_participant_full_item_is_schema_valid(self):
+        """A refused value-action participant keeps its actionValue in
+        the full receipt (R-S06-04) and the whole batch answer stays
+        schema-valid."""
+
+        self._report("on")
+        response = self._full_batch(
+            {
+                "requestId": "batch-full-5",
+                "correlationId": "corr.batch.5",
+                "actions": [
+                    {
+                        "targetId": stand.PUBLIC_TARGET_ID,
+                        "actionId": "set_brightness",
+                        "value": 40,
+                    }
+                ],
+            }
+        )
+        self.assertEqual(HTTPStatus.OK, response.status)
+        item = response.payload["receipts"][0]
+        self.assertEqual("failed", item["status"])
+        self.assertEqual("core_action_unsupported", item["error"])
+        self.assertEqual(40, item.get("actionValue"))
+        self.assertEqual([], self.executor.calls)
+        self._schema_validator(
+            "device-action-batch-receipt.schema.json", "full"
+        ).validate(response.payload)
+
     def test_batch_repeat_keeps_operation_and_does_not_extend(self):
         self._report("on")
         envelope = self._envelope(request_id="core-manual-part-repeat")

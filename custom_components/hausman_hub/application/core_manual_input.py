@@ -242,6 +242,7 @@ class CoreManualInput:
         dry_run: bool = False,
         action_index: int | None = None,
         full: bool = False,
+        value: object = None,
     ) -> dict:
         """The same admission for one batch participant; a typed refusal
         becomes this participant's failed receipt, never a legacy call."""
@@ -282,8 +283,12 @@ class CoreManualInput:
                 item["dryRun"] = True
             if full:
                 # A refused participant is a complete honest full receipt:
-                # nothing was admitted, nothing was sent.
+                # nothing was admitted, nothing was sent. A carried value
+                # stays visible as actionValue (R-S06-04): the full
+                # schema expects it for value actions even when refused.
                 now_ms = int(time.time_ns() // 1_000_000)
+                if value is not None:
+                    item["actionValue"] = value
                 item.update(
                     {
                         "statusName": "Не выполнено",
