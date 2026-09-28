@@ -91,6 +91,15 @@ class ProfileIncompleteError(CoreBranchError):
         self.resource_id = resource_id
 
 
+class CoreBranchAdmissionError(CoreBranchError):
+    """Typed refusal of a branch-serialized manual admission
+    (SEC-S06-01). ``code`` maps onto the common intake's refusal codes."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 class ProfileBoundDeviceAdapter:
     """Device adapter of the branch: a real ``LightDeviceAdapter`` over
     explicitly registered profiles, with a typed refusal for resources
@@ -298,6 +307,55 @@ class RoomLightingCoreBranch:
         """The branch's core service (public read/admission surface)."""
 
         return self._service
+
+    def admit_manual(
+        self,
+        *,
+        resource_id: str,
+        request_id: str,
+        action_id: str,
+        target: object,
+        source: str,
+        expected_control_revision: int,
+        expected_binding_revision: int,
+        receipt_scope: str,
+    ):
+        """One common manual admission serialized with the branch input
+        (SEC-S06-01).
+
+        The whole admission runs under the same reentrant lock as the
+        runtime ticks: a tick can neither interleave its hold transfer
+        between the admission's read and write, nor run after the stop
+        hook closed the input. The binding revision is re-checked under
+        the lock so a concurrent profile change is refused, not raced.
+        Callers must keep this off the Home Assistant event loop: the
+        core commit performs file I/O."""
+
+        with self._lock:
+            if self._input_closed:
+                raise CoreBranchAdmissionError(
+                    "core_branch_closed",
+                    "the core branch input is closed",
+                )
+            spec = self._service.spec(resource_id)
+            if spec.binding_revision != expected_binding_revision:
+                raise CoreBranchAdmissionError(
+                    "core_binding_revision_conflict",
+                    (
+                        f"binding revision moved: expected "
+                        f"{expected_binding_revision}, "
+                        f"actual {spec.binding_revision}"
+                    ),
+                )
+            return self._service.submit_manual(
+                resource_id,
+                request_id,
+                action_id,
+                target,
+                source,
+                expected_control_revision,
+                receipt_scope=receipt_scope,
+            )
 
     def activate_shadow(self) -> None:
         with self._lock:

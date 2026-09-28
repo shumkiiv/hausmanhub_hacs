@@ -36,6 +36,7 @@ from .device_action_protocol import (
 )
 from .room_lighting_core import (
     CORE_MANUAL_HOLD_SOURCE,
+    CoreBranchAdmissionError,
     CoreBranchError,
     ProfileIncompleteError,
     RoomLightingCoreBranch,
@@ -135,9 +136,17 @@ def synthetic_binary_light_profiles(resource_ids) -> dict:
 class CoreManualInput:
     """Registry of transferred targets and their common admission path."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, mono_now=None) -> None:
         self._bindings: dict[str, CoreManualTargetBinding] = {}
         self._branches: dict[str, RoomLightingCoreBranch] = {}
+        # Monotonic milliseconds source for the evidence freshness
+        # (SEC-S06-03): a stored fact is fresh by its own age, not by a
+        # per-request re-stamp. Defaults to the process monotonic clock
+        # (the same source the branch's SystemClock reads); tests inject
+        # a deterministic one.
+        self._mono_now = mono_now or (
+            lambda: time.monotonic_ns() // 1_000_000
+        )
 
     # ------------------------------------------------------------------
     # stand wiring
@@ -214,7 +223,7 @@ class CoreManualInput:
                 full=full,
             )
         envelope = self._validated_envelope(core_control)
-        receipt, branch = self._admit(
+        receipt, branch = await self._admit(
             binding,
             envelope=envelope,
             principal=principal,
@@ -398,7 +407,7 @@ class CoreManualInput:
             )
         return branch
 
-    def _admit(
+    async def _admit(
         self,
         binding: CoreManualTargetBinding,
         *,
@@ -406,6 +415,8 @@ class CoreManualInput:
         principal: str,
         action_id: str,
     ) -> tuple[ManualReceipt, RoomLightingCoreBranch]:
+        import asyncio
+
         branch = self._branch_for(binding)
         service = branch.core_service
         try:
@@ -433,15 +444,27 @@ class CoreManualInput:
             brightness_pct=None,
             color_temperature_k=None,
         )
+        # The admission is serialized with the branch input and runs off
+        # the event loop: the branch lock guards the tick/admission
+        # race and the core commit performs file I/O (SEC-S06-01).
+        loop = asyncio.get_running_loop()
         try:
-            receipt = service.submit_manual(
-                binding.resource_id,
-                str(envelope["requestId"]),
-                action_id,
-                target,
-                CORE_MANUAL_HOLD_SOURCE,
-                int(envelope["expectedControlRevision"]),
-                receipt_scope=principal,
+            receipt = await loop.run_in_executor(
+                None,
+                lambda: branch.admit_manual(
+                    resource_id=binding.resource_id,
+                    request_id=str(envelope["requestId"]),
+                    action_id=action_id,
+                    target=target,
+                    source=CORE_MANUAL_HOLD_SOURCE,
+                    expected_control_revision=int(
+                        envelope["expectedControlRevision"]
+                    ),
+                    expected_binding_revision=int(
+                        envelope["expectedBindingRevision"]
+                    ),
+                    receipt_scope=principal,
+                ),
             )
         except RevisionConflict as exc:
             raise CoreManualInputError(
@@ -456,6 +479,20 @@ class CoreManualInput:
                 str(exc),
                 http_status=409,
                 api_code="conflict",
+            ) from exc
+        except CoreBranchAdmissionError as exc:
+            if exc.code == "core_binding_revision_conflict":
+                raise CoreManualInputError(
+                    exc.code,
+                    str(exc),
+                    http_status=409,
+                    api_code="revision_conflict",
+                ) from exc
+            raise CoreManualInputError(
+                "core_unavailable",
+                str(exc),
+                http_status=503,
+                api_code="unavailable",
             ) from exc
         except (CapacityExceeded, StorageUnavailable) as exc:
             raise CoreManualInputError(
@@ -701,8 +738,8 @@ class CoreManualInput:
             return request_id
         return f"{prefix}.{int(time.time_ns() // 1_000_000)}"
 
-    @staticmethod
     def _evidence(
+        self,
         binding: CoreManualTargetBinding,
         view: "ResourceView",
         *,
@@ -713,23 +750,41 @@ class CoreManualInput:
 
         The combination always matches one reviewed branch of the
         vendored ``device-state-evidence`` schema (R-S06-01):
-        an admitted command reads ``core_manual_admitted`` (fresh on/off
+        an admitted command reads ``core_manual_admitted`` (a fresh fact
         keeps the reported state; a stale fact never claims a current
         ``on``); a read-only dry run describes the state without any
-        admission claim. Nothing is claimed as sent or owned."""
+        admission claim. Freshness is judged by the fact's own age on
+        the monotonic clock, and ``observedAt`` carries the original
+        observation time, not the time of this read (SEC-S06-03).
+        Nothing is claimed as sent or owned."""
 
         on_fact = next(
             (fact for fact in view.facts if fact.property == "on"),
             None,
         )
-        fresh = on_fact is not None and on_fact.quality is Quality.FRESH
+        now_mono = self._mono_now()
+        if on_fact is None or on_fact.quality is Quality.INVALID:
+            fresh = False
+            fact_age_ms = None
+        else:
+            fact_age_ms = max(0, now_mono - on_fact.observed_at_mono_ms)
+            fresh = (
+                on_fact.quality is Quality.FRESH
+                and fact_age_ms <= SYNTHETIC_PROFILE_MAX_AGE_MS
+            )
         if on_fact is None or on_fact.quality is Quality.INVALID:
             reported = "unknown"
         else:
             reported = "on" if on_fact.value is True else (
                 "off" if on_fact.value is False else "unknown"
             )
-        observed_at = int(time.time_ns() // 1_000_000)
+        now_ms = int(time.time_ns() // 1_000_000)
+        if on_fact is not None and fact_age_ms is not None:
+            # The wall time of the original observation: the fact's
+            # monotonic stamp converted through the current read.
+            observed_at = max(0, now_ms - (now_mono - on_fact.observed_at_mono_ms))
+        else:
+            observed_at = now_ms
         revision = "core.manual.evidence.read"
         if operation_id:
             revision = f"core.manual.evidence.{operation_id}"

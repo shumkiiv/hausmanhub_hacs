@@ -586,6 +586,28 @@ class DeviceFeatureMatrixView(HomeAssistantView):
         return self.json(device_feature_matrix_snapshot(), headers=NO_STORE_HEADERS)
 
 
+def _request_principal(request: Any) -> str:
+    """Stable bounded identity of the authenticated caller (SEC-S06-02).
+
+    The core manual intake scopes its replay keys by caller identity:
+    two users of the same role must never share receipts. The
+    authenticated user's id is used when present; otherwise the call
+    falls back to the role marker (recorded limitation for test
+    doubles without a user id)."""
+
+    user = request.get("hass_user") if isinstance(request, Mapping) else None
+    for attribute in ("id", "user_id", "username"):
+        value = getattr(user, attribute, None)
+        if isinstance(value, str) and value:
+            bounded = "".join(
+                character if character.isalnum() or character in "._:-" else "."
+                for character in value
+            )[:64]
+            if bounded and bounded[0].isalnum():
+                return f"u.{bounded}"
+    return "admin" if _is_local_admin_request(request) else "tablet"
+
+
 async def _async_core_manual_single(
     view: HomeAssistantView,
     core_input: CoreManualInput,
@@ -604,7 +626,7 @@ async def _async_core_manual_single(
     error, never a fallback to the old writer."""
 
     request_id = str(payload.get("requestId") or "")
-    principal = "admin" if _is_local_admin_request(request) else "tablet"
+    principal = _request_principal(request)
     try:
         receipt = await core_input.async_submit(
             target_id=target_id,
@@ -1805,11 +1827,28 @@ class DeviceActionBatchView(HomeAssistantView):
                 if coordinated_index is not None
                 else None
             )
+            core_input_for_keys = self._hass.data.get(DOMAIN, {}).get(
+                "core_manual_input"
+            )
+            batch_touches_core = isinstance(
+                core_input_for_keys, CoreManualInput
+            ) and any(
+                core_input_for_keys.is_transferred(item.get("targetId"))
+                for item in normalized
+            )
             idempotency_key = (
                 str(coordinated_item["idempotencyKey"])
                 if dangerous_indexes
                 else _reassert_coordination_key(coordinated_item)
                 if reassert_indexes and coordinated_item is not None
+                else (
+                    # A batch touching a transferred resource replays
+                    # only for the same authenticated caller (SEC-S06-02);
+                    # the dangerous global key above stays untouched.
+                    f"batch:{_request_principal(request)}:"
+                    f"{payload['requestId']}"
+                )
+                if batch_touches_core
                 else f"batch:{payload['requestId']}"
             )
             dispatch_id = uuid.uuid4().hex
@@ -2045,9 +2084,7 @@ class DeviceActionBatchView(HomeAssistantView):
             # (S-06.a) is scoped to this request's authenticated caller
             # and speaks the negotiated receipt media type. Older test
             # doubles without the keyword keep their exact signature.
-            batch_options["core_principal"] = (
-                "admin" if _is_local_admin_request(request) else "tablet"
-            )
+            batch_options["core_principal"] = _request_principal(request)
             batch_options["core_full_receipts"] = full_response
         if dispatch_request_ids is not None:
             batch_options["request_ids"] = dispatch_request_ids

@@ -56,17 +56,31 @@ class RoomLightingInputAdapter:
         binding = self._bindings.get(entity_id)
         if binding is None or new_state is None:
             return None
+        raw_state = getattr(new_state, "state", None)
+        # An unknown/unavailable report of the switching state is never
+        # an OFF: it becomes an explicit INVALID observation that
+        # replaces the previous fact, so neither a manual no_op nor an
+        # evidence read can mistake silence for a proven off
+        # (SEC-S06-04).
+        invalid_state = binding.property == "on" and raw_state not in (
+            "on",
+            "off",
+        )
         value = self._property_value(binding.property, new_state)
-        if value is None:
+        if value is None and not invalid_state:
             return None
         changed = old_state is None or old_state.state != new_state.state
+        if invalid_state:
+            quality = Quality.INVALID
+        else:
+            quality = Quality.FRESH if changed else Quality.STALE
         return Observation(
             observation_id=(
                 f"obs-{binding.resource_id}-{next(self._observation_seq)}"
             ),
             resource_id=binding.resource_id,
             property=binding.property,
-            value=value,
+            value=bool(value) if value is not None else False,
             unit=binding.unit,
             received_at_utc_ms=self._clock.now_utc_ms(),
             received_at_mono_ms=self._clock.now_mono_ms(),
@@ -75,7 +89,7 @@ class RoomLightingInputAdapter:
             source_sequence=None,
             source_id=f"ha_state:{binding.resource_id}",
             source_epoch=self._source_epoch,
-            quality=Quality.FRESH if changed else Quality.STALE,
+            quality=quality,
             evidence_kind=Evidence.DEVICE_REPORT,
             binding_revision=0,
             observation_revision=self._clock.now_mono_ms(),

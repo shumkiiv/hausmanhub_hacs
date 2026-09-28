@@ -639,6 +639,97 @@ class CoreManualInputApiTest(unittest.TestCase):
             [("light.neighbor", "turn_on")], self.executor.calls
         )
 
+    def test_two_users_of_same_role_do_not_share_receipts(self):
+        """The intake scope is the authenticated user's identity, not
+        the role: two tablet users with the same envelope requestId get
+        separate admissions (SEC-S06-02)."""
+
+        user_a = SimpleNamespace(
+            id="tablet-user-a",
+            is_admin=False,
+            system_generated=False,
+            groups=(SimpleNamespace(id="system-users"),),
+        )
+        user_b = SimpleNamespace(
+            id="tablet-user-b",
+            is_admin=False,
+            system_generated=False,
+            groups=(SimpleNamespace(id="system-users"),),
+        )
+        self._report("on")
+        envelope = self._envelope(request_id="core-manual-shared-user")
+        first = self._full_single(
+            {
+                "requestId": "core-manual-shared-user",
+                "targetId": stand.PUBLIC_TARGET_ID,
+                "actionId": "turn_off",
+                "coreControl": envelope,
+            },
+            user=user_a,
+        )
+        self.assertEqual(HTTPStatus.OK, first.status)
+        # The same caller with the same envelope replays; user B with
+        # the identical request never receives A's receipt: their own
+        # scope re-evaluates the moved revision and conflicts.
+        replay = self._full_single(
+            {
+                "requestId": "core-manual-shared-user",
+                "targetId": stand.PUBLIC_TARGET_ID,
+                "actionId": "turn_off",
+                "coreControl": envelope,
+            },
+            user=user_a,
+        )
+        self.assertEqual(HTTPStatus.OK, replay.status)
+        second = self._full_single(
+            {
+                "requestId": "core-manual-shared-user",
+                "targetId": stand.PUBLIC_TARGET_ID,
+                "actionId": "turn_off",
+                "coreControl": envelope,
+            },
+            user=user_b,
+        )
+        self.assertEqual(HTTPStatus.CONFLICT, second.status)
+        self.assertEqual([], self.executor.calls)
+
+    def test_core_batch_replay_is_scoped_to_the_caller(self):
+        """A full batch touching a transferred resource replays only
+        for the same authenticated caller (SEC-S06-02): another user
+        with the same batch body never receives the stored foreign
+        response."""
+
+        self._report("on")
+        payload = {  # noqa: the batch body is reused verbatim per caller
+            "requestId": "batch-shared-user",
+            "correlationId": "corr.batch.shared",
+            "actions": [
+                {
+                    "targetId": stand.PUBLIC_TARGET_ID,
+                    "actionId": "turn_off",
+                    "coreControl": self._envelope(
+                        request_id="core-manual-shared-batch"
+                    ),
+                }
+            ],
+        }
+        first = self._full_batch(payload)
+        self.assertEqual(HTTPStatus.OK, first.status)
+        second = self._full_batch(
+            dict(payload, correlationId="corr.batch.other"),
+            user=SimpleNamespace(
+                id="tablet-user-b",
+                is_admin=False,
+                system_generated=False,
+                groups=(SimpleNamespace(id="system-users"),),
+            ),
+        )
+        # The second caller is not served the stored first response:
+        # the core participant is re-evaluated for their own scope and
+        # the moved revision conflicts.
+        self.assertNotEqual(first.payload, second.payload)
+        self.assertEqual([], self.executor.calls)
+
     def test_refused_batch_participant_full_item_is_schema_valid(self):
         """A refused value-action participant keeps its actionValue in
         the full receipt (R-S06-04) and the whole batch answer stays

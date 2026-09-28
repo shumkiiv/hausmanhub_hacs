@@ -24,6 +24,7 @@ from custom_components.hausman_hub.application.core.command_service import (
     UnknownResource,
 )
 from custom_components.hausman_hub.application.core_manual_input import (
+    SYNTHETIC_PROFILE_MAX_AGE_MS,
     CoreManualInput,
     CoreManualInputError,
     CoreManualTargetBinding,
@@ -527,6 +528,228 @@ def test_scoped_replay_survives_branch_restart(tmp_path):
     assert restarted.core_service.record(
         RESOURCE_ID
     ).control_revision == record.control_revision
+
+
+def test_admission_after_stop_is_typed_closed(tmp_path):
+    """After the stop hook closed the input, the branch-serialized
+    admission refuses typed and never accepts (SEC-S06-01)."""
+
+    branch = build_stand_branch(tmp_path)
+    intake = CoreManualInput()
+    intake.register_transferred_target(branch, _binding())
+    branch.on_runtime_stop()
+    with pytest.raises(CoreManualInputError) as error:
+        asyncio.run(
+            intake.async_submit(
+                target_id=PUBLIC_TARGET_ID,
+                action_id="turn_off",
+                core_control=_envelope(branch),
+                principal="tablet",
+                correlation_id="corr-stop",
+                request_id="request-stop",
+            )
+        )
+    assert error.value.code == "core_unavailable"
+    assert (
+        branch.core_service.receipt("core-manual-full", receipt_scope="tablet")
+        is None
+    )
+
+
+def test_admission_is_serialized_with_branch_lock(tmp_path):
+    """The admission waits for the branch lock: a tick holding the lock
+    cannot interleave with the manual acceptance (SEC-S06-01)."""
+
+    import threading
+
+    branch = build_stand_branch(tmp_path)
+    report_light_state(branch, "on")
+    lock_acquired = threading.Event()
+    release = threading.Event()
+
+    def holding_tick():
+        with branch._lock:
+            lock_acquired.set()
+            release.wait(timeout=5)
+
+    worker = threading.Thread(target=holding_tick)
+    worker.start()
+    assert lock_acquired.wait(timeout=5)
+
+    outcomes: list = []
+
+    def admit():
+        try:
+            outcomes.append(
+                branch.admit_manual(
+                    resource_id=RESOURCE_ID,
+                    request_id="core-manual-locked",
+                    action_id="turn_off",
+                    target=LightStateTarget(on=False),
+                    source=CORE_MANUAL_HOLD_SOURCE,
+                    expected_control_revision=START_CONTROL_REVISION,
+                    expected_binding_revision=branch.core_service.spec(
+                        RESOURCE_ID
+                    ).binding_revision,
+                    receipt_scope="tablet",
+                )
+            )
+        except Exception as exc:  # pragma: no cover - surfaced below
+            outcomes.append(exc)
+
+    admission = threading.Thread(target=admit)
+    admission.start()
+    # The admission must wait: nothing accepted while the tick holds
+    # the lock.
+    admission.join(timeout=0.3)
+    assert outcomes == []
+    release.set()
+    admission.join(timeout=5)
+    worker.join(timeout=5)
+    receipt = outcomes[0]
+    assert receipt.status.name == "ACCEPTED"
+    assert branch.core_service.receipt(
+        "core-manual-locked", receipt_scope="tablet"
+    ) is not None
+
+
+def test_intake_admission_runs_off_the_calling_thread(tmp_path):
+    """The intake executes the branch admission outside the event loop
+    thread: the core commit's file I/O never blocks the loop
+    (SEC-S06-01)."""
+
+    import threading
+
+    branch = build_stand_branch(tmp_path)
+    intake = CoreManualInput()
+    intake.register_transferred_target(branch, _binding())
+    report_light_state(branch, "on")
+    loop_thread = threading.get_ident()
+    seen_threads: list = []
+    original = branch.admit_manual
+
+    def spying(**kwargs):
+        seen_threads.append(threading.get_ident())
+        return original(**kwargs)
+
+    branch.admit_manual = spying
+    asyncio.run(
+        intake.async_submit(
+            target_id=PUBLIC_TARGET_ID,
+            action_id="turn_off",
+            core_control=_envelope(branch),
+            principal="tablet",
+            correlation_id="corr-thread",
+            request_id="request-thread",
+        )
+    )
+    assert seen_threads and seen_threads[0] != loop_thread
+
+
+def test_stale_fact_is_not_reported_fresh(tmp_path):
+    """Freshness is the fact's own age: after the profile window the
+    read-only probe answers suspect with unknown effective state and
+    keeps the original observation time (SEC-S06-03)."""
+
+    import time as time_module
+
+    branch = build_stand_branch(tmp_path)
+    intake = CoreManualInput()
+    intake.register_transferred_target(branch, _binding())
+    report_light_state(branch, "off")
+    base_mono = time_module.monotonic_ns() // 1_000_000
+    shift = {"ms": 0}
+    aged_intake = CoreManualInput(
+        mono_now=lambda: base_mono + shift["ms"]
+    )
+    aged_intake.register_transferred_target(branch, _binding())
+    envelope = _envelope(branch, request_id="core-manual-aged")
+
+    fresh_view = asyncio.run(
+        aged_intake.async_submit(
+            target_id=PUBLIC_TARGET_ID,
+            action_id="turn_on",
+            core_control=envelope,
+            principal="tablet",
+            correlation_id="corr-aged",
+            request_id="request-aged",
+            dry_run=True,
+            full=True,
+        )
+    )
+    assert (
+        fresh_view["evidence"]["reasonCode"] == "device_report_off_confirmed"
+    )
+    original_observed_at = fresh_view["evidence"]["observedAt"]
+
+    shift["ms"] = SYNTHETIC_PROFILE_MAX_AGE_MS + 1
+    aged_view = asyncio.run(
+        aged_intake.async_submit(
+            target_id=PUBLIC_TARGET_ID,
+            action_id="turn_on",
+            core_control=envelope,
+            principal="tablet",
+            correlation_id="corr-aged",
+            request_id="request-aged",
+            dry_run=True,
+            full=True,
+        )
+    )
+    evidence = aged_view["evidence"]
+    assert evidence["confidence"] == "suspect"
+    assert evidence["effectiveState"] in ("off", "unknown")
+    assert evidence["reasonCode"] == "state_suspect"
+    # The observation time is not re-stamped to the read time: the aged
+    # read keeps reporting the original report moment (the fake clock
+    # shift may only pull the estimate backwards, never forwards).
+    assert evidence["observedAt"] <= original_observed_at + 1_000
+
+
+def test_unavailable_report_is_never_a_proven_off(tmp_path):
+    """An unknown/unavailable report replaces the fact with an INVALID
+    observation: a manual turn_off is a real admission (not a no_op),
+    and the read-only probe claims nothing (SEC-S06-04)."""
+
+    branch = build_stand_branch(tmp_path)
+    intake = CoreManualInput()
+    intake.register_transferred_target(branch, _binding())
+    report_light_state(branch, "on")
+    unavailable = make_state("unavailable")
+    branch.handle_runtime_event(ENTITY_ID, make_state("on"), unavailable)
+
+    receipt = asyncio.run(
+        intake.async_submit(
+            target_id=PUBLIC_TARGET_ID,
+            action_id="turn_off",
+            core_control=_envelope(branch, request_id="core-manual-unavail"),
+            principal="tablet",
+            correlation_id="corr-unavail",
+            request_id="request-unavail",
+            full=True,
+        )
+    )
+    # Not a no_op: the silence of the device proves nothing.
+    assert receipt["status"] == "accepted"
+    operation = branch.core_service.operation(
+        receipt["coreOperation"]["operationId"]
+    )
+    assert operation.phase.name == "CANCELLED"
+    assert branch.core_service.record(RESOURCE_ID).manual is not None
+
+    dry_view = asyncio.run(
+        intake.async_submit(
+            target_id=PUBLIC_TARGET_ID,
+            action_id="turn_on",
+            core_control=_envelope(branch, request_id="core-manual-unavail-2"),
+            principal="tablet",
+            correlation_id="corr-unavail-2",
+            request_id="request-unavail-2",
+            dry_run=True,
+            full=True,
+        )
+    )
+    assert dry_view["evidence"]["reportedState"] == "unknown"
+    assert dry_view["evidence"]["confidence"] == "suspect"
 
 
 def test_intake_reports_core_unavailable_without_legacy_fallback(tmp_path):
