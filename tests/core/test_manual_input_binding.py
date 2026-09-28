@@ -838,6 +838,62 @@ def test_stale_fact_keeps_its_observation_time_exactly(tmp_path):
     assert first["evidence"]["observedAt"] == on_fact.received_at_utc_ms
 
 
+def test_zero_utc_stamp_is_not_replaced_by_read_time(tmp_path):
+    """A legitimate zero observation stamp survives projection: reads
+    at different wall-clock moments keep observedAt at zero
+    (SEC-S06-03R1 residual)."""
+
+    from custom_components.hausman_hub.domain.core.models import (
+        Evidence,
+        Observation,
+        ObservationAttribution,
+        Quality,
+    )
+
+    branch = build_stand_branch(tmp_path)
+    intake = CoreManualInput()
+    intake.register_transferred_target(branch, _binding())
+    branch.core_service.ingest_observation(
+        Observation(
+            observation_id="obs-zero-stamp",
+            resource_id=RESOURCE_ID,
+            property="on",
+            value=True,
+            unit="bool",
+            received_at_utc_ms=0,
+            received_at_mono_ms=branch.core_service._clock.now_mono_ms(),
+            boot_id=branch.core_service._clock.boot_id(),
+            source_at_utc_ms=None,
+            source_sequence=None,
+            source_id="ha_state:zero",
+            source_epoch="test.epoch",
+            quality=Quality.FRESH,
+            evidence_kind=Evidence.DEVICE_REPORT,
+            binding_revision=0,
+            observation_revision=0,
+            related_operation_id=None,
+            attribution=ObservationAttribution.UNKNOWN,
+        )
+    )
+    envelope = _envelope(branch, request_id="core-manual-zero")
+    stamps = set()
+    for index in range(2):
+        view = asyncio.run(
+            intake.async_submit(
+                target_id=PUBLIC_TARGET_ID,
+                action_id="turn_off",
+                core_control=envelope,
+                principal="tablet",
+                correlation_id=f"corr-zero-{index}",
+                request_id=f"request-zero-{index}",
+                dry_run=True,
+                full=True,
+            )
+        )
+        stamps.add(view["evidence"]["observedAt"])
+    assert stamps == {0}
+
+
 def test_stop_after_saved_admission_keeps_the_accepted_answer(tmp_path):
     """A stop landing between the saved admission and the projection
     does not turn the accepted result into a refusal (SEC-S06-06)."""

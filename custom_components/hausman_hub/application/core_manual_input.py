@@ -783,9 +783,10 @@ class CoreManualInput:
                 "off" if on_fact.value is False else "unknown"
             )
         now_ms = int(time.time_ns() // 1_000_000)
-        if on_fact is not None and on_fact.received_at_utc_ms:
-            # The observation's own stored wall-clock stamp: a wall
-            # clock jump at read time must not move it (SEC-S06-03R1).
+        if on_fact is not None and on_fact.received_at_utc_ms is not None:
+            # The observation's own stored wall-clock stamp (a
+            # legitimate zero included): a wall clock jump at read time
+            # must not move it (SEC-S06-03R1).
             observed_at = max(0, on_fact.received_at_utc_ms)
         else:
             observed_at = now_ms
