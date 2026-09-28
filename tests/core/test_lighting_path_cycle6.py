@@ -547,6 +547,10 @@ def test_stop_hook_closes_branch_input(tmp_path):
     )
     assert branch.decision_explanation() is before
     assert branch._event_counter == 1  # only the activation cycle
+    # SEC-C6-R3-01: the public schedule input is closed as well.
+    branch.process_schedule_tick()
+    assert branch.decision_explanation() is before
+    assert branch._event_counter == 1
 
 
 def test_transferred_hold_action_id_is_opaque(tmp_path):

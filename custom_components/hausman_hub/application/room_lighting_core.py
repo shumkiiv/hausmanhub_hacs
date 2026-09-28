@@ -282,7 +282,7 @@ class RoomLightingCoreBranch:
 
     def process_schedule_tick(self) -> None:
         with self._lock:
-            if self._mode is not self.MODE_SHADOW:
+            if self._input_closed or self._mode is not self.MODE_SHADOW:
                 return
             self._process_room_event()
 
