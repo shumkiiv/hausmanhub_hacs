@@ -229,8 +229,13 @@ class CoreManualInput:
             principal=principal,
             action_id=action_id,
         )
+        # The projection uses the branch instance the admission just
+        # ran on (SEC-S06-06): a stop that lands between the saved
+        # admission and this projection must not turn an already
+        # accepted result into a refusal.
         return self._receipt_projection(
             binding,
+            branch=branch,
             receipt=receipt,
             action_id=action_id,
             envelope_request_id=envelope["requestId"],
@@ -646,6 +651,7 @@ class CoreManualInput:
         self,
         binding: CoreManualTargetBinding,
         *,
+        branch: RoomLightingCoreBranch,
         receipt: ManualReceipt,
         action_id: str,
         envelope_request_id: str,
@@ -653,7 +659,6 @@ class CoreManualInput:
         request_id: str | None,
         full: bool,
     ) -> dict:
-        branch = self._branch_for(binding)
         service = branch.core_service
         operation = None
         if receipt.operation_id is not None:
@@ -765,7 +770,6 @@ class CoreManualInput:
         now_mono = self._mono_now()
         if on_fact is None or on_fact.quality is Quality.INVALID:
             fresh = False
-            fact_age_ms = None
         else:
             fact_age_ms = max(0, now_mono - on_fact.observed_at_mono_ms)
             fresh = (
@@ -779,10 +783,10 @@ class CoreManualInput:
                 "off" if on_fact.value is False else "unknown"
             )
         now_ms = int(time.time_ns() // 1_000_000)
-        if on_fact is not None and fact_age_ms is not None:
-            # The wall time of the original observation: the fact's
-            # monotonic stamp converted through the current read.
-            observed_at = max(0, now_ms - (now_mono - on_fact.observed_at_mono_ms))
+        if on_fact is not None and on_fact.received_at_utc_ms:
+            # The observation's own stored wall-clock stamp: a wall
+            # clock jump at read time must not move it (SEC-S06-03R1).
+            observed_at = max(0, on_fact.received_at_utc_ms)
         else:
             observed_at = now_ms
         revision = "core.manual.evidence.read"

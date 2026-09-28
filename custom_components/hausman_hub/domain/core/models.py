@@ -611,13 +611,18 @@ class RejectedNeed:
 
 @dataclass(frozen=True)
 class FactView:
-    """One confirmed fact with quality and age for explanations/UI (K-11)."""
+    """One confirmed fact with quality and age for explanations/UI (K-11).
+
+    ``received_at_utc_ms`` carries the observation's own wall-clock
+    stamp: projections must read it instead of recomputing the time of
+    the read (SEC-S06-03R1)."""
 
     property: str
     value: object
     quality: Quality
     evidence: Evidence
     observed_at_mono_ms: int
+    received_at_utc_ms: int | None = None
 
 
 @dataclass(frozen=True)

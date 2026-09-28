@@ -787,6 +787,7 @@ class CoreCommandService:
                     quality=fact.quality,
                     evidence=fact.evidence_kind,
                     observed_at_mono_ms=fact.received_at_mono_ms,
+                    received_at_utc_ms=fact.received_at_utc_ms,
                 )
                 for name, fact in sorted(self._facts[resource_id].items())
             ),
@@ -1707,6 +1708,7 @@ class CoreCommandService:
                     quality=fact.quality,
                     evidence=fact.evidence_kind,
                     observed_at_mono_ms=fact.received_at_mono_ms,
+                    received_at_utc_ms=fact.received_at_utc_ms,
                 )
                 for name, fact in sorted(self._facts[resource_id].items())
             ),
@@ -1943,6 +1945,7 @@ class CoreCommandService:
                 quality=fact.quality,
                 evidence=fact.evidence_kind,
                 observed_at_mono_ms=fact.received_at_mono_ms,
+                received_at_utc_ms=fact.received_at_utc_ms,
             )
             for name, fact in sorted(self._facts[resource_id].items())
         )

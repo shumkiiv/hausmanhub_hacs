@@ -1649,6 +1649,30 @@ class DeviceActionBatchView(HomeAssistantView):
             index for index, item in enumerate(normalized)
             if item.get("reassertKey") is not None
         ]
+        core_input_for_batch = self._hass.data.get(DOMAIN, {}).get(
+            "core_manual_input"
+        )
+        if isinstance(core_input_for_batch, CoreManualInput) and (
+            dangerous_indexes or reassert_indexes
+        ):
+            batch_touches_transferred = any(
+                core_input_for_batch.is_transferred(str(item["targetId"]))
+                for item in normalized
+            )
+            if batch_touches_transferred:
+                # A batch mixing a transferred resource with a dangerous
+                # or reassert participant stays outside the S-06.a
+                # boundary: the global dangerous/reassert key would hand
+                # its stored response to another caller without their
+                # own admission (SEC-S06-02R1). Refused before any
+                # reservation or dispatch; the global dangerous guard is
+                # not touched.
+                return self.json_message(
+                    "A batch mixing a core-transferred resource with a "
+                    "dangerous or reassert action is not supported.",
+                    HTTPStatus.BAD_REQUEST,
+                    headers=NO_STORE_HEADERS,
+                )
         safe_batch_candidates = bool(
             potentially_safe_batch
             and not dangerous_indexes

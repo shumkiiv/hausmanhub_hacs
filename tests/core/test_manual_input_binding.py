@@ -752,6 +752,124 @@ def test_unavailable_report_is_never_a_proven_off(tmp_path):
     assert dry_view["evidence"]["confidence"] == "suspect"
 
 
+def test_numeric_observation_keeps_its_value(tmp_path):
+    """A numeric property keeps its typed value end to end: the adapter
+    never casts it to bool, including zero (SEC-S06-05/R-S06-05)."""
+
+    from custom_components.hausman_hub.adapters.core.room_lighting import (
+        EntityBinding,
+        RoomLightingInputAdapter,
+    )
+    from custom_components.hausman_hub.adapters.core.clock import SystemClock
+
+    adapter = RoomLightingInputAdapter(
+        bindings={
+            "light.test_main.brightness": EntityBinding(
+                resource_id=RESOURCE_ID,
+                property="brightness_pct",
+                unit="pct",
+            )
+        },
+        clock=SystemClock(),
+        source_epoch="test",
+    )
+    bright = make_state("on")
+    bright.attributes = {"brightness": 128}
+    observation = adapter.observation(
+        "light.test_main.brightness", None, bright
+    )
+    assert observation is not None
+    assert observation.value == 50
+    assert isinstance(observation.value, int)
+
+    zero = make_state("on")
+    zero.attributes = {"brightness": 0}
+    observation_zero = adapter.observation(
+        "light.test_main.brightness", None, zero
+    )
+    assert observation_zero is not None
+    assert observation_zero.value == 0
+    assert observation_zero.value is not True
+
+
+def test_stale_fact_keeps_its_observation_time_exactly(tmp_path):
+    """The observed time comes from the stored observation stamp: reads
+    and wall-clock jumps never move it (SEC-S06-03R1)."""
+
+    branch = build_stand_branch(tmp_path)
+    intake = CoreManualInput()
+    intake.register_transferred_target(branch, _binding())
+    report_light_state(branch, "off")
+    envelope = _envelope(branch, request_id="core-manual-time")
+    first = asyncio.run(
+        intake.async_submit(
+            target_id=PUBLIC_TARGET_ID,
+            action_id="turn_on",
+            core_control=envelope,
+            principal="tablet",
+            correlation_id="corr-time",
+            request_id="request-time",
+            dry_run=True,
+            full=True,
+        )
+    )
+    second = asyncio.run(
+        intake.async_submit(
+            target_id=PUBLIC_TARGET_ID,
+            action_id="turn_on",
+            core_control=envelope,
+            principal="tablet",
+            correlation_id="corr-time",
+            request_id="request-time",
+            dry_run=True,
+            full=True,
+        )
+    )
+    assert (
+        first["evidence"]["observedAt"]
+        == second["evidence"]["observedAt"]
+    )
+    # The stamp is the observation's own report time, not the read.
+    resource_view = branch.core_service.resource_view(RESOURCE_ID)
+    on_fact = next(
+        fact for fact in resource_view.facts if fact.property == "on"
+    )
+    assert on_fact.received_at_utc_ms is not None
+    assert first["evidence"]["observedAt"] == on_fact.received_at_utc_ms
+
+
+def test_stop_after_saved_admission_keeps_the_accepted_answer(tmp_path):
+    """A stop landing between the saved admission and the projection
+    does not turn the accepted result into a refusal (SEC-S06-06)."""
+
+    branch = build_stand_branch(tmp_path)
+    intake = CoreManualInput()
+    intake.register_transferred_target(branch, _binding())
+    report_light_state(branch, "on")
+    original = branch.admit_manual
+
+    def admit_then_stop(**kwargs):
+        result = original(**kwargs)
+        branch.on_runtime_stop()
+        return result
+
+    branch.admit_manual = admit_then_stop
+    receipt = asyncio.run(
+        intake.async_submit(
+            target_id=PUBLIC_TARGET_ID,
+            action_id="turn_off",
+            core_control=_envelope(branch, request_id="core-manual-stop"),
+            principal="tablet",
+            correlation_id="corr-stop-late",
+            request_id="request-stop-late",
+            full=True,
+        )
+    )
+    assert receipt["accepted"] is True
+    assert receipt["status"] == "accepted"
+    assert receipt["coreOperation"]["operationId"]
+
+
 def test_intake_reports_core_unavailable_without_legacy_fallback(tmp_path):
     """A missing branch for the transferred resource is a typed visible
     refusal — the legacy writer never opens (S-06.a)."""

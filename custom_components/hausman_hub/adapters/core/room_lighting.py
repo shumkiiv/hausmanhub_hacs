@@ -69,6 +69,11 @@ class RoomLightingInputAdapter:
         value = self._property_value(binding.property, new_state)
         if value is None and not invalid_state:
             return None
+        if invalid_state and value is None:
+            # Placeholder of the invalid switching state only; every
+            # other property keeps its original typed value
+            # (SEC-S06-05).
+            value = False
         changed = old_state is None or old_state.state != new_state.state
         if invalid_state:
             quality = Quality.INVALID
@@ -80,7 +85,7 @@ class RoomLightingInputAdapter:
             ),
             resource_id=binding.resource_id,
             property=binding.property,
-            value=bool(value) if value is not None else False,
+            value=value,
             unit=binding.unit,
             received_at_utc_ms=self._clock.now_utc_ms(),
             received_at_mono_ms=self._clock.now_mono_ms(),

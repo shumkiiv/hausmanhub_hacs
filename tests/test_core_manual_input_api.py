@@ -730,6 +730,39 @@ class CoreManualInputApiTest(unittest.TestCase):
         self.assertNotEqual(first.payload, second.payload)
         self.assertEqual([], self.executor.calls)
 
+    def test_mixed_dangerous_and_transferred_batch_is_refused(self):
+        """A batch mixing a transferred resource with a dangerous
+        participant stays outside the slice: refused before any
+        reservation, so no stored response can leak across callers
+        (SEC-S06-02R1); the global dangerous guard is untouched."""
+
+        self._report("on")
+        response = self._full_batch(
+            {
+                "requestId": "batch-mixed-dangerous",
+                "correlationId": "corr.batch.dangerous",
+                "actions": [
+                    {
+                        "targetId": stand.PUBLIC_TARGET_ID,
+                        "actionId": "turn_off",
+                        "coreControl": self._envelope(
+                            request_id="core-manual-mixed"
+                        ),
+                    },
+                    {
+                        "targetId": "front-door-lock",
+                        "actionId": "unlock",
+                        "confirmedByUser": True,
+                        "idempotencyKey": "mixed-dangerous-key-1",
+                    },
+                ],
+            }
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, response.status)
+        self.assertEqual([], self.executor.calls)
+        record = self.branch.core_service.record(stand.RESOURCE_ID)
+        self.assertNotEqual("MANUAL", record.authority.name)
+
     def test_refused_batch_participant_full_item_is_schema_valid(self):
         """A refused value-action participant keeps its actionValue in
         the full receipt (R-S06-04) and the whole batch answer stays
