@@ -1,6 +1,7 @@
 import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.296";
 import { scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.296";
 import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.296";
+import { publishCoreCatalog } from "./hausman-hub-core-control.js?v=1.52.296";
 import { scenarioCapabilityLabel, scenarioDeviceButton, scenarioDeviceFields, scenarioGroupForTarget, scenarioPhysicalGroups } from "./hausman-hub-scenario-device-picker.js?v=1.52.296";
 import { groupScenarios, renderScenarioCatalog, scenarioActivationKind, scenarioDisplayGroup, scenarioDisplayText } from "./hausman-hub-scenario-catalog.js?v=1.52.296";
 import { renderScenarioRoomPicker, scenarioAffectedDeviceCount, scenarioRoomLabels } from "./hausman-hub-scenario-rooms.js?v=1.52.296";
@@ -365,6 +366,21 @@ function renderScenarioRules(panel, kind, heading, description, items, deps) {
   return section;
 }
 
+/* Re-reads the scenario catalog after missing-entity violations and
+ * publishes it through the single core publication point: the transferred
+ * targets are remembered and the catalog epoch belongs to the session of
+ * the fetch (HH-014.b client, SEC-HACS-01R1). Keeps the last complete
+ * catalog on failure. */
+export async function refreshScenarioCatalog(panel, deps) {
+  const coreSessionAtStart = panel._coreSessionId || 0;
+  try {
+    const fetched = await panel._hass.callApi("GET", deps.catalogApi);
+    return publishCoreCatalog(panel, coreSessionAtStart, fetched);
+  } catch (catalogError) {
+    return false; /* keep the last complete catalog */
+  }
+}
+
 async function submitScenario(panel, deps, testOnly) {
   const scenario = panel._scenarioEditor;
   const issues = scenarioEditorIssues(scenario);
@@ -396,9 +412,7 @@ async function submitScenario(panel, deps, testOnly) {
     const firstViolation = violations[0] || null;
     if (firstViolation) focusScenarioProblem(panel, firstViolation);
     if (["missing_room", "missing_device", "missing_action"].includes(firstViolation && firstViolation.code)) {
-      try {
-        panel._scenarios.catalog = await panel._hass.callApi("GET", deps.catalogApi);
-      } catch (catalogError) { /* keep the last complete catalog */ }
+      await refreshScenarioCatalog(panel, deps);
     }
     panel._error = true;
     if (body.error === "revision_conflict") {

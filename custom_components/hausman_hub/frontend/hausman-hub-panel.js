@@ -921,18 +921,20 @@ class HausmanHubPanel extends HTMLElement {
     // core session boundary (SEC-HACS-02R1).
     const coreSessionAtStart = this._coreSessionId || 0;
     try {
+      const storedCatalog = this._scenarios.catalog;
+      // An already stored catalog is never re-stamped: its epoch must
+      // keep naming the session of its own fetch (SEC-HACS-02R1).
       const [list, catalog, nodeRed] = await Promise.all([
         this._hass.callApi("GET", SCENARIOS_API).catch(() => null),
-        this._scenarios.catalog
-          ? Promise.resolve(this._scenarios.catalog)
+        storedCatalog
+          ? null
           : this._hass.callApi("GET", SCENARIOS_CATALOG_API).catch(() => null),
         this._hass.callApi("GET", SCENARIOS_NODE_RED_API).catch(() => null),
       ]);
       this._scenarios.list = list;
-      if (publishCoreCatalog(this, coreSessionAtStart, catalog)) {
-        this._scenarios.nodeRed = nodeRed;
-        this._scenarios.error = false;
-      }
+      if (!storedCatalog) publishCoreCatalog(this, coreSessionAtStart, catalog);
+      this._scenarios.nodeRed = nodeRed;
+      this._scenarios.error = false;
     } catch (error) {
       this._scenarios.error = true;
     } finally {

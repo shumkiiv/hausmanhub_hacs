@@ -99,13 +99,16 @@ export function isConnectionReplaced(previousHass, nextHass) {
 /* Session bookkeeping for the panel: returns true when the core session
  * actually changed — a replaced connection or a lost connection
  * (hass → null → new hass must not slip through unnoticed,
- * SEC-HACS-02R1). Clearing and bumping happen exactly once per change. */
+ * SEC-HACS-02R1). Clearing and bumping happen exactly once per change.
+ * The catalog epoch (_coreCatalogSession) is NOT touched here: it is
+ * owned by publishCoreCatalog and always names the session of the last
+ * real publication, so the executor can refuse envelopes built from a
+ * catalog of a previous connection (HACS-C3-01). */
 export function applyCoreSession(owner, previousHass, nextHass) {
   if (!nextHass) {
     if (!previousHass || owner._coreSessionEnded === true) return false;
     owner._coreSessionId = (owner._coreSessionId || 0) + 1;
     owner._coreSessionEnded = true;
-    owner._coreCatalogSession = owner._coreSessionId;
     if (owner._coreTransferredSeen) owner._coreTransferredSeen.clear();
     return true;
   }
@@ -113,7 +116,6 @@ export function applyCoreSession(owner, previousHass, nextHass) {
   if (!previousHass) return false;
   if (!isConnectionReplaced(previousHass, nextHass)) return false;
   owner._coreSessionId = (owner._coreSessionId || 0) + 1;
-  owner._coreCatalogSession = owner._coreSessionId;
   if (owner._coreTransferredSeen) owner._coreTransferredSeen.clear();
   return true;
 }
@@ -122,7 +124,8 @@ export function applyCoreSession(owner, previousHass, nextHass) {
  * stayed inside its session may publish, and every recognized
  * transferred target of the answer is remembered (SEC-HACS-01/02R1).
  * Returns false when the load crossed a session change — the stale
- * answer is dropped. */
+ * answer is dropped. The publication stamps the catalog epoch, which is
+ * the only place that happens (HACS-C3-01). */
 export function publishCoreCatalog(owner, sessionAtStart, catalog) {
   if (!owner || typeof owner !== "object") return false;
   if ((owner._coreSessionId || 0) !== sessionAtStart) return false;

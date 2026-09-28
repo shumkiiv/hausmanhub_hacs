@@ -17,6 +17,7 @@ FRONTEND_DIR = ROOT / "custom_components" / "hausman_hub" / "frontend"
 CORE_CONTROL_JS = FRONTEND_DIR / "hausman-hub-core-control.js"
 DEVICE_ACTIONS_JS = FRONTEND_DIR / "hausman-hub-device-actions.js"
 LIGHTING_SIDE_JS = FRONTEND_DIR / "hausman-hub-lighting-side.js"
+SCENARIOS_JS = FRONTEND_DIR / "hausman-hub-scenarios.js"
 SINGLE_PATH = "/api/hausman_hub/v1/device-actions"
 
 
@@ -260,12 +261,15 @@ class CoreControlHelperTest(unittest.TestCase):
           // Test doubles without connections are not replacements.
           assert.strictEqual(mod.applyCoreSession(owner, {}, {}), false);
           // A replaced connection opens a new session and clears the
-          // transferred memory.
+          // transferred memory. The catalog epoch is left to the last
+          // publication (HACS-C3-01): it must not be re-stamped here.
+          owner._coreCatalogSession = 0;
           assert.strictEqual(
             mod.applyCoreSession(owner, {connection}, {connection: {id: "conn-2"}}), true,
           );
           assert.strictEqual(owner._coreSessionId, 1);
           assert.strictEqual(owner._coreTransferredSeen.size, 0);
+          assert.strictEqual(owner._coreCatalogSession, 0);
         """
         run_js_with_assert(script, str(CORE_CONTROL_JS))
 
@@ -288,10 +292,11 @@ class CoreControlHelperTest(unittest.TestCase):
           assert.strictEqual(owner._coreSessionId, 1);
           // The new connection opens the next session.
           assert.strictEqual(mod.applyCoreSession(owner, null, {connection: connB}), false);
-          // A replaced connection bumps once and marks the catalog
-          // epoch: pre-reconnect catalogs are refused for core targets.
+          // A replaced connection bumps once and clears the transferred
+          // memory; the catalog epoch is NOT re-stamped (HACS-C3-01).
           assert.strictEqual(mod.applyCoreSession(owner, {connection: connB}, {connection: {id: "conn-3"}}), true);
-          assert.strictEqual(owner._coreCatalogSession, owner._coreSessionId);
+          assert.strictEqual(owner._coreSessionId, 2);
+          assert.strictEqual(owner._coreCatalogSession, undefined);
         """
         run_js_with_assert(script, str(CORE_CONTROL_JS))
 
@@ -312,28 +317,47 @@ class CoreControlHelperTest(unittest.TestCase):
           assert.strictEqual(mod.publishCoreCatalog(owner, 4, second), false);
           assert.strictEqual(owner._scenarios.catalog, catalog);
           // A catalog published before a reconnection is refused for
-          // core targets by the executor.
+          // core targets by the executor. The refusal is reached through
+          // the REAL applyCoreSession (no manual epoch tampering).
           const conn = {id: "c1"};
-          mod.applyCoreSession(owner, {connection: conn}, {connection: {id: "c2"}});
-          assert.strictEqual(owner._coreCatalogSession, owner._coreSessionId);
-          owner._scenarios.catalog = catalog; // simulate the stale copy staying put
           const exec = await import(process.argv[2]);
           const calls = [];
           const staleOwner = {
             _busy: false, _notice: "", _error: false,
-            _coreSessionId: owner._coreSessionId,
-            _coreCatalogSession: owner._coreCatalogSession - 1,
+            _coreSessionId: 0,
+            _coreCatalogSession: 0,
             _coreTransferredSeen: new Set(),
             _scenarios: {catalog: {devices: [
               {target_id: "stand.light.main", entity_id: "light.stand_main", actions: [{action_id: "turn_off"}],
                coreControlState: {version: 1, status: "ready", controlRevision: 12, bindingRevision: 3}},
             ]}},
-            _hass: {callApi: async (m, p, payload) => { calls.push(payload); return {}; }},
+            _hass: {
+              callApi: async (method, path, payload) => {
+                calls.push(payload);
+                return {status: "accepted"};
+              },
+            },
             async _load() {}, _render() {},
           };
+          // The connection is replaced: the session moves forward, the
+          // catalog epoch keeps naming the old publication.
+          assert.strictEqual(
+            mod.applyCoreSession(staleOwner, {connection: conn}, {connection: {id: "c2"}}), true,
+          );
+          assert.strictEqual(staleOwner._coreSessionId, 1);
+          assert.strictEqual(staleOwner._coreCatalogSession, 0);
           await exec.executeDeviceAction(staleOwner, "stand.light.main", "turn_off", null);
           assert.strictEqual(calls.length, 0, "a pre-reconnect catalog must not command");
           assert.ok(staleOwner._notice.length > 0);
+          // A fresh catalog publication inside the new session restores
+          // the command path.
+          const fresh = {devices: [
+            {target_id: "stand.light.main", coreControlState: {version: 1, status: "ready", controlRevision: 12, bindingRevision: 3}},
+          ]};
+          assert.strictEqual(mod.publishCoreCatalog(staleOwner, 1, fresh), true);
+          await exec.executeDeviceAction(staleOwner, "stand.light.main", "turn_off", null);
+          assert.strictEqual(calls.length, 1, "a fresh publication re-enables the command");
+          assert.strictEqual(calls[0].coreControl.expectedControlRevision, 12);
         """
         run_js_with_assert(script, str(CORE_CONTROL_JS), str(DEVICE_ACTIONS_JS))
 
@@ -721,11 +745,59 @@ class EndToEndCatalogToCoreTest(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
 
 
+class ScenarioCatalogRefreshTest(unittest.TestCase):
+    """The third publication path (scenario violations) goes through the
+    single core publication point (SEC-HACS-01R1 residual)."""
+
+    def test_refresh_scenario_catalog_publishes_and_remembers(self) -> None:
+        script = r"""
+          import assert from "node:assert";
+          const mod = await import(process.argv[1]);
+          const catalog = {devices: [
+            {target_id: "stand.light.main", coreControlState: {version: 1, status: "ready", controlRevision: 12, bindingRevision: 3}},
+            {target_id: "light.neighbor"},
+          ]};
+          const gets = [];
+          const panel = {
+            _coreSessionId: 0,
+            _coreCatalogSession: 0,
+            _scenarios: {catalog: {devices: []}},
+            _hass: {
+              callApi: async (method, path) => {
+                gets.push(path);
+                return catalog;
+              },
+            },
+          };
+          const deps = {catalogApi: "hausman_hub/v1/admin/scenarios/catalog"};
+          assert.strictEqual(await mod.refreshScenarioCatalog(panel, deps), true);
+          assert.strictEqual(panel._scenarios.catalog, catalog);
+          assert.strictEqual(gets.length, 1);
+          assert.ok(panel._coreTransferredSeen.has("stand.light.main"));
+          assert.ok(!panel._coreTransferredSeen.has("light.neighbor"));
+          assert.strictEqual(panel._coreCatalogSession, 0);
+
+          // A session change during the fetch drops the stale answer.
+          panel._hass.callApi = async (method, path) => {
+            panel._coreSessionId = 1; // replaced while the fetch runs
+            return catalog;
+          };
+          assert.strictEqual(await mod.refreshScenarioCatalog(panel, deps), false);
+          assert.strictEqual(panel._coreCatalogSession, 0);
+
+          // A fetch failure keeps the last complete catalog.
+          panel._hass.callApi = async () => { throw new Error("down"); };
+          assert.strictEqual(await mod.refreshScenarioCatalog(panel, deps), false);
+          assert.strictEqual(panel._scenarios.catalog, catalog);
+        """
+        run_js_with_assert(script, str(SCENARIOS_JS))
+
+
 class FrontendSyntaxTest(unittest.TestCase):
     """Every changed frontend file must parse under Node."""
 
     def test_changed_frontend_files_parse(self) -> None:
-        for path in (CORE_CONTROL_JS, DEVICE_ACTIONS_JS, LIGHTING_SIDE_JS):
+        for path in (CORE_CONTROL_JS, DEVICE_ACTIONS_JS, LIGHTING_SIDE_JS, SCENARIOS_JS):
             result = subprocess.run(
                 ("node", "--check", str(path)),
                 check=False, capture_output=True, text=True,
