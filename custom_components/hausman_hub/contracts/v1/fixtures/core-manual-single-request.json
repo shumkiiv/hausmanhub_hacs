@@ -1,0 +1,16 @@
+{
+  "contract": {
+    "name": "hausman-hub-device-action-request",
+    "version": 1
+  },
+  "correlationId": "corr.core.manual.single.1",
+  "requestId": "core-manual-request-1",
+  "targetId": "device_lighting_demo",
+  "actionId": "turn_off",
+  "coreControl": {
+    "version": 1,
+    "requestId": "core-manual-request-1",
+    "expectedControlRevision": 12,
+    "expectedBindingRevision": 3
+  }
+}

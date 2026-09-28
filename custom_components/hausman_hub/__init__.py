@@ -486,6 +486,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     device_power_dependency_service.set_electrical_breaker_resolver(
         scenario_service.is_electrical_breaker_entity
     )
+    # Common manual intake of transferred resources (S-06.a): the running
+    # integration transfers no resources, so the registry stays empty and
+    # every legacy path is unchanged. A stand setup registers its synthetic
+    # resource here explicitly.
+    from .application.core_manual_input import CoreManualInput
+
+    core_manual_input = CoreManualInput()
+    domain_data["core_manual_input"] = core_manual_input
+    scenario_service.set_core_manual_input(core_manual_input)
     await scenario_service.async_load()
     from .application.protected_topology import (
         ROLE_AWAY_SENSOR,

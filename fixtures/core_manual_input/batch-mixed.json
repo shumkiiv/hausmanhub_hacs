@@ -1,0 +1,21 @@
+{
+  "contract": {"name": "hausman-hub-device-action-batch-request", "version": 1},
+  "correlationId": "corr.stand.batch.1",
+  "requestId": "stand-batch-1",
+  "actions": [
+    {
+      "targetId": "stand.light.main",
+      "actionId": "turn_off",
+      "coreControl": {
+        "version": 1,
+        "requestId": "stand-participant-1",
+        "expectedControlRevision": 1,
+        "expectedBindingRevision": 1
+      }
+    },
+    {
+      "targetId": "light.stand_neighbor",
+      "actionId": "turn_on"
+    }
+  ]
+}

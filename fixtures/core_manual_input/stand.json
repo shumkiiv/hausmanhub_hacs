@@ -1,0 +1,33 @@
+{
+  "contract": {"name": "hausmanhub-core-manual-stand", "version": 1},
+  "description": "Anonymized stand passport of the transferred synthetic binary light resource (S-06.a). The public targetId, the core resource, its HA binding and the binding revision are server-side fixture facts; nothing is derived from the client request or the HA domain.",
+  "room": {
+    "roomId": "stand_room",
+    "profile": "synthetic"
+  },
+  "resource": {
+    "targetId": "stand.light.main",
+    "resourceId": "test_main",
+    "entityId": "light.stand_main",
+    "property": "on",
+    "allowedActions": ["turn_on", "turn_off"],
+    "bindingRevision": 1,
+    "synthetic": true,
+    "capabilityProfile": {
+      "profileId": "synthetic-binary-light",
+      "version": 1,
+      "source": "synthetic-stand",
+      "properties": ["on"]
+    }
+  },
+  "neighbour": {
+    "targetId": "light.stand_neighbor",
+    "role": "control",
+    "transferred": false
+  },
+  "boundaries": {
+    "physicalSend": "closed",
+    "transport": "closed_transport",
+    "coreMode": "shadow"
+  }
+}

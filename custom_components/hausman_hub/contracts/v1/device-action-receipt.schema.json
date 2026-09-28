@@ -1261,6 +1261,10 @@
           "maximum": 63,
           "description": "Immutable zero-based batch action identity. Required for every item in the full batch view."
         },
+        "coreOperation": {
+          "$ref": "core-manual-envelope.schema.json#/$defs/coreOperationEcho",
+          "description": "Present when the action was admitted through the Hausman core: echoes the issued operation id and the accepted revisions. Never the legacy requestId."
+        },
         "climateMode": {
           "enum": [
             "automatic",
@@ -2673,7 +2677,8 @@
                         "manual_light_priority",
                         "automatic_on_confirmed",
                         "automatic_ownership_missing",
-                        "power_source_off"
+                        "power_source_off",
+                        "core_manual_admitted"
                       ]
                     },
                     "blockedReasons": {
@@ -2691,6 +2696,14 @@
                             "power_source_off"
                           ]
                         }
+                      ]
+                    },
+                    "coreOperation": {
+                      "required": [
+                        "version",
+                        "operationId",
+                        "controlRevision",
+                        "bindingRevision"
                       ]
                     }
                   },

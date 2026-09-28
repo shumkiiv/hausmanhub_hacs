@@ -1,0 +1,80 @@
+{
+  "contract": {
+    "name": "hausman-hub-device-action-receipt",
+    "version": 1
+  },
+  "correlationId": "corr.core.manual.single.1",
+  "requestId": "core-manual-request-1",
+  "accepted": true,
+  "confirmed": false,
+  "status": "accepted",
+  "statusName": "Проверяется",
+  "targetId": "device_lighting_demo",
+  "targetType": "light",
+  "actionId": "turn_off",
+  "decision": "skipped",
+  "commandSent": false,
+  "decisionTerminal": true,
+  "decisionAt": 1787911689000,
+  "commandSource": "manual",
+  "reasonCode": "core_manual_admitted",
+  "evidenceRevision": "core.manual.evidence.1",
+  "preCommandEvidenceRevision": "core.manual.evidence.1",
+  "preCommandOwnership": "unknown",
+  "ownership": "unknown",
+  "blockedReasons": [],
+  "evidence": {
+    "contract": {
+      "name": "hausman-hub-device-state-evidence",
+      "version": 1
+    },
+    "targetId": "device_lighting_demo",
+    "reportedState": "on",
+    "effectiveState": "on",
+    "confidence": "fresh",
+    "ownership": "unknown",
+    "observedAt": 1787911688000,
+    "freshUntil": 1787911748000,
+    "freshnessWindowMs": 60000,
+    "ownershipSource": "device_report",
+    "evidenceRevision": "core.manual.evidence.1",
+    "evidenceSequence": 1,
+    "reasonCode": "core_manual_admitted",
+    "reassertBudget": 0,
+    "reassertPolicy": "none",
+    "allowedActions": [
+      "turn_off"
+    ],
+    "blockedReasons": []
+  },
+  "preCommandEvidence": {
+    "contract": {
+      "name": "hausman-hub-device-state-evidence",
+      "version": 1
+    },
+    "targetId": "device_lighting_demo",
+    "reportedState": "on",
+    "effectiveState": "on",
+    "confidence": "fresh",
+    "ownership": "unknown",
+    "observedAt": 1787911688000,
+    "freshUntil": 1787911748000,
+    "freshnessWindowMs": 60000,
+    "ownershipSource": "device_report",
+    "evidenceRevision": "core.manual.evidence.1",
+    "evidenceSequence": 1,
+    "reasonCode": "core_manual_admitted",
+    "reassertBudget": 0,
+    "reassertPolicy": "none",
+    "allowedActions": [
+      "turn_off"
+    ],
+    "blockedReasons": []
+  },
+  "coreOperation": {
+    "version": 1,
+    "operationId": "core-op-0001",
+    "controlRevision": 13,
+    "bindingRevision": 3
+  }
+}

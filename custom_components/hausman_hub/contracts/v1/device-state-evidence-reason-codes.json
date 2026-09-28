@@ -46,7 +46,9 @@
       "defaultConfidence": "confirmed",
       "defaultOwnership": "manual",
       "blocked": false,
-      "allowedActions": ["turn_on"]
+      "allowedActions": [
+        "turn_on"
+      ]
     },
     {
       "code": "device_report_off_confirmed",
@@ -55,7 +57,9 @@
       "defaultConfidence": "confirmed",
       "defaultOwnership": "unknown",
       "blocked": false,
-      "allowedActions": ["turn_on"]
+      "allowedActions": [
+        "turn_on"
+      ]
     },
     {
       "code": "automatic_on_confirmed",
@@ -81,7 +85,9 @@
       "defaultConfidence": "confirmed",
       "defaultOwnership": "automation",
       "blocked": false,
-      "allowedActions": ["turn_on"]
+      "allowedActions": [
+        "turn_on"
+      ]
     },
     {
       "code": "state_stale",
@@ -126,7 +132,9 @@
       "defaultConfidence": "confirmed",
       "defaultOwnership": "unknown",
       "blocked": false,
-      "allowedActions": ["turn_on"]
+      "allowedActions": [
+        "turn_on"
+      ]
     },
     {
       "code": "power_source_unavailable",
@@ -224,6 +232,18 @@
       "defaultOwnership": "unknown",
       "blocked": true,
       "allowedActions": []
+    },
+    {
+      "code": "core_manual_admitted",
+      "category": "confirmation",
+      "description": "The core admission accepted one explicit manual action; the physical send stays closed and nothing was sent.",
+      "defaultConfidence": "fresh",
+      "defaultOwnership": "unknown",
+      "blocked": false,
+      "allowedActions": [
+        "turn_on",
+        "turn_off"
+      ]
     }
   ]
 }

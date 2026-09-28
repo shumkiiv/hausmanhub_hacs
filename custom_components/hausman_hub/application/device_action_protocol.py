@@ -25,6 +25,7 @@ FULL_BATCH_RESPONSE_MEDIA_TYPE = (
 DANGEROUS_ACTION_IDS = frozenset({"press", "unlock", "open_valve"})
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _IDEMPOTENCY_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
+_CORE_MANUAL_REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _VALUELESS_ACTIONS = frozenset(
     {
         "press", "turn_on", "turn_off", "open_cover", "close_cover", "toggle",
@@ -153,6 +154,37 @@ def canonical_request_fingerprint(payload: Mapping[str, object]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def validate_core_control(value: object) -> Mapping[str, object]:
+    """Validate one optional core manual admission envelope (S-06.a).
+
+    The envelope is the reviewed 0.72.1 ``coreManualEnvelope``: exactly
+    ``version``, ``requestId``, ``expectedControlRevision`` and
+    ``expectedBindingRevision``. Structural only: revision freshness is
+    checked by the intake against the live binding, never substituted."""
+
+    if not isinstance(value, Mapping):
+        raise StrictJsonError("coreControl must be an object")
+    required = {
+        "version", "requestId",
+        "expectedControlRevision", "expectedBindingRevision",
+    }
+    if set(value) != required:
+        raise StrictJsonError("coreControl fields are invalid")
+    if type(value["version"]) is not int or value["version"] != 1:
+        raise StrictJsonError("coreControl version is invalid")
+    request_id = value["requestId"]
+    if (
+        not isinstance(request_id, str)
+        or _CORE_MANUAL_REQUEST_ID.fullmatch(request_id) is None
+    ):
+        raise StrictJsonError("coreControl requestId is invalid")
+    for name in ("expectedControlRevision", "expectedBindingRevision"):
+        revision = value[name]
+        if type(revision) is not int or revision < 0:
+            raise StrictJsonError(f"coreControl {name} is invalid")
+    return value
+
+
 def validate_single_request(payload: object, *, full: bool) -> Mapping[str, object]:
     """Validate the complete legacy or full single-action envelope."""
 
@@ -167,6 +199,9 @@ def validate_single_request(payload: object, *, full: bool) -> Mapping[str, obje
             "idempotencyKey", "reassertKey", "expectedEvidenceRevision",
             "expectedEvidenceSequence",
             "requestId",
+            # The core admission envelope exists only in the explicitly
+            # selected full request form (0.72.1).
+            "coreControl",
         }
     if not set(payload).issubset(allowed):
         raise StrictJsonError("device action body contains unknown fields")
@@ -231,6 +266,8 @@ def validate_batch_request(payload: object, *, full: bool) -> list[Mapping[str, 
             allowed |= {
                 "dryRun", "confirmedByUser", "idempotencyKey", "reassertKey",
                 "expectedEvidenceRevision", "expectedEvidenceSequence",
+                # The envelope exists only in the full batch item form.
+                "coreControl",
             }
         if not set(item).issubset(allowed):
             raise StrictJsonError("device action batch item contains unknown fields")
@@ -262,6 +299,8 @@ def _validate_action(payload: Mapping[str, object], *, full: bool) -> None:
     for name in ("confirmedByUser", "dryRun"):
         if name in payload and type(payload[name]) is not bool:
             raise StrictJsonError(f"{name} must be boolean")
+    if "coreControl" in payload:
+        validate_core_control(payload["coreControl"])
     if action_id in _VALUELESS_ACTIONS and "value" in payload:
         raise StrictJsonError("action does not accept value")
     if "value" in payload:

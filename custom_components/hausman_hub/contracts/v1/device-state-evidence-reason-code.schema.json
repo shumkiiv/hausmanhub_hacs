@@ -47,7 +47,8 @@
         "automatic_ownership_missing",
         "repair_required",
         "manual_off_confirmed",
-        "device_report_off_confirmed"
+        "device_report_off_confirmed",
+        "core_manual_admitted"
       ],
       "description": "Stable reason code. Clients must preserve unknown future codes as opaque values."
     },

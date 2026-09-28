@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from ..adapters.core.clock import SystemClock
 from ..adapters.core.closed_transport import ClosedTransport
 from ..adapters.core.control_store import FileControlStore
+from ..adapters.core.light import LightDeviceAdapter
 from ..adapters.core.room_lighting import (
     EntityBinding,
     RoomLightingInputAdapter,
@@ -37,6 +38,7 @@ from ..domain.room_lighting import RoomLightingConfig
 if TYPE_CHECKING:
     from pathlib import Path
 from .core.command_service import (
+    CapabilityProfile,
     CoreCommandService,
     CoreServiceError,
     ModuleEntry,
@@ -48,6 +50,11 @@ PROFILE_SUNRISE = "08:00"
 PROFILE_SUNSET = "18:00"
 SHADOW_MANUAL_POLICY_REVISION = 1
 UNCERTAIN_MANUAL_AUTHORITY = "manual_authority_unavailable"
+# Source marker of a hold accepted through the core manual intake
+# (S-06.a). The branch's legacy-holds transfer must never overwrite or
+# clear such a hold: for a transferred resource the core store is the
+# only authority of manual rights.
+CORE_MANUAL_HOLD_SOURCE = "core.manual_intake"
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +79,48 @@ class CoreBranchError(CoreServiceError):
     pass
 
 
+class ProfileIncompleteError(CoreBranchError):
+    """One resource has no explicit capability profile (S-06.a).
+
+    The executive path needs a real typed passport; a missing profile is
+    a typed fail-closed refusal, never a universal light capability and
+    never a copied synthetic profile."""
+
+    def __init__(self, resource_id: str) -> None:
+        super().__init__(f"profile_incomplete: {resource_id}")
+        self.resource_id = resource_id
+
+
+class ProfileBoundDeviceAdapter:
+    """Device adapter of the branch: a real ``LightDeviceAdapter`` over
+    explicitly registered profiles, with a typed refusal for resources
+    nobody registered a passport for (S-06.a capabilities split)."""
+
+    def __init__(
+        self,
+        inner: LightDeviceAdapter,
+        known_resources: frozenset[str],
+    ) -> None:
+        self._inner = inner
+        self._known = known_resources
+
+    def capabilities(self, resource_id: str) -> CapabilityProfile:
+        if resource_id not in self._known:
+            raise ProfileIncompleteError(resource_id)
+        return self._inner.capabilities(resource_id)
+
+    def prepare(self, target, entity_id, profile, operation_id, permit_id):
+        return self._inner.prepare(
+            target, entity_id, profile, operation_id, permit_id
+        )
+
+    def dispatch_once(self, prepared, transport):
+        return self._inner.dispatch_once(prepared, transport)
+
+    def normalize(self, raw):
+        return self._inner.normalize(raw)
+
+
 @dataclass(frozen=True, slots=True)
 class CoreBranchConfig:
     """Frozen profile settings of one shadow branch."""
@@ -81,6 +130,10 @@ class CoreBranchConfig:
     timezone: str = PROFILE_TIMEZONE
     sunrise: str = PROFILE_SUNRISE
     sunset: str = PROFILE_SUNSET
+    # Explicit capability passports of the executive path (S-06.a). Only
+    # explicitly registered resources get one; everything else fails
+    # typed instead of inventing capabilities.
+    device_profiles: Mapping[str, CapabilityProfile] | None = None
 
     def resolved_timezone(self) -> ZoneInfo:
         try:
@@ -151,13 +204,33 @@ class RoomLightingCoreBranch:
         )
         self._mode = self.MODE_OFF
         self._module_id = self._module.module_id
+        # Executive-path bindings (S-06.a): the service needs the plain
+        # resource_id -> entity_id map, not the observation bindings.
+        self._target_bindings: dict[str, str] = {
+            target.id: target.entity_id
+            for target in branch_config.config.devices.light_targets
+            if isinstance(target.entity_id, str)
+        }
+        device_profiles = dict(branch_config.device_profiles or {})
+        self._device_adapter = ProfileBoundDeviceAdapter(
+            LightDeviceAdapter(
+                profiles_by_resource=device_profiles,
+                binding_revisions={
+                    resource_id: branch_config.config.version
+                    for resource_id in self._target_bindings
+                },
+                boot_id=self._clock.boot_id(),
+                id_factory=self._id_factory(),
+            ),
+            known_resources=frozenset(device_profiles),
+        )
         restore_kwargs = dict(
             clock=self._clock,
             store=self._store,
-            adapter=self._input_adapter,
+            adapter=self._device_adapter,
             transport=self._transport,
             specs=self._specs_from(branch_config.config),
-            bindings=self._bindings_from(branch_config.config),
+            bindings=dict(self._target_bindings),
             modules={
                 self._module.module_id: ModuleEntry(
                     manifest=manifest,
@@ -205,11 +278,6 @@ class RoomLightingCoreBranch:
         # process or write (SEC-C6-R2-02).
         self._input_closed = False
         self._manual_holds_provider = manual_holds_provider
-        self._target_bindings: dict[str, str] = {
-            target.id: target.entity_id
-            for target in branch_config.config.devices.light_targets
-            if isinstance(target.entity_id, str)
-        }
 
     # -- mode --------------------------------------------------------------
 
@@ -220,6 +288,16 @@ class RoomLightingCoreBranch:
     @property
     def room_id(self) -> str:
         return self._branch_config.room_id
+
+    @property
+    def input_closed(self) -> bool:
+        return self._input_closed
+
+    @property
+    def core_service(self) -> CoreCommandService:
+        """The branch's core service (public read/admission surface)."""
+
+        return self._service
 
     def activate_shadow(self) -> None:
         with self._lock:
@@ -419,6 +497,15 @@ class RoomLightingCoreBranch:
         now_utc_ms = self._clock.now_utc_ms()
         for resource_id, entity_id in self._target_bindings.items():
             record = self._service.record(resource_id)
+            if (
+                record.manual is not None
+                and record.manual.source == CORE_MANUAL_HOLD_SOURCE
+            ):
+                # A hold accepted through the core manual intake (S-06.a)
+                # is owned by the core store: the legacy transfer neither
+                # extends nor clears it, with or without a matching
+                # runtime hold.
+                continue
             if holds is None:
                 # The shared authority is unavailable: fail closed. A
                 # foreign uncertainty marker (e. g. clock_uncertain) is

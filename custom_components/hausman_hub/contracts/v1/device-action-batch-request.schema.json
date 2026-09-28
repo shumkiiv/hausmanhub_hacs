@@ -119,6 +119,10 @@
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
           "description": "Client-supplied bounded idempotency key. A dangerous physical action reserves the entire immutable full batch under this global key."
         },
+        "coreControl": {
+          "$ref": "core-manual-envelope.schema.json#/$defs/coreManualEnvelope",
+          "description": "Optional per-participant core admission envelope for a resource routed through the Hausman core."
+        },
         "reassertKey": {
           "type": "string",
           "minLength": 1,

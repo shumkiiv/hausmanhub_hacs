@@ -1,0 +1,176 @@
+{
+  "contract": {
+    "name": "hausman-hub-device-action-batch-receipt",
+    "version": 1
+  },
+  "correlationId": "corr.core.manual.batch.1",
+  "status": "accepted",
+  "total": 2,
+  "acceptedCount": 2,
+  "confirmedCount": 0,
+  "failedCount": 0,
+  "receipts": [
+    {
+      "contract": {
+        "name": "hausman-hub-device-action-receipt",
+        "version": 1
+      },
+      "correlationId": "corr.core.manual.batch.1",
+      "requestId": "core-manual-participant-1",
+      "accepted": true,
+      "confirmed": false,
+      "status": "accepted",
+      "statusName": "Проверяется",
+      "targetId": "device_lighting_demo",
+      "targetType": "light",
+      "actionId": "turn_off",
+      "actionIndex": 0,
+      "decision": "skipped",
+      "commandSent": false,
+      "decisionTerminal": true,
+      "decisionAt": 1787911689000,
+      "commandSource": "manual",
+      "reasonCode": "core_manual_admitted",
+      "evidenceRevision": "core.manual.evidence.2",
+      "preCommandEvidenceRevision": "core.manual.evidence.2",
+      "preCommandOwnership": "unknown",
+      "ownership": "unknown",
+      "blockedReasons": [],
+      "evidence": {
+        "contract": {
+          "name": "hausman-hub-device-state-evidence",
+          "version": 1
+        },
+        "targetId": "device_lighting_demo",
+        "reportedState": "on",
+        "effectiveState": "on",
+        "confidence": "fresh",
+        "ownership": "unknown",
+        "observedAt": 1787911688000,
+        "freshUntil": 1787911748000,
+        "freshnessWindowMs": 60000,
+        "ownershipSource": "device_report",
+        "evidenceRevision": "core.manual.evidence.2",
+        "evidenceSequence": 2,
+        "reasonCode": "core_manual_admitted",
+        "reassertBudget": 0,
+        "reassertPolicy": "none",
+        "allowedActions": [
+          "turn_off"
+        ],
+        "blockedReasons": []
+      },
+      "preCommandEvidence": {
+        "contract": {
+          "name": "hausman-hub-device-state-evidence",
+          "version": 1
+        },
+        "targetId": "device_lighting_demo",
+        "reportedState": "on",
+        "effectiveState": "on",
+        "confidence": "fresh",
+        "ownership": "unknown",
+        "observedAt": 1787911688000,
+        "freshUntil": 1787911748000,
+        "freshnessWindowMs": 60000,
+        "ownershipSource": "device_report",
+        "evidenceRevision": "core.manual.evidence.2",
+        "evidenceSequence": 2,
+        "reasonCode": "core_manual_admitted",
+        "reassertBudget": 0,
+        "reassertPolicy": "none",
+        "allowedActions": [
+          "turn_off"
+        ],
+        "blockedReasons": []
+      },
+      "coreOperation": {
+        "version": 1,
+        "operationId": "core-op-0002",
+        "controlRevision": 13,
+        "bindingRevision": 3
+      }
+    },
+    {
+      "contract": {
+        "name": "hausman-hub-device-action-receipt",
+        "version": 1
+      },
+      "correlationId": "corr.core.manual.batch.1",
+      "requestId": "core-manual-participant-2",
+      "accepted": true,
+      "confirmed": false,
+      "status": "accepted",
+      "statusName": "Проверяется",
+      "targetId": "device_lighting_second",
+      "targetType": "light",
+      "actionId": "turn_on",
+      "actionIndex": 1,
+      "decision": "skipped",
+      "commandSent": false,
+      "decisionTerminal": true,
+      "decisionAt": 1787911689000,
+      "commandSource": "manual",
+      "reasonCode": "core_manual_admitted",
+      "evidenceRevision": "core.manual.evidence.3",
+      "preCommandEvidenceRevision": "core.manual.evidence.3",
+      "preCommandOwnership": "unknown",
+      "ownership": "unknown",
+      "blockedReasons": [],
+      "evidence": {
+        "contract": {
+          "name": "hausman-hub-device-state-evidence",
+          "version": 1
+        },
+        "targetId": "device_lighting_second",
+        "reportedState": "off",
+        "effectiveState": "off",
+        "confidence": "fresh",
+        "ownership": "unknown",
+        "observedAt": 1787911688000,
+        "freshUntil": 1787911748000,
+        "freshnessWindowMs": 60000,
+        "ownershipSource": "device_report",
+        "evidenceRevision": "core.manual.evidence.3",
+        "evidenceSequence": 3,
+        "reasonCode": "core_manual_admitted",
+        "reassertBudget": 0,
+        "reassertPolicy": "none",
+        "allowedActions": [
+          "turn_on"
+        ],
+        "blockedReasons": []
+      },
+      "preCommandEvidence": {
+        "contract": {
+          "name": "hausman-hub-device-state-evidence",
+          "version": 1
+        },
+        "targetId": "device_lighting_second",
+        "reportedState": "off",
+        "effectiveState": "off",
+        "confidence": "fresh",
+        "ownership": "unknown",
+        "observedAt": 1787911688000,
+        "freshUntil": 1787911748000,
+        "freshnessWindowMs": 60000,
+        "ownershipSource": "device_report",
+        "evidenceRevision": "core.manual.evidence.3",
+        "evidenceSequence": 3,
+        "reasonCode": "core_manual_admitted",
+        "reassertBudget": 0,
+        "reassertPolicy": "none",
+        "allowedActions": [
+          "turn_on"
+        ],
+        "blockedReasons": []
+      },
+      "coreOperation": {
+        "version": 1,
+        "operationId": "core-op-0003",
+        "controlRevision": 8,
+        "bindingRevision": 2
+      }
+    }
+  ]
+}

@@ -53,13 +53,13 @@ VENDORED_CONTRACT_HASHES = {
     "custom_components/hausman_hub/contracts/v1/scenario-ai-draft-request.schema.json": "eeb72fc172f8730552fb174a1a0a55f58debeb9b5612068b0c2889190c37b9c1",
     "custom_components/hausman_hub/contracts/v1/scenario-ai-draft.schema.json": "585ec9c8e48c208452f4f80407feacfc04a00c8b580e04a63504fa049adedb5e",
     "custom_components/hausman_hub/contracts/v1/scenario-health.schema.json": "8a14e51bdb531dd674bede8e0e0618a2788df641dc23fc9da2e8af9b821890e4",
-    "custom_components/hausman_hub/contracts/v1/device-action-request.schema.json": "ec201063f15aab4614c59e8464da73f9e8490bedd3fc0dc3c2502bf7ecc078cb",
-    "custom_components/hausman_hub/contracts/v1/device-action-receipt.schema.json": "82907a7b9326b00a050548665c45fe87e8095fbe31298a02f90b00bea36c4bde",
+    "custom_components/hausman_hub/contracts/v1/device-action-request.schema.json": "e12f274ee8ae76a1954d159134ce253b2006f9763f3c466b9b0789770738f590",
+    "custom_components/hausman_hub/contracts/v1/device-action-receipt.schema.json": "185cf1d1bc85e548c22800c8d5d80e60ce2037d5c82874d5845bdd115f9c415e",
     "custom_components/hausman_hub/contracts/v1/intercom-release-receipt.schema.json": "ea11c82a77a3fe9195513d1a915336167c81a356fa0b56cf058384daedacf947",
     "custom_components/hausman_hub/contracts/v1/scenario-catalog.schema.json": "3b43fa73e6c254ed0f87188a9f7d50144ee43dd7542233b4dcaf32d3d2629f55",
     "custom_components/hausman_hub/contracts/v1/scenario-dry-run-result.schema.json": "533a303e6e9057efd8660972f3f1216b125cace27a152f9d029767968cc40a9f",
     "custom_components/hausman_hub/contracts/v1/operation-journal.schema.json": "3550cccabc86052c666a9fca3b2d69ba139218c50a657ca3161f7f4bdfc4b6d2",
-    "custom_components/hausman_hub/contracts/v1/device-action-batch-request.schema.json": "ee18b9a830c5c122452477557b32300bba8f0956fa58d2ab7158949b686e00d1",
+    "custom_components/hausman_hub/contracts/v1/device-action-batch-request.schema.json": "86ba156655cbd3750420ec6a3142d440796725d77836aa320202e1b21b168171",
     "custom_components/hausman_hub/contracts/v1/device-action-batch-receipt.schema.json": "9ebd98dbd40f95c5757cc2751efa67612c6a41caadfc51d292d5968f07263089",
     "custom_components/hausman_hub/contracts/v1/device-feature-matrix.json": "ef1f2784f5ffdd0bde84282816f09542e4f7aabf3e9150c1dfe5b1f8c0315455",
     "fixtures/hausmanhub_operation_journal_v1/journal.json": "2429db40627168bb84e39411ec75b0934fe169cd21103d0b05ae0bd28b2e3340",
@@ -95,9 +95,9 @@ VENDORED_CONTRACT_HASHES = {
     "custom_components/hausman_hub/contracts/v1/api-error-idempotency-conflict.schema.json": "bcf1642ce7cc3428a1b39f9613df857fdd517d98d0e51cc0c1172541c1d8b0c1",
     "custom_components/hausman_hub/contracts/v1/api-error-not-acceptable.schema.json": "1f54dd304c0fa59e565a258f07d85bd1aea6fd02520abf2115de6223fa3e636a",
     "custom_components/hausman_hub/contracts/v1/device-action-value.schema.json": "bf7856e9584156b9aba1ca08f407d8159dbef1a94c70bf1e2f33b429befdb4cb",
-    "custom_components/hausman_hub/contracts/v1/device-state-evidence-reason-code.schema.json": "7180b1d07ede8e77b4fdda23af421b82c3fdf3846e0f53b39b5f6dd140b3007b",
+    "custom_components/hausman_hub/contracts/v1/device-state-evidence-reason-code.schema.json": "05255c42e57bde11658f5b1eea903cf242294ba8f2384703033e81da6cd0d21a",
     "custom_components/hausman_hub/contracts/v1/device-state-evidence.schema.json": "4e658a34e9254b49473324ea90eab1c7accc769e746340367afd244269feea6c",
-    "custom_components/hausman_hub/contracts/v1/device-state-evidence-reason-codes.json": "667409c7671a11f686dc4872dcebb456cfa1846ce16a5ee2caf170aea943bc90",
+    "custom_components/hausman_hub/contracts/v1/device-state-evidence-reason-codes.json": "51d3b39097027467f2b50af36b8c90bebf45e946490b559a7f4d04ce48242637",
     "custom_components/hausman_hub/contracts/v1/error-taxonomy.schema.json": "f0497234155f4f692913aa157246bb3e0d732ce6ba9fba25d99969526dc57595",
     "custom_components/hausman_hub/contracts/v1/error-taxonomy.json": "24fc25f256ba8845095142f9b2b251c2265df555fcba3fa79265a83977e1b81c",
     "custom_components/hausman_hub/contracts/v1/lighting-profile-snapshots.json": "ef8a54c3a83da87986335c5d41dcfaa489945e4117eecfdc7094770466319aec",
@@ -113,17 +113,29 @@ VENDORED_CONTRACT_HASHES = {
     "custom_components/hausman_hub/contracts/v1/fixtures/operation-journal-reset-receipt.json": "8e41b875b88adf03aba66bf4dde62133ffe8e55e2b01f64105458e0a6679de90",
     "custom_components/hausman_hub/contracts/v1/fixtures/operation-journal-reset-request.json": "61dd9dacd630bd088e9cd2002add93f8cf988f8b2c5eca9b4e65c8aedc6d65a0",
     "custom_components/hausman_hub/contracts/v1/fixtures/operation-journal-reset-token-error.json": "8c0f069fde2712d7cdbfd00c236b0b4529a0659ca3c2bf7b7aca0eda282128b5",
+    "custom_components/hausman_hub/contracts/v1/core-manual-envelope.schema.json": "0f601049ea921ad3d255f1b670749aea1f828b86c4e85e667003c95752960e49",
+    "custom_components/hausman_hub/contracts/v1/fixtures/core-manual-single-request.json": "05203ac7ee1a2ec718c1453ce1a79c42426bb211c4a680462f55134646199855",
+    "custom_components/hausman_hub/contracts/v1/fixtures/core-manual-batch-request.json": "b55be55355ec18be2f0f978653b639d1a4fa5a2f4d11525571a5850b535c28c9",
+    "custom_components/hausman_hub/contracts/v1/fixtures/core-manual-single-receipt.json": "d6aa823e8a33c3e50a88a20451e0094fe4160edf7355460354f6be36d876b054",
+    "custom_components/hausman_hub/contracts/v1/fixtures/core-manual-batch-receipt.json": "e0c0d20417fcf9602a0dfab213cd100591afc0ce74553db36e602420f11879e1",
 }
 
 
-def test_external_contract_pin_is_explicit_and_canonical() -> None:
+def test_external_contract_pin_is_explicit() -> None:
+    """The pin names the exact contract the runtime was built against.
+
+    0.72.1 is the reviewed local candidate of HH-014.b (branch
+    ``codex/hh-014b-core-manual-input-contracts-20260928``): it is not
+    published, so ``canonical`` stays false until the owner publishes it.
+    """
+
     pin = json.loads(PIN_PATH.read_text(encoding="utf-8"))
 
     assert pin == {
         "repository": "shumkiiv/hausmanhub-contracts",
-        "version": "0.72.0",
-        "commit": "3daa0fb6eecac395e8473bd705dd6b0d2f8cd7f9",
-        "canonical": True,
+        "version": "0.72.1",
+        "commit": "e0fe03e5708cfb9aad2495239a106d41a6d36ef8",
+        "canonical": False,
         "role": "runtime-consumer",
     }
 

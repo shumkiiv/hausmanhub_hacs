@@ -1,0 +1,30 @@
+{
+  "contract": {
+    "name": "hausman-hub-device-action-batch-request",
+    "version": 1
+  },
+  "correlationId": "corr.core.manual.batch.1",
+  "requestId": "core-manual-batch-1",
+  "actions": [
+    {
+      "targetId": "device_lighting_demo",
+      "actionId": "turn_off",
+      "coreControl": {
+        "version": 1,
+        "requestId": "core-manual-participant-1",
+        "expectedControlRevision": 12,
+        "expectedBindingRevision": 3
+      }
+    },
+    {
+      "targetId": "device_lighting_second",
+      "actionId": "turn_on",
+      "coreControl": {
+        "version": 1,
+        "requestId": "core-manual-participant-2",
+        "expectedControlRevision": 7,
+        "expectedBindingRevision": 2
+      }
+    }
+  ]
+}

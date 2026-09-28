@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/core-manual-envelope.schema.json",
+  "title": "HausmanHub core manual control envelope v1",
+  "description": "Optional core-control envelope of one explicit manual action routed through the Hausman core admission (HH-014.b, S-06.a). The envelope carries one explicit request id and the control/binding revisions the client based its decision on. It never replaces the legacy requestId or idempotencyKey of the v1 device-action contract.",
+  "$defs": {
+    "coreManualEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "requestId",
+        "expectedControlRevision",
+        "expectedBindingRevision"
+      ],
+      "properties": {
+        "version": { "const": 1 },
+        "requestId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "description": "Identity of one explicit core manual action. The same id must be reused when a batch participant is replayed as a single request."
+        },
+        "expectedControlRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Control revision the client accepted. The server must reject the action when the current control revision differs; substituting the current revision is not allowed."
+        },
+        "expectedBindingRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Binding revision the client accepted. The server must reject the action when the current binding revision differs."
+        }
+      }
+    },
+    "coreOperationEcho": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "operationId", "controlRevision", "bindingRevision"],
+      "properties": {
+        "version": { "const": 1 },
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Core operation identity issued by the server. It is not the legacy requestId."
+        },
+        "controlRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Control revision accepted by the core admission."
+        },
+        "bindingRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Binding revision accepted by the core admission."
+        }
+      }
+    }
+  }
+}

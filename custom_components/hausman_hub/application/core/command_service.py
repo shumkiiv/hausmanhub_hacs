@@ -433,8 +433,11 @@ class CoreCommandService:
     def scope_revision(self, group_id: str) -> int:
         return self._scope_revisions.get(group_id, 0)
 
-    def receipt(self, request_id: str) -> ManualReceipt | None:
-        return self._receipts.get(request_id)
+    def receipt(
+        self, request_id: str, *, receipt_scope: str = ""
+    ) -> ManualReceipt | None:
+        key = f"{receipt_scope}|{request_id}" if receipt_scope else request_id
+        return self._receipts.get(key)
 
     def _next_id(self, prefix: str) -> str:
         # Identifiers never repeat across restarts: restored operations
@@ -1482,19 +1485,48 @@ class CoreCommandService:
         source: str,
         expected_control_revision: int,
         policy_revision: int = DEFAULT_MANUAL_POLICY_REVISION,
+        receipt_scope: str = "",
     ) -> ManualReceipt:
         """Manual intake in the S-04 order: barrier first, then one commit
         that durably contains the accepted rights AND the acceptance
         receipt, then publication and permitted execution (SEC-FIRST-IDEM-01:
         the accepted request_id is never lost to a later storage failure).
         A no_op acceptance still records the manual hold and bumps
-        generation/revision (K-07)."""
+        generation/revision (K-07).
+
+        ``receipt_scope`` bounds the replay key to one authenticated
+        caller (S-06.a): the durable receipt key becomes
+        ``scope|request_id`` so another principal never receives a
+        foreign replay. The public ``request_id`` fields of the receipt
+        and the operation keep the caller's id; an empty scope keeps the
+        legacy unscoped key (and replays legacy unscoped receipts)."""
 
         resource_id = self.resolve_resource_id(resource_ref)
-        fingerprint = (resource_id, action_id, target)
-        previous = self._receipts.get(request_id)
+        receipt_key = (
+            f"{receipt_scope}|{request_id}" if receipt_scope else request_id
+        )
+        if receipt_scope:
+            # Scoped admission (S-06.a): the replay fingerprint covers
+            # the whole admitted intent — method, resource, action,
+            # parameters and the expected versions the caller based its
+            # decision on. The same id with another version or content
+            # is an idempotency conflict.
+            fingerprint = (
+                resource_id,
+                action_id,
+                target,
+                expected_control_revision,
+            )
+        else:
+            # Legacy unscoped admission keeps its historical fingerprint
+            # (and its replay semantics) untouched.
+            fingerprint = (resource_id, action_id, target)
+        previous = self._receipts.get(receipt_key)
         if previous is not None:
-            if self._receipt_fingerprints.get(request_id) == fingerprint:
+            stored = self._receipt_fingerprints.get(receipt_key)
+            if stored is not None and _manual_fingerprints_match(
+                stored, fingerprint
+            ):
                 return ManualReceipt(
                     request_id=request_id,
                     status=previous.status,
@@ -1628,14 +1660,14 @@ class CoreCommandService:
             **image["operations"],
             operation.operation_id: operation,
         }
-        image["receipts"] = {**image["receipts"], request_id: receipt}
+        image["receipts"] = {**image["receipts"], receipt_key: receipt}
         image["receipt_fingerprints"] = {
             **image["receipt_fingerprints"],
-            request_id: list(fingerprint),
+            receipt_key: list(fingerprint),
         }
         image["receipt_times"] = {
             **image["receipt_times"],
-            request_id: now_utc,
+            receipt_key: now_utc,
         }
         image["scope_revisions"] = next_scope
         try:
@@ -1649,9 +1681,9 @@ class CoreCommandService:
         self._records[resource_id] = next_record
         self._scope_revisions.clear()
         self._scope_revisions.update(next_scope)
-        self._receipts[request_id] = receipt
-        self._receipt_fingerprints[request_id] = fingerprint
-        self._receipt_times[request_id] = now_utc
+        self._receipts[receipt_key] = receipt
+        self._receipt_fingerprints[receipt_key] = fingerprint
+        self._receipt_times[receipt_key] = now_utc
         # The acceptance image already contains the operation; publishing
         # it in memory must not fire a second, diverging commit.
         self._operations[operation.operation_id] = operation
@@ -1937,6 +1969,22 @@ class CoreCommandService:
             control_revision=record.control_revision,
             generation=record.generation,
         )
+
+
+def _manual_fingerprints_match(
+    stored: tuple, current: tuple
+) -> bool:
+    """Replay comparison of two manual-intent fingerprints.
+
+    Current fingerprints carry the expected control revision (S-06.a);
+    receipts restored from older images store the legacy three-part
+    form, which replays only on an exact legacy match."""
+
+    if len(stored) == len(current):
+        return stored == current
+    if len(stored) == 3 and len(current) == 4:
+        return tuple(stored) == tuple(current[:3])
+    return False
 
 
 def _value_matches(

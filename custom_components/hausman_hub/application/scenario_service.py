@@ -1006,6 +1006,9 @@ class ScenarioService:
         self._electrical_breaker_device_ids_resolver = (
             electrical_breaker_device_ids_resolver
         )
+        # Common manual intake of transferred resources (S-06.a): wired
+        # at setup; None keeps the legacy paths completely unchanged.
+        self._core_manual_input: object | None = None
         self._topology_resolver: Callable[[str], str | None] | None = None
         self._manual_action_pre_admission: (
             Callable[[str, str, str, object | None], Awaitable[None]] | None
@@ -5269,6 +5272,19 @@ class ScenarioService:
         except Exception:
             _LOGGER.warning("scenario run journal append failed", exc_info=True)
 
+    def set_core_manual_input(self, core_manual_input: object) -> None:
+        """Wire the common manual intake (S-06.a). ``None`` disables it."""
+
+        self._core_manual_input = core_manual_input
+
+    def _core_manual_intake(self) -> object | None:
+        intake = self._core_manual_input
+        if intake is None or not callable(
+            getattr(intake, "is_transferred", None)
+        ):
+            return None
+        return intake
+
     async def async_execute_device_action(
         self,
         target_id: str,
@@ -5296,6 +5312,15 @@ class ScenarioService:
     ) -> dict[str, Any]:
         """Execute one catalog action through the shared strict executor."""
 
+        intake = self._core_manual_intake()
+        if intake is not None and intake.is_transferred(target_id):
+            # A transferred resource never reaches the legacy writer,
+            # including direct wrapper calls and before any power or
+            # manual side records are prepared (S-06.a).
+            raise ScenarioServiceError(
+                "Target is admitted through the Hausman core manual intake.",
+                status=409,
+            )
         await self.async_refresh_catalog()
         if self._executor is None:
             raise ScenarioServiceError("Executor not configured", status=500)
@@ -5439,8 +5464,15 @@ class ScenarioService:
         ) = None,
         dispatch_marker: Callable[[], None] | None = None,
         dispatch_markers: tuple[Callable[[], None], ...] | None = None,
+        core_principal: str | None = None,
+        core_full_receipts: bool = False,
     ) -> list[dict[str, Any]]:
-        """Run one bounded ordered batch and preserve every target receipt."""
+        """Run one bounded ordered batch and preserve every target receipt.
+
+        Participants of a transferred resource (S-06.a) are admitted by
+        the common core intake instead of the legacy executor; their
+        receipts stay separate per participant and a core refusal never
+        switches that participant to the legacy writer."""
 
         if not 1 <= len(actions) <= 64:
             raise ScenarioServiceError("Action batch must contain 1 to 64 items")
@@ -5508,6 +5540,7 @@ class ScenarioService:
         await self.async_refresh_catalog()
         if self._executor is None:
             raise ScenarioServiceError("Executor not configured", status=500)
+        intake = self._core_manual_intake()
         receipts: list[dict[str, Any]] = []
         for index, (
             target_id,
@@ -5518,6 +5551,31 @@ class ScenarioService:
             expected_revision,
             expected_sequence,
         ) in enumerate(normalized_actions):
+            if intake is not None and intake.is_transferred(target_id):
+                # The common admission owns this participant; the legacy
+                # executor and its side records are not reached (S-06.a).
+                receipts.append(
+                    await intake.async_submit_batch_item(
+                        target_id=target_id,
+                        action_id=action_id,
+                        core_control=(
+                            actions[index].get("coreControl")
+                            if index < len(actions)
+                            else None
+                        ),
+                        principal=core_principal,
+                        correlation_id=correlation_id,
+                        request_id=(
+                            request_ids[index]
+                            if request_ids is not None
+                            else None
+                        ),
+                        dry_run=dry_run,
+                        action_index=index,
+                        full=core_full_receipts,
+                    )
+                )
+                continue
             options: dict[str, object] = {"correlation_id": correlation_id}
             context = (
                 dispatch_contexts[index]

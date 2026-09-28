@@ -82,6 +82,10 @@
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
           "description": "Client-supplied bounded idempotency key for a dangerous physical action."
         },
+        "coreControl": {
+          "$ref": "core-manual-envelope.schema.json#/$defs/coreManualEnvelope",
+          "description": "Optional core admission envelope for a resource routed through the Hausman core. Absent means the legacy single path; present requires exact expected revisions with no server-side substitution."
+        },
         "dryRun": {
           "type": "boolean",
           "description": "Validate and resolve the action without sending a physical command."

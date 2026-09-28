@@ -36,6 +36,10 @@ from .application.device_action_protocol import (
     validate_batch_request,
     validate_single_request,
 )
+from .application.core_manual_input import (
+    CoreManualInput,
+    CoreManualInputError,
+)
 from .application.device_action_receipts import (
     evidence_snapshot,
     full_action_receipt,
@@ -582,6 +586,49 @@ class DeviceFeatureMatrixView(HomeAssistantView):
         return self.json(device_feature_matrix_snapshot(), headers=NO_STORE_HEADERS)
 
 
+async def _async_core_manual_single(
+    view: HomeAssistantView,
+    core_input: CoreManualInput,
+    *,
+    request: Any,
+    payload: Mapping[str, object],
+    target_id: str,
+    action_id: str,
+    dry_run: bool,
+    correlation_id: str,
+    response_media_type: str,
+    full_response: bool,
+) -> Any:
+    """One transferred target: the common core admission answers instead
+    of the legacy executor (S-06.a). A typed refusal is a strict API
+    error, never a fallback to the old writer."""
+
+    request_id = str(payload.get("requestId") or "")
+    principal = "admin" if _is_local_admin_request(request) else "tablet"
+    try:
+        receipt = await core_input.async_submit(
+            target_id=target_id,
+            action_id=action_id,
+            core_control=payload.get("coreControl"),
+            principal=principal,
+            correlation_id=correlation_id,
+            request_id=request_id or None,
+            dry_run=dry_run,
+            full=full_response,
+        )
+    except CoreManualInputError as error:
+        return _negotiated_json(
+            view,
+            api_error_payload(
+                error.api_code,
+                request_id=request_id or None,
+            ),
+            media_type=response_media_type,
+            status_code=HTTPStatus(error.http_status),
+        )
+    return _negotiated_json(view, receipt, media_type=response_media_type)
+
+
 class DeviceActionView(HomeAssistantView):
     """Execute only catalog-resolved actions and return read-back evidence."""
 
@@ -645,6 +692,27 @@ class DeviceActionView(HomeAssistantView):
                 "correlationId is invalid.",
                 HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
+            )
+        core_manual_input = self._hass.data.get(DOMAIN, {}).get(
+            "core_manual_input"
+        )
+        if isinstance(core_manual_input, CoreManualInput) and (
+            core_manual_input.is_transferred(target_id)
+        ):
+            # A transferred resource is answered by the common core
+            # admission before any legacy side record is prepared
+            # (S-06.a).
+            return await _async_core_manual_single(
+                self,
+                core_manual_input,
+                request=request,
+                payload=payload,
+                target_id=target_id,
+                action_id=action_id,
+                dry_run=bool(dry_run),
+                correlation_id=correlation_id,
+                response_media_type=response_media_type,
+                full_response=full_response,
             )
         try:
             context = (
@@ -1749,6 +1817,38 @@ class DeviceActionBatchView(HomeAssistantView):
                 f"dispatch.{dispatch_id}.{index}"
                 for index in range(len(normalized))
             )
+            core_input_for_bindings = self._hass.data.get(DOMAIN, {}).get(
+                "core_manual_input"
+            )
+
+            def _binding_request_id(item: Mapping[str, object], index: int):
+                # A core participant keeps its envelope identity in the
+                # durable journal: the same id replays as a single
+                # request (S-06.a).
+                core_control = item.get("coreControl")
+                if isinstance(core_control, Mapping):
+                    envelope_request_id = core_control.get("requestId")
+                    if isinstance(envelope_request_id, str) and (
+                        envelope_request_id
+                    ):
+                        return envelope_request_id
+                return dispatch_request_ids[index]
+
+            def _binding_target_type(
+                item: Mapping[str, object], index: int
+            ):
+                if contexts[index] is not None:
+                    return contexts[index][1]
+                if isinstance(
+                    core_input_for_bindings, CoreManualInput
+                ) and core_input_for_bindings.is_transferred(
+                    str(item["targetId"])
+                ):
+                    return core_input_for_bindings.wire_target_type(
+                        str(item["targetId"])
+                    )
+                return "sensor"
+
             lifecycle = _DeviceActionLifecycle(
                 view=self,
                 service=service,
@@ -1785,14 +1885,10 @@ class DeviceActionBatchView(HomeAssistantView):
                         {
                             "actionIndex": index,
                             "targetId": str(item["targetId"]),
-                            "targetType": (
-                                contexts[index][1]
-                                if contexts[index] is not None
-                                else "sensor"
-                            ),
+                            "targetType": _binding_target_type(item, index),
                             "actionId": str(item["actionId"]),
                             "correlationId": correlation_id,
-                            "requestId": dispatch_request_ids[index],
+                            "requestId": _binding_request_id(item, index),
                         }
                         for index, item in enumerate(normalized)
                     ],
@@ -1942,6 +2038,17 @@ class DeviceActionBatchView(HomeAssistantView):
                 return await lifecycle.async_failure()
 
         batch_options: dict[str, object] = {"correlation_id": correlation_id}
+        if _supports_keyword(
+            service.async_execute_device_action_batch, "core_principal"
+        ):
+            # The common core admission of transferred participants
+            # (S-06.a) is scoped to this request's authenticated caller
+            # and speaks the negotiated receipt media type. Older test
+            # doubles without the keyword keep their exact signature.
+            batch_options["core_principal"] = (
+                "admin" if _is_local_admin_request(request) else "tablet"
+            )
+            batch_options["core_full_receipts"] = full_response
         if dispatch_request_ids is not None:
             batch_options["request_ids"] = dispatch_request_ids
             batch_options["dispatch_contexts"] = tuple(contexts)
@@ -2392,25 +2499,42 @@ class DeviceActionBatchView(HomeAssistantView):
                     return await lifecycle.async_failure()
         if full_response:
             try:
-                wrapped = [
-                    full_action_receipt(
-                        payload=action,
-                        result=receipt,
-                        target_type=context[1] if context is not None else "sensor",
-                        state=(
-                            self._hass.states.get(context[0])
-                            if context is not None
-                            else None
-                        ),
-                        allowed_actions=context[2] if context is not None else (),
-                        pre_command_evidence=pre,
-                        decision_at=decision_at + index,
-                        action_index=index,
+                wrapped = []
+                for index, (action, receipt, context, pre) in enumerate(
+                    zip(normalized, receipts, contexts, pre_evidence, strict=True)
+                ):
+                    if (
+                        receipt.get("coreOperation") is not None
+                        or str(receipt.get("error") or "").startswith("core_")
+                    ):
+                        # A core-admitted or core-refused participant
+                        # carries its own honest full receipt: rebuilding
+                        # it from HA state would invent evidence
+                        # (S-06.a).
+                        core_item = dict(receipt)
+                        core_item.setdefault("actionIndex", index)
+                        wrapped.append(core_item)
+                        continue
+                    wrapped.append(
+                        full_action_receipt(
+                            payload=action,
+                            result=receipt,
+                            target_type=(
+                                context[1] if context is not None else "sensor"
+                            ),
+                            state=(
+                                self._hass.states.get(context[0])
+                                if context is not None
+                                else None
+                            ),
+                            allowed_actions=(
+                                context[2] if context is not None else ()
+                            ),
+                            pre_command_evidence=pre,
+                            decision_at=decision_at + index,
+                            action_index=index,
+                        )
                     )
-                    for index, (action, receipt, context, pre) in enumerate(
-                        zip(normalized, receipts, contexts, pre_evidence, strict=True)
-                    )
-                ]
                 if not all(isinstance(receipt, Mapping) for receipt in wrapped):
                     raise TypeError("device action batch full receipt is malformed")
                 wrapped = [dict(receipt) for receipt in wrapped]
@@ -2440,7 +2564,7 @@ class DeviceActionBatchView(HomeAssistantView):
                     "targetType": (
                         contexts[index][1]
                         if contexts[index] is not None
-                        else "sensor"
+                        else item.get("targetType") or "sensor"
                     ),
                     "actionIndex": index,
                 }
