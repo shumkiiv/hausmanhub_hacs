@@ -105,6 +105,14 @@ ENTRY_WAKEUP_GRACE_MS = 5_000
 # Default manual priority (owner rule): an active legacy light-priority
 # claim transfers to the shadow branch as a hold of at most this length.
 MANUAL_PRIORITY_TRANSFER_MS = 3_600_000
+
+
+def _opaque_entity_tag(entity_id: str) -> str:
+    """Stable opaque tag: HA entity names never cross the adapter."""
+
+    import hashlib
+
+    return hashlib.sha256(entity_id.encode("utf-8")).hexdigest()[:16]
 CURVE_SENSOR_FRESHNESS_MS = 300_000
 # A morning boundary date must be a real calendar day; a damaged storage
 # entry is dropped instead of being trusted as "already transitioned".
@@ -1511,32 +1519,71 @@ class RoomLightingRuntime:
         self._create_task(self.async_process(sorted(rooms)))
 
     def _dispatch_core_input(self, coroutine: object) -> None:
-        """Track one core-input task so ``stop()`` can await it."""
+        """Track one core-input task so ``stop()`` can await it.
+
+        The coroutine is wrapped: the task registers itself on start, so
+        even the off-loop ``call_soon_threadsafe`` path (where
+        ``_create_task`` cannot return the task) stays visible to the
+        drain (SEC-C6-05). A task that never started hits the closed
+        guard inside the input coroutine and does nothing."""
 
         if self._core_input_closed:
             _discard_coroutine(coroutine)
             return
-        task = self._create_task(coroutine)
-        if task is not None:
-            self._core_input_tasks.add(task)
-            task.add_done_callback(self._core_input_tasks.discard)
+
+        async def _tracked() -> None:
+            task = asyncio.current_task()
+            if task is not None:
+                self._core_input_tasks.add(task)
+            try:
+                await coroutine
+            finally:
+                if task is not None:
+                    self._core_input_tasks.discard(task)
+
+        created = self._create_task(_tracked())
+        if created is not None:
+            self._core_input_tasks.add(created)
+            created.add_done_callback(self._core_input_tasks.discard)
 
     async def _drain_core_input(self) -> None:
-        """Wait for in-flight core-input processing; then it is closed."""
+        """Wait for in-flight core-input processing, then close the input.
+
+        Registered tasks are gathered first (including tasks that were
+        created but have not started yet): they still process, because
+        the closed flag is only set after the queue is empty. A task that
+        was scheduled off-loop and never registered by then hits the
+        closed guard inside the input coroutine and writes nothing."""
+
+        while True:
+            pending = [
+                task
+                for task in tuple(self._core_input_tasks)
+                if not task.done()
+            ]
+            if not pending:
+                break
+            await asyncio.gather(*pending, return_exceptions=True)
+        self._core_input_closed = True
+
+    def close_and_drain_core_input(self) -> None:
+        """Sync unload callback (registered like every other unload hook):
+        new dispatches stop immediately; the in-flight input is awaited by
+        a drain task scheduled on the loop. The unload sequence itself is
+        synchronous and does not block on that task; store consistency is
+        guaranteed by the branch and store locks regardless of ordering."""
 
         self._core_input_closed = True
-        pending = [
-            task for task in tuple(self._core_input_tasks) if not task.done()
-        ]
-        if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
-
-    async def async_drain_core_input(self) -> None:
-        """Public drain for the entry unload path: registered as an async
-        unload callback, it runs first (LIFO) and awaits in-flight core
-        input before the branch stop hook and deactivation follow."""
-
-        await self._drain_core_input()
+        create = (
+            getattr(self._hass, "async_create_task", None)
+            if self._hass is not None
+            else None
+        )
+        if callable(create):
+            try:
+                create(self._drain_core_input())
+            except Exception:  # noqa: BLE001 - unload must not crash
+                _LOGGER.warning("core input drain scheduling failed")
 
     def core_manual_holds(self):
         """Snapshot of active manual holds for the shadow branch (K-07).
@@ -1593,6 +1640,57 @@ class RoomLightingRuntime:
                         evidence_id=record.fingerprint,
                     )
                     continue
+                if authority is not None:
+                    # The FULL prohibition of the authority transfers, not
+                    # only its own record: barriers (uncertain selector,
+                    # untrusted related-source graph) and holds on related
+                    # lights block the same way the dispatch gate does
+                    # (SEC-C6-02). Any failure here fails closed.
+                    try:
+                        blocked = authority.blocks(entity_id)
+                    except Exception:  # noqa: BLE001 - fail closed
+                        return None
+                    if blocked:
+                        try:
+                            evidence = authority.blocking_evidence(entity_id)
+                        except Exception:  # noqa: BLE001 - fail closed
+                            return None
+                        now_ms = self._now_ms()
+                        holds[entity_id] = ManualHoldView(
+                            entity_id=entity_id,
+                            action=(
+                                evidence.action
+                                if evidence is not None
+                                else "unknown"
+                            ),
+                            source=(
+                                evidence.source
+                                if evidence is not None
+                                else "authority_barrier"
+                            ),
+                            proven_at_utc_ms=(
+                                evidence.observed_at_ms
+                                if evidence is not None
+                                else now_ms
+                            ),
+                            priority_until_utc_ms=max(
+                                (
+                                    evidence.deadline_ms
+                                    if evidence is not None
+                                    else 0
+                                ),
+                                now_ms + MANUAL_PRIORITY_TRANSFER_MS,
+                            ),
+                            evidence_id=(
+                                evidence.fingerprint
+                                if evidence is not None
+                                else (
+                                    "authority.barrier."
+                                    f"{_opaque_entity_tag(entity_id)}"
+                                )
+                            ),
+                        )
+                        continue
                 claims = getattr(priority, "manual_claim_entity_ids", None)
                 if not callable(claims):
                     if priority is not None:
@@ -1614,13 +1712,19 @@ class RoomLightingRuntime:
                         priority_until_utc_ms=(
                             now_ms + MANUAL_PRIORITY_TRANSFER_MS
                         ),
-                        evidence_id=f"light_priority.{entity_id}",
+                        # Opaque tag: the HA entity name must not reach the
+                        # core frame or the durable image (SEC-C6-06).
+                        evidence_id=(
+                            f"lp.claim.{_opaque_entity_tag(entity_id)}"
+                        ),
                     )
         return holds
 
     async def _async_core_clock_tick(self) -> None:
         import asyncio
 
+        if self._core_input_closed:
+            return
         port = self._core_input_port
         await asyncio.to_thread(port, "__clock__", None, None)
 
@@ -1629,6 +1733,9 @@ class RoomLightingRuntime:
         # so the event loop is never blocked by fsync (SEC-LP-ISO01).
         import asyncio
 
+        if self._core_input_closed:
+            # Closed between scheduling and execution: drop silently.
+            return
         port = self._core_input_port
         old_state = data.get("old_state")
         new_state = data.get("new_state")

@@ -602,9 +602,21 @@ class CoreCommandService:
             for operation_id, operation in self._operations.items()
             if operation.phase in _RESOLVED_PHASES
         ]
-        evict_count = len(terminal) - RETAINED_TERMINAL_OPERATIONS
+        # An operation referenced by a live auto proof must survive: its
+        # confirm key is what lets a later contradictory report revoke the
+        # ownership (SEC-C6-04). Eviction of it would freeze the proof.
+        protected = {
+            record.auto_proof.operation_id
+            for record in self._records.values()
+            if record.auto_proof is not None
+        }
+        evictable = [
+            operation_id for operation_id in terminal
+            if operation_id not in protected
+        ]
+        evict_count = len(evictable) - RETAINED_TERMINAL_OPERATIONS
         if evict_count > 0:
-            for operation_id in terminal[:evict_count]:
+            for operation_id in evictable[:evict_count]:
                 operation = self._operations.pop(operation_id, None)
                 self._confirm_keys.pop(operation_id, None)
                 # Every index must forget the evicted id together with the

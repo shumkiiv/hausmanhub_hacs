@@ -218,6 +218,12 @@ class FileControlStore:
     def _commit_locked(
         self, expected_commit_revision: int, next_state: Mapping
     ) -> None:
+        # Re-check under the lock (SEC-C6-03): a concurrent writer may
+        # have failed and closed the store while this caller waited; the
+        # closed durable outcome must never be overwritten without an
+        # explicit reload.
+        if self._closed:
+            raise StorageUnavailable("store closed after an earlier failure")
         if expected_commit_revision != self._commit_revision:
             raise CommitConflict(
                 f"expected {expected_commit_revision}, "

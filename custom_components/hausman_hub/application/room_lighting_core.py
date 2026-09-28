@@ -410,17 +410,26 @@ class RoomLightingCoreBranch:
         for resource_id, entity_id in self._target_bindings.items():
             record = self._service.record(resource_id)
             if holds is None:
-                # The shared authority is unavailable: fail closed. The
-                # shadow decision must not widen automation rights, so
-                # the record stays uncertain until recovery (K-07).
-                if record.uncertainty_reason == UNCERTAIN_MANUAL_AUTHORITY:
+                # The shared authority is unavailable: fail closed. A
+                # foreign uncertainty marker (e. g. clock_uncertain) is
+                # another guard's reason and must survive this transfer
+                # untouched (NR-1/SEC-C6-01).
+                foreign = record.uncertainty_reason not in (
+                    None,
+                    UNCERTAIN_MANUAL_AUTHORITY,
+                )
+                if foreign and record.authority is Authority.UNCERTAIN:
                     continue
                 self._service.update_control_record(
                     resource_id,
                     replace(
                         record,
                         authority=Authority.UNCERTAIN,
-                        uncertainty_reason=UNCERTAIN_MANUAL_AUTHORITY,
+                        uncertainty_reason=(
+                            record.uncertainty_reason
+                            if foreign
+                            else UNCERTAIN_MANUAL_AUTHORITY
+                        ),
                     ),
                 )
                 continue
@@ -435,7 +444,7 @@ class RoomLightingCoreBranch:
                     authority=Authority.MANUAL,
                     manual=ManualHold(
                         action_id=view.evidence_id
-                        or f"{entity_id}.{view.proven_at_utc_ms}",
+                        or f"shadow.hold.{view.proven_at_utc_ms}",
                         action=view.action,
                         source=view.source,
                         proven_at_utc_ms=view.proven_at_utc_ms,

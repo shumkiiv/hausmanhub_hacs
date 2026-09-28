@@ -5,6 +5,7 @@ history. Each test fails against the previous candidate behavior."""
 from __future__ import annotations
 
 import asyncio
+import pytest
 import threading
 import time
 from unittest.mock import MagicMock
@@ -188,6 +189,39 @@ async def test_stop_awaits_in_flight_core_input(tmp_path):
     runtime._dispatch_core_input(coroutine)
     await asyncio.sleep(0)
     assert len(slow.record) == 4
+
+
+async def test_off_loop_dispatch_is_tracked_and_drained(tmp_path):
+    """SEC-C6-05: a task scheduled through the off-loop path registers
+    itself on start, so stop() still awaits it."""
+
+    from custom_components.hausman_hub.application.room_lighting_runtime import (
+        RoomLightingRuntime,
+    )
+
+    branch = _branch(tmp_path)
+    slow = _RecordingBranch(branch)
+    loop = asyncio.get_running_loop()
+    runtime = RoomLightingRuntime(
+        hass=_FakeHass(loop),
+        service=MagicMock(),
+        shadow=MagicMock(),
+    )
+    runtime._running = True
+    runtime.set_core_input_port(slow)
+
+    def dispatch_from_worker_thread():
+        # No running loop here: _create_task takes the
+        # call_soon_threadsafe path and cannot return the task.
+        runtime._dispatch_core_input(
+            runtime._async_core_input("binary_sensor.test_presence", {})
+        )
+
+    await loop.run_in_executor(None, dispatch_from_worker_thread)
+    await asyncio.sleep(0.1)
+
+    await runtime.stop()
+    assert slow.record == ["binary_sensor.test_presence", "stop"]
 
 
 # --- 3. manual holds reach the frame and the decisions ----------------
@@ -374,6 +408,83 @@ def test_foreign_uncertainty_is_never_cleared_by_hold_transfer(tmp_path):
     assert held.uncertainty_reason == "clock_uncertain"
 
 
+def test_foreign_uncertainty_survives_provider_failure_and_recovery(tmp_path):
+    """NR-1/SEC-C6-01: an unavailable authority must not overwrite a
+    foreign prohibition, and the later recovery must not wipe it."""
+
+    from dataclasses import replace as dc_replace
+
+    holder = {"holds": None}
+    branch = _branch_with_provider(tmp_path, lambda: holder["holds"])
+    record = branch._service.record("test_main")
+    branch._service.update_control_record(
+        "test_main",
+        dc_replace(
+            record,
+            authority=Authority.UNCERTAIN,
+            uncertainty_reason="clock_uncertain",
+        ),
+    )
+    branch.handle_runtime_event(
+        "binary_sensor.test_presence", None, _state("on")
+    )
+    during = branch._service.record("test_main")
+    assert during.authority is Authority.UNCERTAIN
+    assert during.uncertainty_reason == "clock_uncertain"
+
+    holder["holds"] = {}
+    branch.handle_runtime_event(
+        "binary_sensor.test_motion", None, _state("on")
+    )
+    after = branch._service.record("test_main")
+    assert after.authority is Authority.UNCERTAIN
+    assert after.uncertainty_reason == "clock_uncertain"
+
+
+def test_core_manual_holds_transfers_full_authority_barrier():
+    """SEC-C6-02: barriers and related-light holds transfer even when the
+    entity has no own record and no legacy claim."""
+
+    from custom_components.hausman_hub.application.room_lighting_runtime import (
+        RoomLightingRuntime,
+    )
+
+    class _BarrierAuthority:
+        @property
+        def unhealthy(self) -> bool:
+            return False
+
+        def record(self, entity_id):
+            return None
+
+        def blocks(self, entity_id):
+            return True
+
+        def blocking_evidence(self, entity_id):
+            return None
+
+    runtime = RoomLightingRuntime(
+        hass=None,
+        service=MagicMock(),
+        shadow=MagicMock(),
+        manual_light_authority=_BarrierAuthority(),
+    )
+    target = MagicMock()
+    target.entity_id = "light.test_main"
+    room_config = MagicMock()
+    room_config.devices.light_targets = [target]
+    runtime._configs = {"room": room_config}
+    holds = runtime.core_manual_holds()
+    assert holds is not None
+    assert len(holds) == 1
+    view = holds["light.test_main"]
+    assert view.source == "authority_barrier"
+    assert view.action == "unknown"
+    # SEC-C6-06: no HA entity name inside the evidence id.
+    assert "test_main" not in view.evidence_id
+    assert view.evidence_id.startswith("authority.barrier.")
+
+
 # --- 4. observation ids are resource-scoped ---------------------------
 
 
@@ -427,12 +538,13 @@ def test_store_commit_serializes_concurrent_writers(tmp_path):
 
     store._commit_locked = slow_locked
 
+    # One shared expected revision (NR-4): both workers race with the
+    # same CAS value, so exactly one may win regardless of timing.
+    with gate:
+        expected = store.commit_revision
+
     def worker():
         try:
-            # Both workers race with the same expected revision: exactly
-            # one CAS may win, the write itself must never interleave.
-            with gate:
-                expected = store.commit_revision
             store.commit(expected, image)
             outcomes["ok"] += 1
         except CommitConflict:
@@ -448,6 +560,39 @@ def test_store_commit_serializes_concurrent_writers(tmp_path):
     # The store stays healthy and readable after the race.
     assert store.healthy() is True
     assert store.load() is not None
+
+
+def test_store_refuses_writes_after_failure_closed_it(tmp_path):
+    """SEC-C6-03: the closed check sits inside the critical section, so a
+    waiting writer cannot overwrite an undefined durable outcome."""
+
+    from custom_components.hausman_hub.application.core.command_service import (
+        StorageUnavailable,
+    )
+
+    class _Faults:
+        def __init__(self) -> None:
+            self.fired = False
+
+        def __call__(self, point: str) -> None:
+            if point == "dir_fsync" and not self.fired:
+                self.fired = True
+                raise OSError("directory fsync failed")
+
+    store = FileControlStore(tmp_path / "closed_after_failure.json")
+    stand = build_stand(arbitration_mode_from_flag(False), store_path=None)
+    image = stand.service._build_image()
+    # Seed a good image first, then arm the one-shot fault.
+    store.commit(store.commit_revision, image)
+    store._fault_injector = _Faults()
+    with_gate_revision = store.commit_revision
+
+    with pytest.raises(StorageUnavailable):
+        store.commit(with_gate_revision, image)
+    assert store.healthy() is False
+    # Even a correct CAS must not write into a closed store.
+    with pytest.raises(StorageUnavailable):
+        store.commit(with_gate_revision, image)
 
 
 # --- 6. bounded history retention -------------------------------------
@@ -578,3 +723,61 @@ def test_prune_keeps_operation_index_consistent(monkeypatch):
         MAIN_RESOURCE, sequence=99, mono_ms=1000, properties={"on": True}
     )
     assert "test.main" in service._facts
+
+
+def test_prune_never_evicts_live_auto_proof_operation():
+    """SEC-C6-04: an operation referenced by a live auto proof survives
+    eviction, so a contradictory report can still revoke the ownership."""
+
+    from dataclasses import replace as dc_replace
+
+    from custom_components.hausman_hub.application.core.command_service import (
+        RETAINED_TERMINAL_OPERATIONS as _RETAIN,
+    )
+    from custom_components.hausman_hub.domain.core.models import (
+        AutoProof,
+        Evidence,
+        ObservationSnapshot,
+    )
+
+    stand = build_stand(arbitration_mode_from_flag(False))
+    service = stand.service
+    protected_id = "op.protect.0"
+    service._operations[protected_id] = _operation(
+        protected_id, OperationPhase.CONFIRMED
+    )
+    service._confirm_keys[protected_id] = ("group", protected_id)
+    record = service.record(MAIN_RESOURCE)
+    service.update_control_record(
+        MAIN_RESOURCE,
+        dc_replace(
+            record,
+            auto_proof=AutoProof(
+                operation_id=protected_id,
+                observation_id="obs.protect.1",
+                confirmed_at_utc_ms=0,
+                generation=record.generation,
+                binding_revision=record.binding_revision,
+                confirmed_target=BASE_TARGET_ON40,
+                confirmed_observation=ObservationSnapshot(
+                    observation_id="obs.protect.1",
+                    values={"on": "true"},
+                    evidence=Evidence.DEVICE_REPORT,
+                ),
+                source_evidence=Evidence.DEVICE_REPORT,
+            ),
+        ),
+    )
+    for index in range(_RETAIN + 100):
+        operation_id = f"op.fill.{index}"
+        service._operations[operation_id] = _operation(
+            operation_id, OperationPhase.FAILED
+        )
+
+    service._commit_state()
+
+    assert protected_id in service._operations
+    assert protected_id in service._confirm_keys
+    live_proof = service.record(MAIN_RESOURCE).auto_proof
+    assert live_proof is not None
+    assert live_proof.operation_id in service._operations
