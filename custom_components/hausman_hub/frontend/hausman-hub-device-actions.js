@@ -108,17 +108,33 @@ export async function executeDeviceAction(owner, targetId, actionId, value, opti
     // user acted on, before any asynchronous work (HH-014.b client).
     // A caller-supplied snapshot (sequential group) always wins so a
     // mid-group reload cannot rewrite confirmed actions.
+    if (!owner._coreTransferredSeen) owner._coreTransferredSeen = new Set();
+    const seen = owner._coreTransferredSeen;
     let corePrepared = null;
     if (options.coreControl !== undefined) {
       corePrepared = options.coreControl;
+      if (corePrepared && corePrepared.state) seen.add(targetId);
     } else if (target) {
       corePrepared = coreControlForTarget(target);
+      if (corePrepared && corePrepared.state) seen.add(targetId);
+    }
+    // Loss of the projection for a previously transferred target is
+    // never a fallback to the legacy writer (SEC-HACS-01).
+    if (corePrepared === null && seen.has(targetId)) {
+      owner._notice = "Ресурс передан ядру, но данные управления потеряны: обновите панель.";
+      owner._error = false;
+      return;
     }
     if (corePrepared && corePrepared.refused) {
       owner._notice = corePrepared.refused;
       owner._error = false;
       return;
     }
+    // The request belongs to the connection it was prepared on: a
+    // session replacement cancels the send instead of carrying the
+    // action across (SEC-HACS-02).
+    const coreSession = owner._coreSessionId || 0;
+    const hass = owner._hass;
     let payload = { targetId, actionId };
     if (value !== null && value !== undefined) payload.value = value;
     if (options.confirmedByUser === true) payload.confirmedByUser = true;
@@ -131,7 +147,12 @@ export async function executeDeviceAction(owner, targetId, actionId, value, opti
       ({ payload, headers } = fullDeviceActionRequest(payload, deviceActionRequestId()));
       payload = withCoreControl(payload, corePrepared, payload.requestId);
     }
-    const receipt = await owner._hass.callApi(
+    if ((owner._coreSessionId || 0) !== coreSession) {
+      owner._notice = "Сессия панели изменилась: действие отменено.";
+      owner._error = false;
+      return;
+    }
+    const receipt = await hass.callApi(
       "POST",
       DEVICE_ACTION_EXECUTOR_API,
       withCorrelationId(DEVICE_ACTION_EXECUTOR_API, payload),

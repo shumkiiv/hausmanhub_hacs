@@ -127,7 +127,7 @@ VENDORED_CONTRACT_HASHES = {
 def test_external_contract_pin_is_explicit() -> None:
     """The pin names the exact contract the runtime was built against.
 
-    0.72.1 is the reviewed local candidate of HH-014.b (branch
+    0.72.2 is the reviewed local candidate of HH-014.b (branch
     ``codex/hh-014b-core-manual-input-contracts-20260928``): it is not
     published, so ``canonical`` stays false until the owner publishes it.
     """

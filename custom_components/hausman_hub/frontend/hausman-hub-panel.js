@@ -547,9 +547,17 @@ class HausmanHubPanel extends HTMLElement {
 
   set hass(value) {
     const first = this._hass === null;
+    const replaced = !first && this._hass !== value;
     this._hass = value;
     this._applyThemeMode();
     if (!this._preferencesLoaded) this._loadUserPreferences();
+    if (replaced) {
+      // A new core session (HH-014.b): the transferred-target memory and
+      // any prepared core envelopes belong to the previous connection and
+      // must not leak into the next one.
+      this._coreSessionId = (this._coreSessionId || 0) + 1;
+      if (this._coreTransferredSeen) this._coreTransferredSeen.clear();
+    }
     if (first) {
       this._load();
     }

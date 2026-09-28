@@ -17,6 +17,7 @@ FRONTEND_DIR = ROOT / "custom_components" / "hausman_hub" / "frontend"
 CORE_CONTROL_JS = FRONTEND_DIR / "hausman-hub-core-control.js"
 DEVICE_ACTIONS_JS = FRONTEND_DIR / "hausman-hub-device-actions.js"
 LIGHTING_SIDE_JS = FRONTEND_DIR / "hausman-hub-lighting-side.js"
+SINGLE_PATH = "/api/hausman_hub/v1/device-actions"
 
 
 def run_node_module(script: str, *args: str) -> subprocess.CompletedProcess[str]:
@@ -66,6 +67,10 @@ class CoreControlHelperTest(unittest.TestCase):
             {coreControlState: {version: 1, status: "unavailable", controlRevision: 5}},
             {coreControlState: {version: 1, status: "other"}},
             {coreControlState: "ready"},
+            // Unsafe integers and non-integers are rejected outright.
+            {coreControlState: {version: 1, status: "ready", controlRevision: 9007199254740993, bindingRevision: 0}},
+            {coreControlState: {version: 1, status: "ready", controlRevision: NaN, bindingRevision: 0}},
+            {coreControlState: {version: 1, status: "ready", controlRevision: Infinity, bindingRevision: 0}},
           ];
           for (const target of invalid) {
             const prepared = mod.coreControlForTarget(target);
@@ -270,6 +275,253 @@ class CoreControlHelperTest(unittest.TestCase):
           assert.strictEqual(calls[0].coreControl.expectedBindingRevision, 3);
         """
         run_js_with_assert(script, str(DEVICE_ACTIONS_JS), str(CORE_CONTROL_JS))
+
+
+class EndToEndCatalogToCoreTest(unittest.TestCase):
+    """The mandatory connected check (assignment §6 row 1): the real
+    catalog view answer feeds the real JS executor, and its exact
+    request is admitted by the real DeviceActionView. Removing
+    coreControl from the JS breaks this test."""
+
+    def test_catalog_get_feeds_real_js_and_real_view(self) -> None:
+        import asyncio
+        import importlib
+        import json
+        import sys
+        from datetime import datetime, timezone
+        from types import SimpleNamespace
+
+        sys.path.insert(0, str(ROOT))
+        sys.path.insert(0, str(ROOT / "tests"))
+        sys.path.insert(0, str(ROOT / "tests" / "core"))
+        import test_local_summary_access as harness
+        import test_manual_input_binding as stand
+
+        harness_mod = harness
+        api_test = importlib.import_module("test_core_manual_input_api")
+        api_test.CoreManualInputApiTest.setUpClass()
+        case = api_test.CoreManualInputApiTest(
+            "test_catalog_publishes_core_control_state"
+        )
+        case.setUp()
+        # The catalog view checks service readiness: reuse the same
+        # prepared stub as the catalog test (registry non-None,
+        # readiness snapshot present).
+        case.service._registry = object()  # noqa: SLF001
+        case.service.__dict__["_catalog_readiness"] = {"state": "ready"}
+        from types import SimpleNamespace as _NS
+
+        catalog_entry_stub = _NS(
+            target_id=stand.PUBLIC_TARGET_ID,
+            name="Основной свет стенда",
+            entity_id=stand.ENTITY_ID,
+            properties=[],
+            actions=[],
+            physical_id=None,
+            physical_name=None,
+            room_id=None,
+            room_name=None,
+            device_type=None,
+            device_type_name=None,
+            capability_name=None,
+        )
+        case.service.current_catalog = lambda: SimpleNamespace(
+            devices={stand.PUBLIC_TARGET_ID: catalog_entry_stub}
+        )
+
+        async def list_scenarios_stub():
+            return []
+
+        case.service.async_list_scenarios = list_scenarios_stub
+        try:
+            # 1. Real catalog GET through the real ScenarioCatalogView.
+            scenario_api = importlib.import_module(
+                "custom_components.hausman_hub.scenario_api"
+            )
+            catalog_view = scenario_api.ScenarioCatalogView(case.hass)
+            admin = harness_mod.reader_user("system-admin", admin=True)
+            catalog_path = "/api/hausman_hub/v1/admin/scenarios/catalog"
+            catalog_response = asyncio.run(
+                catalog_view.get(
+                    harness_mod.FakeRequest(
+                        "192.168.1.20", admin, catalog_path
+                    )
+                )
+            )
+            self.assertEqual(200, catalog_response.status)
+            devices = {
+                item["target_id"]: item
+                for item in catalog_response.payload["devices"]
+            }
+            self.assertIn(stand.PUBLIC_TARGET_ID, devices)
+            catalog_entry = devices[stand.PUBLIC_TARGET_ID]
+
+            # 2. The real JS executor prepares the exact request from
+            # that catalog entry (no hand-written envelope).
+            entry_json = json.dumps(catalog_entry, ensure_ascii=False)
+            node_script = r"""
+              import assert from "node:assert";
+              const mod = await import(process.argv[1]);
+              const entry = JSON.parse(process.argv[2]);
+              const calls = [];
+              const owner = {
+                _busy: false, _notice: "", _error: false,
+                _scenarios: {catalog: {devices: [entry]}},
+                _hass: {
+                  callApi: async (method, path, payload, headers) => {
+                    calls.push({payload, headers});
+                    return {status: "accepted"};
+                  },
+                },
+                async _load() {}, _render() {},
+              };
+              await mod.executeDeviceAction(
+                owner, entry.target_id, "turn_off", null,
+              );
+              if (calls.length !== 1) throw new Error("expected one POST");
+              console.log(JSON.stringify({call: calls[0]}));
+            """
+            node_result = run_node_module(
+                node_script, str(DEVICE_ACTIONS_JS), entry_json
+            )
+            self.assertEqual(0, node_result.returncode, node_result.stderr)
+            call = json.loads(node_result.stdout)["call"]
+
+            # 3. The exact prepared request is admitted by the real
+            # DeviceActionView: one operation, coreOperation echo, zero
+            # legacy executor involvement, nothing sent.
+            executor_calls: list = []
+
+            def _fail_if_called(*args, **kwargs):
+                executor_calls.append(args)
+                raise AssertionError("legacy executor was called")
+
+            case.service.async_execute_device_action = _fail_if_called
+
+            full_request_media = (
+                "application/vnd.hausmanhub.device-action-request.full+json"
+            )
+            full_response_media = (
+                "application/vnd.hausmanhub.device-action-receipt.full+json"
+            )
+            request = harness_mod.FakeJsonRequest(
+                "192.168.1.20",
+                case.tablet,
+                SINGLE_PATH,
+                call["payload"],
+                content_type=full_request_media,
+                accept=full_response_media,
+            )
+            view_response = asyncio.run(case.view.post(request))
+            self.assertEqual(200, view_response.status, view_response.payload)
+            self.assertTrue(view_response.payload["accepted"])
+            self.assertFalse(view_response.payload["commandSent"])
+            core_operation = view_response.payload["coreOperation"]
+            self.assertTrue(core_operation["operationId"])
+            self.assertNotEqual(
+                call["payload"]["requestId"],
+                core_operation["operationId"],
+            )
+            self.assertEqual([], executor_calls)
+            operation = case.branch.core_service.operation(
+                core_operation["operationId"]
+            )
+            self.assertEqual("CANCELLED", operation.phase.name)
+            self.assertEqual("core_not_active", operation.reason_code)
+
+            # 4. Removing coreControl from the JS payload breaks the
+            # flow exactly as the matrix demands: without the envelope
+            # the same request is refused before acceptance.
+            broken_payload = {
+                key: value
+                for key, value in call["payload"].items()
+                if key != "coreControl"
+            }
+            broken_request = harness_mod.FakeJsonRequest(
+                "192.168.1.20",
+                case.tablet,
+                SINGLE_PATH,
+                broken_payload,
+                content_type=full_request_media,
+                accept=full_response_media,
+            )
+            broken_response = asyncio.run(case.view.post(broken_request))
+            self.assertEqual(409, broken_response.status)
+        finally:
+            case.tearDown()
+            api_test.CoreManualInputApiTest.doCleanups(case)
+            api_test.CoreManualInputApiTest.tearDownClass()
+
+    def test_group_snapshot_survives_catalog_refresh_between_members(self) -> None:
+        import sys
+
+        sys.path.insert(0, str(ROOT))
+        sys.path.insert(0, str(ROOT / "tests"))
+        sys.path.insert(0, str(ROOT / "tests" / "core"))
+        import test_local_summary_access as harness
+
+        group_script = r"""
+          import assert from "node:assert";
+          const side = await import(process.argv[1]);
+          const sent = [];
+          const devices = [
+            {name: "Основной", entityId: "light.stand_main"},
+          ];
+          let catalogRevision = 12;
+          const panel = {
+            _coreSessionId: 0,
+            _notice: "",
+            _catalogTargets(device) {
+              return [{
+                target_id: "stand.light.main",
+                entity_id: device.entityId,
+                actions: [{action_id: "turn_off"}],
+                coreControlState: {
+                  version: 1, status: "ready",
+                  controlRevision: catalogRevision, bindingRevision: 3,
+                },
+              }];
+            },
+            async _executeDeviceAction(targetId, actionId, value, options) {
+              sent.push({targetId, options});
+            },
+          };
+          const entries = [{device: devices[0], targetId: "stand.light.main"}, {device: devices[0], targetId: "stand.light.main"}];
+          entries[1] = {device: devices[0], targetId: "stand.light.main"};
+          // A catalog refresh DURING the first member must not rewrite
+          // the envelope already captured for the second member.
+          panel.async_executeDeviceActionOverride = null;
+          panel._executeDeviceAction = async (targetId, actionId, value, options) => {
+            sent.push({targetId, options});
+            catalogRevision = 99; // refresh fires while member A runs
+          };
+          await side.executeTurnOff(panel, entries);
+          assert.strictEqual(sent.length, 2);
+          assert.strictEqual(
+            sent[0].options.coreControl.state.controlRevision, 12,
+          );
+          assert.strictEqual(
+            sent[1].options.coreControl.state.controlRevision, 12,
+            "the refresh rewrote a prepared group envelope",
+          );
+          // A session replacement DURING the group stops the remaining
+          // members: they never run under the new session.
+          const beforeSessionTest = sent.length;
+          panel._coreSessionId = 0;
+          panel._executeDeviceAction = async (targetId, actionId, value, options) => {
+            sent.push({targetId, options});
+            panel._coreSessionId = 7; // the connection is replaced while A runs
+          };
+          await side.executeTurnOff(panel, entries);
+          assert.strictEqual(
+            sent.length, beforeSessionTest + 1,
+            "the group continued in a new session",
+          );
+        """
+        result = run_node_module(
+            group_script, str(LIGHTING_SIDE_JS)
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
 
 
 class FrontendSyntaxTest(unittest.TestCase):

@@ -16,13 +16,16 @@ function isNonNegativeSafeInteger(value) {
  *   null                    — target is not transferred (legacy path);
  *   { status: "ready", controlRevision, bindingRevision }
  *   { status: "unavailable" }
- *   { invalid: true }       — the block exists but violates contract 0.72.2. */
+ *   { invalid: true }       — the block exists but violates contract 0.72.2.
+ * An explicit null block is a damaged projection, not an absence: once a
+ * target was seen transferred, losing the block refuses new commands
+ * (the executor keeps the per-session seen-set). */
 export function coreControlStateOf(catalogTarget) {
   const state = catalogTarget && typeof catalogTarget === "object"
     ? catalogTarget.coreControlState
     : undefined;
-  if (state === undefined || state === null) return null;
-  if (typeof state !== "object") return { invalid: true };
+  if (state === undefined) return null;
+  if (state === null || typeof state !== "object") return { invalid: true };
   if (state.version !== CORE_CONTROL_STATE_VERSION) return { invalid: true };
   if (state.status === "ready") {
     if (!isNonNegativeSafeInteger(state.controlRevision)

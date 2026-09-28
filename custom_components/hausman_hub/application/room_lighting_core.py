@@ -324,6 +324,10 @@ class RoomLightingCoreBranch:
             try:
                 spec = self._service.spec(resource_id)
                 record = self._service.record(resource_id)
+                # An incomplete passport is not "ready": the executive
+                # path would refuse the very action this pair is for
+                # (SEC-HACS-03).
+                self._device_adapter.capabilities(resource_id)
             except CoreServiceError:
                 return {"version": 1, "status": "unavailable"}
             return {
