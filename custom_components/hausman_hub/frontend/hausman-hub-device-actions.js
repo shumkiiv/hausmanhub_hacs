@@ -133,6 +133,23 @@ export async function executeDeviceAction(owner, targetId, actionId, value, opti
       owner._error = false;
       return;
     }
+    if (corePrepared && corePrepared.state) {
+      // The envelope must be built from the CURRENT catalog publication:
+      // a group snapshot captured before a reconnect or a catalog
+      // refresh is refused, never sent (SEC-HACS-02R1).
+      const currentEpoch = owner._coreCatalogSession || 0;
+      const preparedEpoch = options.coreEpoch !== undefined
+        ? options.coreEpoch
+        : currentEpoch;
+      if (
+        (owner._coreCatalogSession || 0) !== (owner._coreSessionId || 0)
+        || preparedEpoch !== currentEpoch
+      ) {
+        owner._notice = "Данные управления получены до переподключения или обновления каталога: обновите панель.";
+        owner._error = false;
+        return;
+      }
+    }
     // Envelopes built from a catalog published before the current
     // connection are refused: the revision pair must come from this
     // session's own read (SEC-HACS-02R1). The server CAS stays the

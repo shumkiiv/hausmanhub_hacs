@@ -745,6 +745,96 @@ class EndToEndCatalogToCoreTest(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
 
 
+    def test_group_member_from_stale_catalog_is_refused_after_refresh(self) -> None:
+        """The exact auditor sequence (SEC-HACS-02R1 residual): the
+        group snapshot is taken, member A's completion refreshes the
+        catalog epoch, and member B's prepared envelope is refused with
+        zero POST — through the REAL executor in the loop."""
+
+        script = r"""
+          import assert from "node:assert";
+          const side = await import(process.argv[1]);
+          const exec = await import(process.argv[2]);
+          const posts = [];
+          const neighborDevice = {name: "Сосед", entityId: "light.neighbor"};
+          const standDevice = {name: "Стенд", entityId: "light.stand_main"};
+          let catalogEpoch = 0;
+          const panel = {
+            _coreSessionId: 0,
+            _coreCatalogSession: 0,
+            _notice: "",
+            _catalogTargets(device) {
+              if (device.entityId === "light.neighbor") {
+                return [{
+                  target_id: "light.neighbor", entity_id: "light.neighbor",
+                  actions: [{action_id: "turn_on"}],
+                }];
+              }
+              return [{
+                target_id: "stand.light.main", entity_id: "light.stand_main",
+                actions: [{action_id: "turn_off"}],
+                coreControlState: {version: 1, status: "ready", controlRevision: 12, bindingRevision: 3},
+              }];
+            },
+            _executeDeviceAction(targetId, actionId, value, options) {
+              return exec.executeDeviceAction(this, targetId, actionId, value, options);
+            },
+          };
+          const owner = {
+            _busy: false, _notice: "", _error: false,
+            _coreSessionId: 0,
+            _coreCatalogSession: 0,
+            _coreTransferredSeen: new Set(["stand.light.main"]),
+            _scenarios: {catalog: {devices: [
+              {target_id: "stand.light.main", entity_id: "light.stand_main", actions: [{action_id: "turn_off"}],
+               coreControlState: {version: 1, status: "ready", controlRevision: 12, bindingRevision: 3}},
+              {target_id: "light.neighbor", entity_id: "light.neighbor", actions: [{action_id: "turn_on"}]},
+            ]}},
+            _hass: {
+              callApi: async (method, path, payload) => {
+                posts.push(payload);
+                return {status: "confirmed"};
+              },
+            },
+            async _load() {}, _render() {},
+          };
+          // In production the panel IS the owner: one object carries
+          // _hass, the catalog and the core state.
+          Object.assign(panel, {
+            _busy: false, _error: false,
+            _scenarios: {catalog: {devices: [
+              {target_id: "stand.light.main", entity_id: "light.stand_main", actions: [{action_id: "turn_off"}],
+               coreControlState: {version: 1, status: "ready", controlRevision: 12, bindingRevision: 3}},
+              {target_id: "light.neighbor", entity_id: "light.neighbor", actions: [{action_id: "turn_on"}]},
+            ]}},
+            _hass: {
+              callApi: async (method, path, payload) => {
+                posts.push(payload);
+                return {status: "confirmed"};
+              },
+            },
+            async _load() {}, _render() {},
+          });
+          const entries = [
+            {device: neighborDevice, targetId: "light.neighbor"},
+            {device: standDevice, targetId: "stand.light.main"},
+          ];
+          // Member A's completion refreshes the catalog epoch, exactly
+          // like the panel reload after a command.
+          const realExecutor = panel._executeDeviceAction;
+          panel._executeDeviceAction = function (targetId, actionId, value, options) {
+            const result = realExecutor.call(panel, targetId, actionId, value, options);
+            if (targetId === "light.neighbor") panel._coreCatalogSession = 1;
+            return result;
+          };
+          await side.executeTurnOff(panel, entries);
+          assert.strictEqual(posts.length, 1, "member B must not POST with a stale snapshot");
+          assert.strictEqual(posts[0].targetId, "light.neighbor");
+          assert.ok(panel._notice.length > 0, "the refusal of B is visible");
+        """
+        run_js_with_assert(script, str(LIGHTING_SIDE_JS), str(DEVICE_ACTIONS_JS))
+
+
 class ScenarioCatalogRefreshTest(unittest.TestCase):
     """The third publication path (scenario violations) goes through the
     single core publication point (SEC-HACS-01R1 residual)."""

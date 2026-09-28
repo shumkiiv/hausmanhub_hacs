@@ -44,19 +44,23 @@ function turnOffEntries(panel, devices) {
 }
 
 /* Commands go one by one through the shared device-actions flow with receipts and reload. */
-/* Core envelopes of transferred participants are captured before the first POST: */
-/* a mid-group catalog reload must not rewrite already confirmed actions, and a */
-/* panel session replacement stops the remaining group (HH-014.b). */
+/* Core envelopes of transferred participants are captured before the first POST */
+/* together with the catalog epoch of the capture: a mid-group catalog refresh */
+/* or reconnection must not let a stale prepared envelope through (SEC-HACS-02R1). */
 export async function executeTurnOff(panel, entries) {
   const snapshots = entries.map((entry) => {
     let prepared = null;
+    let coreEpoch;
     if (typeof panel._catalogTargets === "function") {
       const target = panel
         ._catalogTargets(entry.device)
         .find((item) => item.target_id === entry.targetId);
       prepared = target ? coreControlForTarget(target) : null;
+      if (prepared && prepared.state) {
+        coreEpoch = panel._coreCatalogSession || 0;
+      }
     }
-    return { ...entry, options: { coreControl: prepared } };
+    return { ...entry, options: { coreControl: prepared, coreEpoch } };
   });
   const coreSession = panel._coreSessionId || 0;
   for (const entry of snapshots) {
