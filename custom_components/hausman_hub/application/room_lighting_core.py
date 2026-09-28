@@ -9,8 +9,9 @@ entity ids stay inside the input adapter; the core sees resource ids.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+import threading
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Callable, Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..adapters.core.clock import SystemClock
@@ -21,6 +22,9 @@ from ..adapters.core.room_lighting import (
     RoomLightingInputAdapter,
 )
 from ..domain.core.models import (
+    Authority,
+    AutomaticScope,
+    ManualHold,
     ModuleMode,
     Observation,
     ProposalKind,
@@ -42,6 +46,26 @@ from .core.command_service import (
 PROFILE_TIMEZONE = "Asia/Omsk"
 PROFILE_SUNRISE = "08:00"
 PROFILE_SUNSET = "18:00"
+SHADOW_MANUAL_POLICY_REVISION = 1
+UNCERTAIN_MANUAL_AUTHORITY = "manual_authority_unavailable"
+
+
+@dataclass(frozen=True, slots=True)
+class ManualHoldView:
+    """Manual hold snapshot transferred from the shared runtime authority.
+
+    The runtime (the only attribution authority) produces these views; the
+    branch maps them onto core ``ManualHold`` records so the frame's
+    ``resource_controls`` carry the real manual priority (AUD-LP-ISO01
+    cycle 6). It grants no dispatch rights: the branch stays in SHADOW.
+    """
+
+    entity_id: str
+    action: str
+    source: str
+    proven_at_utc_ms: int
+    priority_until_utc_ms: int
+    evidence_id: str
 
 
 class CoreBranchError(CoreServiceError):
@@ -90,6 +114,9 @@ class RoomLightingCoreBranch:
         *,
         branch_config: CoreBranchConfig,
         store_path: str | Path,
+        manual_holds_provider: (
+            Callable[[], Mapping[str, ManualHoldView] | None] | None
+        ) = None,
     ) -> None:
         # The shadow branch is intentionally Hass-independent: closed
         # transport, own store, own clock.
@@ -168,6 +195,17 @@ class RoomLightingCoreBranch:
                 initial_records=self._initial_records(branch_config.config),
             )
         self._event_counter = 0
+        # Input serialization (AUD-LP-ISO01 cycle 6): the runtime delivers
+        # port calls from worker threads (file I/O off the event loop), so
+        # two events could otherwise interleave inside the branch and the
+        # store. One reentrant lock makes every processing cycle atomic.
+        self._lock = threading.RLock()
+        self._manual_holds_provider = manual_holds_provider
+        self._target_bindings: dict[str, str] = {
+            target.id: target.entity_id
+            for target in branch_config.config.devices.light_targets
+            if isinstance(target.entity_id, str)
+        }
 
     # -- mode --------------------------------------------------------------
 
@@ -180,18 +218,21 @@ class RoomLightingCoreBranch:
         return self._branch_config.room_id
 
     def activate_shadow(self) -> None:
-        if self._mode is not self.MODE_OFF:
-            return
-        self._mode = self.MODE_SHADOW
-        self._process_room_event()
+        with self._lock:
+            if self._mode is not self.MODE_OFF:
+                return
+            self._mode = self.MODE_SHADOW
+            self._process_room_event()
 
     def deactivate(self) -> None:
-        self._mode = self.MODE_OFF
+        with self._lock:
+            self._mode = self.MODE_OFF
 
     def on_runtime_stop(self) -> None:
         """Called by the legacy runtime on stop: flush the store."""
 
-        self._store.flush()
+        with self._lock:
+            self._store.flush()
 
     def __call__(
         self, entity_id: str, old_state: object, new_state: object
@@ -203,6 +244,17 @@ class RoomLightingCoreBranch:
     # -- input -------------------------------------------------------------
 
     def handle_runtime_event(
+        self, entity_id: str, old_state: object, new_state: object
+    ) -> None:
+        # The lock serializes events delivered from worker threads; the
+        # observation is created under the lock, so its timestamps follow
+        # the processing order (AUD-LP-ISO01 cycle 6).
+        with self._lock:
+            self._handle_runtime_event_locked(
+                entity_id, old_state, new_state
+            )
+
+    def _handle_runtime_event_locked(
         self, entity_id: str, old_state: object, new_state: object
     ) -> None:
         if self._mode is not self.MODE_SHADOW:
@@ -219,9 +271,10 @@ class RoomLightingCoreBranch:
         self._ingest(observation)
 
     def process_schedule_tick(self) -> None:
-        if self._mode is not self.MODE_SHADOW:
-            return
-        self._process_room_event()
+        with self._lock:
+            if self._mode is not self.MODE_SHADOW:
+                return
+            self._process_room_event()
 
     # -- read model --------------------------------------------------------
 
@@ -326,6 +379,7 @@ class RoomLightingCoreBranch:
         self._process_room_event()
 
     def _process_room_event(self) -> None:
+        self._apply_manual_holds()
         self._event_counter += 1
         self._service.process_module_event(
             self._module_id,
@@ -334,6 +388,78 @@ class RoomLightingCoreBranch:
         # Even a no-demand cycle leaves an explanation for the room.
         for resource_id in self._resource_ids(self._branch_config.config):
             self._service.evaluate_resource(resource_id)
+
+    def _apply_manual_holds(self) -> None:
+        """Transfer the runtime's manual holds onto control records.
+
+        Runs inside the branch lock before every decision cycle, so the
+        frame's ``resource_controls`` show the real manual priority and
+        arbitration explains its rejections (AUD-LP-ISO01 cycle 6).
+        A ``None`` snapshot means the shared authority is unavailable:
+        records become uncertain — the shadow decisions never widen
+        automation rights because of it (fail closed).
+        """
+
+        if self._manual_holds_provider is None:
+            return
+        try:
+            holds = self._manual_holds_provider()
+        except Exception:  # noqa: BLE001 - isolation by design
+            holds = None
+        now_utc_ms = self._clock.now_utc_ms()
+        for resource_id, entity_id in self._target_bindings.items():
+            record = self._service.record(resource_id)
+            if holds is None:
+                # The shared authority is unavailable: fail closed. The
+                # shadow decision must not widen automation rights, so
+                # the record stays uncertain until recovery (K-07).
+                if record.uncertainty_reason == UNCERTAIN_MANUAL_AUTHORITY:
+                    continue
+                self._service.update_control_record(
+                    resource_id,
+                    replace(
+                        record,
+                        authority=Authority.UNCERTAIN,
+                        uncertainty_reason=UNCERTAIN_MANUAL_AUTHORITY,
+                    ),
+                )
+                continue
+            view = holds.get(entity_id)
+            if view is not None and view.priority_until_utc_ms > now_utc_ms:
+                updated = replace(
+                    record,
+                    authority=Authority.MANUAL,
+                    manual=ManualHold(
+                        action_id=view.evidence_id
+                        or f"{entity_id}.{view.proven_at_utc_ms}",
+                        action=view.action,
+                        source=view.source,
+                        proven_at_utc_ms=view.proven_at_utc_ms,
+                        priority_until_utc_ms=view.priority_until_utc_ms,
+                        minimum_off_until_utc_ms=None,
+                        policy_revision=SHADOW_MANUAL_POLICY_REVISION,
+                    ),
+                    uncertainty_reason=None,
+                )
+            elif (
+                record.manual is not None
+                or record.uncertainty_reason is not None
+                or record.authority
+                in (Authority.MANUAL, Authority.UNCERTAIN)
+            ):
+                # The hold expired or the authority recovered: restore the
+                # automatic-eligible baseline. Expiry itself sends nothing
+                # and grants no ownership (K-07).
+                updated = replace(
+                    record,
+                    authority=Authority.AUTOMATIC_ELIGIBLE,
+                    automatic_scope=AutomaticScope.NORMAL,
+                    manual=None,
+                    uncertainty_reason=None,
+                )
+            else:
+                continue
+            self._service.update_control_record(resource_id, updated)
 
     @staticmethod
     def _id_factory():

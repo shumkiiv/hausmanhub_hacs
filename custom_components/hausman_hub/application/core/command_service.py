@@ -106,6 +106,24 @@ RECEIPT_WINDOW_MS = 24 * 60 * 60 * 1000
 MAX_RECEIPTS_IN_WINDOW = 2048
 MAX_UNRESOLVED_OPERATIONS = 1024
 
+# Bounded history retention (AUD-LP-ISO01 cycle 6): resolved operations
+# and resolved receipts beyond the newest window are pruned before every
+# commit. Unresolved outcomes and UNKNOWN outcomes are never pruned
+# (K-10, S-05) — their intake is bounded by the capacity rule (S-04).
+RETAINED_TERMINAL_OPERATIONS = 1024
+RETAINED_RESOLVED_RECEIPTS = MAX_RECEIPTS_IN_WINDOW
+_RESOLVED_PHASES = frozenset(
+    {
+        OperationPhase.CONFIRMED,
+        OperationPhase.CONFIRMED_LATE,
+        OperationPhase.FAILED,
+        OperationPhase.SUPERSEDED,
+        OperationPhase.SUPERSEDED_AFTER_DISPATCH,
+        OperationPhase.CANCELLED,
+        OperationPhase.EXPIRED,
+    }
+)
+
 
 @runtime_checkable
 class ClockPort(Protocol):
@@ -368,6 +386,22 @@ class CoreCommandService:
         except KeyError as exc:
             raise UnknownResource(resource_id) from exc
 
+    def update_control_record(
+        self, resource_id: str, record: ControlRecord
+    ) -> None:
+        """Replace one control record (K-07).
+
+        The shadow branch uses it to transfer the runtime's manual holds
+        onto the records the frame exposes (AUD-LP-ISO01 cycle 6). The
+        resource must exist and the record must name the same resource;
+        rights are never widened here — the caller supplies the record.
+        """
+
+        current = self.record(resource_id)
+        if record.resource_id != current.resource_id:
+            raise CoreServiceError("control record resource mismatch")
+        self._records[resource_id] = record
+
     def explanation(self, resource_id: str) -> DecisionExplanation | None:
         return self._explanations.get(resource_id)
 
@@ -545,7 +579,47 @@ class CoreCommandService:
         }
 
     def _commit_state(self) -> None:
+        self._prune_history()
         self._store.commit(self._store.commit_revision, self._build_image())
+
+    def _prune_history(self) -> None:
+        """Bounded retention of resolved history (AUD-LP-ISO01 cycle 6).
+
+        Long-running shadow work resolved every cycle into terminal
+        operations; without a policy the image grows without bound. The
+        policy: keep the newest ``RETAINED_TERMINAL_OPERATIONS`` resolved
+        operations and the newest ``RETAINED_RECEIPTS`` receipts, evicting
+        the oldest first. Operations with unresolved outcomes (queued,
+        taken, dispatching, observing) are never pruned, and UNKNOWN
+        outcomes keep their replay keys by design (K-10, S-05) — their
+        intake is bounded by the acceptance capacity rule (S-04).
+        """
+
+        terminal = [
+            operation_id
+            for operation_id, operation in self._operations.items()
+            if operation.phase in _RESOLVED_PHASES
+        ]
+        evict_count = len(terminal) - RETAINED_TERMINAL_OPERATIONS
+        if evict_count > 0:
+            for operation_id in terminal[:evict_count]:
+                self._operations.pop(operation_id, None)
+                self._confirm_keys.pop(operation_id, None)
+        receipts = list(self._receipts.items())
+        receipt_evict = len(receipts) - RETAINED_RESOLVED_RECEIPTS
+        if receipt_evict > 0:
+            for request_id, receipt in receipts[:receipt_evict]:
+                operation = self._operations.get(receipt.operation_id)
+                if operation is not None and (
+                    not operation.is_terminal()
+                    or operation.phase is OperationPhase.UNKNOWN
+                ):
+                    # Same protection as the receipt window cleanup:
+                    # active and unknown outcomes keep their keys.
+                    continue
+                self._receipts.pop(request_id, None)
+                self._receipt_times.pop(request_id, None)
+                self._receipt_fingerprints.pop(request_id, None)
 
     # ------------------------------------------------------------------
     # module events (auto path)

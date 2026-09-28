@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
 from decimal import Decimal
 from pathlib import Path
 from typing import Callable, Mapping
@@ -140,6 +141,11 @@ class FileControlStore:
         self.fail_at_commit_revisions: set[int] = set()
         self._closed = False
         self._commit_revision = 0
+        # The shadow branch runs its file I/O in worker threads (SEC-LP-ISO01),
+        # so two callers may reach commit concurrently. One write at a time
+        # keeps the CAS check and the durable replacement indivisible
+        # (AUD-LP-ISO01 cycle 6: no interleaved fsync writes).
+        self._commit_lock = threading.Lock()
         loaded = self.load()
         if loaded is not None:
             self._commit_revision = int(loaded[_COMMIT])
@@ -206,6 +212,12 @@ class FileControlStore:
             raise StorageUnavailable("file store commit failure")
         if self._commit_revision + 1 in self.fail_at_commit_revisions:
             raise StorageUnavailable("file store commit failure")
+        with self._commit_lock:
+            self._commit_locked(expected_commit_revision, next_state)
+
+    def _commit_locked(
+        self, expected_commit_revision: int, next_state: Mapping
+    ) -> None:
         if expected_commit_revision != self._commit_revision:
             raise CommitConflict(
                 f"expected {expected_commit_revision}, "

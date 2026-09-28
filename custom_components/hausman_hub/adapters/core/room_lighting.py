@@ -8,6 +8,7 @@ never sees HA objects.
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass
 from typing import Mapping
 
@@ -41,6 +42,10 @@ class RoomLightingInputAdapter:
         self._bindings = dict(bindings)
         self._clock = clock
         self._source_epoch = source_epoch
+        # Observation ids are per-adapter sequential: stable, unique per
+        # boot and free of HA entity ids (AUD-LP-ISO01 cycle 6: the core
+        # sees resource ids only; HA stays inside the adapter).
+        self._observation_seq = itertools.count(1)
 
     def observation(
         self,
@@ -57,7 +62,7 @@ class RoomLightingInputAdapter:
         changed = old_state is None or old_state.state != new_state.state
         return Observation(
             observation_id=(
-                f"obs-{entity_id}-{self._clock.now_mono_ms()}"
+                f"obs-{binding.resource_id}-{next(self._observation_seq)}"
             ),
             resource_id=binding.resource_id,
             property=binding.property,
@@ -68,7 +73,7 @@ class RoomLightingInputAdapter:
             boot_id=self._clock.boot_id(),
             source_at_utc_ms=None,
             source_sequence=None,
-            source_id=f"ha.{entity_id}",
+            source_id=f"ha_state:{binding.resource_id}",
             source_epoch=self._source_epoch,
             quality=Quality.FRESH if changed else Quality.STALE,
             evidence_kind=Evidence.DEVICE_REPORT,

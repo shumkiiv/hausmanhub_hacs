@@ -102,6 +102,9 @@ EVENT_CALL_SERVICE = "call_service"
 CURVE_PRESENCE_CONFIRM_MS = 15_000
 CURVE_MOTION_CONFIRM_WINDOW_MS = 20_000
 ENTRY_WAKEUP_GRACE_MS = 5_000
+# Default manual priority (owner rule): an active legacy light-priority
+# claim transfers to the shadow branch as a hold of at most this length.
+MANUAL_PRIORITY_TRANSFER_MS = 3_600_000
 CURVE_SENSOR_FRESHNESS_MS = 300_000
 # A morning boundary date must be a real calendar day; a damaged storage
 # entry is dropped instead of being trusted as "already transitioned".
@@ -907,6 +910,11 @@ class RoomLightingRuntime:
         # ownership history changes. The port never dispatches; the legacy
         # executor stays the only writer.
         self._core_input_port = core_input_port
+        # Core-input task tracking (AUD-LP-ISO01 cycle 6): dispatched port
+        # calls are awaited on stop, so the store is never written after
+        # the runtime stopped and the stop hook runs last.
+        self._core_input_tasks: set = set()
+        self._core_input_closed = False
         self._hass = hass
         self._service = service
         self._shadow = shadow
@@ -1245,7 +1253,10 @@ class RoomLightingRuntime:
                 _LOGGER.exception("core input port stop failed")
 
     async def stop(self) -> None:
-        self._notify_core_stop()
+        # In-flight core-input processing is awaited first (AUD-LP-ISO01
+        # cycle 6): after stop() returns, no shadow store write is pending
+        # and the stop hook in cancel() runs last.
+        await self._drain_core_input()
         self.cancel()
 
     def _load_trackers(self) -> None:
@@ -1471,9 +1482,10 @@ class RoomLightingRuntime:
         if self._core_input_port is not None:
             # Immutable snapshot delivered via a scheduled task in a
             # thread pool: file I/O (fsync) never blocks the event loop
-            # (SEC-LP-ISO01). Errors are isolated.
+            # (SEC-LP-ISO01). Errors are isolated; the task is tracked so
+            # stop() can await it (AUD-LP-ISO01 cycle 6).
             try:
-                self._create_task(
+                self._dispatch_core_input(
                     self._async_core_input(entity_id, data)
                 )
             except Exception:  # noqa: BLE001
@@ -1493,6 +1505,93 @@ class RoomLightingRuntime:
         self._observe_target_transition(entity_id)
         self._observe_power_transition(entity_id)
         self._create_task(self.async_process(sorted(rooms)))
+
+    def _dispatch_core_input(self, coroutine: object) -> None:
+        """Track one core-input task so ``stop()`` can await it."""
+
+        if self._core_input_closed:
+            _discard_coroutine(coroutine)
+            return
+        task = self._create_task(coroutine)
+        if task is not None:
+            self._core_input_tasks.add(task)
+            task.add_done_callback(self._core_input_tasks.discard)
+
+    async def _drain_core_input(self) -> None:
+        """Wait for in-flight core-input processing; then it is closed."""
+
+        self._core_input_closed = True
+        pending = [
+            task for task in tuple(self._core_input_tasks) if not task.done()
+        ]
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    def core_manual_holds(self):
+        """Snapshot of active manual holds for the shadow branch (K-07).
+
+        Returns ``{entity_id: ManualHoldView}`` for tracked room light
+        targets, or ``None`` when the shared authority is unavailable —
+        the branch must then treat manual state as uncertain (fail
+        closed, never widen automation rights). Legacy light-priority
+        claims do not expose timestamps, so an active claim transfers as
+        a conservative one-hour hold from now (the documented default
+        manual priority); it cannot shorten a real hold.
+        """
+
+        from .room_lighting_core import ManualHoldView
+
+        holds: dict = {}
+        authority = self._manual_light_authority
+        if authority is not None:
+            unhealthy = getattr(authority, "unhealthy", None)
+            if callable(unhealthy) and unhealthy():
+                return None
+        priority = self._light_priority
+        for config in self._configs.values():
+            for target in config.devices.light_targets:
+                entity_id = target.entity_id
+                if not isinstance(entity_id, str):
+                    continue
+                record = (
+                    authority.record(entity_id)
+                    if authority is not None
+                    else None
+                )
+                if record is not None:
+                    holds[entity_id] = ManualHoldView(
+                        entity_id=entity_id,
+                        action=record.action,
+                        source=record.source,
+                        proven_at_utc_ms=record.observed_at_ms,
+                        priority_until_utc_ms=record.deadline_ms,
+                        evidence_id=record.fingerprint,
+                    )
+                    continue
+                claims = getattr(priority, "manual_claim_entity_ids", None)
+                if not callable(claims):
+                    if priority is not None:
+                        # An unavailable shared authority must not open
+                        # an automatic route (same rule as dispatch).
+                        return None
+                    continue
+                try:
+                    claimed = entity_id in claims(frozenset({entity_id}))
+                except Exception:  # noqa: BLE001 - shared safety authority
+                    return None
+                if claimed:
+                    now_ms = self._now_ms()
+                    holds[entity_id] = ManualHoldView(
+                        entity_id=entity_id,
+                        action="on",
+                        source="light_priority",
+                        proven_at_utc_ms=now_ms,
+                        priority_until_utc_ms=(
+                            now_ms + MANUAL_PRIORITY_TRANSFER_MS
+                        ),
+                        evidence_id=f"light_priority.{entity_id}",
+                    )
+        return holds
 
     async def _async_core_clock_tick(self) -> None:
         import asyncio
@@ -1614,9 +1713,7 @@ class RoomLightingRuntime:
             return
         if self._core_input_port is not None:
             try:
-                self._create_task(
-                    self._async_core_clock_tick()
-                )
+                self._dispatch_core_input(self._async_core_clock_tick())
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("core clock tick dispatch failed")
         self._create_task(self.async_process())
@@ -5182,10 +5279,10 @@ class RoomLightingRuntime:
                 self._ownership.mark_clean_if_revision(revision)
             return True
 
-    def _create_task(self, coroutine: object) -> None:
+    def _create_task(self, coroutine: object) -> object | None:
         if self._hass is None:
             _discard_coroutine(coroutine)
-            return
+            return None
         create = getattr(self._hass, "async_create_task", None)
         loop = getattr(self._hass, "loop", None)
         try:
@@ -5200,24 +5297,24 @@ class RoomLightingRuntime:
             if callable(schedule) and callable(create):
                 try:
                     schedule(create, coroutine)
-                    return
+                    return None
                 except Exception:  # noqa: BLE001 - never crash a callback
                     _LOGGER.warning("room lighting task scheduling failed")
                     _discard_coroutine(coroutine)
-                    return
+                    return None
         if callable(create):
             try:
-                create(coroutine)
-                return
+                return create(coroutine)
             except Exception:  # noqa: BLE001 - never crash a callback
                 _LOGGER.warning("room lighting task scheduling failed")
                 _discard_coroutine(coroutine)
-                return
+                return None
         try:
-            asyncio.ensure_future(coroutine)  # type: ignore[arg-type]
+            return asyncio.ensure_future(coroutine)  # type: ignore[arg-type]
         except Exception:  # noqa: BLE001 - never crash a callback
             _LOGGER.warning("room lighting task scheduling failed")
             _discard_coroutine(coroutine)
+            return None
 
 
 def _discard_coroutine(coroutine: object) -> None:

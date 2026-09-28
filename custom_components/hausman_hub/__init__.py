@@ -1187,6 +1187,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         ),
                         store_path=Path(hass.config.config_dir)
                         / f"hausman_hub.core_shadow_{core_shadow_room_id}.json",
+                        # The runtime stays the only attribution authority:
+                        # its manual holds transfer into the shadow frame
+                        # (AUD-LP-ISO01 cycle 6) without dispatch rights.
+                        manual_holds_provider=(
+                            room_lighting_runtime.core_manual_holds
+                        ),
                     )
                     core_branch.activate_shadow()
                 except Exception:  # noqa: BLE001 - optional branch isolation
