@@ -44,7 +44,7 @@ import { renderSettingsRooms, saveRoomType } from "./hausman-hub-settings-rooms.
 import { loadPowerLinks, renderPowerLinks } from "./hausman-hub-power-links.js?v=1.52.296";
 import { loadAwaySettings, renderAwaySettings } from "./hausman-hub-away-settings.js?v=1.52.296";
 import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.296";
-import { applyCoreSession, rememberTransferredTargets } from "./hausman-hub-core-control.js?v=1.52.296";
+import { applyCoreSession, publishCoreCatalog } from "./hausman-hub-core-control.js?v=1.52.296";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.296";
@@ -855,10 +855,7 @@ class HausmanHubPanel extends HTMLElement {
         irBindings: results[5],
       };
       this._homeDashboard = results[6];
-      if ((this._coreSessionId || 0) === coreSessionAtStart) {
-        this._scenarios.catalog = results[7];
-        rememberTransferredTargets(this, results[7]);
-      }
+      publishCoreCatalog(this, coreSessionAtStart, results[7]);
       if (typeof applyTabletProfile === "function") applyTabletProfile(this, results[8]);
       this._upcomingEvents = results[9];
       this._climateRuntime = results[10];
@@ -920,6 +917,9 @@ class HausmanHubPanel extends HTMLElement {
   async _loadScenarios() {
     if (!this._hass || this._scenarios.loading) return;
     this._scenarios.loading = true;
+    // Same session rule as _load: a catalog answer never crosses a
+    // core session boundary (SEC-HACS-02R1).
+    const coreSessionAtStart = this._coreSessionId || 0;
     try {
       const [list, catalog, nodeRed] = await Promise.all([
         this._hass.callApi("GET", SCENARIOS_API).catch(() => null),
@@ -929,9 +929,10 @@ class HausmanHubPanel extends HTMLElement {
         this._hass.callApi("GET", SCENARIOS_NODE_RED_API).catch(() => null),
       ]);
       this._scenarios.list = list;
-      this._scenarios.catalog = catalog;
-      this._scenarios.nodeRed = nodeRed;
-      this._scenarios.error = false;
+      if (publishCoreCatalog(this, coreSessionAtStart, catalog)) {
+        this._scenarios.nodeRed = nodeRed;
+        this._scenarios.error = false;
+      }
     } catch (error) {
       this._scenarios.error = true;
     } finally {

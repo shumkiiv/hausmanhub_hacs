@@ -96,12 +96,41 @@ export function isConnectionReplaced(previousHass, nextHass) {
   return previous !== next;
 }
 
-/* Session bookkeeping for the panel: returns true when the connection
- * was replaced and bumps/clears the per-instance core state. */
+/* Session bookkeeping for the panel: returns true when the core session
+ * actually changed — a replaced connection or a lost connection
+ * (hass → null → new hass must not slip through unnoticed,
+ * SEC-HACS-02R1). Clearing and bumping happen exactly once per change. */
 export function applyCoreSession(owner, previousHass, nextHass) {
+  if (!nextHass) {
+    if (!previousHass || owner._coreSessionEnded === true) return false;
+    owner._coreSessionId = (owner._coreSessionId || 0) + 1;
+    owner._coreSessionEnded = true;
+    owner._coreCatalogSession = owner._coreSessionId;
+    if (owner._coreTransferredSeen) owner._coreTransferredSeen.clear();
+    return true;
+  }
+  owner._coreSessionEnded = false;
+  if (!previousHass) return false;
   if (!isConnectionReplaced(previousHass, nextHass)) return false;
   owner._coreSessionId = (owner._coreSessionId || 0) + 1;
+  owner._coreCatalogSession = owner._coreSessionId;
   if (owner._coreTransferredSeen) owner._coreTransferredSeen.clear();
+  return true;
+}
+
+/* Publishes one catalog answer for core purposes: only a load that
+ * stayed inside its session may publish, and every recognized
+ * transferred target of the answer is remembered (SEC-HACS-01/02R1).
+ * Returns false when the load crossed a session change — the stale
+ * answer is dropped. */
+export function publishCoreCatalog(owner, sessionAtStart, catalog) {
+  if (!owner || typeof owner !== "object") return false;
+  if ((owner._coreSessionId || 0) !== sessionAtStart) return false;
+  if (owner._scenarios && typeof owner._scenarios === "object") {
+    owner._scenarios.catalog = catalog;
+  }
+  rememberTransferredTargets(owner, catalog);
+  owner._coreCatalogSession = owner._coreSessionId || 0;
   return true;
 }
 

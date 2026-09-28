@@ -269,6 +269,74 @@ class CoreControlHelperTest(unittest.TestCase):
         """
         run_js_with_assert(script, str(CORE_CONTROL_JS))
 
+    def test_connection_loss_then_new_connection_bumps_session_once(self) -> None:
+        """hass A → null → hass B must not slip through: the lost
+        connection ends the session, the new one opens the next
+        (SEC-HACS-02R1)."""
+
+        script = r"""
+          import assert from "node:assert";
+          const mod = await import(process.argv[1]);
+          const connA = {id: "conn-1"};
+          const connB = {id: "conn-2"};
+          const owner = {_coreSessionId: 0, _coreTransferredSeen: new Set(["t"])};
+          assert.strictEqual(mod.applyCoreSession(owner, {connection: connA}, null), true);
+          assert.strictEqual(owner._coreSessionId, 1);
+          assert.strictEqual(owner._coreTransferredSeen.size, 0);
+          // Repeated nulls do not keep bumping.
+          assert.strictEqual(mod.applyCoreSession(owner, null, null), false);
+          assert.strictEqual(owner._coreSessionId, 1);
+          // The new connection opens the next session.
+          assert.strictEqual(mod.applyCoreSession(owner, null, {connection: connB}), false);
+          // A replaced connection bumps once and marks the catalog
+          // epoch: pre-reconnect catalogs are refused for core targets.
+          assert.strictEqual(mod.applyCoreSession(owner, {connection: connB}, {connection: {id: "conn-3"}}), true);
+          assert.strictEqual(owner._coreCatalogSession, owner._coreSessionId);
+        """
+        run_js_with_assert(script, str(CORE_CONTROL_JS))
+
+    def test_publish_core_catalog_scopes_to_session(self) -> None:
+        script = r"""
+          import assert from "node:assert";
+          const mod = await import(process.argv[1]);
+          const catalog = {devices: [
+            {target_id: "stand.light.main", coreControlState: {version: 1, status: "ready", controlRevision: 12, bindingRevision: 3}},
+          ]};
+          const owner = {_coreSessionId: 5, _scenarios: {}};
+          assert.strictEqual(mod.publishCoreCatalog(owner, 5, catalog), true);
+          assert.strictEqual(owner._scenarios.catalog, catalog);
+          assert.ok(owner._coreTransferredSeen.has("stand.light.main"));
+          assert.strictEqual(owner._coreCatalogSession, 5);
+          // A load that crossed a session change is dropped entirely.
+          const second = {devices: []};
+          assert.strictEqual(mod.publishCoreCatalog(owner, 4, second), false);
+          assert.strictEqual(owner._scenarios.catalog, catalog);
+          // A catalog published before a reconnection is refused for
+          // core targets by the executor.
+          const conn = {id: "c1"};
+          mod.applyCoreSession(owner, {connection: conn}, {connection: {id: "c2"}});
+          assert.strictEqual(owner._coreCatalogSession, owner._coreSessionId);
+          owner._scenarios.catalog = catalog; // simulate the stale copy staying put
+          const exec = await import(process.argv[2]);
+          const calls = [];
+          const staleOwner = {
+            _busy: false, _notice: "", _error: false,
+            _coreSessionId: owner._coreSessionId,
+            _coreCatalogSession: owner._coreCatalogSession - 1,
+            _coreTransferredSeen: new Set(),
+            _scenarios: {catalog: {devices: [
+              {target_id: "stand.light.main", entity_id: "light.stand_main", actions: [{action_id: "turn_off"}],
+               coreControlState: {version: 1, status: "ready", controlRevision: 12, bindingRevision: 3}},
+            ]}},
+            _hass: {callApi: async (m, p, payload) => { calls.push(payload); return {}; }},
+            async _load() {}, _render() {},
+          };
+          await exec.executeDeviceAction(staleOwner, "stand.light.main", "turn_off", null);
+          assert.strictEqual(calls.length, 0, "a pre-reconnect catalog must not command");
+          assert.ok(staleOwner._notice.length > 0);
+        """
+        run_js_with_assert(script, str(CORE_CONTROL_JS), str(DEVICE_ACTIONS_JS))
+
     def test_catalog_load_remembers_transferred_targets(self) -> None:
         script = r"""
           import assert from "node:assert";

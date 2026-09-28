@@ -133,6 +133,18 @@ export async function executeDeviceAction(owner, targetId, actionId, value, opti
       owner._error = false;
       return;
     }
+    // Envelopes built from a catalog published before the current
+    // connection are refused: the revision pair must come from this
+    // session's own read (SEC-HACS-02R1). The server CAS stays the
+    // last line of defense.
+    if (
+      corePrepared && corePrepared.state
+      && (owner._coreCatalogSession || 0) !== (owner._coreSessionId || 0)
+    ) {
+      owner._notice = "Данные управления получены до переподключения: обновите панель.";
+      owner._error = false;
+      return;
+    }
     // The request belongs to the connection it was prepared on: the
     // group loop stops on a session change, and a stale envelope can
     // only end in a server revision conflict — never in a bypass.
