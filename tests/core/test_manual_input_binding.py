@@ -129,6 +129,14 @@ def report_light_state(branch, value: str) -> None:
     branch.handle_runtime_event(ENTITY_ID, None, make_state(value))
 
 
+def report_light_state_repeat(branch, value: str) -> None:
+    """A repeated report with no state change: the input adapter marks
+    it STALE, so the stored fact loses freshness."""
+
+    state = make_state(value)
+    branch.handle_runtime_event(ENTITY_ID, state, state)
+
+
 def _binding() -> CoreManualTargetBinding:
     return CoreManualTargetBinding(
         target_id=PUBLIC_TARGET_ID,
@@ -470,10 +478,55 @@ def test_intake_dry_run_creates_no_manual_and_no_operation(tmp_path):
     assert after.control_revision == before.control_revision
     assert after.authority == before.authority
     assert after.manual == before.manual
-    # No operation was created for the read-only check.
-    assert branch.core_service.receipt(
-        "core-manual-dry", receipt_scope="tablet"
-    ) is None or True  # receipt() reads acceptances only; dry-run makes none
+    # A dry run never creates an acceptance receipt: the read-only
+    # projection cannot be replayed or mistaken for an admission.
+    assert (
+        branch.core_service.receipt("core-manual-dry", receipt_scope="tablet")
+        is None
+    )
+
+
+def test_scoped_replay_survives_branch_restart(tmp_path):
+    """The scoped replay key and fingerprint are durable: the same
+    principal replays the same acceptance after a reload, with the same
+    operation and without a new admission."""
+
+    store_path = Path(tmp_path) / "core_shadow_restart.json"
+    branch = RoomLightingCoreBranch(
+        branch_config=CoreBranchConfig(
+            room_id=ROOM_ID,
+            config=config_from_payload(make_config_payload(ROOM_ID)),
+            device_profiles=synthetic_binary_light_profiles([RESOURCE_ID]),
+        ),
+        store_path=store_path,
+    )
+    branch.activate_shadow()
+    report_light_state(branch, "on")
+    first = _submit(branch, request_id="core-manual-restart")
+    restarted = RoomLightingCoreBranch(
+        branch_config=CoreBranchConfig(
+            room_id=ROOM_ID,
+            config=config_from_payload(make_config_payload(ROOM_ID)),
+            device_profiles=synthetic_binary_light_profiles([RESOURCE_ID]),
+        ),
+        store_path=store_path,
+    )
+    restarted.activate_shadow()
+    record = restarted.core_service.record(RESOURCE_ID)
+    assert record.authority.name == "MANUAL"
+    replay = _submit(
+        restarted,
+        request_id="core-manual-restart",
+        expected=START_CONTROL_REVISION,
+    )
+    # The replaying client presents the same envelope it originally
+    # sent; the durable scoped fingerprint matches before any revision
+    # check, so the acceptance replays instead of re-admitting.
+    assert replay.idempotent_replay is True
+    assert replay.operation_id == first.operation_id
+    assert restarted.core_service.record(
+        RESOURCE_ID
+    ).control_revision == record.control_revision
 
 
 def test_intake_reports_core_unavailable_without_legacy_fallback(tmp_path):

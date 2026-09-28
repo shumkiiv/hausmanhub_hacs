@@ -508,6 +508,31 @@ class CoreManualInput:
         branch = self._branch_for(binding)
         service = branch.core_service
         try:
+            spec = service.spec(binding.resource_id)
+        except UnknownResource as exc:
+            raise CoreManualInputError(
+                "core_binding_unknown",
+                str(exc),
+                http_status=409,
+                api_code="conflict",
+            ) from exc
+        if envelope is not None and (
+            spec.binding_revision != envelope["expectedBindingRevision"]
+        ):
+            # The read-only probe answers exactly what the real
+            # admission would answer (R-S06-02): a stale binding
+            # revision is a conflict, never a green light.
+            raise CoreManualInputError(
+                "core_binding_revision_conflict",
+                (
+                    f"binding revision moved: expected "
+                    f"{envelope['expectedBindingRevision']}, "
+                    f"actual {spec.binding_revision}"
+                ),
+                http_status=409,
+                api_code="revision_conflict",
+            )
+        try:
             view = service.resource_view(binding.resource_id)
         except UnknownResource as exc:
             raise CoreManualInputError(
@@ -531,7 +556,9 @@ class CoreManualInput:
             )
         if envelope_conflict is not None:
             raise envelope_conflict
-        evidence = self._evidence(binding, view, operation_id=None)
+        evidence = self._evidence(
+            binding, view, operation_id=None, action_id=None
+        )
         receipt: dict = {
             "contract": {
                 "name": "hausman-hub-device-action-receipt",
@@ -552,16 +579,23 @@ class CoreManualInput:
             receipt.update(
                 {
                     "targetType": "light",
-                    "decision": "skipped",
+                    # The v1 contract marks a passed dry run "executed"
+                    # with dryRun=true (the legacy projection does the
+                    # same): commandSent stays false and nothing was
+                    # admitted, so no coreOperation echo appears.
+                    "decision": "executed",
                     "decisionAt": int(time.time_ns() // 1_000_000),
                     "commandSent": False,
                     "decisionTerminal": True,
                     "commandSource": "manual",
                     "reasonCode": evidence["reasonCode"],
                     "evidenceRevision": evidence["evidenceRevision"],
+                    "preCommandEvidenceRevision": evidence["evidenceRevision"],
+                    "preCommandOwnership": "unknown",
                     "ownership": evidence["ownership"],
                     "blockedReasons": evidence["blockedReasons"],
                     "evidence": evidence,
+                    "preCommandEvidence": evidence,
                 }
             )
         return receipt
@@ -622,7 +656,10 @@ class CoreManualInput:
             return base
         view = service.resource_view(binding.resource_id)
         evidence = self._evidence(
-            binding, view, operation_id=receipt.operation_id
+            binding,
+            view,
+            operation_id=receipt.operation_id,
+            action_id=action_id,
         )
         base.update(
             {
@@ -665,39 +702,62 @@ class CoreManualInput:
         view: "ResourceView",
         *,
         operation_id: str | None,
+        action_id: str | None = None,
     ) -> dict:
         """One bounded evidence snapshot built from the public core view.
 
-        Nothing is claimed beyond the facts: an admitted but unsent
-        command stays ``unknown`` in ownership until a device report
-        proves the physical outcome."""
+        The combination always matches one reviewed branch of the
+        vendored ``device-state-evidence`` schema (R-S06-01):
+        an admitted command reads ``core_manual_admitted`` (fresh on/off
+        keeps the reported state; a stale fact never claims a current
+        ``on``); a read-only dry run describes the state without any
+        admission claim. Nothing is claimed as sent or owned."""
 
         on_fact = next(
             (fact for fact in view.facts if fact.property == "on"),
             None,
         )
+        fresh = on_fact is not None and on_fact.quality is Quality.FRESH
         if on_fact is None or on_fact.quality is Quality.INVALID:
             reported = "unknown"
-            confidence = "suspect"
         else:
             reported = "on" if on_fact.value is True else (
                 "off" if on_fact.value is False else "unknown"
-            )
-            confidence = (
-                "fresh" if on_fact.quality is Quality.FRESH else "suspect"
             )
         observed_at = int(time.time_ns() // 1_000_000)
         revision = "core.manual.evidence.read"
         if operation_id:
             revision = f"core.manual.evidence.{operation_id}"
         if operation_id:
+            # Admission: the reason code of the reviewed confirmation
+            # category carries no state claim of its own.
             reason = REASON_CORE_MANUAL_ADMITTED
-        elif reported == "off" and confidence == "fresh":
+            confidence = "fresh" if fresh else "suspect"
+            if confidence == "fresh":
+                effective = reported if reported in ("on", "off") else "unknown"
+                allowed = [action_id] if action_id else []
+            else:
+                effective = reported if reported == "off" else "unknown"
+                allowed = []
+            blocked: list[str] = []
+            ownership_source = "device_report"
+        elif reported == "off" and fresh:
             reason = "device_report_off_confirmed"
-        elif reported == "on" and confidence == "fresh":
-            reason = "manual_state_fresh"
+            confidence = "confirmed"
+            effective = "off"
+            allowed = ["turn_on"]
+            blocked = []
+            ownership_source = "device_report"
         else:
+            # The legacy read semantics for a state nobody proven owns
+            # (including a fresh on-report): suspect, no actions, no
+            # ownership claims (R-S06-01).
             reason = "state_suspect"
+            confidence = "suspect"
+            effective = reported if reported == "off" else "unknown"
+            allowed = []
+            blocked = [reason]
+            ownership_source = "device_report"
         return {
             "contract": {
                 "name": "hausman-hub-device-state-evidence",
@@ -705,22 +765,18 @@ class CoreManualInput:
             },
             "targetId": binding.target_id,
             "reportedState": reported,
-            "effectiveState": (
-                reported if reported in ("on", "off") else "unknown"
-            ),
+            "effectiveState": effective,
             "confidence": confidence,
             "ownership": "unknown",
             "observedAt": observed_at,
             "freshUntil": observed_at + SYNTHETIC_PROFILE_MAX_AGE_MS,
             "freshnessWindowMs": SYNTHETIC_PROFILE_MAX_AGE_MS,
-            "ownershipSource": "device_report",
+            "ownershipSource": ownership_source,
             "evidenceRevision": revision,
             "evidenceSequence": observed_at,
             "reasonCode": reason,
             "reassertBudget": 0,
             "reassertPolicy": "none",
-            "allowedActions": (
-                ["turn_off"] if reported == "on" else ["turn_on"]
-            ),
-            "blockedReasons": [],
+            "allowedActions": allowed,
+            "blockedReasons": blocked,
         }

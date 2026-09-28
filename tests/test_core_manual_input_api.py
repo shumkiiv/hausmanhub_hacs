@@ -23,6 +23,7 @@ import unittest
 import test_local_summary_access as harness
 
 ROOT = Path(__file__).resolve().parents[1]
+CONTRACTS = ROOT / "custom_components" / "hausman_hub" / "contracts" / "v1"
 
 # The branch-level stand builders live in tests/core; the path is
 # extended in setUpClass before the fake Home Assistant modules exist.
@@ -277,6 +278,49 @@ class CoreManualInputApiTest(unittest.TestCase):
     def _report(self, value: str) -> None:
         stand.report_light_state(self.branch, value)
 
+    def _report_stale(self, value: str) -> None:
+        stand.report_light_state_repeat(self.branch, value)
+
+    def _validate_full_receipt(self, payload) -> None:
+        """The live full answer must satisfy the vendored 0.72.1 schemas
+        (R-S06-01): the receipt and its evidence block."""
+
+        receipt_validator = self._schema_validator(
+            "device-action-receipt.schema.json", "full"
+        )
+        receipt_validator.validate(payload)
+        if isinstance(payload.get("evidence"), dict):
+            self._schema_validator(
+                "device-state-evidence.schema.json"
+            ).validate(payload["evidence"])
+
+    def _schema_validator(self, name: str, definition=None):
+        import json
+
+        from jsonschema import Draft202012Validator, RefResolver
+
+        if not hasattr(self, "_schema_store"):
+            store = {}
+            for schema_path in CONTRACTS.rglob("*.json"):
+                candidate = json.loads(
+                    schema_path.read_text(encoding="utf-8")
+                )
+                if isinstance(candidate, dict) and isinstance(
+                    candidate.get("$id"), str
+                ):
+                    store[candidate["$id"]] = candidate
+            self._schema_store = store
+        schema = json.loads((CONTRACTS / name).read_text(encoding="utf-8"))
+        if definition is not None:
+            schema = schema["$defs"][definition]
+        return Draft202012Validator(
+            schema,
+            resolver=RefResolver.from_schema(
+                json.loads((CONTRACTS / name).read_text(encoding="utf-8")),
+                store=self._schema_store,
+            ),
+        )
+
     # -- tests ---------------------------------------------------------
 
     def test_transferred_resource_without_envelope_is_refused(self):
@@ -353,6 +397,99 @@ class CoreManualInputApiTest(unittest.TestCase):
         self.assertNotEqual(
             "core-manual-api-full", core_operation["operationId"]
         )
+        self._validate_full_receipt(payload)
+        self.assertEqual([], self.executor.calls)
+
+    def test_admitted_full_receipt_with_stale_fact_is_schema_valid(self):
+        """A stale on-fact never claims a current on (R-S06-01): the
+        admitted evidence goes suspect with an unknown effective state,
+        and the live full answer stays schema-valid."""
+
+        self._report("on")
+        self._report_stale("on")
+        response = self._full_single(
+            {
+                "requestId": "core-manual-api-stale",
+                "targetId": stand.PUBLIC_TARGET_ID,
+                "actionId": "turn_off",
+                "coreControl": self._envelope(
+                    request_id="core-manual-api-stale"
+                ),
+            }
+        )
+        self.assertEqual(HTTPStatus.OK, response.status)
+        payload = response.payload
+        evidence = payload["evidence"]
+        self.assertEqual("suspect", evidence["confidence"])
+        self.assertNotEqual("on", evidence["effectiveState"])
+        self.assertEqual([], self.executor.calls)
+        self._validate_full_receipt(payload)
+
+    def test_dry_run_full_receipt_is_schema_valid(self):
+        """The read-only probe answers honestly per state: a fresh on
+        reads automatic_ownership_missing, a fresh off reads
+        device_report_off_confirmed; both stay schema-valid."""
+
+        self._report("off")
+        off_response = self._full_single(
+            {
+                "requestId": "core-manual-dry-off",
+                "targetId": stand.PUBLIC_TARGET_ID,
+                "actionId": "turn_on",
+                "dryRun": True,
+                "coreControl": self._envelope(
+                    request_id="core-manual-dry-off"
+                ),
+            }
+        )
+        self.assertEqual(HTTPStatus.OK, off_response.status)
+        self.assertEqual(
+            "device_report_off_confirmed",
+            off_response.payload["evidence"]["reasonCode"],
+        )
+        self._validate_full_receipt(off_response.payload)
+
+        self._report("on")
+        on_response = self._full_single(
+            {
+                "requestId": "core-manual-dry-on",
+                "targetId": stand.PUBLIC_TARGET_ID,
+                "actionId": "turn_off",
+                "dryRun": True,
+                "coreControl": self._envelope(
+                    request_id="core-manual-dry-on"
+                ),
+            }
+        )
+        self.assertEqual(HTTPStatus.OK, on_response.status)
+        # The legacy read semantics: an on-state with unproven ownership
+        # is suspect, never a claimed current on.
+        self.assertEqual(
+            "state_suspect", on_response.payload["evidence"]["reasonCode"]
+        )
+        self.assertEqual(
+            "unknown", on_response.payload["evidence"]["effectiveState"]
+        )
+        self._validate_full_receipt(on_response.payload)
+
+    def test_dry_run_with_stale_binding_revision_conflicts(self):
+        """The read-only probe answers what the real admission would
+        answer (R-S06-02): a stale binding revision is a conflict."""
+
+        self._report("on")
+        envelope = self._envelope(request_id="core-manual-dry-stale")
+        envelope["expectedBindingRevision"] += 1
+        response = self._full_single(
+            {
+                "requestId": "core-manual-dry-stale",
+                "targetId": stand.PUBLIC_TARGET_ID,
+                "actionId": "turn_off",
+                "dryRun": True,
+                "coreControl": envelope,
+            }
+        )
+        self.assertEqual(HTTPStatus.CONFLICT, response.status)
+        self.assertEqual("revision_conflict", response.payload["code"])
         self.assertEqual([], self.executor.calls)
 
     def test_malformed_envelope_is_a_protocol_refusal(self):
