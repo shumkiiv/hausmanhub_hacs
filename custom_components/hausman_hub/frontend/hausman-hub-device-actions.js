@@ -2,7 +2,7 @@ import { resolveIntercomQuickAction } from "./hausman-hub-navigation.js?v=1.52.2
 import { apiErrorMessage } from "./hausman-hub-error-taxonomy.js?v=1.52.296";
 import { filterCatalogActions } from "./hausman-hub-device-features.js?v=1.52.296";
 import { fullDeviceActionRequest, withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.296";
-import { coreControlForTarget, withCoreControl } from "./hausman-hub-core-control.js?v=1.52.296";
+import { coreControlForTarget, coreControlStateOf, withCoreControl } from "./hausman-hub-core-control.js?v=1.52.296";
 
 const DEVICE_ACTION_EXECUTOR_API = "hausman_hub/v1/device-actions";
 
@@ -107,7 +107,10 @@ export async function executeDeviceAction(owner, targetId, actionId, value, opti
     // The core envelope is captured synchronously from the catalog the
     // user acted on, before any asynchronous work (HH-014.b client).
     // A caller-supplied snapshot (sequential group) always wins so a
-    // mid-group reload cannot rewrite confirmed actions.
+    // mid-group reload cannot rewrite confirmed actions. Every
+    // recognized transferred target is remembered — ready, unavailable
+    // and damaged blocks alike — so losing the block later refuses the
+    // command instead of a silent legacy fallback (SEC-HACS-01).
     if (!owner._coreTransferredSeen) owner._coreTransferredSeen = new Set();
     const seen = owner._coreTransferredSeen;
     let corePrepared = null;
@@ -115,8 +118,8 @@ export async function executeDeviceAction(owner, targetId, actionId, value, opti
       corePrepared = options.coreControl;
       if (corePrepared && corePrepared.state) seen.add(targetId);
     } else if (target) {
+      if (coreControlStateOf(target) !== null) seen.add(targetId);
       corePrepared = coreControlForTarget(target);
-      if (corePrepared && corePrepared.state) seen.add(targetId);
     }
     // Loss of the projection for a previously transferred target is
     // never a fallback to the legacy writer (SEC-HACS-01).
@@ -130,10 +133,9 @@ export async function executeDeviceAction(owner, targetId, actionId, value, opti
       owner._error = false;
       return;
     }
-    // The request belongs to the connection it was prepared on: a
-    // session replacement cancels the send instead of carrying the
-    // action across (SEC-HACS-02).
-    const coreSession = owner._coreSessionId || 0;
+    // The request belongs to the connection it was prepared on: the
+    // group loop stops on a session change, and a stale envelope can
+    // only end in a server revision conflict — never in a bypass.
     const hass = owner._hass;
     let payload = { targetId, actionId };
     if (value !== null && value !== undefined) payload.value = value;
@@ -146,11 +148,6 @@ export async function executeDeviceAction(owner, targetId, actionId, value, opti
     if (options.dryRun !== true || corePrepared !== null) {
       ({ payload, headers } = fullDeviceActionRequest(payload, deviceActionRequestId()));
       payload = withCoreControl(payload, corePrepared, payload.requestId);
-    }
-    if ((owner._coreSessionId || 0) !== coreSession) {
-      owner._notice = "Сессия панели изменилась: действие отменено.";
-      owner._error = false;
-      return;
     }
     const receipt = await hass.callApi(
       "POST",

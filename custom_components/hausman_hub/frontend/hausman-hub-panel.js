@@ -44,6 +44,7 @@ import { renderSettingsRooms, saveRoomType } from "./hausman-hub-settings-rooms.
 import { loadPowerLinks, renderPowerLinks } from "./hausman-hub-power-links.js?v=1.52.296";
 import { loadAwaySettings, renderAwaySettings } from "./hausman-hub-away-settings.js?v=1.52.296";
 import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.296";
+import { applyCoreSession, rememberTransferredTargets } from "./hausman-hub-core-control.js?v=1.52.296";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.296";
@@ -546,18 +547,16 @@ class HausmanHubPanel extends HTMLElement {
   }
 
   set hass(value) {
-    const first = this._hass === null;
-    const replaced = !first && this._hass !== value;
+    const previous = this._hass;
+    const first = previous === null;
     this._hass = value;
     this._applyThemeMode();
     if (!this._preferencesLoaded) this._loadUserPreferences();
-    if (replaced) {
-      // A new core session (HH-014.b): the transferred-target memory and
-      // any prepared core envelopes belong to the previous connection and
-      // must not leak into the next one.
-      this._coreSessionId = (this._coreSessionId || 0) + 1;
-      if (this._coreTransferredSeen) this._coreTransferredSeen.clear();
-    }
+    // A replaced connection opens a new core session (HH-014.b): the
+    // transferred-target memory and any prepared core envelopes belong
+    // to the previous connection. Ordinary hass object updates keep the
+    // same connection and never touch this.
+    applyCoreSession(this, previous, value);
     if (first) {
       this._load();
     }
@@ -827,6 +826,10 @@ class HausmanHubPanel extends HTMLElement {
   async _load() {
     if (!this._hass || this._loadingPanel) return;
     this._loadingPanel = true;
+    // The catalog answer belongs to the connection it was fetched on:
+    // a session replacement during the load must not publish stale
+    // revisions (SEC-HACS-02).
+    const coreSessionAtStart = this._coreSessionId || 0;
     try {
       const results = await Promise.all([
         this._hass.callApi("GET", PANEL_API),
@@ -852,7 +855,10 @@ class HausmanHubPanel extends HTMLElement {
         irBindings: results[5],
       };
       this._homeDashboard = results[6];
-      this._scenarios.catalog = results[7];
+      if ((this._coreSessionId || 0) === coreSessionAtStart) {
+        this._scenarios.catalog = results[7];
+        rememberTransferredTargets(this, results[7]);
+      }
       if (typeof applyTabletProfile === "function") applyTabletProfile(this, results[8]);
       this._upcomingEvents = results[9];
       this._climateRuntime = results[10];

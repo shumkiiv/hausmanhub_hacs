@@ -239,6 +239,135 @@ class CoreControlHelperTest(unittest.TestCase):
         """
         run_js_with_assert(script, str(DEVICE_ACTIONS_JS))
 
+    def test_session_scoping_uses_connection_not_object_identity(self) -> None:
+        """Home Assistant recreates the hass object on ordinary state
+        updates: only a replaced connection opens a new core session
+        (NEW-HACS-01/SEC-HACS-02)."""
+
+        script = r"""
+          import assert from "node:assert";
+          const mod = await import(process.argv[1]);
+          // Ordinary update: a new hass object with the SAME connection.
+          const connection = {id: "conn-1"};
+          const owner = {_coreSessionId: 0, _coreTransferredSeen: new Set(["stand.light.main"])};
+          assert.strictEqual(
+            mod.applyCoreSession(owner, {connection}, {connection}), false,
+          );
+          assert.strictEqual(owner._coreSessionId, 0);
+          assert.strictEqual(owner._coreTransferredSeen.size, 1);
+          // First assignment (no previous hass) never counts.
+          assert.strictEqual(mod.applyCoreSession(owner, null, {connection}), false);
+          // Test doubles without connections are not replacements.
+          assert.strictEqual(mod.applyCoreSession(owner, {}, {}), false);
+          // A replaced connection opens a new session and clears the
+          // transferred memory.
+          assert.strictEqual(
+            mod.applyCoreSession(owner, {connection}, {connection: {id: "conn-2"}}), true,
+          );
+          assert.strictEqual(owner._coreSessionId, 1);
+          assert.strictEqual(owner._coreTransferredSeen.size, 0);
+        """
+        run_js_with_assert(script, str(CORE_CONTROL_JS))
+
+    def test_catalog_load_remembers_transferred_targets(self) -> None:
+        script = r"""
+          import assert from "node:assert";
+          const mod = await import(process.argv[1]);
+          const owner = {};
+          mod.rememberTransferredTargets(owner, {devices: [
+            {target_id: "stand.light.main", coreControlState: {version: 1, status: "ready", controlRevision: 1, bindingRevision: 1}},
+            {target_id: "stand.light.second", coreControlState: {version: 1, status: "unavailable"}},
+            {target_id: "stand.light.broken", coreControlState: "damaged"},
+            {target_id: "light.neighbor"},
+          ]});
+          const seen = owner._coreTransferredSeen;
+          assert.ok(seen.has("stand.light.main"));
+          assert.ok(seen.has("stand.light.second"));
+          assert.ok(seen.has("stand.light.broken"));
+          assert.ok(!seen.has("light.neighbor"));
+          // Empty/absent catalogs are tolerated.
+          mod.rememberTransferredTargets(owner, {devices: []});
+          mod.rememberTransferredTargets(owner, null);
+          assert.strictEqual(seen.size, 3);
+        """
+        run_js_with_assert(script, str(CORE_CONTROL_JS))
+
+    def test_lost_block_after_ready_refuses_instead_of_legacy(self) -> None:
+        """The exact SEC-HACS-01 sequence: a ready target is commanded,
+        then its block disappears — the next click refuses and never
+        posts through the legacy writer."""
+
+        script = r"""
+          import assert from "node:assert";
+          const mod = await import(process.argv[1]);
+          const calls = [];
+          const target = (withBlock) => ({
+            target_id: "stand.light.main", entity_id: "light.stand_main",
+            actions: [{action_id: "turn_off"}],
+            ...(withBlock ? {coreControlState: {version: 1, status: "ready", controlRevision: 12, bindingRevision: 3}} : {}),
+          });
+          const owner = {
+            _busy: false, _notice: "", _error: false,
+            _scenarios: {catalog: {devices: [target(true)]}},
+            _hass: {
+              callApi: async (method, path, payload) => {
+                calls.push(payload);
+                return {status: "accepted"};
+              },
+            },
+            async _load() {}, _render() {},
+          };
+          await mod.executeDeviceAction(owner, "stand.light.main", "turn_off", null);
+          assert.strictEqual(calls.length, 1);
+          // The block disappears (failed read / damaged answer).
+          owner._scenarios.catalog.devices[0] = target(false);
+          await mod.executeDeviceAction(owner, "stand.light.main", "turn_off", null);
+          assert.strictEqual(calls.length, 1, "the lost block fell through to the legacy writer");
+          assert.ok(owner._notice.length > 0);
+          // The explicit null block is a damaged projection, not an absence.
+          owner._scenarios.catalog.devices[0] = target(true);
+          owner._scenarios.catalog.devices[0].coreControlState = null;
+          await mod.executeDeviceAction(owner, "stand.light.main", "turn_off", null);
+          assert.strictEqual(calls.length, 1);
+        """
+        run_js_with_assert(script, str(DEVICE_ACTIONS_JS))
+
+    def test_unavailable_then_block_disappearance_stays_refused(self) -> None:
+        """The auditor's sequence: unavailable (refused) → block
+        disappears → still refused, because the unavailable state was
+        remembered too (SEC-HACS-01 residual)."""
+
+        script = r"""
+          import assert from "node:assert";
+          const mod = await import(process.argv[1]);
+          const calls = [];
+          const target = (block) => ({
+            target_id: "stand.light.main", entity_id: "light.stand_main",
+            actions: [{action_id: "turn_off"}],
+            ...(block ? {coreControlState: block} : {}),
+          });
+          const owner = {
+            _busy: false, _notice: "", _error: false,
+            _scenarios: {catalog: {devices: [target({version: 1, status: "unavailable"})]}},
+            _hass: {callApi: async (m, p, payload) => { calls.push(payload); return {}; }},
+            async _load() {}, _render() {},
+          };
+          await mod.executeDeviceAction(owner, "stand.light.main", "turn_off", null);
+          assert.strictEqual(calls.length, 0, "unavailable refused");
+          owner._scenarios.catalog.devices[0] = target(null);
+          delete owner._scenarios.catalog.devices[0].coreControlState;
+          await mod.executeDeviceAction(owner, "stand.light.main", "turn_off", null);
+          assert.strictEqual(calls.length, 0, "the disappeared block fell through");
+          // The neighbor without any block history keeps the legacy path.
+          owner._scenarios.catalog.devices = [
+            {target_id: "light.neighbor", entity_id: "light.neighbor", actions: [{action_id: "turn_on"}]},
+          ];
+          await mod.executeDeviceAction(owner, "light.neighbor", "turn_on", null);
+          assert.strictEqual(calls.length, 1);
+          assert.strictEqual(calls[0].coreControl, undefined);
+        """
+        run_js_with_assert(script, str(DEVICE_ACTIONS_JS))
+
     def test_caller_supplied_snapshot_wins_over_catalog(self) -> None:
         """The sequential group snapshots envelopes before the first
         POST: a catalog refresh must not rewrite a prepared action."""

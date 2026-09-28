@@ -838,6 +838,25 @@ def test_stale_fact_keeps_its_observation_time_exactly(tmp_path):
     assert first["evidence"]["observedAt"] == on_fact.received_at_utc_ms
 
 
+def test_incomplete_profile_reports_unavailable(tmp_path):
+    """A transferred resource without a capability passport is
+    unavailable for the catalog read, never ready (SEC-HACS-03)."""
+
+    branch = build_stand_branch(tmp_path, with_profile=False)
+    intake = CoreManualInput()
+    intake.register_transferred_target(branch, _binding())
+    state = intake.core_control_state(PUBLIC_TARGET_ID)
+    assert state == {"version": 1, "status": "unavailable"}
+    # The full branch keeps answering ready.
+    ready_branch = build_stand_branch(Path(tmp_path) / "ready")
+    ready_intake = CoreManualInput()
+    ready_intake.register_transferred_target(
+        ready_branch, _binding()
+    )
+    ready_state = ready_intake.core_control_state(PUBLIC_TARGET_ID)
+    assert ready_state["status"] == "ready"
+
+
 def test_zero_utc_stamp_is_not_replaced_by_read_time(tmp_path):
     """A legitimate zero observation stamp survives projection: reads
     at different wall-clock moments keep observedAt at zero

@@ -82,3 +82,42 @@ export function withCoreControl(payload, prepared, requestId) {
     },
   };
 }
+
+/* A connection replacement is a NEW connection object. Home Assistant
+ * recreates the hass object on ordinary state updates while keeping the
+ * same connection, so object identity must never decide a session
+ * change (NEW-HACS-01). Missing connections on both sides (test
+ * doubles) are not a replacement either. */
+export function isConnectionReplaced(previousHass, nextHass) {
+  if (!previousHass || !nextHass) return false;
+  const previous = previousHass.connection;
+  const next = nextHass.connection;
+  if (previous === undefined && next === undefined) return false;
+  return previous !== next;
+}
+
+/* Session bookkeeping for the panel: returns true when the connection
+ * was replaced and bumps/clears the per-instance core state. */
+export function applyCoreSession(owner, previousHass, nextHass) {
+  if (!isConnectionReplaced(previousHass, nextHass)) return false;
+  owner._coreSessionId = (owner._coreSessionId || 0) + 1;
+  if (owner._coreTransferredSeen) owner._coreTransferredSeen.clear();
+  return true;
+}
+
+/* Records every recognized transferred target of a catalog document:
+ * ready, unavailable and damaged blocks all count, so losing the block
+ * later refuses the command instead of silently falling back to the
+ * legacy writer (SEC-HACS-01). Neighbours without a block stay out. */
+export function rememberTransferredTargets(owner, catalog) {
+  if (!owner || typeof owner !== "object") return;
+  if (!Array.isArray(catalog && catalog.devices)) return;
+  if (!owner._coreTransferredSeen) owner._coreTransferredSeen = new Set();
+  const seen = owner._coreTransferredSeen;
+  catalog.devices.forEach((device) => {
+    if (device && typeof device.target_id === "string"
+        && coreControlStateOf(device) !== null) {
+      seen.add(device.target_id);
+    }
+  });
+}
