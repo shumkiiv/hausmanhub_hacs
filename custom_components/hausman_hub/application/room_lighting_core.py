@@ -23,6 +23,7 @@ from ..adapters.core.room_lighting import (
 from ..domain.core.models import (
     ModuleMode,
     Observation,
+    ProposalKind,
     ResourceSpec,
     StabilityProfile,
 )
@@ -37,7 +38,6 @@ from .core.command_service import (
     ModuleEntry,
     ModuleManifest,
 )
-from ..domain.core.models import ProposalKind
 
 PROFILE_TIMEZONE = "Asia/Omsk"
 PROFILE_SUNRISE = "08:00"
@@ -124,7 +124,6 @@ class RoomLightingCoreBranch:
         )
         self._mode = self.MODE_OFF
         self._module_id = self._module.module_id
-        self._counter = {"n": 0}
         restore_kwargs = dict(
             clock=self._clock,
             store=self._store,

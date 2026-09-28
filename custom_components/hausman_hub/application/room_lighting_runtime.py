@@ -1495,23 +1495,20 @@ class RoomLightingRuntime:
         self._create_task(self.async_process(sorted(rooms)))
 
     async def _async_core_clock_tick(self) -> None:
-        try:
-            self._core_input_port("__clock__", None, None)
-        except Exception:  # noqa: BLE001
-            _LOGGER.exception("core clock tick failed")
+        import asyncio
+
+        port = self._core_input_port
+        await asyncio.to_thread(port, "__clock__", None, None)
 
     async def _async_core_input(self, entity_id: str, data: Mapping) -> None:
         # The port does file I/O (shadow store fsync); run it in a thread
         # so the event loop is never blocked by fsync (SEC-LP-ISO01).
         import asyncio
 
-        loop = asyncio.get_event_loop()
         port = self._core_input_port
         old_state = data.get("old_state")
         new_state = data.get("new_state")
-        await loop.run_in_executor(
-            None, lambda: port(entity_id, old_state, new_state)
-        )
+        await asyncio.to_thread(port, entity_id, old_state, new_state)
 
     def _observe_target_transition(self, entity_id: str) -> None:
         """Attribution for a light that was switched off outside Home Assistant.

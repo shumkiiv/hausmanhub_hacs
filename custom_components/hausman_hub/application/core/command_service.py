@@ -1724,7 +1724,6 @@ class CoreCommandService:
         )
         if loaded:
             service._operations = dict(loaded.get("operations", {}))
-            service._image_boot_id = loaded.get("boot_id")
             # Provenance: every operation of the loaded image originates
             # from the previous process, plus the persisted restored
             # markers; this survives later re-commits (SEC-S04-11).
