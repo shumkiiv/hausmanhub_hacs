@@ -1204,6 +1204,10 @@ class RoomLightingRuntime:
     def cancel(self) -> None:
         if not self._running and not self._unsubscribers:
             return
+        # The sync path cannot await, but it closes new dispatches at
+        # once; the async drain for in-flight work is registered
+        # separately as the first unload callback (LP-C6-R5).
+        self._core_input_closed = True
         self._notify_core_stop()
         # Invalidate any pending away-on debounce so it cannot fire after stop.
         self._away_generation += 1
@@ -1527,6 +1531,13 @@ class RoomLightingRuntime:
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
 
+    async def async_drain_core_input(self) -> None:
+        """Public drain for the entry unload path: registered as an async
+        unload callback, it runs first (LIFO) and awaits in-flight core
+        input before the branch stop hook and deactivation follow."""
+
+        await self._drain_core_input()
+
     def core_manual_holds(self):
         """Snapshot of active manual holds for the shadow branch (K-07).
 
@@ -1544,8 +1555,13 @@ class RoomLightingRuntime:
         holds: dict = {}
         authority = self._manual_light_authority
         if authority is not None:
+            # ManualLightAuthority.unhealthy is a bool property; test
+            # doubles may expose a method. Both forms must fail closed.
             unhealthy = getattr(authority, "unhealthy", None)
-            if callable(unhealthy) and unhealthy():
+            if isinstance(unhealthy, bool):
+                if unhealthy:
+                    return None
+            elif callable(unhealthy) and unhealthy():
                 return None
         priority = self._light_priority
         for config in self._configs.values():
@@ -1559,12 +1575,21 @@ class RoomLightingRuntime:
                     else None
                 )
                 if record is not None:
+                    now_ms = self._now_ms()
                     holds[entity_id] = ManualHoldView(
                         entity_id=entity_id,
                         action=record.action,
                         source=record.source,
                         proven_at_utc_ms=record.observed_at_ms,
-                        priority_until_utc_ms=record.deadline_ms,
+                        # The shared authority is the release source of
+                        # truth: while its record exists the view re-arms
+                        # (never shorter than the recorded deadline), so
+                        # the shadow branch never unlocks earlier than
+                        # the authority's own barrier.
+                        priority_until_utc_ms=max(
+                            record.deadline_ms,
+                            now_ms + MANUAL_PRIORITY_TRANSFER_MS,
+                        ),
                         evidence_id=record.fingerprint,
                     )
                     continue

@@ -121,6 +121,8 @@ _RESOLVED_PHASES = frozenset(
         OperationPhase.SUPERSEDED_AFTER_DISPATCH,
         OperationPhase.CANCELLED,
         OperationPhase.EXPIRED,
+        OperationPhase.REJECTED,
+        OperationPhase.NO_OP,
     }
 )
 
@@ -603,8 +605,16 @@ class CoreCommandService:
         evict_count = len(terminal) - RETAINED_TERMINAL_OPERATIONS
         if evict_count > 0:
             for operation_id in terminal[:evict_count]:
-                self._operations.pop(operation_id, None)
+                operation = self._operations.pop(operation_id, None)
                 self._confirm_keys.pop(operation_id, None)
+                # Every index must forget the evicted id together with the
+                # operation itself, or the next read crashes (LP-C6-R1).
+                if operation is not None:
+                    resource_ops = self._resource_ops.get(
+                        operation.resource_id
+                    )
+                    if resource_ops and operation_id in resource_ops:
+                        resource_ops.remove(operation_id)
         receipts = list(self._receipts.items())
         receipt_evict = len(receipts) - RETAINED_RESOLVED_RECEIPTS
         if receipt_evict > 0:

@@ -1207,6 +1207,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         room_lighting_runtime._notify_core_stop
                     )
                     entry.async_on_unload(core_branch.deactivate)
+                    # Registered last, runs first on unload (LIFO): the
+                    # in-flight shadow input is awaited before the stop
+                    # hook and deactivation (AUD-LP-ISO01 cycle 6).
+                    entry.async_on_unload(
+                        room_lighting_runtime.async_drain_core_input()
+                    )
     # No automatic route may open until room-only light events received while
     # the room catalog loaded have been attributed and durably drained.
     await manual_light_events.async_complete_startup()

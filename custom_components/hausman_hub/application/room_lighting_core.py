@@ -426,6 +426,10 @@ class RoomLightingCoreBranch:
                 continue
             view = holds.get(entity_id)
             if view is not None and view.priority_until_utc_ms > now_utc_ms:
+                foreign_uncertainty = (
+                    record.uncertainty_reason
+                    not in (None, UNCERTAIN_MANUAL_AUTHORITY)
+                )
                 updated = replace(
                     record,
                     authority=Authority.MANUAL,
@@ -439,23 +443,41 @@ class RoomLightingCoreBranch:
                         minimum_off_until_utc_ms=None,
                         policy_revision=SHADOW_MANUAL_POLICY_REVISION,
                     ),
-                    uncertainty_reason=None,
+                    # A manual hold dominates the decision anyway; a
+                    # foreign uncertainty marker must survive it.
+                    uncertainty_reason=(
+                        record.uncertainty_reason
+                        if foreign_uncertainty
+                        else None
+                    ),
                 )
             elif (
                 record.manual is not None
-                or record.uncertainty_reason is not None
-                or record.authority
-                in (Authority.MANUAL, Authority.UNCERTAIN)
+                or record.authority is Authority.MANUAL
+                or record.uncertainty_reason == UNCERTAIN_MANUAL_AUTHORITY
             ):
                 # The hold expired or the authority recovered: restore the
-                # automatic-eligible baseline. Expiry itself sends nothing
-                # and grants no ownership (K-07).
+                # automatic baseline. Only markers set by this transfer
+                # are cleared; foreign uncertainty (e. g. clock_uncertain
+                # after an untrusted restart) stays untouched (LP-C6-R4).
+                foreign_uncertainty = (
+                    record.uncertainty_reason
+                    not in (None, UNCERTAIN_MANUAL_AUTHORITY)
+                )
                 updated = replace(
                     record,
-                    authority=Authority.AUTOMATIC_ELIGIBLE,
+                    authority=(
+                        Authority.UNCERTAIN
+                        if foreign_uncertainty
+                        else Authority.AUTOMATIC_ELIGIBLE
+                    ),
                     automatic_scope=AutomaticScope.NORMAL,
                     manual=None,
-                    uncertainty_reason=None,
+                    uncertainty_reason=(
+                        record.uncertainty_reason
+                        if foreign_uncertainty
+                        else None
+                    ),
                 )
             else:
                 continue

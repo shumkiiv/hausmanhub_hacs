@@ -312,6 +312,68 @@ def test_hold_release_after_recovery(tmp_path):
     assert record.manual is None
 
 
+def test_core_manual_holds_fail_closed_on_unhealthy_authority():
+    from custom_components.hausman_hub.application.room_lighting_runtime import (
+        RoomLightingRuntime,
+    )
+
+    class _UnhealthyAuthority:
+        @property
+        def unhealthy(self) -> bool:
+            return True
+
+    runtime = RoomLightingRuntime(
+        hass=None,
+        service=MagicMock(),
+        shadow=MagicMock(),
+        manual_light_authority=_UnhealthyAuthority(),
+    )
+    # unhealthy is a bool property on the real authority: the provider
+    # must treat it as unavailable (LP-C6-R3).
+    assert runtime.core_manual_holds() is None
+
+
+def test_foreign_uncertainty_is_never_cleared_by_hold_transfer(tmp_path):
+    from dataclasses import replace as dc_replace
+
+    branch = _branch_with_provider(tmp_path, lambda: {})
+    record = branch._service.record("test_main")
+    branch._service.update_control_record(
+        "test_main",
+        dc_replace(
+            record,
+            authority=Authority.UNCERTAIN,
+            uncertainty_reason="clock_uncertain",
+        ),
+    )
+    branch.handle_runtime_event(
+        "binary_sensor.test_presence", None, _state("on")
+    )
+    kept = branch._service.record("test_main")
+    assert kept.authority is Authority.UNCERTAIN
+    assert kept.uncertainty_reason == "clock_uncertain"
+
+    held_branch = _branch_with_provider(
+        tmp_path, lambda: {"light.test_main": _hold()}
+    )
+    held_record = held_branch._service.record("test_main")
+    held_branch._service.update_control_record(
+        "test_main",
+        dc_replace(
+            held_record,
+            authority=Authority.UNCERTAIN,
+            uncertainty_reason="clock_uncertain",
+        ),
+    )
+    held_branch.handle_runtime_event(
+        "binary_sensor.test_presence", None, _state("on")
+    )
+    held = held_branch._service.record("test_main")
+    assert held.authority is Authority.MANUAL
+    assert held.manual is not None
+    assert held.uncertainty_reason == "clock_uncertain"
+
+
 # --- 4. observation ids are resource-scoped ---------------------------
 
 
@@ -443,22 +505,76 @@ def test_terminal_history_is_pruned_unresolved_is_kept():
     assert "op.queued" in service._operations
 
 
-def test_shadow_cycles_do_not_accumulate_operations(tmp_path):
-    branch = _branch(tmp_path)
-    for _ in range(60):
-        branch.handle_runtime_event(
-            "binary_sensor.test_presence", None, _state("on")
+def test_no_op_and_rejected_history_is_pruned_too():
+    from custom_components.hausman_hub.application.core import (
+        command_service as command_service_module,
+    )
+
+    stand = build_stand(arbitration_mode_from_flag(False))
+    service = stand.service
+    for index in range(RETAINED_TERMINAL_OPERATIONS + 60):
+        service._operations[f"op.failed.{index}"] = _operation(
+            f"op.failed.{index}", OperationPhase.FAILED
         )
+    for index in range(30):
+        service._operations[f"op.noop.{index}"] = _operation(
+            f"op.noop.{index}", OperationPhase.NO_OP
+        )
+        service._operations[f"op.rejected.{index}"] = _operation(
+            f"op.rejected.{index}", OperationPhase.REJECTED
+        )
+
+    service._commit_state()
+
     resolved = [
         operation
-        for operation in branch._service._operations.values()
-        if operation.phase
-        in (
-            OperationPhase.FAILED,
-            OperationPhase.CONFIRMED,
-            OperationPhase.SUPERSEDED,
-        )
+        for operation in service._operations.values()
+        if operation.phase in command_service_module._RESOLVED_PHASES
     ]
+    # Every resolved phase is inside one bounded window (LP-C6-R2).
     assert len(resolved) <= RETAINED_TERMINAL_OPERATIONS
-    # And the durable image stays loadable.
-    assert branch._store.load() is not None
+    assert "op.noop.0" in service._operations
+    assert "op.rejected.0" in service._operations
+    assert "op.failed.0" not in service._operations
+
+
+def test_prune_keeps_operation_index_consistent(monkeypatch):
+    """LP-C6-R1 repro: eviction must remove the id from every index,
+    or the next arbitration/ingest crashes on a dangling id."""
+
+    from custom_components.hausman_hub.application.core import (
+        command_service as command_service_module,
+    )
+
+    monkeypatch.setattr(
+        command_service_module, "RETAINED_TERMINAL_OPERATIONS", 40
+    )
+    stand = build_stand(arbitration_mode_from_flag(False))
+    service = stand.service
+    for index in range(120):
+        operation_id = f"op.{index}"
+        service._operations[operation_id] = _operation(
+            operation_id, OperationPhase.SUPERSEDED
+        )
+        service._resource_ops[MAIN_RESOURCE].append(operation_id)
+        service._confirm_keys[operation_id] = ("key", operation_id)
+
+    service._commit_state()
+
+    operations = service._operations
+    resolved_count = sum(
+        1
+        for operation in operations.values()
+        if operation.phase in command_service_module._RESOLVED_PHASES
+    )
+    assert resolved_count <= 40
+    for resource_id, ids in service._resource_ops.items():
+        for operation_id in ids:
+            assert operation_id in operations, (
+                f"dangling index entry {operation_id} for {resource_id}"
+            )
+    # The service still arbitrates and ingests after pruning.
+    stand.ingest(
+        MAIN_RESOURCE, sequence=99, mono_ms=1000, properties={"on": True}
+    )
+    assert "test.main" in service._facts
