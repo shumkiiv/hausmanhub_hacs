@@ -101,7 +101,8 @@ export async function executeDeviceAction(owner, targetId, actionId, value, opti
     options = { ...options, confirmedByUser: true };
   }
   owner._busy = true;
-  owner._notice = "";
+  owner._notice = "Отправка команды…";
+  owner._pendingTargetId = targetId;
   owner._render();
   try {
     // The core envelope is captured synchronously from the catalog the
@@ -191,6 +192,7 @@ export async function executeDeviceAction(owner, targetId, actionId, value, opti
     owner._error = false;
   } finally {
     owner._busy = false;
+    owner._pendingTargetId = null;
     await owner._load();
   }
 }
