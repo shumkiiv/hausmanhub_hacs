@@ -62,6 +62,16 @@ class ManualLightAuthorityEvents:
         self._ambiguous_startup_domains: set[str] = set()
 
     def start(self, *, buffer_startup: bool = False) -> Callable[[], None]:
+        # The event loop is captured here (async setup context): event
+        # callbacks may be dispatched from worker threads, so the drain
+        # task must be scheduled threadsafe (live regression 2026-09-29:
+        # hass.async_create_task from SyncWorker was blocked by HA and
+        # the drain coroutine was never awaited). Without a running loop
+        # (sync tests) the drain falls back to plain create_task.
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = None
         if buffer_startup:
             self._managed_ready = False
             self._authority.begin_startup_observation()
@@ -139,12 +149,25 @@ class ManualLightAuthorityEvents:
             _LOGGER.exception("manual light action could not be captured")
             return
         if changed and schedule_drain:
-            create_task = getattr(self._hass, "async_create_task", None)
             task = self._authority.async_drain()
-            if callable(create_task):
-                create_task(task)
-            else:
-                asyncio.create_task(task)
+            self._schedule_drain(task)
+
+    def _schedule_drain(self, task) -> None:
+        """Schedule the drain coroutine on the captured event loop.
+
+        Safe to call from any thread (SEC/live repair 2026-09-29)."""
+        loop = getattr(self, "_loop", None)
+        if loop is not None and loop.is_running():
+            loop.call_soon_threadsafe(self._create_drain_task, task)
+            return
+        self._create_drain_task(task)
+
+    def _create_drain_task(self, task) -> None:
+        create_task = getattr(self._hass, "async_create_task", None)
+        if callable(create_task):
+            create_task(task)
+        else:
+            asyncio.create_task(task)
 
     def _capture_or_buffer(
         self, entity_id: str, action: str, context: object, source: str,

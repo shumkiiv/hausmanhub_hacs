@@ -1180,3 +1180,75 @@ def test_startup_wiring_drains_room_events_before_activation() -> None:
     assert source.index("await room_lighting_service.async_list_configs()") < source.index(
         "await manual_light_authority.async_capture_initial_room_scope("
     ) < source.index("await manual_light_events.async_complete_startup()")
+
+
+def test_drain_from_worker_thread_is_scheduled_on_loop_threadsafe() -> None:
+    """Live regression 2026-09-29: the authority drain is captured from
+    a worker thread (HA dispatches sync event listeners there); the
+    drain must be scheduled threadsafe on the captured loop and actually
+    awaited — never dropped with 'coroutine never awaited'."""
+
+    import asyncio
+    import threading
+    import time
+
+    async def scenario() -> tuple[list, int]:
+        hass_calls: list = []
+        hass = SimpleNamespace(
+            async_create_task=lambda task: hass_calls.append(
+                asyncio.get_event_loop().create_task(task)
+            )
+        )
+        from custom_components.hausman_hub.manual_light_authority_events import (
+            _StartupEvidence,
+        )
+
+        class _MemoryStore:
+            recovered_previous = False
+
+            async def async_load(self):
+                return None
+
+            async def async_save(self, payload):
+                self.payload = payload
+
+        authority = ManualLightAuthority(_MemoryStore())
+        listener = ManualLightAuthorityEvents(
+            hass,
+            authority,
+            lambda: frozenset({"light.stand_main"}),
+            None,
+            lambda: None,
+        )
+        listener.start()  # called inside the running loop, as in setup
+        loop = asyncio.get_running_loop()
+        worker_error: list = []
+
+        def worker() -> None:
+            try:
+                # The worker thread captures a manual action, as HA's
+                # sync event dispatch does in production.
+                listener._capture_evidence(
+                    _StartupEvidence(
+                        "light.stand_main", "on", "state", "ctx-worker",
+                        "event-worker-1",
+                    )
+                )
+            except Exception as error:  # pragma: no cover
+                worker_error.append(error)
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        thread.join(timeout=2)
+        assert not worker_error, worker_error
+
+        # Let the loop run the threadsafe scheduling and the drain.
+        for _ in range(50):
+            if hass_calls and all(task.done() for task in hass_calls):
+                break
+            await asyncio.sleep(0.01)
+        await asyncio.gather(*hass_calls, return_exceptions=True)
+        return hass_calls, threading.get_ident()
+
+    hass_calls, loop_thread = asyncio.run(scenario())
+    assert len(hass_calls) == 1, "the drain task must be scheduled once"
