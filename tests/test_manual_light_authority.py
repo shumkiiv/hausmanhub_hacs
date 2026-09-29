@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,6 +19,7 @@ from custom_components.hausman_hub.application.manual_light_auto_return import (
 )
 from custom_components.hausman_hub.manual_light_authority_events import (
     ManualLightAuthorityEvents,
+    _StartupEvidence,
     room_light_entity_ids,
 )
 from custom_components.hausman_hub.application.room_lighting_ha_executor import (
@@ -1250,79 +1252,144 @@ def test_drain_from_worker_thread_is_scheduled_on_loop_threadsafe() -> None:
         assert saved, "the drain did not persist the capture"
         return {"saved": saved}
 
-    def test_closed_listener_drops_drain_and_marks_unhealthy() -> None:
-        """cancel() closes the listener: a drain captured before cancel is
-        dropped (no task on an unloaded integration) and the authority is
-        marked unhealthy so manual light automation stays denied
-        (SEC-REPAIR-02)."""
+    result = asyncio.run(scenario())
+    assert result["saved"]
 
-        async def scenario() -> dict:
-            class _MemoryStore:
-                recovered_previous = False
 
-                async def async_load(self):
-                    return None
+def test_closed_listener_drops_drain_and_marks_unhealthy() -> None:
+    """cancel() closes the listener: a drain captured before cancel is
+    dropped (no task on an unloaded integration) and the authority is
+    marked unhealthy so manual light automation stays denied
+    (SEC-REPAIR-02)."""
 
-                async def async_save(self, payload):
-                    self.payload = payload
+    async def scenario() -> dict:
+        class _MemoryStore:
+            recovered_previous = False
 
-            store = _MemoryStore()
-            authority = ManualLightAuthority(store)
-            listener = ManualLightAuthorityEvents(
-                SimpleNamespace(async_create_task=None),
-                authority,
-                lambda: frozenset({"light.stand_main"}),
-                None,
-                lambda: None,
+            async def async_load(self):
+                return None
+
+            async def async_save(self, payload):
+                self.payload = payload
+
+        store = _MemoryStore()
+        authority = ManualLightAuthority(store)
+        listener = ManualLightAuthorityEvents(
+            SimpleNamespace(async_create_task=None),
+            authority,
+            lambda: frozenset({"light.stand_main"}),
+            None,
+            lambda: None,
+        )
+        listener.start()
+        listener.cancel()
+        listener._capture_evidence(
+            _StartupEvidence(
+                "light.stand_main", "on", "state", "ctx-closed",
+                "event-closed-1",
             )
-            listener.start()
-            listener.cancel()
-            listener._capture_evidence(
-                _StartupEvidence(
-                    "light.stand_main", "on", "state", "ctx-closed",
-                    "event-closed-1",
-                )
+        )
+        assert authority.unhealthy
+        return {"saved": getattr(store, "payload", None)}
+
+    result = asyncio.run(scenario())
+    assert result["saved"] is None
+
+
+def test_cancel_flushes_pending_capture_exactly_once() -> None:
+    """cancel() flushes already captured actions through the final drain
+    exactly once, even though the listener is closed (SEC-REPAIR-02R1);
+    captures after cancel are dropped."""
+
+    import json
+
+    async def scenario() -> dict:
+        saved: list = []
+        schedule_calls: list = []
+
+        class _MemoryStore:
+            recovered_previous = False
+
+            async def async_load(self):
+                return None
+
+            async def async_save(self, payload):
+                saved.append(json.loads(json.dumps(payload, default=str)))
+
+        hass = SimpleNamespace(
+            async_create_task=lambda task: schedule_calls.append(task)
+        )
+        authority = ManualLightAuthority(_MemoryStore())
+        listener = ManualLightAuthorityEvents(
+            hass,
+            authority,
+            lambda: frozenset({"light.stand_main"}),
+            None,
+            lambda: None,
+        )
+        listener.start()
+        listener._capture_evidence(
+            _StartupEvidence(
+                "light.stand_main", "on", "state", "ctx-flush",
+                "event-flush-1",
             )
-            assert authority.unhealthy() is True
-            return {"saved": getattr(store, "payload", None)}
-
-        result = asyncio.run(scenario())
-        assert result["saved"] is None
-
-    def test_stopped_loop_marks_unhealthy_instead_of_wrong_thread() -> None:
-        """A dead loop must not send hass.async_create_task into a worker
-        thread again: the drain coroutine is closed and the authority is
-        marked unhealthy (SEC-REPAIR-01)."""
-
-        async def scenario() -> dict:
-            class _MemoryStore:
-                recovered_previous = False
-
-                async def async_load(self):
-                    return None
-
-                async def async_save(self, payload):
-                    self.payload = payload
-
-            store = _MemoryStore()
-            authority = ManualLightAuthority(store)
-            listener = ManualLightAuthorityEvents(
-                SimpleNamespace(async_create_task=None),
-                authority,
-                lambda: frozenset({"light.stand_main"}),
-                None,
-                lambda: None,
+        )
+        listener.cancel()
+        listener._capture_evidence(
+            _StartupEvidence(
+                "light.stand_main", "on", "state", "ctx-after-cancel",
+                "event-after-cancel-1",
             )
-            listener.start()
-            listener._loop = None  # stopped/unknown loop
-            listener._capture_evidence(
-                _StartupEvidence(
-                    "light.stand_main", "on", "state", "ctx-dead",
-                    "event-dead-1",
-                )
-            )
-            assert authority.unhealthy() is True
-            return {"saved": getattr(store, "payload", None)}
+        )
+        # The final drain is scheduled on the loop; yield once so it runs.
+        await asyncio.sleep(0.01)
+        assert schedule_calls, "final drain was not scheduled at cancel"
+        assert len(schedule_calls) == 1, "cancel scheduled more than one drain"
+        await asyncio.gather(*schedule_calls, return_exceptions=True)
+        failures = [r for r in schedule_calls if isinstance(r, BaseException)]
+        assert not failures, failures
+        # The pending capture survived the unload; the late one did not.
+        assert saved, "pending capture was lost at cancel"
+        joined = json.dumps(saved, ensure_ascii=False)
+        assert "ctx-flush" in joined
+        assert "ctx-after-cancel" not in joined
 
-        result = asyncio.run(scenario())
-        assert result["saved"] is None
+    asyncio.run(scenario())
+
+def test_stopped_loop_marks_unhealthy_instead_of_wrong_thread() -> None:
+    """A dead loop must not send hass.async_create_task into a worker
+    thread again: the drain coroutine is closed and the authority is
+    marked unhealthy (SEC-REPAIR-01)."""
+
+    async def scenario() -> dict:
+        class _MemoryStore:
+            recovered_previous = False
+
+            async def async_load(self):
+                return None
+
+            async def async_save(self, payload):
+                self.payload = payload
+
+        store = _MemoryStore()
+        authority = ManualLightAuthority(store)
+        listener = ManualLightAuthorityEvents(
+            SimpleNamespace(async_create_task=None),
+            authority,
+            lambda: frozenset({"light.stand_main"}),
+            None,
+            lambda: None,
+        )
+        listener.start()
+        listener._loop = None  # stopped/unknown loop
+        listener._capture_evidence(
+            _StartupEvidence(
+                "light.stand_main", "on", "state", "ctx-dead",
+                "event-dead-1",
+            )
+        )
+        assert authority.unhealthy
+        return {"saved": getattr(store, "payload", None)}
+
+    result = asyncio.run(scenario())
+    assert result["saved"] is None
