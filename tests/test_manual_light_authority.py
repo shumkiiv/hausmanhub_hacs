@@ -1185,23 +1185,13 @@ def test_startup_wiring_drains_room_events_before_activation() -> None:
 def test_drain_from_worker_thread_is_scheduled_on_loop_threadsafe() -> None:
     """Live regression 2026-09-29: the authority drain is captured from
     a worker thread (HA dispatches sync event listeners there); the
-    drain must be scheduled threadsafe on the captured loop and actually
-    awaited — never dropped with 'coroutine never awaited'."""
+    drain must be scheduled threadsafe on the captured loop, actually
+    awaited, and the capture must land in the store (SEC-REPAIR-03)."""
 
-    import asyncio
-    import threading
-    import time
+    import json
 
-    async def scenario() -> tuple[list, int]:
-        hass_calls: list = []
-        hass = SimpleNamespace(
-            async_create_task=lambda task: hass_calls.append(
-                asyncio.get_event_loop().create_task(task)
-            )
-        )
-        from custom_components.hausman_hub.manual_light_authority_events import (
-            _StartupEvidence,
-        )
+    async def scenario() -> dict:
+        saved: list = []
 
         class _MemoryStore:
             recovered_previous = False
@@ -1210,8 +1200,14 @@ def test_drain_from_worker_thread_is_scheduled_on_loop_threadsafe() -> None:
                 return None
 
             async def async_save(self, payload):
-                self.payload = payload
+                saved.append(json.loads(json.dumps(payload, default=str)))
 
+        hass_calls: list = []
+        hass = SimpleNamespace(
+            async_create_task=lambda task: hass_calls.append(
+                asyncio.get_event_loop().create_task(task)
+            )
+        )
         authority = ManualLightAuthority(_MemoryStore())
         listener = ManualLightAuthorityEvents(
             hass,
@@ -1221,7 +1217,6 @@ def test_drain_from_worker_thread_is_scheduled_on_loop_threadsafe() -> None:
             lambda: None,
         )
         listener.start()  # called inside the running loop, as in setup
-        loop = asyncio.get_running_loop()
         worker_error: list = []
 
         def worker() -> None:
@@ -1242,13 +1237,92 @@ def test_drain_from_worker_thread_is_scheduled_on_loop_threadsafe() -> None:
         thread.join(timeout=2)
         assert not worker_error, worker_error
 
-        # Let the loop run the threadsafe scheduling and the drain.
         for _ in range(50):
             if hass_calls and all(task.done() for task in hass_calls):
                 break
             await asyncio.sleep(0.01)
-        await asyncio.gather(*hass_calls, return_exceptions=True)
-        return hass_calls, threading.get_ident()
+        results = await asyncio.gather(*hass_calls, return_exceptions=True)
+        failures = [r for r in results if isinstance(r, BaseException)]
+        assert not failures, failures
+        assert len(hass_calls) == 1, "the drain task must be scheduled once"
+        # The capture actually landed in the authority store
+        # (SEC-REPAIR-03): the drain persisted it.
+        assert saved, "the drain did not persist the capture"
+        return {"saved": saved}
 
-    hass_calls, loop_thread = asyncio.run(scenario())
-    assert len(hass_calls) == 1, "the drain task must be scheduled once"
+    def test_closed_listener_drops_drain_and_marks_unhealthy() -> None:
+        """cancel() closes the listener: a drain captured before cancel is
+        dropped (no task on an unloaded integration) and the authority is
+        marked unhealthy so manual light automation stays denied
+        (SEC-REPAIR-02)."""
+
+        async def scenario() -> dict:
+            class _MemoryStore:
+                recovered_previous = False
+
+                async def async_load(self):
+                    return None
+
+                async def async_save(self, payload):
+                    self.payload = payload
+
+            store = _MemoryStore()
+            authority = ManualLightAuthority(store)
+            listener = ManualLightAuthorityEvents(
+                SimpleNamespace(async_create_task=None),
+                authority,
+                lambda: frozenset({"light.stand_main"}),
+                None,
+                lambda: None,
+            )
+            listener.start()
+            listener.cancel()
+            listener._capture_evidence(
+                _StartupEvidence(
+                    "light.stand_main", "on", "state", "ctx-closed",
+                    "event-closed-1",
+                )
+            )
+            assert authority.unhealthy() is True
+            return {"saved": getattr(store, "payload", None)}
+
+        result = asyncio.run(scenario())
+        assert result["saved"] is None
+
+    def test_stopped_loop_marks_unhealthy_instead_of_wrong_thread() -> None:
+        """A dead loop must not send hass.async_create_task into a worker
+        thread again: the drain coroutine is closed and the authority is
+        marked unhealthy (SEC-REPAIR-01)."""
+
+        async def scenario() -> dict:
+            class _MemoryStore:
+                recovered_previous = False
+
+                async def async_load(self):
+                    return None
+
+                async def async_save(self, payload):
+                    self.payload = payload
+
+            store = _MemoryStore()
+            authority = ManualLightAuthority(store)
+            listener = ManualLightAuthorityEvents(
+                SimpleNamespace(async_create_task=None),
+                authority,
+                lambda: frozenset({"light.stand_main"}),
+                None,
+                lambda: None,
+            )
+            listener.start()
+            listener._loop = None  # stopped/unknown loop
+            listener._capture_evidence(
+                _StartupEvidence(
+                    "light.stand_main", "on", "state", "ctx-dead",
+                    "event-dead-1",
+                )
+            )
+            assert authority.unhealthy() is True
+            return {"saved": getattr(store, "payload", None)}
+
+        result = asyncio.run(scenario())
+        assert result["saved"] is None

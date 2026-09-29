@@ -55,6 +55,8 @@ class ManualLightAuthorityEvents:
         self._managed_entities = managed_entities
         self._automatic_contexts = automatic_contexts
         self._room_executor = room_executor
+        self._closed = False
+        self._drain_tasks: set = set()
         self._unsubscribers: list[Callable[[], None]] = []
         self._service_actions: dict[tuple[str, str], str] = {}
         self._managed_ready = True
@@ -112,9 +114,22 @@ class ManualLightAuthorityEvents:
             raise
 
     def cancel(self) -> None:
+        # Closing stops new scheduling AND new captures: after unload the
+        # authority must not receive (or persist) further actions
+        # (SEC-REPAIR-02). A final drain of already captured actions is
+        # scheduled best-effort on the live loop so they are not lost.
+        self._closed = True
         for unsubscribe in self._unsubscribers:
             unsubscribe()
         self._unsubscribers.clear()
+        if self._loop is not None and self._loop.is_running():
+            try:
+                task = self._authority.async_drain()
+                self._loop.call_soon_threadsafe(self._create_drain_task, task)
+            except Exception:
+                _LOGGER.exception(
+                    "final authority drain could not be scheduled on unload"
+                )
 
     def set_automatic_contexts(self, contexts: object) -> None:
         """Attach scenario attribution before its first automatic subscription."""
@@ -155,19 +170,44 @@ class ManualLightAuthorityEvents:
     def _schedule_drain(self, task) -> None:
         """Schedule the drain coroutine on the captured event loop.
 
-        Safe to call from any thread (SEC/live repair 2026-09-29)."""
+        Safe to call from any thread (live repair 2026-09-29). A closed
+        listener or a dead loop never creates the task: the coroutine is
+        closed and the authority is marked unhealthy, so manual light
+        automation stays conservatively denied (SEC-REPAIR-01/02)."""
+        if self._closed:
+            task.close()
+            return
         loop = getattr(self, "_loop", None)
         if loop is not None and loop.is_running():
-            loop.call_soon_threadsafe(self._create_drain_task, task)
-            return
+            try:
+                loop.call_soon_threadsafe(self._create_drain_task, task)
+                return
+            except RuntimeError:
+                pass  # loop stopped between checks — fall through
         self._create_drain_task(task)
 
     def _create_drain_task(self, task) -> None:
-        create_task = getattr(self._hass, "async_create_task", None)
-        if callable(create_task):
-            create_task(task)
-        else:
-            asyncio.create_task(task)
+        if self._closed:
+            task.close()
+            return
+        try:
+            create_task = getattr(self._hass, "async_create_task", None)
+            if callable(create_task):
+                created = create_task(task)
+            else:
+                created = asyncio.create_task(task)
+        except Exception:
+            task.close()
+            self._authority.mark_unhealthy()
+            _LOGGER.exception(
+                "authority drain could not be scheduled; "
+                "manual light automation stays denied"
+            )
+            return
+        add_done = getattr(created, "add_done_callback", None)
+        if callable(add_done):
+            self._drain_tasks.add(created)
+            add_done(self._drain_tasks.discard)
 
     def _capture_or_buffer(
         self, entity_id: str, action: str, context: object, source: str,
