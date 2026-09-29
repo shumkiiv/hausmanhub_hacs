@@ -1,10 +1,10 @@
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.296";
-import { appendDeviceRangeControls, appendDeviceVisual, localizedDeviceState, openPhysicalDeviceSheet } from "./hausman-hub-device-card.js?v=1.52.296";
-import { lightingSideIcon, openLightingTurnOffConfirm, renderLightingSide } from "./hausman-hub-lighting-side.js?v=1.52.296";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.296";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.296";
-import { renderManualLightProtectionStatus } from "./hausman-hub-light-protection.js?v=1.52.296";
-import { openRoomLightingSettings, renderRoomLightingSettingsScreen } from "./hausman-hub-room-lighting-editor.js?v=1.52.296";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.297";
+import { appendDeviceRangeControls, appendDeviceVisual, localizedDeviceState, openPhysicalDeviceSheet } from "./hausman-hub-device-card.js?v=1.52.297";
+import { lightingSideIcon, openLightingTurnOffConfirm, renderLightingSide } from "./hausman-hub-lighting-side.js?v=1.52.297";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.297";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.297";
+import { renderManualLightProtectionStatus } from "./hausman-hub-light-protection.js?v=1.52.297";
+import { openRoomLightingSettings, renderRoomLightingSettingsScreen } from "./hausman-hub-room-lighting-editor.js?v=1.52.297";
 
 const LIGHTING_EXCLUSIONS = [
   "ambilight", "глазок", "домофон", "пульт", "очистител", "аквариум", "aquarium",
