@@ -1,7 +1,7 @@
 /* Right column of the lighting section: quick actions, active lights, attention, history. */
 
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.298";
-import { coreControlForTarget } from "./hausman-hub-core-control.js?v=1.52.298";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.299";
+import { coreControlForTarget } from "./hausman-hub-core-control.js?v=1.52.299";
 
 const LIGHTING_SIDE_SVG_NAMESPACE = "http" + "://www.w3.org/2000/svg";
 
