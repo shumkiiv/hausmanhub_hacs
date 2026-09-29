@@ -3965,6 +3965,50 @@ class ScenarioExecutor:
             if dependency.policy == AUTO_TURN_ON_POLICY:
                 if state in {None, "unknown", "unavailable"}:
                     return "power_source_unavailable", precondition, upstream_sources
+                # Already on: skip the redundant turn_on + state-change wait.
+                # The warmup delay still applies because the device behind
+                # the switch needs time to stabilise. Without this shortcut
+                # an always-on source would time out waiting for a state
+                # change that never comes.
+                if state == "on":
+                    precondition["sourceTurnedOn"] = False
+                    precondition["sourceAlreadyOn"] = True
+                    if not dry_run and dependency.warmup_seconds > 0:
+                        if cancellation_event is None:
+                            await asyncio.sleep(dependency.warmup_seconds)
+                        else:
+                            try:
+                                await asyncio.wait_for(
+                                    cancellation_event.wait(),
+                                    dependency.warmup_seconds,
+                                )
+                            except TimeoutError:
+                                pass
+                            else:
+                                return (
+                                    "dispatch_cancelled",
+                                    precondition,
+                                    upstream_sources,
+                                )
+                    confirmed = self._entity_state_object(source_entity_id)
+                    read_back = int(time.time() * 1000)
+                    precondition["sourceEvidenceRevision"] = _state_revision(
+                        confirmed
+                    )
+                    precondition["sourceReadBackAt"] = read_back_at = read_back
+                    precondition["readyAt"] = read_back
+                    precondition["powerPreparation"] = (
+                        self._power_preparation_proof(
+                            entity_id,
+                            dependency,
+                            confirmed,
+                            request_id=request_id,
+                            source_command_sent_at=None,
+                            source_read_back_at=read_back,
+                            ready_at=read_back,
+                        )
+                    )
+                    return None, precondition, upstream_sources | {source_entity_id}
                 if self._command_guard is None:
                     return (
                         "power_source_guard_unavailable",
