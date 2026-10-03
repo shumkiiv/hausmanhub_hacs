@@ -16,6 +16,9 @@ from custom_components.hausman_hub.application.room_lighting_core import (
     CoreBranchConfig,
     RoomLightingCoreBranch,
 )
+from custom_components.hausman_hub.application.core.command_service import (
+    StorageUnavailable,
+)
 from custom_components.hausman_hub.domain.room_lighting import (
     config_from_payload,
 )
@@ -124,6 +127,34 @@ def test_deactivation_stops_processing(tmp_path):
     branch.process_schedule_tick()
     # After deactivation no new decision cycle replaced the stored one.
     assert branch.decision_explanation() is before
+
+
+@pytest.mark.parametrize("callbacks", (("deactivate", "on_runtime_stop"), ("on_runtime_stop", "deactivate")))
+def test_stop_callbacks_retry_the_same_pending_close_without_reopening_input(
+    tmp_path, monkeypatch, callbacks
+):
+    branch = _branch(tmp_path)
+    branch.activate_shadow()
+    real_close = branch._service.close_dispatch_for_restore
+    attempts = 0
+
+    def fail_once_then_close():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise StorageUnavailable("injected durable close failure")
+        real_close()
+
+    monkeypatch.setattr(
+        branch._service, "close_dispatch_for_restore", fail_once_then_close
+    )
+    with pytest.raises(StorageUnavailable):
+        getattr(branch, callbacks[0])()
+    getattr(branch, callbacks[1])()
+
+    assert attempts == 2
+    assert branch.input_closed is True
+    assert branch.physical_send_enabled() is False
 
 
 def test_resource_view_reports_facts_not_fiction(tmp_path):

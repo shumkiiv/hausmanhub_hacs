@@ -395,6 +395,7 @@ class RoomLightingCoreBranch:
 
     def deactivate(self) -> None:
         with self._lock:
+            self._service.close_dispatch_for_restore()
             self._mode = self.MODE_OFF
 
     def on_runtime_stop(self) -> None:
@@ -407,6 +408,7 @@ class RoomLightingCoreBranch:
 
         with self._lock:
             self._input_closed = True
+            self._service.close_dispatch_for_restore()
             self._store.flush()
 
     def __call__(

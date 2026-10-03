@@ -9,6 +9,7 @@ permission check, queue, arbitration and lifecycle are production code.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from enum import Enum
@@ -364,6 +365,20 @@ class CoreCommandService:
             resource_id: None for resource_id in self._specs
         }
         self._consumed_permits: set[str] = set()
+        # This instance may be retired while its durable image is kept for a
+        # closed SHADOW restore.  It is deliberately in-memory: the restored
+        # service receives SHADOW mode, while this old instance must never
+        # reopen its own dispatch path after the barrier is lifted by a
+        # later manual admission.
+        self._dispatch_closed_for_restore = False
+        # Closing physical dispatch is irreversible for this instance, but a
+        # failed file commit is not evidence that the retirement image became
+        # durable.  Keep immutable snapshots of that one transition so a
+        # later lifecycle callback can verify or finish it without rebuilding
+        # a second generation from changed live memory.
+        self._close_restore_complete = False
+        self._close_restore_base: dict | None = None
+        self._close_restore_intended: dict | None = None
 
     # ------------------------------------------------------------------
     # lookups
@@ -584,8 +599,176 @@ class CoreCommandService:
         }
 
     def _commit_state(self) -> None:
+        if (
+            self._dispatch_closed_for_restore
+            and not self._close_restore_complete
+        ):
+            raise StorageUnavailable("durable close is unresolved")
         self._prune_history()
         self._store.commit(self._store.commit_revision, self._build_image())
+
+    def close_dispatch_for_restore(self) -> None:
+        """Durably retire this instance before a closed restore.
+
+        The in-memory gate is closed first, so a failed CAS or file commit
+        cannot leave the old instance able to send.  The one succeeding
+        whole-image commit advances every affected control/scope version,
+        preserves manual and receipt history, and makes unfinished work
+        either explicitly cancelled (never sent) or unknown (may have
+        crossed the transport boundary).  Old automatic proof is history,
+        never proof for the next generation.
+        """
+
+        if self._close_restore_complete:
+            return
+
+        new_close = not self._dispatch_closed_for_restore
+        if new_close:
+            # The deny-only gate is intentionally set before any disk I/O.
+            # It must survive every uncertain write outcome.
+            self._dispatch_closed_for_restore = True
+            base = deepcopy(self._build_image())
+            intended = deepcopy(base)
+            next_records: dict[str, ControlRecord] = {}
+            for resource_id, record in self._records.items():
+                next_records[resource_id] = replace(
+                    record,
+                    control_revision=record.control_revision + 1,
+                    generation=record.generation + 1,
+                    authority=(
+                        record.authority
+                        if record.manual is not None
+                        else Authority.UNCERTAIN
+                    ),
+                    automatic_scope=(
+                        record.automatic_scope
+                        if record.manual is not None
+                        else AutomaticScope.NONE
+                    ),
+                    auto_proof=None,
+                    uncertainty_reason=(
+                        record.uncertainty_reason
+                        or "closed_restore_requires_fresh_observation"
+                    ),
+                )
+            next_operations: dict[str, Operation] = {}
+            for operation_id, operation in self._operations.items():
+                next_operation = replace(operation)
+                if operation.phase in (OperationPhase.QUEUED, OperationPhase.TAKEN):
+                    next_operation.phase = OperationPhase.CANCELLED
+                    next_operation.reason_code = "closed_for_restore"
+                elif operation.phase in (
+                    OperationPhase.DISPATCHING,
+                    OperationPhase.OBSERVING,
+                ):
+                    # A durable dispatching image does not prove the physical
+                    # call was absent.  Keep that uncertainty for recovery.
+                    next_operation.phase = OperationPhase.UNKNOWN
+                    next_operation.reason_code = "closed_for_restore_unknown"
+                next_operations[operation_id] = next_operation
+            next_scopes = dict(self._scope_revisions)
+            for spec in self._specs.values():
+                for group in spec.manual_scopes:
+                    next_scopes[group] = next_scopes.get(group, 0) + 1
+            intended["records"] = next_records
+            intended["operations"] = next_operations
+            intended["scope_revisions"] = next_scopes
+            self._close_restore_base = base
+            self._close_restore_intended = intended
+
+        assert self._close_restore_base is not None
+        assert self._close_restore_intended is not None
+        base = self._close_restore_base
+        intended = self._close_restore_intended
+        try:
+            if new_close:
+                # Only the first attempt may advance the captured base to the
+                # intended image without a preceding durable comparison.
+                self._store.commit(self._store.commit_revision, intended)
+                durable = intended
+            else:
+                # A failed atomic write can have replaced the target before
+                # directory fsync or re-read failed.  Reload is required to
+                # reopen FileControlStore and compare the full typed image;
+                # revision equality alone cannot distinguish a later manual.
+                durable = self._store.load()
+                if durable is None:
+                    raise StorageUnavailable("durable close image disappeared")
+                if self._same_close_payload(durable, base):
+                    self._store.commit(self._store.commit_revision, intended)
+                    durable = intended
+                elif self._same_close_payload(durable, intended):
+                    # The rights transition is already present.  Repeat the
+                    # identical current payload only to obtain a verified
+                    # file+directory commit; never increment generation again.
+                    # ``load`` returns typed codec values (including tuple
+                    # episode-lock keys), while this captured image is the
+                    # known encodable wire-boundary representation of the
+                    # same complete transition.  Recommit the latter, not
+                    # the decoded mapping, then publish that exact image.
+                    self._store.commit(self._store.commit_revision, intended)
+                    durable = intended
+                else:
+                    raise StorageUnavailable(
+                        "durable close conflicts with a newer image"
+                    )
+        except Exception:
+            # The gate remains closed and the captured images stay available
+            # for an explicit subsequent lifecycle retry.  Publishing either
+            # image here would make memory disagree with durable truth.
+            raise
+        self._publish_closed_restore(durable)
+
+    @staticmethod
+    def _same_close_payload(actual: Mapping, expected: Mapping) -> bool:
+        """Compare complete typed images while ignoring store-local commit id.
+
+        ``FileControlStore`` deliberately decodes a few wire collections
+        (sets, tuple keys and tuples) back into their typed forms.  Normalize
+        only those codec representations before comparing the authoritative
+        payload; this is not a partial generation/revision comparison.
+        """
+
+        actual_payload = deepcopy(dict(actual))
+        expected_payload = deepcopy(dict(expected))
+        for payload in (actual_payload, expected_payload):
+            payload.pop("commit_revision", None)
+            payload["restored_operation_ids"] = set(
+                payload.get("restored_operation_ids", ())
+            )
+            payload["receipt_fingerprints"] = {
+                key: tuple(value)
+                for key, value in payload.get(
+                    "receipt_fingerprints", {}
+                ).items()
+            }
+            payload["confirm_keys"] = {
+                key: tuple(value)
+                for key, value in payload.get("confirm_keys", {}).items()
+            }
+            payload["episode_locks"] = {
+                (
+                    key
+                    if isinstance(key, str)
+                    else f"{key[0]}|{key[1]}"
+                ): value
+                for key, value in payload.get("episode_locks", {}).items()
+            }
+        return actual_payload == expected_payload
+
+    def _publish_closed_restore(self, image: Mapping) -> None:
+        """Publish only an image whose commit has returned successfully."""
+
+        self._records = dict(image["records"])
+        self._operations = dict(image["operations"])
+        self._scope_revisions.clear()
+        self._scope_revisions.update(image["scope_revisions"])
+        self._close_restore_complete = True
+        self._close_restore_base = None
+        self._close_restore_intended = None
+        self._taken.clear()
+        self._dispatching.clear()
+        self._deny_barrier.update(self._specs)
 
     def _prune_history(self) -> None:
         """Bounded retention of resolved history (AUD-LP-ISO01 cycle 6).
@@ -961,6 +1144,8 @@ class CoreCommandService:
             self._commit_state()
 
     def take_ready(self) -> None:
+        if self._dispatch_closed_for_restore:
+            return
         for resource_id in sorted(self._specs):
             if resource_id in self._taken or self._resource_busy(resource_id):
                 continue
@@ -1010,6 +1195,12 @@ class CoreCommandService:
     def _final_permit(
         self, operation: Operation
     ) -> DispatchPermit | PermitDenial:
+        if self._dispatch_closed_for_restore:
+            return PermitDenial(
+                operation_id=operation.operation_id,
+                resource_id=operation.resource_id,
+                reason_code="dispatch_closed_for_restore",
+            )
         record = self.record(operation.resource_id)
         permit = issue_dispatch_permit(
             operation=operation,
@@ -1112,6 +1303,8 @@ class CoreCommandService:
         here, after the durable dispatching record and directly before the
         physical call (S-04; D-15)."""
 
+        if self._dispatch_closed_for_restore:
+            return
         if not self._store.healthy():
             # The store closed after an undefined write: prepared calls
             # are withdrawn until an explicit reload and verification
@@ -1501,6 +1694,15 @@ class CoreCommandService:
         foreign replay. The public ``request_id`` fields of the receipt
         and the operation keep the caller's id; an empty scope keeps the
         legacy unscoped key (and replays legacy unscoped receipts)."""
+
+        if (
+            self._dispatch_closed_for_restore
+            and not self._close_restore_complete
+        ):
+            # The last close write has an unknown outcome.  Accepting a new
+            # manual intent from stale memory could overwrite its durable
+            # successor, so the caller must retry the close lifecycle first.
+            raise StorageUnavailable("durable close is unresolved")
 
         resource_id = self.resolve_resource_id(resource_ref)
         receipt_key = (

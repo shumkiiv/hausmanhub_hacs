@@ -13,12 +13,16 @@ import pytest
 
 from custom_components.hausman_hub.application.core.command_service import (
     CapacityExceeded,
+    CoreCommandService,
     ManualStatus,
+    ModuleEntry,
+    ModuleManifest,
     Operation,
     StorageUnavailable,
 )
 from custom_components.hausman_hub.domain.core.models import (
     Authority,
+    ModuleMode,
     OperationPhase,
     Origin,
     ProposalKind,
@@ -29,6 +33,7 @@ from custom_components.hausman_hub.domain.core.recovery import (
 )
 
 from custom_components.hausman_hub.adapters.core.control_store import (
+    FAULT_POINTS,
     FileControlStore,
     StoreImageError,
 )
@@ -37,6 +42,11 @@ from conftest import (
     MAIN_ENTITY,
     MAIN_RESOURCE,
     MAIN_SCOPE,
+    BINDING_REVISION_START,
+    CONFIG_REVISION_START,
+    Counter,
+    FakeClock,
+    FakeTransport,
     OTHER_RESOURCE,
     OWNER_EPISODE,
     OWNER_MODULE,
@@ -46,6 +56,70 @@ from conftest import (
     owner_proposal,
     restore_file_stand,
 )
+
+
+def _restore_file_stand_closed(stand):
+    """Restore the durable image directly into the only allowed mode.
+
+    This intentionally does not alter the generic fixture's ACTIVE default:
+    a stopped room must prove its own OFF/SHADOW recovery explicitly.
+    """
+
+    from custom_components.hausman_hub.adapters.core.light import LightDeviceAdapter
+    from custom_components.hausman_hub.domain.core.models import (
+        ProposalKind,
+        StabilityProfile,
+    )
+    from conftest import light_profile, module_spec_resource
+
+    clock = FakeClock(boot_id="test.closed_restore")
+    clock.utc_ms = stand.clock.utc_ms
+    transport = FakeTransport()
+    store = FileControlStore(stand.store_path)
+    counter = Counter()
+    adapter = LightDeviceAdapter(
+        profiles_by_resource={rid: light_profile() for rid in stand.specs},
+        binding_revisions={
+            rid: BINDING_REVISION_START for rid in stand.specs
+        },
+        boot_id=clock.boot_id(),
+        id_factory=counter.next,
+    )
+    entries = {
+        module_id: ModuleEntry(
+            manifest=ModuleManifest(
+                module_id=module_id,
+                api_version=1,
+                config_schema_version=1,
+                resource_roles=("light",),
+                allowed_proposal_kinds=(
+                    ProposalKind.TARGET,
+                    ProposalKind.REQUIRE_ON,
+                ),
+                observation_subscriptions=(module_spec_resource(stand, module_id),),
+                policy_priority=50,
+            ),
+            instance=module,
+        )
+        for module_id, module in stand.modules.items()
+    }
+    return CoreCommandService.restore(
+        clock=clock,
+        store=store,
+        adapter=adapter,
+        transport=transport,
+        specs=stand.specs,
+        bindings=stand.bindings,
+        modules=entries,
+        stability_profiles={
+            "default": StabilityProfile("default", 0, 0, 0, 0)
+        },
+        config_revisions={rid: CONFIG_REVISION_START for rid in stand.specs},
+        scope_revisions={MAIN_SCOPE: 4, "test.other_scope": 4},
+        id_factory=counter.next,
+        clock_trust=evaluate_clock_trust(True, None, None, clock.utc_ms, 0),
+        core_mode=ModuleMode.SHADOW,
+    ), transport
 
 
 def _auto_on40_dispatched(stand):
@@ -64,6 +138,240 @@ def _manual(stand, request_id, target=TARGET_OFF, expected=12, action=None):
         source="test.ui",
         expected_control_revision=expected,
     )
+
+
+def test_s11_closed_restore_cancels_unsent_and_keeps_dispatched_unknown():
+    from custom_components.hausman_hub.domain.core.models import ArbitrationMode
+
+    stand = build_file_stand(tmp_path_fixture(), ArbitrationMode.RANKED_TARGET)
+    _auto_on40_dispatched(stand)
+    before_calls = len(stand.transport.calls)
+    stand.service.close_dispatch_for_restore()
+
+    record = stand.service.record(MAIN_RESOURCE)
+    assert record.generation == 8
+    assert record.control_revision == 13
+    assert record.authority is Authority.UNCERTAIN
+    assert record.auto_proof is None
+    operation = stand.service.operations(MAIN_RESOURCE)[-1]
+    assert operation.phase is OperationPhase.UNKNOWN
+    assert operation.reason_code == "closed_for_restore_unknown"
+    stand.service.drain()
+    assert len(stand.transport.calls) == before_calls
+
+    restored, transport = _restore_file_stand_closed(stand)
+    assert restored._core_mode is ModuleMode.SHADOW
+    restored.drain()
+    assert transport.calls == []
+    assert restored.operations(MAIN_RESOURCE)[-1].phase is OperationPhase.UNKNOWN
+
+
+def test_s11_closed_instance_keeps_late_manual_but_never_dispatches():
+    from custom_components.hausman_hub.domain.core.models import ArbitrationMode
+
+    stand = build_file_stand(tmp_path_fixture(), ArbitrationMode.RANKED_TARGET)
+    stand.service.close_dispatch_for_restore()
+    receipt = _manual(
+        stand,
+        "closed-manual",
+        target=BASE_TARGET_ON40,
+        expected=13,
+    )
+    record = stand.service.record(MAIN_RESOURCE)
+    assert receipt.status is ManualStatus.ACCEPTED
+    assert record.manual is not None
+    assert record.manual.priority_until_utc_ms == 3_600_000
+    operation = stand.service.operations(MAIN_RESOURCE)[-1]
+    assert operation.phase is OperationPhase.CANCELLED
+    assert operation.reason_code == "dispatch_closed_for_restore"
+    assert stand.transport.calls == []
+
+
+@pytest.mark.parametrize(
+    ("phase", "expected_phase", "expected_reason"),
+    (
+        (OperationPhase.QUEUED, OperationPhase.CANCELLED, "closed_for_restore"),
+        (OperationPhase.TAKEN, OperationPhase.CANCELLED, "closed_for_restore"),
+        (
+            OperationPhase.DISPATCHING,
+            OperationPhase.UNKNOWN,
+            "closed_for_restore_unknown",
+        ),
+        (
+            OperationPhase.OBSERVING,
+            OperationPhase.UNKNOWN,
+            "closed_for_restore_unknown",
+        ),
+        (OperationPhase.UNKNOWN, OperationPhase.UNKNOWN, None),
+    ),
+)
+def test_s11_close_classifies_each_recoverable_operation_phase(
+    phase, expected_phase, expected_reason
+):
+    from custom_components.hausman_hub.domain.core.models import ArbitrationMode
+
+    stand = build_file_stand(tmp_path_fixture(), ArbitrationMode.RANKED_TARGET)
+    stand.modules[OWNER_MODULE].queue_proposal(owner_proposal())
+    stand.service.process_module_event(OWNER_MODULE, "closed-phase")
+    operation = stand.service.operations(MAIN_RESOURCE)[-1]
+    # The prior durable image can be interrupted at any lifecycle boundary.
+    # This fixture only selects that persisted boundary; the classification is
+    # production code in the close transition.
+    operation.phase = phase
+    stand.service.close_dispatch_for_restore()
+    closed = stand.service.operations(MAIN_RESOURCE)[-1]
+    assert closed.phase is expected_phase
+    assert closed.reason_code == expected_reason
+    assert stand.transport.calls == []
+
+
+@pytest.mark.parametrize("fault_point", FAULT_POINTS)
+def test_s11_close_fault_never_reopens_old_dispatch(fault_point):
+    from custom_components.hausman_hub.domain.core.models import ArbitrationMode
+
+    stand = build_file_stand(tmp_path_fixture(), ArbitrationMode.RANKED_TARGET)
+    _auto_on40_dispatched(stand)
+    before_calls = len(stand.transport.calls)
+    stand.store.injector.faults[fault_point] = OSError(fault_point)
+    with pytest.raises((StorageUnavailable, OSError)):
+        stand.service.close_dispatch_for_restore()
+    # A failed atomic replacement may retain either complete image, but the
+    # old process itself has already lost every path to a physical send.
+    stand.service.drain()
+    assert len(stand.transport.calls) == before_calls
+
+
+def test_s11_close_retries_a_prewrite_failure_once_without_a_second_generation():
+    from custom_components.hausman_hub.domain.core.models import ArbitrationMode
+
+    stand = build_file_stand(tmp_path_fixture(), ArbitrationMode.RANKED_TARGET)
+    before_calls = len(stand.transport.calls)
+    stand.store.fail_next_commit = True
+    with pytest.raises(StorageUnavailable):
+        stand.service.close_dispatch_for_restore()
+
+    unchanged = stand.service.record(MAIN_RESOURCE)
+    assert (unchanged.generation, unchanged.control_revision) == (7, 12)
+    stand.service.close_dispatch_for_restore()
+    closed = stand.service.record(MAIN_RESOURCE)
+    assert (closed.generation, closed.control_revision) == (8, 13)
+    assert stand.store.commit_revision == 3
+    stand.service.close_dispatch_for_restore()
+    assert stand.store.commit_revision == 3
+    assert len(stand.transport.calls) == before_calls
+
+
+@pytest.mark.parametrize("fault_point", FAULT_POINTS)
+def test_s11_close_reconciles_each_atomic_write_boundary(fault_point):
+    from custom_components.hausman_hub.domain.core.models import ArbitrationMode
+
+    stand = build_file_stand(tmp_path_fixture(), ArbitrationMode.RANKED_TARGET)
+    before_calls = len(stand.transport.calls)
+    stand.store.injector.faults[fault_point] = OSError(fault_point)
+    with pytest.raises(StorageUnavailable):
+        stand.service.close_dispatch_for_restore()
+
+    stand.service.close_dispatch_for_restore()
+    closed = stand.service.record(MAIN_RESOURCE)
+    assert (closed.generation, closed.control_revision) == (8, 13)
+    durable = stand.store.load()
+    assert durable["records"][MAIN_RESOURCE] == closed
+    revision_after_retry = stand.store.commit_revision
+    stand.service.close_dispatch_for_restore()
+    assert stand.store.commit_revision == revision_after_retry
+    assert len(stand.transport.calls) == before_calls
+
+
+def test_s11_close_retries_an_ambiguous_reconciliation_without_new_rights():
+    from custom_components.hausman_hub.domain.core.models import ArbitrationMode
+
+    stand = build_file_stand(tmp_path_fixture(), ArbitrationMode.RANKED_TARGET)
+    # dir_fsync fails after replace: the transition may already be in the
+    # file, but the first caller has no durability confirmation.
+    stand.store.injector.faults["dir_fsync"] = OSError("first")
+    with pytest.raises(StorageUnavailable):
+        stand.service.close_dispatch_for_restore()
+    # The reconciliation write can itself be interrupted.  It stays visible
+    # and a later retry must preserve the same generation/control revision.
+    stand.store.injector.faults["dir_fsync"] = OSError("second")
+    with pytest.raises(StorageUnavailable):
+        stand.service.close_dispatch_for_restore()
+    with pytest.raises(StorageUnavailable):
+        _manual(stand, "blocked-until-durable-close")
+
+    stand.service.close_dispatch_for_restore()
+    closed = stand.service.record(MAIN_RESOURCE)
+    assert (closed.generation, closed.control_revision) == (8, 13)
+    assert stand.store.load()["records"][MAIN_RESOURCE] == closed
+    assert stand.transport.calls == []
+
+
+@pytest.mark.parametrize("fault_point", ("dir_fsync", "reread"))
+def test_s11_close_recommits_episode_lock_after_replace_without_new_generation(
+    fault_point,
+):
+    from custom_components.hausman_hub.domain.core.models import ArbitrationMode
+
+    stand = build_file_stand(
+        tmp_path_fixture(),
+        ArbitrationMode.RANKED_TARGET,
+        episode_map={OWNER_PROPOSAL: OWNER_EPISODE},
+    )
+    _auto_on40_dispatched(stand)
+    operation = stand.service.operations(MAIN_RESOURCE)[-1]
+    assert operation.phase is OperationPhase.OBSERVING
+    stand.clock.advance(10_000)
+    stand.service.advance_timeouts()
+    assert stand.service.episode_lock_reason(
+        MAIN_RESOURCE, OWNER_EPISODE
+    ) == REASON_CONFIRMATION_TIMEOUT
+    calls_before_close = len(stand.transport.calls)
+
+    # Both failures occur after replace.  The persisted typed reload has a
+    # tuple episode-lock key, so Case B must recommit the captured encodable
+    # intended image instead of the decoded mapping.
+    stand.store.injector.faults[fault_point] = OSError("first")
+    with pytest.raises(StorageUnavailable):
+        stand.service.close_dispatch_for_restore()
+    durable_after_first = stand.store.load()
+    assert any(
+        isinstance(key, tuple)
+        for key in durable_after_first["episode_locks"]
+    )
+    assert durable_after_first["records"][MAIN_RESOURCE].generation == 8
+    assert durable_after_first["records"][MAIN_RESOURCE].control_revision == 13
+
+    stand.store.injector.faults[fault_point] = OSError("second")
+    with pytest.raises(StorageUnavailable):
+        stand.service.close_dispatch_for_restore()
+    stand.service.close_dispatch_for_restore()
+    closed = stand.service.record(MAIN_RESOURCE)
+    assert (closed.generation, closed.control_revision) == (8, 13)
+    assert stand.service._same_close_payload(
+        stand.store.load(), durable_after_first
+    )
+    assert len(stand.transport.calls) == calls_before_close
+
+
+def test_s11_close_refuses_a_newer_manual_successor_without_overwriting_it():
+    from custom_components.hausman_hub.domain.core.models import ArbitrationMode
+
+    stand = build_file_stand(tmp_path_fixture(), ArbitrationMode.RANKED_TARGET)
+    stand.store.fail_next_commit = True
+    with pytest.raises(StorageUnavailable):
+        stand.service.close_dispatch_for_restore()
+
+    # A separate fresh coordinator accepts a manual successor from the last
+    # proven durable base.  The old closed instance must not write its stale
+    # intended snapshot over that newer manual right.
+    successor = restore_file_stand(stand)
+    receipt = _manual(successor, "newer-manual", expected=12)
+    with pytest.raises(StorageUnavailable, match="newer image"):
+        stand.service.close_dispatch_for_restore()
+    durable = stand.store.load()
+    assert durable["records"][MAIN_RESOURCE].manual is not None
+    assert durable["receipts"]["newer-manual"] == receipt
+    assert stand.transport.calls == []
 
 
 def test_d01_failed_acceptance_neither_accepts_nor_replays(bootstrap=None):
