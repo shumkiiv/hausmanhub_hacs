@@ -32,6 +32,18 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 
+def compose_reserved_entity_ids_provider(*providers: Callable[[], object]):
+    """Join live writer reservations without hiding an unavailable source."""
+
+    def reserved_entity_ids() -> frozenset[str]:
+        entity_ids: set[str] = set()
+        for provider in providers:
+            entity_ids.update(provider())  # type: ignore[arg-type]
+        return frozenset(entity_ids)
+
+    return reserved_entity_ids
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Load observation, local climate facade, and optional narrow canaries."""
 
@@ -1159,7 +1171,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 hass, entry.entry_id
             ),
             reserved_target_ids=scenario_control_coordinator.command_target_ids,
-            reserved_entity_ids_provider=scenario_control_coordinator.command_entity_ids,
+            reserved_entity_ids_provider=compose_reserved_entity_ids_provider(
+                scenario_control_coordinator.command_entity_ids,
+                core_manual_input.command_entity_ids,
+            ),
             power_dependency_resolver=(
                 lambda: device_power_dependency_service.mapping
             ),

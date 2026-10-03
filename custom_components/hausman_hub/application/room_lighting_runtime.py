@@ -2273,6 +2273,13 @@ class RoomLightingRuntime:
             target = config.devices.target(target_id)
             if target is None or target.entity_id is None:
                 continue
+            if self._binding_conflicts_with_reserved_writer(
+                config, (target_id,), dependencies=exact_dependencies
+            ):
+                _LOGGER.warning(
+                    "room lighting binding refused: target is owned by a controller"
+                )
+                return
             command = _binding_command(self._hass, target, binding)
             if command is None:
                 continue
@@ -4186,6 +4193,18 @@ class RoomLightingRuntime:
                 config_version=config_version,
             )
             return False, detail
+        if self._is_reserved_target_or_entity(None, source_entity_id):
+            detail["reason"] = "power_source_reserved"
+            await self._persist_not_sent_power_dispatch_closure(
+                at=at,
+                room_id=room_id,
+                source_entity_id=source_entity_id,
+                evidence_revision=evidence_revision,
+                reason="power_source_reserved",
+                operation_id=operation_id,
+                config_version=config_version,
+            )
+            return False, detail
         self._executing_actions[source_entity_id] = "turn_on"
         self._command_grace[source_entity_id] = ("turn_on", self._now_ms())
         detail["dispatchAttempt"] = True
@@ -4342,6 +4361,18 @@ class RoomLightingRuntime:
                 source_entity_id=power_entity,
                 evidence_revision=evidence_revision,
                 reason=away_block,
+                operation_id=operation_id,
+                config_version=config_version,
+            )
+            return False, detail
+        if self._is_reserved_target_or_entity(None, power_entity):
+            detail["reason"] = "power_source_reserved"
+            await self._persist_not_sent_power_dispatch_closure(
+                at=at,
+                room_id=room_id,
+                source_entity_id=power_entity,
+                evidence_revision=evidence_revision,
+                reason="power_source_reserved",
                 operation_id=operation_id,
                 config_version=config_version,
             )

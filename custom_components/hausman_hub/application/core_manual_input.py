@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Mapping
 
 from ..domain.core.models import LightStateTarget, Quality
+from ..manual_light_authority_events import _EXACT_ENTITY_ID
 from .core.command_service import (
     CapacityExceeded,
     CoreServiceError,
@@ -174,6 +175,31 @@ class CoreManualInput:
 
     def transferred_target_ids(self) -> tuple[str, ...]:
         return tuple(sorted(self._bindings))
+
+    def command_entity_ids(self) -> frozenset[str]:
+        """Current legacy-writer reservations of transferred targets.
+
+        This is a read-only projection of the registered server bindings.
+        A broken binding is an unsafe unknown, never an empty reservation:
+        the runtime's existing fail-closed guard will keep the legacy writer
+        closed when this exception reaches it.
+        """
+
+        entity_ids: set[str] = set()
+        for target_id, binding in self._bindings.items():
+            entity_id = binding.entity_id
+            if (
+                not isinstance(entity_id, str)
+                or _EXACT_ENTITY_ID.fullmatch(entity_id) is None
+            ):
+                raise CoreManualInputError(
+                    "core_target_binding_invalid",
+                    f"target {target_id} has no valid command entity",
+                    http_status=500,
+                    api_code="unavailable",
+                )
+            entity_ids.add(entity_id)
+        return frozenset(entity_ids)
 
     def resolve_target(self, target_id: str) -> CoreManualTargetBinding:
         binding = self._bindings.get(target_id)
