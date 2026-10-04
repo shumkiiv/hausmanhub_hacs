@@ -820,6 +820,7 @@ class CoreCommandService:
         the same branch/import identity is refused before a write.
         """
 
+        _validate_closed_registration_codec_compatible(registration)
         if expected_commit_revision != self._store.commit_revision:
             raise ClosedRegistrationConflict("stale closed import revision")
         if not registration.branch_id or not registration.import_id:
@@ -909,6 +910,7 @@ class CoreCommandService:
         together, or no destination state is changed.
         """
 
+        _validate_closed_registration_codec_compatible(registration)
         if (
             source is self
             or not source._close_restore_complete
@@ -2811,6 +2813,44 @@ class CoreCommandService:
             control_revision=record.control_revision,
             generation=record.generation,
         )
+
+
+def _validate_closed_registration_codec_compatible(
+    registration: ClosedRegistration,
+) -> None:
+    """Refuse DTOs the durable codec would later reject, before commit."""
+
+    if not isinstance(registration, ClosedRegistration):
+        raise ClosedRegistrationConflict("closed import registration is invalid")
+    identities = (
+        registration.branch_id,
+        registration.import_id,
+        registration.source_identity,
+        registration.source_payload_digest,
+    )
+    if not all(isinstance(value, str) and value for value in identities):
+        raise ClosedRegistrationConflict("closed import identity is invalid")
+    if type(registration.source_revision) is not int:
+        raise ClosedRegistrationConflict("closed import source revision is invalid")
+    if not isinstance(registration.targets, tuple) or not registration.targets:
+        raise ClosedRegistrationConflict("closed import targets are invalid")
+    for target in registration.targets:
+        if not isinstance(target, ClosedTargetRegistration):
+            raise ClosedRegistrationConflict("closed import target is invalid")
+        identities = (
+            target.target_id, target.resource_id, target.entity_id,
+            target.property_name,
+        )
+        if not all(isinstance(value, str) and value for value in identities):
+            raise ClosedRegistrationConflict("closed import target identity is invalid")
+        if (
+            not isinstance(target.allowed_actions, tuple)
+            or not target.allowed_actions
+            or not all(isinstance(action, str) and action for action in target.allowed_actions)
+            or type(target.binding_revision) is not int
+            or type(target.config_revision) is not int
+        ):
+            raise ClosedRegistrationConflict("closed import target shape is invalid")
 
 
 def _payload_digest(image: Mapping) -> str:

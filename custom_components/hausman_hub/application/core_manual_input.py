@@ -151,7 +151,11 @@ class CoreManualInput:
         self._unavailable = False
         # A durable registration is admitted per room.  ``None`` preserves
         # the old process-wide fail-closed marker used by existing callers.
-        self._unresolved_registration_scopes: set[str | None] = set()
+        # ``None`` means the durable scope is not knowable and closes all
+        # legacy routing. A known scope reserves only its exact entities.
+        self._unresolved_registration_scopes: dict[
+            str | None, frozenset[str] | None
+        ] = {}
         self._closed_projection_by_room: dict[str, "ClosedRegistration"] = {}
 
     def mark_closed_registration_unavailable(
@@ -159,17 +163,45 @@ class CoreManualInput:
     ) -> None:
         """Close routing while an expected durable projection is unresolved."""
 
-        self._unresolved_registration_scopes.add(branch_id)
+        self._unresolved_registration_scopes[branch_id] = None
         self._unavailable = True
+
+    def mark_closed_registration_scope_unavailable(
+        self, *, branch_id: str, entity_ids: frozenset[str]
+    ) -> None:
+        """Keep a decoded scope reserved after a later startup failure."""
+
+        if not entity_ids or not all(isinstance(entity_id, str) and entity_id for entity_id in entity_ids):
+            self.mark_closed_registration_unavailable(branch_id=branch_id)
+            return
+        previous = self._unresolved_registration_scopes.get(branch_id)
+        if previous is None and branch_id in self._unresolved_registration_scopes:
+            self._unresolved_registration_scopes[branch_id] = entity_ids
+        elif previous is None:
+            self._unresolved_registration_scopes[branch_id] = entity_ids
+        else:
+            self._unresolved_registration_scopes[branch_id] = previous | entity_ids
+        self._unavailable = bool(self._unresolved_registration_scopes)
+
+    def _globally_unresolved(self) -> bool:
+        return any(scope is None for scope in self._unresolved_registration_scopes.values())
+
+    def _entity_is_unresolved(self, entity_id: str) -> bool:
+        return any(
+            scope is not None and entity_id in scope
+            for scope in self._unresolved_registration_scopes.values()
+        )
 
     def registration_ready(self, target_id: object) -> bool:
         """Only a known, decoded target may select the legacy route."""
 
-        if self._unresolved_registration_scopes:
+        if self._globally_unresolved():
             return False
         binding = self._bindings.get(target_id) if isinstance(target_id, str) else None
         if binding is None:
             return True
+        if self._entity_is_unresolved(binding.entity_id):
+            return False
         branch = self._branches.get(binding.room_id)
         return branch is not None and not branch.input_closed
 
@@ -271,7 +303,7 @@ class CoreManualInput:
             self._branches.pop(registration.branch_id, None)
         else:
             self._branches[registration.branch_id] = branch
-        self._unresolved_registration_scopes.discard(registration.branch_id)
+        self._unresolved_registration_scopes.pop(registration.branch_id, None)
         self._unavailable = bool(self._unresolved_registration_scopes)
 
     def resolve_closed_registration_as_legacy(self, *, branch_id: str) -> None:
@@ -290,7 +322,7 @@ class CoreManualInput:
                 http_status=409,
                 api_code="conflict",
             )
-        self._unresolved_registration_scopes.discard(branch_id)
+        self._unresolved_registration_scopes.pop(branch_id, None)
         self._unavailable = bool(self._unresolved_registration_scopes)
 
     def is_transferred(self, target_id: object) -> bool:
@@ -308,7 +340,7 @@ class CoreManualInput:
         closed when this exception reaches it.
         """
 
-        if self._unresolved_registration_scopes:
+        if self._globally_unresolved():
             raise CoreManualInputError(
                 "core_closed_registration_unavailable",
                 "closed registration is unresolved",
@@ -329,13 +361,16 @@ class CoreManualInput:
                     api_code="unavailable",
                 )
             entity_ids.add(entity_id)
+        for scope in self._unresolved_registration_scopes.values():
+            if scope is not None:
+                entity_ids.update(scope)
         return frozenset(entity_ids)
 
     def resolve_target(self, target_id: str) -> CoreManualTargetBinding:
         # A process-wide/scoped unresolved durable image is distinct from an
         # already registered branch which later stopped.  The latter keeps its
         # established ``core_unavailable`` compatibility through _branch_for.
-        if self._unresolved_registration_scopes:
+        if self._globally_unresolved():
             raise CoreManualInputError(
                 "core_closed_registration_unavailable",
                 "closed core registration is unavailable",
@@ -349,6 +384,13 @@ class CoreManualInput:
                 f"target {target_id} is not transferred to the core",
                 http_status=404,
                 api_code="not_found",
+            )
+        if self._entity_is_unresolved(binding.entity_id):
+            raise CoreManualInputError(
+                "core_closed_registration_unavailable",
+                "closed core registration is unavailable",
+                http_status=503,
+                api_code="unavailable",
             )
         return binding
 

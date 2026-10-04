@@ -191,6 +191,9 @@ class FileControlStore:
             # system error here closes the store instead of escaping
             # (SEC-S04-02 residual).
             file_missing = not self._path.exists()
+        except StoreImageError:
+            self._closed = True
+            raise
         except OSError as exc:
             self._closed = True
             raise StoreImageError(f"store path unavailable: {exc}") from exc
@@ -269,32 +272,38 @@ class FileControlStore:
         if not isinstance(room_id, str) or not room_id:
             raise StoreImageError("shadow room_id is invalid")
         with self._commit_lock:
-            if self._sentinel_path().exists():
-                raise StoreImageError("shadow marker already exists")
-            raw = self._read_raw_image()
-            validate_image_shape(raw, supported_versions=(IMAGE_SCHEMA_VERSION,))
-            state = decode_state(raw)
-            registrations = state.get(_CLOSED_REGISTRATIONS, {})
-            if set(registrations) != {room_id}:
-                raise StoreImageError("legacy image is not a closed room image")
-            backup = self._backup_path()
-            if backup.exists():
-                raise StoreImageError("legacy backup already exists")
-            self._write_json_atomic(backup, raw)
-            if self._read_raw_json(backup) != raw:
-                raise StoreImageError("legacy backup mismatched")
-            image_id = uuid.uuid4().hex
-            marker = {"format_version": _SENTINEL_FORMAT_VERSION, "room_id": room_id,
-                      _IMAGE_ID: image_id, "image_required": True}
-            self._write_json_atomic(self._sentinel_path(), marker)
-            encoded = dict(raw)
-            encoded["schema_version"] = IMAGE_SCHEMA_VERSION_WITH_ID
-            encoded[_IMAGE_ID] = image_id
-            self._write_atomic(encoded)
-            reread = self._read_raw_image()
-            self._validate_marker_pair(reread, self._read_sentinel())
-            if reread != encoded:
-                raise StoreImageError("migrated shadow image mismatched")
+            if self._closed:
+                raise StorageUnavailable("store closed after an earlier failure")
+            try:
+                if self._sentinel_path().exists():
+                    raise StoreImageError("shadow marker already exists")
+                raw = self._read_raw_image()
+                validate_image_shape(raw, supported_versions=(IMAGE_SCHEMA_VERSION,))
+                state = decode_state(raw)
+                registrations = state.get(_CLOSED_REGISTRATIONS, {})
+                if set(registrations) != {room_id}:
+                    raise StoreImageError("legacy image is not a closed room image")
+                backup = self._backup_path()
+                if backup.exists():
+                    raise StoreImageError("legacy backup already exists")
+                self._write_json_atomic(backup, raw)
+                if self._read_raw_json(backup) != raw:
+                    raise StoreImageError("legacy backup mismatched")
+                image_id = uuid.uuid4().hex
+                marker = {"format_version": _SENTINEL_FORMAT_VERSION, "room_id": room_id,
+                          _IMAGE_ID: image_id, "image_required": True}
+                self._write_json_atomic(self._sentinel_path(), marker)
+                encoded = dict(raw)
+                encoded["schema_version"] = IMAGE_SCHEMA_VERSION_WITH_ID
+                encoded[_IMAGE_ID] = image_id
+                self._write_atomic(encoded)
+                reread = self._read_raw_image()
+                self._validate_marker_pair(reread, self._read_sentinel())
+                if reread != encoded:
+                    raise StoreImageError("migrated shadow image mismatched")
+            except Exception:
+                self._closed = True
+                raise
             self._image_id = image_id
             self._commit_revision = _strict_int(state[_COMMIT], _COMMIT)
             self._closed = False
@@ -304,14 +313,18 @@ class FileControlStore:
 
         Export is read-only; it cannot replace a newer durable manual action.
         """
-        raw = self._read_raw_image()
-        marker = self._read_sentinel()
-        self._validate_marker_pair(raw, marker)
-        exported = dict(raw)
-        exported["schema_version"] = IMAGE_SCHEMA_VERSION
-        exported.pop(_IMAGE_ID, None)
-        validate_image_shape(exported, supported_versions=(IMAGE_SCHEMA_VERSION,))
-        return exported
+        try:
+            raw = self._read_raw_image()
+            marker = self._read_sentinel()
+            self._validate_marker_pair(raw, marker)
+            exported = dict(raw)
+            exported["schema_version"] = IMAGE_SCHEMA_VERSION
+            exported.pop(_IMAGE_ID, None)
+            validate_image_shape(exported, supported_versions=(IMAGE_SCHEMA_VERSION,))
+            return exported
+        except Exception:
+            self._closed = True
+            raise
 
     def commit(self, expected_commit_revision: int, next_state: Mapping) -> None:
         if self._closed:

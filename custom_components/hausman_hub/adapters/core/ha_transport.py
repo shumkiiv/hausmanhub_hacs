@@ -53,6 +53,15 @@ class HomeAssistantTransport(TransportPort):
                 running_loop = None
             if running_loop is self._loop:
                 raise RuntimeError("HA transport cannot block the HA event loop")
+        except Exception as error:
+            # Payload and event-loop checks run before ``async_call``.  Their
+            # refusal is therefore proof that no HA call was attempted.
+            return TransportOutcome(
+                status=TransportStatus.ERROR,
+                error_detail=f"ha_transport_preflight_error:{type(error).__name__}",
+                proven_not_sent=True,
+            )
+        try:
             result = self._hass.services.async_call(  # type: ignore[attr-defined]
                 prepared.domain,
                 prepared.service,
@@ -71,7 +80,7 @@ class HomeAssistantTransport(TransportPort):
                 error_detail="ha_transport_timeout",
                 proven_not_sent=False,
             )
-        except Exception as error:  # boundary error; no confirmation implied
+        except Exception as error:  # a call may already have reached HA
             return TransportOutcome(
                 status=TransportStatus.ERROR,
                 error_detail=f"ha_transport_error:{type(error).__name__}",

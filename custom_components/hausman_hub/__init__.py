@@ -85,8 +85,6 @@ async def _async_start_room_lighting_with_core(
             )
             store = await hass.async_add_executor_job(FileControlStore, store_path)
             image = await hass.async_add_executor_job(store.load)
-            if await room_lighting_service.async_get_config(core_shadow_room_id) != config:
-                raise RuntimeError("core room configuration moved during startup")
             registration = RoomLightingCoreBranch._validate_startup_image(
                 branch_config, image, expected_closed_image
             )
@@ -96,6 +94,17 @@ async def _async_start_room_lighting_with_core(
                 core_manual_input.resolve_closed_registration_as_legacy(
                     branch_id=core_shadow_room_id
                 )
+            current_config = await room_lighting_service.async_get_config(core_shadow_room_id)
+            if current_config != config:
+                if registration is not None and current_config is not None:
+                    core_manual_input.mark_closed_registration_scope_unavailable(
+                        branch_id=core_shadow_room_id,
+                        entity_ids=frozenset(
+                            target.entity_id
+                            for target in current_config.devices.light_targets
+                        ),
+                    )
+                raise RuntimeError("core room configuration moved during startup")
             branch = await hass.async_add_executor_job(partial(
                 RoomLightingCoreBranch,
                 branch_config=branch_config,

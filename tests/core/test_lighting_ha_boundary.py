@@ -90,4 +90,5 @@ def test_transport_refuses_unbound_or_unsupported_call_before_ha(prepared, ha_lo
     outcome = transport.call(prepared)
 
     assert outcome.status is TransportStatus.ERROR
+    assert outcome.proven_not_sent is True
     assert hass.services.calls == []
