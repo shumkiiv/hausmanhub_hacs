@@ -12,6 +12,8 @@ from decimal import Decimal
 import pytest
 
 from custom_components.hausman_hub.application.core.command_service import (
+    ClosedRegistration,
+    ClosedTargetRegistration,
     CapacityExceeded,
     CoreCommandService,
     ManualStatus,
@@ -19,6 +21,7 @@ from custom_components.hausman_hub.application.core.command_service import (
     ModuleManifest,
     Operation,
     StorageUnavailable,
+    _payload_digest,
 )
 from custom_components.hausman_hub.domain.core.models import (
     Authority,
@@ -31,6 +34,23 @@ from custom_components.hausman_hub.domain.core.models import (
 from custom_components.hausman_hub.domain.core.recovery import (
     evaluate_clock_trust,
 )
+
+
+def test_payload_digest_is_typed_and_canonical_without_codec_io():
+    """Closed-import source identity ignores codec-only ordering, never types."""
+    first = {
+        "records": {"b": 2, "a": 1},
+        "receipt_fingerprints": {"id": ("turn_on", Decimal("1.0"))},
+        "scope_revisions": {"scope": {"one", "two"}},
+    }
+    reordered = {
+        "scope_revisions": {"scope": {"two", "one"}},
+        "receipt_fingerprints": {"id": ["turn_on", Decimal("1.0")]},
+        "records": {"a": 1, "b": 2},
+    }
+    assert _payload_digest(first) == _payload_digest(reordered)
+    assert _payload_digest({"value": "1"}) != _payload_digest({"value": 1})
+    assert _payload_digest({"value": False}) != _payload_digest({"value": 0})
 
 from custom_components.hausman_hub.adapters.core.control_store import (
     FAULT_POINTS,
@@ -45,6 +65,7 @@ from conftest import (
     BINDING_REVISION_START,
     CONFIG_REVISION_START,
     Counter,
+    FaultInjector,
     FakeClock,
     FakeTransport,
     OTHER_RESOURCE,
@@ -1296,3 +1317,170 @@ def test_sec_s04_08_manual_replacement_at_full_capacity_future_composition():
         if op.phase is ServicePhase.CANCELLED
     ]
     assert len(cancelled) >= 1
+
+
+def test_closed_import_copies_a_complete_real_file_image_once(tmp_path):
+    from custom_components.hausman_hub.domain.core.models import ArbitrationMode
+
+    source = build_file_stand(tmp_path / "source", ArbitrationMode.RANKED_TARGET)
+    source.service.close_dispatch_for_restore()
+    destination = build_file_stand(
+        tmp_path / "destination", ArbitrationMode.RANKED_TARGET
+    )
+    destination.service.close_dispatch_for_restore()
+    registration = ClosedRegistration(
+        branch_id="synthetic.room",
+        import_id="closed-import-1",
+        source_identity="source-file-image",
+        source_revision=source.store.commit_revision,
+        source_payload_digest=_payload_digest(source.store.load()),
+        targets=(
+            ClosedTargetRegistration(
+                target_id="light.main", resource_id=MAIN_RESOURCE,
+                entity_id=MAIN_ENTITY, property_name="on",
+                allowed_actions=("turn_on", "turn_off"),
+                binding_revision=BINDING_REVISION_START,
+                config_revision=CONFIG_REVISION_START,
+            ),
+            ClosedTargetRegistration(
+                target_id="light.other", resource_id=OTHER_RESOURCE,
+                entity_id="light.test_other", property_name="on",
+                allowed_actions=("turn_on", "turn_off"),
+                binding_revision=BINDING_REVISION_START,
+                config_revision=CONFIG_REVISION_START,
+            ),
+        ),
+    )
+    destination.service.import_closed_registration_from(
+        source.service, registration,
+        expected_commit_revision=destination.store.commit_revision,
+        expected_source_revision=source.store.commit_revision,
+    )
+    assert destination.service.closed_registrations() == (registration,)
+    assert destination.service.record(MAIN_RESOURCE) == source.service.record(
+        MAIN_RESOURCE
+    )
+    commit_revision = destination.store.commit_revision
+    destination.service.import_closed_registration_from(
+        source.service, registration,
+        expected_commit_revision=commit_revision,
+        expected_source_revision=source.store.commit_revision,
+    )
+    assert destination.store.commit_revision == commit_revision
+    # A later durable manual decision in the destination cannot be erased by
+    # replaying the old source snapshot under the same import identity.
+    later = destination.service.submit_manual(
+        resource_ref=MAIN_RESOURCE, request_id="destination-later",
+        action_id="destination.manual", target=TARGET_OFF,
+        source="test.destination",
+        expected_control_revision=destination.service.record(
+            MAIN_RESOURCE
+        ).control_revision,
+    )
+    assert later.status in (ManualStatus.ACCEPTED, ManualStatus.NO_OP)
+    after_later = destination.service.record(MAIN_RESOURCE)
+    destination.service.import_closed_registration_from(
+        source.service, registration,
+        expected_commit_revision=destination.store.commit_revision,
+        expected_source_revision=source.store.commit_revision,
+    )
+    assert destination.service.record(MAIN_RESOURCE) == after_later
+
+
+@pytest.mark.parametrize("target", (TARGET_OFF, BASE_TARGET_ON40))
+def test_first_closed_import_refuses_destination_manual_history(tmp_path, target):
+    from custom_components.hausman_hub.domain.core.models import ArbitrationMode
+    from custom_components.hausman_hub.application.core.command_service import (
+        ClosedRegistrationConflict,
+    )
+
+    source = build_file_stand(tmp_path / "source", ArbitrationMode.RANKED_TARGET)
+    source.service.close_dispatch_for_restore()
+    destination = build_file_stand(tmp_path / "destination", ArbitrationMode.RANKED_TARGET)
+    destination.service.submit_manual(
+        resource_ref=MAIN_RESOURCE, request_id="new-human",
+        action_id="new-human-action", target=target, source="test.destination",
+        expected_control_revision=12,
+    )
+    destination.service.close_dispatch_for_restore()
+    registration = ClosedRegistration(
+        "synthetic.room", "first-import", "source-file",
+        source.store.commit_revision,
+        (
+            ClosedTargetRegistration("light.main", MAIN_RESOURCE, MAIN_ENTITY,
+                "on", ("turn_on", "turn_off"), BINDING_REVISION_START,
+                CONFIG_REVISION_START),
+            ClosedTargetRegistration("light.other", OTHER_RESOURCE,
+                "light.test_other", "on", ("turn_on", "turn_off"),
+                BINDING_REVISION_START, CONFIG_REVISION_START),
+        ),
+            _payload_digest(source.store.load()),
+    )
+    before = destination.service.record(MAIN_RESOURCE)
+    revision = destination.store.commit_revision
+    calls_before = list(destination.transport.calls)
+    with pytest.raises(ClosedRegistrationConflict, match="not pristine"):
+        destination.service.import_closed_registration_from(
+            source.service, registration, expected_commit_revision=revision,
+            expected_source_revision=source.store.commit_revision,
+        )
+    assert destination.service.record(MAIN_RESOURCE) == before
+    assert destination.store.commit_revision == revision
+    assert destination.transport.calls == calls_before
+
+
+@pytest.mark.parametrize("fault_point", FAULT_POINTS)
+def test_closed_import_fault_keeps_registration_and_rights_as_one_image(
+    tmp_path, fault_point
+):
+    """Every file interruption leaves the old image or the whole new one."""
+
+    from custom_components.hausman_hub.domain.core.models import ArbitrationMode
+
+    source = build_file_stand(tmp_path / "source", ArbitrationMode.RANKED_TARGET)
+    source.service.submit_manual(
+        resource_ref=MAIN_RESOURCE, request_id="source-manual",
+        action_id="source.manual", target=TARGET_OFF, source="test.source",
+        expected_control_revision=12,
+    )
+    source.service.close_dispatch_for_restore()
+    destination = build_file_stand(
+        tmp_path / "destination", ArbitrationMode.RANKED_TARGET
+    )
+    destination.service.close_dispatch_for_restore()
+    registration = ClosedRegistration(
+        branch_id="synthetic.room", import_id="fault-import",
+        source_identity="source-file-image",
+        source_revision=source.store.commit_revision,
+            source_payload_digest=_payload_digest(source.store.load()),
+        targets=(
+            ClosedTargetRegistration("light.main", MAIN_RESOURCE, MAIN_ENTITY,
+                "on", ("turn_on", "turn_off"), BINDING_REVISION_START,
+                CONFIG_REVISION_START),
+            ClosedTargetRegistration("light.other", OTHER_RESOURCE,
+                "light.test_other", "on", ("turn_on", "turn_off"),
+                BINDING_REVISION_START, CONFIG_REVISION_START),
+        ),
+    )
+    injector = FaultInjector()
+    injector.faults[fault_point] = OSError(fault_point, "injected")
+    destination.store._fault_injector = injector
+    before = destination.service.record(MAIN_RESOURCE)
+    with pytest.raises(StorageUnavailable):
+        destination.service.import_closed_registration_from(
+            source.service, registration,
+            expected_commit_revision=destination.store.commit_revision,
+            expected_source_revision=source.store.commit_revision,
+        )
+    reread = FileControlStore(destination.store_path).load()
+    assert reread is not None
+    imported = reread["closed_registrations"]
+    durable_record = reread["records"][MAIN_RESOURCE]
+    # A replace may have succeeded before the reported failure.  In both
+    # cases routing registration and the manual record share one image.
+    if imported:
+        assert imported == {"synthetic.room": registration}
+        assert durable_record == source.service.record(MAIN_RESOURCE)
+    else:
+        assert durable_record == before
+    assert destination.transport.calls == []

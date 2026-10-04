@@ -5313,7 +5313,10 @@ class ScenarioService:
         """Execute one catalog action through the shared strict executor."""
 
         intake = self._core_manual_intake()
-        if intake is not None and intake.is_transferred(target_id):
+        if intake is not None and (
+            intake.is_transferred(target_id)
+            or not intake.registration_ready(target_id)
+        ):
             # A transferred resource never reaches the legacy writer,
             # including direct wrapper calls and before any power or
             # manual side records are prepared (S-06.a).
@@ -5551,7 +5554,10 @@ class ScenarioService:
             expected_revision,
             expected_sequence,
         ) in enumerate(normalized_actions):
-            if intake is not None and intake.is_transferred(target_id):
+            if intake is not None and (
+                intake.is_transferred(target_id)
+                or not intake.registration_ready(target_id)
+            ):
                 # The common admission owns this participant; the legacy
                 # executor and its side records are not reached (S-06.a).
                 receipts.append(

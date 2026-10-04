@@ -19,6 +19,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import AsyncMock
 
 import test_local_summary_access as harness
 
@@ -577,6 +578,118 @@ class CoreManualInputApiTest(unittest.TestCase):
             )
         self.assertIn("core manual intake", str(caught.exception))
         self.assertEqual([], self.executor.calls)
+
+    def test_unresolved_startup_window_blocks_http_and_direct_paths_before_legacy(self):
+        """The early scoped marker closes the HTTP and direct wrappers.
+
+        This uses awaited view methods rather than the synchronous helper so
+        the assertion covers the real startup-window request shape.
+        """
+        self.intake.mark_closed_registration_unavailable(branch_id=stand.ROOM_ID)
+        resolve = AsyncMock(side_effect=AssertionError("legacy route reached"))
+        admission = AsyncMock(side_effect=AssertionError("legacy authority reached"))
+        self.service.async_resolve_device_action_context = resolve
+        self.service._manual_action_pre_admission = admission
+
+        async def exercise():
+            request = harness.FakeJsonRequest(
+                "192.168.1.20", self.tablet, SINGLE_PATH,
+                {
+                    "contract": {
+                        "name": "hausman-hub-device-action-request", "version": 1,
+                    },
+                    "requestId": "startup-window-single",
+                    "targetId": stand.PUBLIC_TARGET_ID,
+                    "actionId": "turn_off",
+                    "coreControl": self._envelope(
+                        request_id="startup-window-single"
+                    ),
+                },
+                content_type=FULL_SINGLE_REQUEST_MEDIA_TYPE,
+                accept=FULL_SINGLE_RESPONSE_MEDIA_TYPE,
+            )
+            response = await self.view.post(request)
+            self.assertEqual(HTTPStatus.SERVICE_UNAVAILABLE, response.status)
+            self.assertEqual("unavailable", response.payload["code"])
+            self.assertEqual(0, resolve.await_count)
+            self.assertEqual(0, admission.await_count)
+            self.assertEqual([], self.executor.calls)
+
+            direct = self.device_action_api.ScenarioService.async_execute_device_action
+            with self.assertRaises(Exception) as caught:
+                await direct(self.service, stand.PUBLIC_TARGET_ID, "turn_off")
+            self.assertEqual(409, getattr(caught.exception, "status", None))
+            self.assertEqual(0, admission.await_count)
+            self.assertEqual([], self.executor.calls)
+
+            batch = self.device_action_api.ScenarioService.async_execute_device_action_batch
+            unknown_receipts = await batch(
+                self.service,
+                [
+                    {"targetId": stand.PUBLIC_TARGET_ID, "actionId": "turn_off"},
+                    {"targetId": "light.neighbor", "actionId": "turn_on"},
+                ],
+                correlation_id="startup-unknown-batch",
+                request_ids=("unknown-core", "unknown-neighbor"),
+                core_principal="test",
+                core_full_receipts=True,
+            )
+            self.assertEqual(["failed", "failed"], [
+                item["status"] for item in unknown_receipts
+            ])
+            self.assertEqual([], self.executor.calls)
+
+            # Once the durable scope is known, only the affected target stays
+            # closed while its branch is unavailable; an unrelated neighbour
+            # keeps the legacy path.
+            from custom_components.hausman_hub.application.core.command_service import (
+                ClosedRegistration, ClosedTargetRegistration,
+            )
+            self.intake.install_closed_registration_projection(ClosedRegistration(
+                branch_id=stand.ROOM_ID,
+                import_id="startup-known-scope",
+                source_identity="synthetic",
+                source_revision=1,
+                source_payload_digest="0" * 64,
+                targets=(ClosedTargetRegistration(
+                    target_id=stand.PUBLIC_TARGET_ID,
+                    resource_id=stand.RESOURCE_ID,
+                    entity_id=stand.ENTITY_ID,
+                    property_name="on",
+                    allowed_actions=("turn_on", "turn_off"),
+                    binding_revision=self.branch.core_service.spec(
+                        stand.RESOURCE_ID
+                    ).binding_revision,
+                    config_revision=self.branch.core_service.record(
+                        stand.RESOURCE_ID
+                    ).control_revision,
+                ),),
+            ))
+            receipts = await batch(
+                self.service,
+                [
+                    {
+                        "targetId": stand.PUBLIC_TARGET_ID,
+                        "actionId": "turn_off",
+                        "coreControl": self._envelope(
+                            request_id="startup-core"
+                        ),
+                    },
+                    {"targetId": "light.neighbor", "actionId": "turn_on"},
+                ],
+                correlation_id="startup-window-batch",
+                request_ids=("startup-core", "startup-neighbor"),
+                core_principal="test",
+                core_full_receipts=True,
+            )
+            self.assertEqual("failed", receipts[0]["status"])
+            self.assertEqual("core_unavailable", receipts[0]["error"])
+            self.assertEqual(
+                [("light.neighbor", "turn_on")], self.executor.calls
+            )
+            self.assertEqual(0, admission.await_count)
+
+        asyncio.run(exercise())
 
     def test_batch_participants_keep_separate_results(self):
         self._report("on")

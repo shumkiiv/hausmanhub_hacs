@@ -15,6 +15,10 @@ from custom_components.hausman_hub.application.room_lighting_core import (
     CoreBranchConfig,
     RoomLightingCoreBranch,
 )
+from custom_components.hausman_hub.application.core.command_service import (
+    ClosedRegistration,
+    ClosedTargetRegistration,
+)
 from custom_components.hausman_hub.domain.room_lighting import config_from_payload
 from custom_components.hausman_hub.domain.device_power_dependencies import (
     AUTO_TURN_ON_POLICY,
@@ -73,6 +77,52 @@ def _runtime(hass, config, executor, provider, **runtime_kwargs):
         away_entity_id=AWAY_ENTITY_ID,
         **runtime_kwargs,
     )
+
+
+def _closed_registration(config):
+    return ClosedRegistration(
+        branch_id=config.room_id,
+        import_id="registration-1",
+        source_identity="test-source",
+        source_revision=1,
+        source_payload_digest="digest",
+        targets=(ClosedTargetRegistration(
+            target_id="public-main",
+            resource_id="light_main",
+            entity_id="light.demo_main",
+            property_name="on",
+            allowed_actions=("turn_on", "turn_off"),
+            binding_revision=config.version,
+            config_revision=config.version,
+        ),),
+    )
+
+
+def test_typed_projection_reserves_before_a_branch_is_available(tmp_path):
+    branch, config = _branch(tmp_path)
+    intake = CoreManualInput()
+    registration = _closed_registration(config)
+
+    intake.mark_closed_registration_unavailable(branch_id=config.room_id)
+    intake.install_closed_registration_projection(registration)
+
+    assert intake.command_entity_ids() == frozenset({"light.demo_main"})
+    assert intake.registration_ready("public-main") is False
+    assert intake.core_control_state("public-main")["status"] == "unavailable"
+    # Replaying exactly the durable image is harmless; attaching the branch
+    # makes only this transferred target ready.
+    intake.install_closed_registration_projection(registration, branch=branch)
+    assert intake.registration_ready("public-main") is True
+
+
+def test_scoped_projection_does_not_clear_a_global_unknown_marker(tmp_path):
+    _, config = _branch(tmp_path)
+    intake = CoreManualInput()
+    intake.mark_closed_registration_unavailable()
+    intake.install_closed_registration_projection(_closed_registration(config))
+
+    with pytest.raises(CoreManualInputError, match="unresolved"):
+        intake.command_entity_ids()
 
 
 @pytest.mark.asyncio

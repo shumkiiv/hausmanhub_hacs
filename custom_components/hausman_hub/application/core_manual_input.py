@@ -44,7 +44,7 @@ from .room_lighting_core import (
 )
 
 if TYPE_CHECKING:
-    from .core.command_service import ResourceView
+    from .core.command_service import ClosedRegistration, ResourceView
 
 REASON_CORE_MANUAL_ADMITTED = "core_manual_admitted"
 SUPPORTED_MANUAL_ACTIONS = ("turn_on", "turn_off")
@@ -148,6 +148,30 @@ class CoreManualInput:
         self._mono_now = mono_now or (
             lambda: time.monotonic_ns() // 1_000_000
         )
+        self._unavailable = False
+        # A durable registration is admitted per room.  ``None`` preserves
+        # the old process-wide fail-closed marker used by existing callers.
+        self._unresolved_registration_scopes: set[str | None] = set()
+        self._closed_projection_by_room: dict[str, "ClosedRegistration"] = {}
+
+    def mark_closed_registration_unavailable(
+        self, *, branch_id: str | None = None
+    ) -> None:
+        """Close routing while an expected durable projection is unresolved."""
+
+        self._unresolved_registration_scopes.add(branch_id)
+        self._unavailable = True
+
+    def registration_ready(self, target_id: object) -> bool:
+        """Only a known, decoded target may select the legacy route."""
+
+        if self._unresolved_registration_scopes:
+            return False
+        binding = self._bindings.get(target_id) if isinstance(target_id, str) else None
+        if binding is None:
+            return True
+        branch = self._branches.get(binding.room_id)
+        return branch is not None and not branch.input_closed
 
     # ------------------------------------------------------------------
     # stand wiring
@@ -170,6 +194,105 @@ class CoreManualInput:
         self._bindings[binding.target_id] = binding
         self._branches[binding.room_id] = branch
 
+    def install_closed_registration(self, branch: RoomLightingCoreBranch) -> None:
+        """Install only the registration decoded from the branch's image.
+
+        The service/store accepted the complete scope before this projection
+        exists.  Consequently a process restart cannot turn an empty local
+        cache into permission for the legacy executor.
+        """
+
+        matching = [
+            registration
+            for registration in branch.core_service.closed_registrations()
+            if registration.branch_id == branch.room_id
+        ]
+        if len(matching) != 1:
+            raise CoreManualInputError(
+                "core_closed_registration_unavailable",
+                "closed registration is missing or ambiguous",
+                http_status=503,
+                api_code="unavailable",
+            )
+        self.install_closed_registration_projection(matching[0], branch=branch)
+
+    def install_closed_registration_projection(
+        self,
+        registration: "ClosedRegistration",
+        *,
+        branch: RoomLightingCoreBranch | None = None,
+    ) -> None:
+        """Publish one complete decoded registration atomically.
+
+        A projection without a live branch deliberately retains its entity
+        reservation: a failed restart must not reopen the legacy writer.
+        """
+        if branch is not None and branch.room_id != registration.branch_id:
+            raise CoreManualInputError(
+                "core_closed_registration_unavailable",
+                "closed registration belongs to another branch",
+                http_status=503,
+                api_code="unavailable",
+            )
+        existing = self._closed_projection_by_room.get(registration.branch_id)
+        if existing is not None and existing != registration:
+            raise CoreManualInputError(
+                "core_target_already_registered",
+                "closed registration changed for the same branch",
+                http_status=409,
+                api_code="conflict",
+            )
+        projected: dict[str, CoreManualTargetBinding] = {}
+        for target in registration.targets:
+            binding = CoreManualTargetBinding(
+                target_id=target.target_id,
+                resource_id=target.resource_id,
+                entity_id=target.entity_id,
+                room_id=registration.branch_id,
+                property_name=target.property_name,
+                allowed_actions=target.allowed_actions,
+            )
+            prior = self._bindings.get(binding.target_id)
+            if (
+                binding.target_id in projected
+                or (prior is not None and prior != binding)
+            ):
+                raise CoreManualInputError(
+                    "core_target_already_registered",
+                    f"target {binding.target_id} is already transferred",
+                    http_status=409,
+                    api_code="conflict",
+                )
+            projected[binding.target_id] = binding
+        # Publish a complete scope only after every target is validated.
+        self._bindings.update(projected)
+        self._closed_projection_by_room[registration.branch_id] = registration
+        if branch is None:
+            self._branches.pop(registration.branch_id, None)
+        else:
+            self._branches[registration.branch_id] = branch
+        self._unresolved_registration_scopes.discard(registration.branch_id)
+        self._unavailable = bool(self._unresolved_registration_scopes)
+
+    def resolve_closed_registration_as_legacy(self, *, branch_id: str) -> None:
+        """Resolve a proved old/explicit-first-create image without erasing a transfer."""
+        if branch_id in self._closed_projection_by_room:
+            raise CoreManualInputError(
+                "core_target_already_registered",
+                "accepted closed registration cannot become legacy",
+                http_status=409,
+                api_code="conflict",
+            )
+        if any(binding.room_id == branch_id for binding in self._bindings.values()):
+            raise CoreManualInputError(
+                "core_target_already_registered",
+                "transferred targets cannot become legacy",
+                http_status=409,
+                api_code="conflict",
+            )
+        self._unresolved_registration_scopes.discard(branch_id)
+        self._unavailable = bool(self._unresolved_registration_scopes)
+
     def is_transferred(self, target_id: object) -> bool:
         return isinstance(target_id, str) and target_id in self._bindings
 
@@ -185,6 +308,13 @@ class CoreManualInput:
         closed when this exception reaches it.
         """
 
+        if self._unresolved_registration_scopes:
+            raise CoreManualInputError(
+                "core_closed_registration_unavailable",
+                "closed registration is unresolved",
+                http_status=503,
+                api_code="unavailable",
+            )
         entity_ids: set[str] = set()
         for target_id, binding in self._bindings.items():
             entity_id = binding.entity_id
@@ -202,6 +332,16 @@ class CoreManualInput:
         return frozenset(entity_ids)
 
     def resolve_target(self, target_id: str) -> CoreManualTargetBinding:
+        # A process-wide/scoped unresolved durable image is distinct from an
+        # already registered branch which later stopped.  The latter keeps its
+        # established ``core_unavailable`` compatibility through _branch_for.
+        if self._unresolved_registration_scopes:
+            raise CoreManualInputError(
+                "core_closed_registration_unavailable",
+                "closed core registration is unavailable",
+                http_status=503,
+                api_code="unavailable",
+            )
         binding = self._bindings.get(target_id)
         if binding is None:
             raise CoreManualInputError(

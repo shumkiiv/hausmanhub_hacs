@@ -16,6 +16,8 @@ from custom_components.hausman_hub.adapters.core.control_store import (
     StoreImageError,
 )
 from custom_components.hausman_hub.application.core.command_service import (
+    ClosedRegistration,
+    ClosedTargetRegistration,
     CommitConflict,
 )
 from custom_components.hausman_hub.domain.core.models import (
@@ -64,6 +66,36 @@ def test_roundtrip_of_a_typed_image(tmp_path):
     assert record.control_revision == 12
     assert record.generation == 7
     assert restored["scope_revisions"]["test.scope"] == 4
+    assert restored["closed_registrations"] == {}
+
+
+def test_closed_registration_roundtrips_with_the_same_whole_image(tmp_path):
+    store = FileControlStore(tmp_path / STORE_FILE)
+    state = make_state(control_revision=12, commit_revision=0)
+    state["closed_registrations"] = {
+        "synthetic.room": ClosedRegistration(
+            branch_id="synthetic.room",
+            import_id="import-1",
+            source_identity="legacy-image-1",
+            source_revision=7,
+                source_payload_digest="0" * 64,
+            targets=(ClosedTargetRegistration(
+                target_id="light.synthetic",
+                resource_id=MAIN_RESOURCE,
+                entity_id="light.synthetic",
+                property_name="on",
+                allowed_actions=("turn_on", "turn_off"),
+                binding_revision=3,
+                config_revision=2,
+            ),),
+        )
+    }
+    store.commit(0, state)
+    restored = FileControlStore(tmp_path / STORE_FILE).load()
+    assert restored is not None
+    registration = restored["closed_registrations"]["synthetic.room"]
+    assert registration.source_revision == 7
+    assert registration.targets[0].entity_id == "light.synthetic"
 
 
 def test_d07_damaged_images_close_the_store(tmp_path):

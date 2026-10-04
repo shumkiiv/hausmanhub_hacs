@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 from .core.command_service import (
     CapabilityProfile,
+    ClosedRegistration,
     CoreCommandService,
     CoreServiceError,
     ModuleEntry,
@@ -55,6 +56,7 @@ UNCERTAIN_MANUAL_AUTHORITY = "manual_authority_unavailable"
 # clear such a hold: for a transferred resource the core store is the
 # only authority of manual rights.
 CORE_MANUAL_HOLD_SOURCE = "core.manual_intake"
+_NOT_LOADED = object()
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +181,9 @@ class RoomLightingCoreBranch:
         manual_holds_provider: (
             Callable[[], Mapping[str, ManualHoldView] | None] | None
         ) = None,
+        expected_closed_image: bool | None = False,
+        _store: FileControlStore | None = None,
+        _loaded_image: Mapping | None | object = _NOT_LOADED,
     ) -> None:
         # The shadow branch is intentionally Hass-independent: closed
         # transport, own store, own clock.
@@ -187,7 +192,13 @@ class RoomLightingCoreBranch:
         self._transport = ClosedTransport()
         room_id = branch_config.room_id
         self._store_path = str(store_path)
-        self._store = FileControlStore(self._store_path)
+        self._store = _store if _store is not None else FileControlStore(self._store_path)
+        loaded_image = self._store.load() if _loaded_image is _NOT_LOADED else _loaded_image
+        if loaded_image is not None and not isinstance(loaded_image, Mapping):
+            raise CoreBranchError("closed control image is invalid")
+        registration = self._validate_startup_image(
+            branch_config, loaded_image, expected_closed_image
+        )
         self._bindings = self._bindings_from(branch_config.config)
         self._input_adapter = RoomLightingInputAdapter(
             bindings=self._bindings,
@@ -264,11 +275,12 @@ class RoomLightingCoreBranch:
             id_factory=self._id_factory(),
         )
         clock_trust = self._clock.wall_clock_trust()
-        if self._store.load() is not None:
+        if loaded_image is not None:
             # Restart: rebuild from the durable image (K-10) and keep the
             # SHADOW mode regardless of what was persisted.
             self._service = CoreCommandService.restore(
-                **restore_kwargs, clock_trust=clock_trust, core_mode=ModuleMode.SHADOW
+                **restore_kwargs, clock_trust=clock_trust, core_mode=ModuleMode.SHADOW,
+                _loaded_image=loaded_image,
             )
         else:
             self._service = CoreCommandService(
@@ -287,6 +299,92 @@ class RoomLightingCoreBranch:
         # process or write (SEC-C6-R2-02).
         self._input_closed = False
         self._manual_holds_provider = manual_holds_provider
+
+    @staticmethod
+    def _validate_startup_image(
+        branch_config: CoreBranchConfig,
+        image: Mapping | None,
+        expected_closed_image: bool | None,
+    ) -> ClosedRegistration | None:
+        """Validate admission facts before creating a plugin or recovering state."""
+        if image is None:
+            if expected_closed_image is False:
+                return None
+            raise CoreBranchError("expected closed control image is missing")
+        registrations = image.get("closed_registrations", {})
+        if not isinstance(registrations, Mapping):
+            raise CoreBranchError("closed registrations are invalid")
+        registration = registrations.get(branch_config.room_id)
+        if registration is None:
+            if registrations:
+                raise CoreBranchError("closed registration belongs to another room")
+            if expected_closed_image is True:
+                raise CoreBranchError("expected closed registration is missing")
+            return None
+        if set(registrations) != {branch_config.room_id}:
+            raise CoreBranchError("closed registration scope is ambiguous")
+        if not isinstance(registration, ClosedRegistration):
+            raise CoreBranchError("closed registration is invalid")
+        if registration.branch_id != branch_config.room_id:
+            raise CoreBranchError("closed registration belongs to another room")
+        targets = {target.resource_id: target for target in registration.targets}
+        configured = {
+            target.id: target for target in branch_config.config.devices.light_targets
+        }
+        if set(targets) != set(configured):
+            raise CoreBranchError("closed registration does not cover configured lights")
+        for resource_id, target in targets.items():
+            configured_target = configured[resource_id]
+            if (
+                target.entity_id != configured_target.entity_id
+                or target.property_name != "on"
+                or tuple(target.allowed_actions) != ("turn_on", "turn_off")
+                or target.binding_revision != branch_config.config.version
+                or target.config_revision != branch_config.config.version
+            ):
+                raise CoreBranchError("closed registration binding moved")
+        return registration
+
+    def import_closed_registration(
+        self, registration: ClosedRegistration,
+        *,
+        expected_commit_revision: int,
+    ) -> None:
+        """Durably accept a complete registration while transport is closed."""
+
+        with self._lock:
+            if registration.branch_id != self.room_id:
+                raise CoreBranchError("closed registration belongs to another room")
+            if self._mode != self.MODE_OFF or self._input_closed:
+                raise CoreBranchError("closed registration requires an off branch")
+            self._service.import_closed_registration(
+                registration,
+                expected_commit_revision=expected_commit_revision,
+            )
+
+    def import_closed_registration_from(
+        self,
+        source: CoreCommandService,
+        registration: ClosedRegistration,
+        *,
+        expected_commit_revision: int,
+        expected_source_revision: int,
+    ) -> None:
+        """Copy a complete real Core source image while both branches close."""
+
+        with self._lock:
+            if registration.branch_id != self.room_id or self._mode != self.MODE_OFF:
+                raise CoreBranchError("closed source import requires this off room")
+            self._service.import_closed_registration_from(
+                source,
+                registration,
+                expected_commit_revision=expected_commit_revision,
+                expected_source_revision=expected_source_revision,
+                controlled_resource_ids=frozenset(
+                    target.id
+                    for target in self._branch_config.config.devices.light_targets
+                ),
+            )
 
     # -- mode --------------------------------------------------------------
 
@@ -586,6 +684,11 @@ class RoomLightingCoreBranch:
         now_utc_ms = self._clock.now_utc_ms()
         for resource_id, entity_id in self._target_bindings.items():
             record = self._service.record(resource_id)
+            if self._service.is_closed_registered_resource(resource_id):
+                # A closed-image import owns the complete manual/unknown
+                # history.  A legacy snapshot is only an observation source
+                # and may never clear or extend that imported evidence.
+                continue
             if (
                 record.manual is not None
                 and record.manual.source == CORE_MANUAL_HOLD_SOURCE

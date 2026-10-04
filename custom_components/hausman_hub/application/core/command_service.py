@@ -10,6 +10,7 @@ permission check, queue, arbitration and lifecycle are production code.
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from enum import Enum
@@ -101,6 +102,10 @@ class CommitConflict(CoreServiceError):
 class CapacityExceeded(CoreServiceError):
     """Store capacity is exhausted; the request is refused before
     acceptance instead of silently dropping protected records (S-05)."""
+
+
+class ClosedRegistrationConflict(CoreServiceError):
+    """A closed import cannot be applied to a different durable image."""
 
 
 RECEIPT_WINDOW_MS = 24 * 60 * 60 * 1000
@@ -298,6 +303,36 @@ class ModuleEntry:
     instance: object
 
 
+@dataclass(frozen=True)
+class ClosedTargetRegistration:
+    """One exact server binding accepted by a closed synthetic import.
+
+    This is deliberately an application DTO.  It contains no HA objects and
+    is persisted with the control image, so an in-memory routing cache never
+    becomes an authority for a transferred resource.
+    """
+
+    target_id: str
+    resource_id: str
+    entity_id: str
+    property_name: str
+    allowed_actions: tuple[str, ...]
+    binding_revision: int
+    config_revision: int
+
+
+@dataclass(frozen=True)
+class ClosedRegistration:
+    """Atomic, complete registration of one closed branch image."""
+
+    branch_id: str
+    import_id: str
+    source_identity: str
+    source_revision: int
+    targets: tuple[ClosedTargetRegistration, ...]
+    source_payload_digest: str = ""
+
+
 class CoreCommandService:
     """Single coordinating path; transitions are serialized here (S-04)."""
 
@@ -377,6 +412,7 @@ class CoreCommandService:
         # later lifecycle callback can verify or finish it without rebuilding
         # a second generation from changed live memory.
         self._close_restore_complete = False
+        self._closed_registrations: dict[str, ClosedRegistration] = {}
         self._close_restore_base: dict | None = None
         self._close_restore_intended: dict | None = None
 
@@ -596,7 +632,239 @@ class CoreCommandService:
             },
             "scope_revisions": dict(self._scope_revisions),
             "config_revisions": dict(self._config_revisions),
+            "closed_registrations": dict(self._closed_registrations),
         }
+
+    def closed_registrations(self) -> tuple[ClosedRegistration, ...]:
+        """Read-only durable registration projection, ordered by branch."""
+
+        return tuple(
+            self._closed_registrations[key]
+            for key in sorted(self._closed_registrations)
+        )
+
+    def is_closed_registered_resource(self, resource_id: str) -> bool:
+        """Whether this resource's manual state belongs to the image import."""
+
+        return any(
+            target.resource_id == resource_id
+            for registration in self._closed_registrations.values()
+            for target in registration.targets
+        )
+
+    def import_closed_registration(
+        self,
+        registration: ClosedRegistration,
+        *,
+        expected_commit_revision: int,
+    ) -> None:
+        """Persist one complete closed registration with this whole image.
+
+        The branch remains closed; this operation only records the exact
+        routing ownership after checking the current service configuration.
+        A same import is an idempotent no-op, while any changed payload under
+        the same branch/import identity is refused before a write.
+        """
+
+        if expected_commit_revision != self._store.commit_revision:
+            raise ClosedRegistrationConflict("stale closed import revision")
+        if not registration.branch_id or not registration.import_id:
+            raise ClosedRegistrationConflict("closed import identity is empty")
+        if not registration.targets:
+            raise ClosedRegistrationConflict("closed import has no targets")
+        seen_targets: set[str] = set()
+        seen_resources: set[str] = set()
+        seen_entities: set[str] = set()
+        for target in registration.targets:
+            if (
+                not target.target_id
+                or not target.resource_id
+                or not target.entity_id
+                or not target.property_name
+                or not target.allowed_actions
+                or target.target_id in seen_targets
+                or target.resource_id in seen_resources
+                or target.entity_id in seen_entities
+            ):
+                raise ClosedRegistrationConflict("closed import target scope invalid")
+            seen_targets.add(target.target_id)
+            seen_resources.add(target.resource_id)
+            seen_entities.add(target.entity_id)
+            spec = self._specs.get(target.resource_id)
+            if spec is None or self._bindings.get(target.resource_id) != target.entity_id:
+                raise ClosedRegistrationConflict("closed import binding is unknown")
+            if (
+                spec.binding_revision != target.binding_revision
+                or self._config_revisions.get(target.resource_id) != target.config_revision
+            ):
+                raise ClosedRegistrationConflict("closed import binding revision moved")
+        existing = self._closed_registrations.get(registration.branch_id)
+        if existing is not None:
+            if existing == registration:
+                return
+            raise ClosedRegistrationConflict("closed branch is already registered")
+        # A first closed import has no ordering proof against an existing
+        # destination history.  Do not overwrite a person's newer manual
+        # choice (or any unresolved history) merely because both stores have
+        # valid local revisions.
+        if (
+            any(record.manual is not None for record in self._records.values())
+            or self._operations
+            or self._receipts
+            or self._receipt_fingerprints
+            or self._confirm_keys
+            or self._episode_locks
+        ):
+            raise ClosedRegistrationConflict(
+                "first closed import destination is not pristine"
+            )
+        target_ids = {
+            target.target_id
+            for imported in self._closed_registrations.values()
+            for target in imported.targets
+        }
+        entity_ids = {
+            target.entity_id
+            for imported in self._closed_registrations.values()
+            for target in imported.targets
+        }
+        if target_ids.intersection(seen_targets) or entity_ids.intersection(seen_entities):
+            raise ClosedRegistrationConflict("closed import collides with registered target")
+        self._closed_registrations[registration.branch_id] = registration
+        try:
+            self._commit_state()
+        except Exception:
+            self._closed_registrations.pop(registration.branch_id, None)
+            raise
+
+    def import_closed_registration_from(
+        self,
+        source: "CoreCommandService",
+        registration: ClosedRegistration,
+        *,
+        expected_commit_revision: int,
+        expected_source_revision: int,
+        controlled_resource_ids: frozenset[str] | None = None,
+    ) -> None:
+        """Atomically copy a complete real Core image and its registration.
+
+        The caller supplies another ``CoreCommandService`` backed by a real
+        ControlStore, never a reduced legacy hold view.  This deliberately
+        accepts only a whole matching resource scope: records, unresolved
+        operations, receipts and their fingerprints cross the boundary
+        together, or no destination state is changed.
+        """
+
+        if (
+            source is self
+            or not source._close_restore_complete
+            or not self._close_restore_complete
+            or source._store.commit_revision != expected_source_revision
+            or registration.source_revision != expected_source_revision
+        ):
+            raise ClosedRegistrationConflict("closed import source or destination is not closed or revision moved")
+        durable_source = source._store.load()
+        if (
+            durable_source is None
+            or _canonical_source_image(durable_source)
+            != _canonical_source_image(source._build_image())
+            or not _valid_payload_digest(registration.source_payload_digest)
+            or registration.source_payload_digest
+            != _payload_digest(durable_source)
+        ):
+            raise ClosedRegistrationConflict("closed import source payload changed")
+        registration_scope = {
+            target.resource_id for target in registration.targets
+        }
+        full_scope = set(source._specs)
+        if full_scope != set(self._specs):
+            raise ClosedRegistrationConflict("closed import source scope is incomplete")
+        if controlled_resource_ids is None:
+            controlled_scope = full_scope
+        else:
+            controlled_scope = set(controlled_resource_ids)
+            if not controlled_scope or not controlled_scope.issubset(full_scope):
+                raise ClosedRegistrationConflict("closed import controlled scope is invalid")
+        if registration_scope != controlled_scope:
+            raise ClosedRegistrationConflict("closed import registration is incomplete")
+        if set(source._records) != full_scope:
+            raise ClosedRegistrationConflict("closed import source records are incomplete")
+        for operation in source._operations.values():
+            if operation.resource_id not in full_scope:
+                raise ClosedRegistrationConflict("closed import operation escapes scope")
+        for receipt in source._receipts.values():
+            if receipt.operation_id is not None and receipt.operation_id not in source._operations:
+                raise ClosedRegistrationConflict("closed import receipt is incomplete")
+        if expected_commit_revision != self._store.commit_revision:
+            raise ClosedRegistrationConflict("stale closed import revision")
+        existing = self._closed_registrations.get(registration.branch_id)
+        if existing is not None:
+            if existing == registration:
+                return
+            raise ClosedRegistrationConflict("closed branch is already registered")
+        if (
+            any(record.manual is not None for record in self._records.values())
+            or self._operations
+            or self._receipts
+            or self._receipt_fingerprints
+            or self._confirm_keys
+            or self._episode_locks
+        ):
+            raise ClosedRegistrationConflict(
+                "first closed import destination is not pristine"
+            )
+        for target in registration.targets:
+            spec = self._specs.get(target.resource_id)
+            if (
+                spec is None
+                or self._bindings.get(target.resource_id) != target.entity_id
+                or spec.binding_revision != target.binding_revision
+                or self._config_revisions.get(target.resource_id) != target.config_revision
+            ):
+                raise ClosedRegistrationConflict("closed import binding revision moved")
+        occupied = {
+            target.target_id
+            for imported in self._closed_registrations.values()
+            for target in imported.targets
+        }
+        if occupied.intersection(target.target_id for target in registration.targets):
+            raise ClosedRegistrationConflict("closed import collides with registered target")
+        previous = (
+            self._records, self._operations, self._resource_ops, self._receipts,
+            self._receipt_times, self._receipt_fingerprints,
+            self._confirm_keys, self._episode_locks, self._closed_registrations,
+            self._scope_revisions, self._config_revisions,
+            self._restored_operation_ids, self._id_floor,
+        )
+        self._records = deepcopy(source._records)
+        self._operations = deepcopy(source._operations)
+        self._resource_ops = {resource_id: [] for resource_id in self._specs}
+        for operation_id, operation in self._operations.items():
+            self._resource_ops[operation.resource_id].append(operation_id)
+        self._receipts = deepcopy(source._receipts)
+        self._receipt_times = deepcopy(source._receipt_times)
+        self._receipt_fingerprints = deepcopy(source._receipt_fingerprints)
+        self._confirm_keys = deepcopy(source._confirm_keys)
+        self._episode_locks = deepcopy(source._episode_locks)
+        self._scope_revisions = deepcopy(source._scope_revisions)
+        self._config_revisions = deepcopy(source._config_revisions)
+        self._restored_operation_ids = set(source._restored_operation_ids) | set(
+            self._operations
+        )
+        self._id_floor = max(self._id_floor, source._id_floor)
+        self._closed_registrations = dict(self._closed_registrations)
+        self._closed_registrations[registration.branch_id] = registration
+        try:
+            self._commit_state()
+        except Exception:
+            (
+                self._records, self._operations, self._resource_ops, self._receipts,
+                self._receipt_times, self._receipt_fingerprints,
+                self._confirm_keys, self._episode_locks, self._closed_registrations,
+                self._scope_revisions, self._config_revisions,
+                self._restored_operation_ids, self._id_floor,
+            ) = previous
+            raise
 
     def _commit_state(self) -> None:
         if (
@@ -2029,13 +2297,19 @@ class CoreCommandService:
         id_factory: Callable[[], str],
         clock_trust: ClockTrust,
         core_mode: ModuleMode = ModuleMode.ACTIVE,
+        _loaded_image: Mapping | None = None,
     ) -> "CoreCommandService":
         """Build a fresh service from the durable image of the store and
         apply the K-10 recovery: pending work is cancelled, dispatched
         work without a durable outcome becomes unknown. An untrusted
         clock never extends rights (S-05)."""
 
-        loaded = store.load() or {}
+        if _loaded_image is not None:
+            if _loaded_image.get("commit_revision") != store.commit_revision:
+                raise StorageUnavailable("closed control image revision moved")
+            loaded = deepcopy(dict(_loaded_image))
+        else:
+            loaded = store.load() or {}
         service = cls(
             clock=clock,
             store=store,
@@ -2055,6 +2329,9 @@ class CoreCommandService:
             core_mode=core_mode,
         )
         if loaded:
+            service._closed_registrations = dict(
+                loaded.get("closed_registrations", {})
+            )
             service._operations = dict(loaded.get("operations", {}))
             # Provenance: every operation of the loaded image originates
             # from the previous process, plus the persisted restored
@@ -2174,6 +2451,88 @@ class CoreCommandService:
             control_revision=record.control_revision,
             generation=record.generation,
         )
+
+
+def _payload_digest(image: Mapping) -> str:
+    """Stable private identity of one typed durable source image."""
+
+    def frame(tag: bytes, payload: bytes) -> bytes:
+        return tag + str(len(payload)).encode("ascii") + b":" + payload
+
+    def encode(value: object) -> bytes:
+        # Tagged lengths prevent delimiter collisions and preserve scalar
+        # types. Lists and tuples intentionally share a sequence form because
+        # the durable codec reconstructs a few wire lists as tuples.
+        if value is None:
+            return b"n"
+        if isinstance(value, bool):
+            return b"b1" if value else b"b0"
+        if isinstance(value, int):
+            return frame(b"i", str(value).encode("ascii"))
+        if isinstance(value, float):
+            return frame(b"f", repr(value).encode("ascii"))
+        if isinstance(value, Decimal):
+            return frame(b"d", str(value).encode("ascii"))
+        if isinstance(value, str):
+            return frame(b"s", value.encode("utf-8"))
+        if isinstance(value, bytes):
+            return frame(b"y", value)
+        if isinstance(value, Enum):
+            return frame(b"e", encode(value.value))
+        if isinstance(value, Mapping):
+            entries = sorted((encode(key), encode(item)) for key, item in value.items())
+            return frame(
+                b"m", b"".join(
+                    frame(b"k", key) + frame(b"v", item)
+                    for key, item in entries
+                ),
+            )
+        if isinstance(value, (tuple, list)):
+            return frame(
+                b"q", b"".join(frame(b"v", encode(item)) for item in value)
+            )
+        if isinstance(value, (set, frozenset)):
+            items = sorted(encode(item) for item in value)
+            return frame(b"q", b"".join(frame(b"v", item) for item in items))
+        if hasattr(value, "__dataclass_fields__"):
+            fields = getattr(value, "__dataclass_fields__")
+            return encode({name: getattr(value, name) for name in fields})
+        raise ClosedRegistrationConflict("closed import source payload is unsupported")
+
+    return hashlib.sha256(encode(image)).hexdigest()
+
+
+def _canonical_source_image(image: Mapping) -> dict:
+    """Compare a loaded image with its in-memory representation.
+
+    The file codec restores episode-lock keys as tuples while _build_image()
+    uses their canonical durable string form.  This local conversion preserves
+    every lock and lets the closed-import proof reject an actual divergence.
+    """
+    canonical = dict(image)
+    restored = image.get("restored_operation_ids", ())
+    if isinstance(restored, (set, frozenset, tuple, list)):
+        canonical["restored_operation_ids"] = sorted(restored)
+    for name in ("receipt_fingerprints", "confirm_keys"):
+        values = image.get(name, {})
+        if isinstance(values, Mapping):
+            canonical[name] = {
+                key: list(value) if isinstance(value, tuple) else value
+                for key, value in values.items()
+            }
+    locks = image.get("episode_locks", {})
+    if isinstance(locks, Mapping):
+        canonical["episode_locks"] = {
+            f"{key[0]}|{key[1]}" if isinstance(key, tuple) and len(key) == 2 else key: value
+            for key, value in locks.items()
+        }
+    return canonical
+
+
+def _valid_payload_digest(value: object) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(
+        character in "0123456789abcdef" for character in value
+    )
 
 
 def _manual_fingerprints_match(

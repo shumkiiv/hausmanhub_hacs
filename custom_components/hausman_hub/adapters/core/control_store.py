@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Callable, Mapping
 
 from ...application.core.command_service import (
+    ClosedRegistration,
+    ClosedTargetRegistration,
     CommitConflict,
     ManualReceipt,
     ManualStatus,
@@ -52,6 +54,7 @@ _EPISODE_LOCKS = "episode_locks"
 _SCOPE_REVISIONS = "scope_revisions"
 _CONFIG_REVISIONS = "config_revisions"
 _BOOT_ID = "boot_id"
+_CLOSED_REGISTRATIONS = "closed_registrations"
 
 # Checkpoints where a test may inject an OSError/TimeoutError to emulate
 # a failing or interrupted file operation (S-T04, D-08, D-12).
@@ -101,6 +104,7 @@ def validate_image_shape(raw: Mapping) -> None:
         *_REQUIRED_SECTIONS,
         _BOOT_ID,
         "restored_operation_ids",
+        _CLOSED_REGISTRATIONS,
     }
     if unknown:
         raise StoreImageError(f"unknown image sections: {sorted(unknown)}")
@@ -246,6 +250,7 @@ class FileControlStore:
             "schema_version",
             _BOOT_ID,
             "restored_operation_ids",
+            _CLOSED_REGISTRATIONS,
         }
         if unknown_sections:
             raise StoreImageError(
@@ -378,6 +383,70 @@ def _decode_fingerprint_part(part: object) -> object:
     return part
 
 
+def _encode_closed_registration(registration: ClosedRegistration) -> dict:
+    return {
+        "branch_id": registration.branch_id,
+        "import_id": registration.import_id,
+        "source_identity": registration.source_identity,
+        "source_revision": registration.source_revision,
+        "source_payload_digest": registration.source_payload_digest,
+        "targets": [
+            {
+                "target_id": target.target_id,
+                "resource_id": target.resource_id,
+                "entity_id": target.entity_id,
+                "property_name": target.property_name,
+                "allowed_actions": list(target.allowed_actions),
+                "binding_revision": target.binding_revision,
+                "config_revision": target.config_revision,
+            }
+            for target in registration.targets
+        ],
+    }
+
+
+def _decode_closed_registration(raw: Mapping) -> ClosedRegistration:
+    if not isinstance(raw, Mapping) or set(raw) != {
+        "branch_id", "import_id", "source_identity", "source_revision", "source_payload_digest", "targets"
+    }:
+        raise StoreImageError("closed registration has invalid shape")
+    targets = raw["targets"]
+    if not isinstance(targets, list) or not targets:
+        raise StoreImageError("closed registration targets must be a non-empty list")
+    decoded: list[ClosedTargetRegistration] = []
+    for target in targets:
+        if not isinstance(target, Mapping) or set(target) != {
+            "target_id", "resource_id", "entity_id", "property_name",
+            "allowed_actions", "binding_revision", "config_revision",
+        }:
+            raise StoreImageError("closed registration target has invalid shape")
+        actions = target["allowed_actions"]
+        if not isinstance(actions, list) or not actions or not all(
+            isinstance(action, str) and action for action in actions
+        ):
+            raise StoreImageError("closed registration actions are invalid")
+        values = (target["target_id"], target["resource_id"], target["entity_id"], target["property_name"])
+        if not all(isinstance(value, str) and value for value in values):
+            raise StoreImageError("closed registration target identity is invalid")
+        decoded.append(ClosedTargetRegistration(
+            target_id=target["target_id"], resource_id=target["resource_id"],
+            entity_id=target["entity_id"], property_name=target["property_name"],
+            allowed_actions=tuple(actions),
+            binding_revision=_strict_int(target["binding_revision"], "closed binding_revision"),
+            config_revision=_strict_int(target["config_revision"], "closed config_revision"),
+        ))
+    values = (raw["branch_id"], raw["import_id"], raw["source_identity"], raw["source_payload_digest"])
+    if not all(isinstance(value, str) and value for value in values):
+        raise StoreImageError("closed registration identity is invalid")
+    return ClosedRegistration(
+        branch_id=raw["branch_id"], import_id=raw["import_id"],
+        source_identity=raw["source_identity"],
+        source_revision=_strict_int(raw["source_revision"], "closed source_revision"),
+        source_payload_digest=raw["source_payload_digest"],
+        targets=tuple(decoded),
+    )
+
+
 def encode_state(state: Mapping) -> dict:
     """Convert the typed service state into a JSON-safe whole image."""
 
@@ -506,6 +575,10 @@ def encode_state(state: Mapping) -> dict:
         _RECEIPT_TIMES: {
             key: _strict_int(value, f"receipt_times[{key}]")
             for key, value in state.get(_RECEIPT_TIMES, {}).items()
+        },
+        _CLOSED_REGISTRATIONS: {
+            branch_id: _encode_closed_registration(registration)
+            for branch_id, registration in state.get(_CLOSED_REGISTRATIONS, {}).items()
         },
     }
     return image
@@ -644,6 +717,12 @@ def decode_state(raw: Mapping) -> dict:
             _CONFIG_REVISIONS: {
                 key: _strict_int(value, f"config_revisions[{key}]")
                 for key, value in raw[_CONFIG_REVISIONS].items()
+            },
+            _CLOSED_REGISTRATIONS: {
+                branch_id: _decode_closed_registration(registration)
+                for branch_id, registration in raw.get(
+                    _CLOSED_REGISTRATIONS, {}
+                ).items()
             },
             "restored_operation_ids": set(
                 raw.get("restored_operation_ids", [])
