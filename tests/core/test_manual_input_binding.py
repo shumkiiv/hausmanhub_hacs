@@ -127,7 +127,14 @@ def build_stand_branch(tmp_path, *, with_profile: bool = True, holds=None):
 
 
 def report_light_state(branch, value: str) -> None:
-    branch.handle_runtime_event(ENTITY_ID, None, make_state(value))
+    report_light_state.sequence += 1
+    branch.report_device_state(
+        ENTITY_ID, None, make_state(value),
+        source_sequence=report_light_state.sequence,
+    )
+
+
+report_light_state.sequence = 0
 
 
 def report_light_state_repeat(branch, value: str) -> None:
@@ -216,6 +223,15 @@ def test_no_op_admission_when_already_in_target_state(tmp_path):
     assert receipt.status is ManualStatus.NO_OP
     record = branch.core_service.record(RESOURCE_ID)
     assert record.authority.name == "MANUAL"
+
+
+def test_raw_state_snapshot_is_fresh_for_manual_no_op_but_not_auto_proof(tmp_path):
+    branch = build_stand_branch(tmp_path)
+    branch.handle_runtime_event(ENTITY_ID, None, make_state("on"))
+    fact = branch.resource_view(RESOURCE_ID).facts[0]
+    assert fact.quality.name == "FRESH"
+    assert fact.evidence.name == "ADAPTER_STATE"
+    assert branch.core_service.record(RESOURCE_ID).auto_proof is None
 
 
 def test_core_hold_survives_the_legacy_transfer_tick(tmp_path):

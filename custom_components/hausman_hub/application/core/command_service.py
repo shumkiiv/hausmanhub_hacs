@@ -246,10 +246,20 @@ class CapabilityProfile:
     version: int
     source: str
     properties: Mapping[str, PropertyRule]
+    # Internal passport metadata.  A non-zero value makes every configured
+    # upstream power dependency a final dispatch precondition; old profiles
+    # deliberately retain their historical behaviour.
+    power_warmup_ms: int = 0
 
     def __post_init__(self) -> None:
         if isinstance(self.version, bool) or not isinstance(self.version, int):
             raise CoreServiceError("CapabilityProfile.version must be int")
+        if (
+            isinstance(self.power_warmup_ms, bool)
+            or not isinstance(self.power_warmup_ms, int)
+            or self.power_warmup_ms < 0
+        ):
+            raise CoreServiceError("CapabilityProfile.power_warmup_ms must be non-negative int")
 
 
 class ManualStatus(Enum):
@@ -295,6 +305,19 @@ class ModuleEntry:
 
     manifest: ModuleManifest
     instance: object
+    memory_type: type | None = None
+    revalidate_automatic_off_before_dispatch: bool = False
+    revalidate_automatic_on_before_dispatch: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.revalidate_automatic_off_before_dispatch, bool):
+            raise CoreServiceError(
+                "revalidate_automatic_off_before_dispatch must be bool"
+            )
+        if not isinstance(self.revalidate_automatic_on_before_dispatch, bool):
+            raise CoreServiceError(
+                "revalidate_automatic_on_before_dispatch must be bool"
+            )
 
 
 class CoreCommandService:
@@ -334,6 +357,10 @@ class CoreCommandService:
 
         self._records: dict[str, ControlRecord] = dict(initial_records or {})
         self._needs: dict[str, tuple[Proposal, ...]] = {}
+        # K-04 module-local immutable state is deliberately ephemeral: mono
+        # deadlines and transition evidence never survive a restore.
+        self._module_memory: dict[str, object] = {}
+        self._module_wakeups: dict[str, int] = {}
         self._operations: dict[str, Operation] = {}
         self._resource_ops: dict[str, list[str]] = {
             resource_id: [] for resource_id in self._specs
@@ -350,6 +377,11 @@ class CoreCommandService:
             resource_id: {} for resource_id in self._specs
         }
         self._report_groups: dict[tuple, list[Observation]] = {}
+        # These cursors are intentionally only process-local snapshots for
+        # retained operations.  The durable report history remains the
+        # authority for ingress ordering; a restored operation cannot use a
+        # boundary from a previous process.
+        self._dispatch_cursors: dict[str, dict[tuple[str, str, int, str], int]] = {}
         self._confirm_keys: dict[str, tuple] = {}
         self._dispatching: dict[str, str] = {}
         self._receipt_times: dict[str, int] = {}
@@ -466,7 +498,12 @@ class CoreCommandService:
         return record.manual.active_at_utc(self._clock.now_utc_ms())
 
     def _fact_matches(self, resource_id: str, target: Target) -> bool:
-        profile = self._adapter.capabilities(resource_id)
+        try:
+            profile = self._adapter.capabilities(resource_id)
+        except Exception:
+            # A profile-less shadow branch cannot establish a no-op from
+            # untyped facts; final dispatch remains fail-closed.
+            return False
         for name, expected in requested_properties(target).items():
             fact = self._facts[resource_id].get(name)
             if fact is None:
@@ -511,6 +548,116 @@ class CoreCommandService:
             if self._clock.now_mono_ms() - fact.received_at_mono_ms > max_age:
                 return False
         return True
+
+    def _module_frame(self, module_id: str, event_id: str) -> InputFrame:
+        """Build one current, fail-closed module view.
+
+        A fact may have entered as FRESH but may not outlive its passport
+        window.  The frame therefore projects an expired fact as STALE;
+        it does not rewrite retained evidence or control history.
+        """
+        entry = self._modules[module_id]
+        subscribed = tuple(
+            self.resolve_resource_id(name)
+            for name in entry.manifest.observation_subscriptions
+        )
+        now = self._clock.now_mono_ms()
+        observations = []
+        for resource_id in subscribed:
+            try:
+                profile = self._adapter.capabilities(resource_id)
+            except Exception:
+                # Observation-only subscriptions (for example presence)
+                # have no command passport and retain their raw fact view.
+                profile = None
+            for observation in self._facts[resource_id].values():
+                rule = (
+                    profile.properties.get(observation.property)
+                    if profile is not None else None
+                )
+                max_age = rule.max_age_ms if rule else FALLBACK_MAX_AGE_MS
+                if (
+                    observation.quality is Quality.FRESH
+                    and now - observation.received_at_mono_ms > max_age
+                ):
+                    observation = replace(observation, quality=Quality.STALE)
+                observations.append(observation)
+        controls = tuple(
+            self._project_current_auto_proof(resource_id)
+            for resource_id in subscribed
+        )
+        return InputFrame(
+            now_utc_ms=self._clock.now_utc_ms(),
+            now_mono_ms=now,
+            boot_id=self._clock.boot_id(),
+            event_id=event_id,
+            config_revision=self._config_revisions.get(
+                subscribed[0] if subscribed else "", 0
+            ),
+            observations=tuple(observations),
+            resource_controls=controls,
+            related_scope_revisions=dict(self._scope_revisions),
+            inbound_needs=self._needs.get(module_id, ()),
+        )
+
+    def _project_current_auto_proof(self, resource_id: str) -> ControlRecord:
+        """Expose automatic ownership to modules only while current facts
+        still satisfy the originally confirmed target under its passport.
+
+        The durable proof remains historical evidence in the control record.
+        This projection only closes a module's present dispatch permission
+        when fresh, bound device facts no longer support it.
+        """
+        record = self._records[resource_id]
+        proof = record.auto_proof
+        if proof is None:
+            return record
+        target = proof.confirmed_target
+        if not self._fact_matches(resource_id, target):
+            return replace(record, auto_proof=None)
+        if not self._facts_fresh(resource_id, target, require_all=True):
+            return replace(record, auto_proof=None)
+        for name in requested_properties(target):
+            fact = self._facts[resource_id].get(name)
+            if (
+                fact is None
+                or fact.evidence_kind is not Evidence.DEVICE_REPORT
+                or fact.boot_id != self._clock.boot_id()
+                or fact.binding_revision != record.binding_revision
+                or fact.source_sequence is None
+            ):
+                return replace(record, auto_proof=None)
+        return record
+
+    def _module_still_permits(self, operation: Operation) -> bool:
+        """Re-evaluate an automatic intent immediately before dispatch.
+
+        Operations deliberately do not carry a second copy of a module's
+        conditions.  Instead the existing K-04 contract is evaluated against
+        current facts and the original target must still be proposed.
+        """
+        if not operation.origin_automation or operation.module_id is None:
+            return True
+        entry = self._modules.get(operation.module_id)
+        if entry is None:
+            return False
+        target_on = getattr(operation.target, "on", None)
+        if (
+            (target_on is False and not entry.revalidate_automatic_off_before_dispatch)
+            or (target_on is True and not entry.revalidate_automatic_on_before_dispatch)
+            or target_on not in (True, False)
+        ):
+            return True
+        evaluation = entry.instance.evaluate(
+            self._module_frame(operation.module_id, "dispatch_recheck"),
+            self._module_memory.get(operation.module_id),
+        )
+        return any(
+            proposal.resource_id == operation.resource_id
+            and proposal.target == operation.target
+            and proposal.config_revision == operation.config_revision
+            for proposal in evaluation.proposals
+        )
 
     def _unresolved_sent_exists(self, resource_id: str) -> bool:
         """A dispatch with an undetermined outcome exists (K-08 no_op)."""
@@ -622,6 +769,7 @@ class CoreCommandService:
             for operation_id in evictable[:evict_count]:
                 operation = self._operations.pop(operation_id, None)
                 self._confirm_keys.pop(operation_id, None)
+                self._dispatch_cursors.pop(operation_id, None)
                 # Every index must forget the evicted id together with the
                 # operation itself, or the next read crashes (LP-C6-R1).
                 if operation is not None:
@@ -654,36 +802,27 @@ class CoreCommandService:
         if entry is None:
             raise UnknownModule(module_id)
         manifest = entry.manifest
-        subscribed = tuple(
-            self.resolve_resource_id(name)
-            for name in manifest.observation_subscriptions
-        )
-        frame = InputFrame(
-            now_utc_ms=self._clock.now_utc_ms(),
-            now_mono_ms=self._clock.now_mono_ms(),
-            boot_id=self._clock.boot_id(),
-            event_id=event_id,
-            config_revision=self._config_revisions.get(
-                subscribed[0] if subscribed else "", 0
-            ),
-            observations=tuple(
-                observation
-                for resource_id in subscribed
-                for observation in self._facts[resource_id].values()
-            ),
-            resource_controls=tuple(
-                self._records[resource_id] for resource_id in subscribed
-            ),
-            related_scope_revisions=dict(self._scope_revisions),
-            inbound_needs=self._needs.get(module_id, ()),
-        )
-        evaluation = entry.instance.evaluate(frame, None)
+        frame = self._module_frame(module_id, event_id)
+        evaluation = entry.instance.evaluate(frame, self._module_memory.get(module_id))
         if evaluation.module_id != module_id:
             raise CoreServiceError("evaluation module mismatch")
         if evaluation.constraints:
             # Constraint arbitration is outside the FIRST scope; non-empty
             # sets are rejected instead of being silently ignored (K-05).
             raise CoreServiceError("constraints_are_out_of_first_scope")
+        if entry.memory_type is None:
+            if evaluation.next_memory is not None:
+                raise CoreServiceError("module memory is not registered")
+        elif evaluation.next_memory is not None and not isinstance(
+            evaluation.next_memory, entry.memory_type
+        ):
+            raise CoreServiceError("module memory type is invalid")
+        wakeup = evaluation.next_wakeup_mono_ms
+        if wakeup is not None and (
+            isinstance(wakeup, bool) or not isinstance(wakeup, int)
+            or wakeup <= frame.now_mono_ms
+        ):
+            raise CoreServiceError("module wakeup must be a future int")
         previous = self._needs.get(module_id, ())
         canonical: list[Proposal] = []
         for proposal in evaluation.proposals:
@@ -706,6 +845,11 @@ class CoreCommandService:
             if count > manifest.max_proposals_per_resource:
                 raise CoreServiceError("too many proposals for resource")
         self._needs[module_id] = tuple(canonical)
+        self._module_memory[module_id] = evaluation.next_memory
+        if wakeup is None:
+            self._module_wakeups.pop(module_id, None)
+        else:
+            self._module_wakeups[module_id] = wakeup
         previous_by_id = {
             proposal.proposal_id: proposal for proposal in previous
         }
@@ -1003,14 +1147,36 @@ class CoreCommandService:
         dispatching record, transport call."""
 
         self.advance_timeouts()
+        self._run_due_module_wakeups()
         self.take_ready()
         self.run_taken()
         self.run_dispatching()
+
+    def _run_due_module_wakeups(self) -> None:
+        now = self._clock.now_mono_ms()
+        due = sorted(
+            (deadline, module_id)
+            for module_id, deadline in self._module_wakeups.items()
+            if deadline <= now
+        )
+        for deadline, module_id in due:
+            if self._module_wakeups.get(module_id) != deadline:
+                continue
+            self.process_module_event(module_id, f"wakeup.{module_id}.{deadline}")
 
     def _final_permit(
         self, operation: Operation
     ) -> DispatchPermit | PermitDenial:
         record = self.record(operation.resource_id)
+        if not self._module_still_permits(operation):
+            return PermitDenial(
+                operation_id=operation.operation_id,
+                resource_id=operation.resource_id,
+                reason_code="module_condition_changed",
+            )
+        power_denial = self._power_dependency_denial(operation)
+        if power_denial is not None:
+            return power_denial
         permit = issue_dispatch_permit(
             operation=operation,
             record=record,
@@ -1044,6 +1210,57 @@ class CoreCommandService:
             )
         self._consumed_permits.add(permit.permit_id)
         return permit
+
+    def _power_dependency_denial(
+        self, operation: Operation
+    ) -> PermitDenial | None:
+        """Fail closed immediately before transport for opted-in profiles.
+
+        The relationship is intentionally read from the immutable resource
+        passport.  A queued operation cannot cross this boundary after an
+        upstream OFF, stale report, binding move, reboot, or incomplete
+        warm-up window.
+        """
+        if not operation.target_requires_on:
+            return None
+        profile = self._adapter.capabilities(operation.resource_id)
+        if profile.power_warmup_ms == 0:
+            return None
+        spec = self.spec(operation.resource_id)
+        now = self._clock.now_mono_ms()
+        for source_id in spec.power_dependencies:
+            source_spec = self._specs.get(source_id)
+            source_on = self._facts.get(source_id, {}).get("on")
+            if source_spec is None or source_on is None:
+                return self._power_denial(operation)
+            try:
+                source_profile = self._adapter.capabilities(source_id)
+                source_rule = source_profile.properties.get("on")
+            except Exception:
+                return self._power_denial(operation)
+            age = now - source_on.received_at_mono_ms
+            if (
+                source_rule is None
+                or age < 0
+                or age > source_rule.max_age_ms
+                or source_on.value is not True
+                or source_on.quality is not Quality.FRESH
+                or source_on.evidence_kind is not Evidence.DEVICE_REPORT
+                or source_on.boot_id != self._clock.boot_id()
+                or source_on.binding_revision != source_spec.binding_revision
+                or source_on.source_sequence is None
+                or age < profile.power_warmup_ms
+            ):
+                return self._power_denial(operation)
+        return None
+
+    @staticmethod
+    def _power_denial(operation: Operation) -> PermitDenial:
+        return PermitDenial(
+            operation_id=operation.operation_id,
+            resource_id=operation.resource_id,
+            reason_code="power_dependency_unready",
+        )
 
     def _apply_permit_denial(
         self, operation: Operation, denial: PermitDenial
@@ -1156,7 +1373,7 @@ class CoreCommandService:
             started = self._clock.now_mono_ms()
             operation.dispatch_started_at_mono_ms = started
             operation.confirmation_deadline_mono_ms = started + timeout
-            operation.pre_dispatch_sequence = self._max_sequence(resource_id)
+            operation.pre_dispatch_sequence = None
             prepared = self._adapter.prepare(
                 operation.target,
                 self._bindings[resource_id],
@@ -1169,6 +1386,17 @@ class CoreCommandService:
                     operation, OperationPhase.REJECTED, "invalid_profile"
                 )
                 continue
+            # Capture trusted device-report cursors at the last physical
+            # boundary.  Facts can be replaced by raw adapter state, so they
+            # cannot establish this replay floor.
+            self._dispatch_cursors[operation.operation_id] = dict(
+                self._trusted_report_group_maxima(
+                    resource_id, operation.binding_revision
+                )
+            )
+            # Kept for the persisted operation ABI only; it is no longer a
+            # cross-producer confirmation authority.
+            operation.pre_dispatch_sequence = None
             outcome = self._adapter.dispatch_once(prepared, self._transport)
             if outcome.status is TransportStatus.ACCEPTED:
                 operation.phase = OperationPhase.OBSERVING
@@ -1183,20 +1411,105 @@ class CoreCommandService:
                     ] = "transport_error_unknown_outcome"
         self._commit_state()
 
-    def _max_sequence(self, resource_id: str) -> int | None:
-        sequences = [
-            fact.source_sequence
-            for fact in self._facts[resource_id].values()
-            if fact.source_sequence is not None
-        ]
-        return max(sequences) if sequences else None
-
     # ------------------------------------------------------------------
     # observations
 
     def ingest_observation(self, observation: Observation) -> str:
         resource_id = self.resolve_resource_id(observation.resource_id)
-        self._facts[resource_id][observation.property] = observation
+        previous = self._facts[resource_id].get(observation.property)
+        confirmation_key = (
+            resource_id,
+            observation.source_sequence,
+            observation.source_id,
+            observation.source_epoch,
+            observation.evidence_kind.value,
+        )
+        incoming_sequence = observation.source_sequence
+        accepted_sequence = None
+        if (
+            observation.evidence_kind is Evidence.DEVICE_REPORT
+            and incoming_sequence is not None
+        ):
+            namespace = (
+                observation.source_id,
+                observation.source_epoch,
+                observation.binding_revision,
+                observation.boot_id,
+            )
+            accepted_sequence = self._trusted_report_group_maxima(
+                resource_id, observation.binding_revision
+            ).get(namespace)
+        if (
+            incoming_sequence is not None
+            and accepted_sequence is not None
+            and incoming_sequence < accepted_sequence
+        ):
+            return "ignored_stale_report"
+        report_sequence_group = (
+            observation.evidence_kind is Evidence.DEVICE_REPORT
+            and incoming_sequence is not None
+        )
+        group = self._report_groups.get(confirmation_key, [])
+        same_property = [
+            item for item in group
+            if item.property == observation.property
+        ] if report_sequence_group else []
+
+        def same_report_fact(item: Observation) -> bool:
+            return (
+                item.value == observation.value
+                and item.quality == observation.quality
+                and item.evidence_kind == observation.evidence_kind
+                and item.binding_revision == observation.binding_revision
+                and item.attribution == observation.attribution
+            )
+
+        # A complete device report legitimately has several properties with
+        # one sequence.  A second observation for one of those properties is
+        # only a replay when its fact is identical.  A conflicting replay
+        # poisons that property's current fact and cannot re-open rights
+        # established by an older, valid report.
+        conflicting_replay = bool(same_property) and any(
+            not same_report_fact(item) for item in same_property
+        )
+        # Once a same-sequence property is poisoned, both payloads are
+        # retained as its history.  Replaying either already known payload
+        # must leave the INVALID current fact, its timestamp and the durable
+        # revision untouched; only a strictly newer report can recover it.
+        known_poisoned_replay = conflicting_replay and any(
+            same_report_fact(item) for item in same_property
+        )
+        exact_replay = bool(same_property) and all(
+            same_report_fact(item) for item in same_property
+        )
+        if exact_replay or known_poisoned_replay:
+            return "recorded"
+        if conflicting_replay:
+            self._facts[resource_id][observation.property] = replace(
+                observation, quality=Quality.INVALID
+            )
+            self._report_groups.setdefault(confirmation_key, []).append(
+                observation
+            )
+            if observation.attribution is ObservationAttribution.MANUAL:
+                self._apply_manual_evidence(resource_id)
+            self._revalidate_confirm_group(confirmation_key)
+            self._commit_state()
+            return (
+                "manual_evidence"
+                if observation.attribution is ObservationAttribution.MANUAL
+                else "recorded"
+            )
+        previous_is_exact_replay = (
+            previous is not None
+            and incoming_sequence is not None
+            and previous.source_sequence == incoming_sequence
+            and previous.source_id == observation.source_id
+            and previous.source_epoch == observation.source_epoch
+            and same_report_fact(previous)
+        )
+        if not previous_is_exact_replay:
+            self._facts[resource_id][observation.property] = observation
         if observation.attribution is ObservationAttribution.MANUAL:
             # Proven manual intervention is processed before any
             # confirmation correlation: it closes the automatic rights
@@ -1204,13 +1517,6 @@ class CoreCommandService:
             # (SEC-FIRST-OWN-02-R1); a manual-origin operation may then
             # still be confirmed by its own report.
             self._apply_manual_evidence(resource_id)
-        confirmation_key = (
-            resource_id,
-            observation.source_sequence,
-            observation.received_at_mono_ms,
-            observation.source_id,
-            observation.source_epoch,
-        )
         self._report_groups.setdefault(confirmation_key, []).append(
             observation
         )
@@ -1243,6 +1549,40 @@ class CoreCommandService:
         self._revalidate_confirm_group(confirmation_key)
         self._commit_state()
         return result
+
+    def _trusted_report_group_maxima(
+        self, resource_id: str, binding_revision: int
+    ) -> dict[tuple[str, str, int, str], int]:
+        """Return trusted report cursors from retained report members.
+
+        Current facts are deliberately excluded: adapter-state reports may
+        replace them, while INVALID device reports must still close replay.
+        The cursor is scoped to the whole producer/binding/boot namespace;
+        properties merely share a device report sequence.
+        """
+
+        maxima: dict[tuple[str, str, int, str], int] = {}
+        current_boot = self._clock.boot_id()
+        for group in self._report_groups.values():
+            for observation in group:
+                if (
+                    observation.resource_id != resource_id
+                    or observation.evidence_kind is not Evidence.DEVICE_REPORT
+                    or observation.binding_revision != binding_revision
+                    or observation.boot_id != current_boot
+                    or observation.source_sequence is None
+                ):
+                    continue
+                namespace = (
+                    observation.source_id,
+                    observation.source_epoch,
+                    observation.binding_revision,
+                    observation.boot_id,
+                )
+                previous = maxima.get(namespace)
+                if previous is None or observation.source_sequence > previous:
+                    maxima[namespace] = observation.source_sequence
+        return maxima
 
     def _apply_manual_evidence(self, resource_id: str) -> None:
         """A manually attributed device report voids automatic ownership:
@@ -1390,6 +1730,9 @@ class CoreCommandService:
             # comparable with new observations; a restored operation is
             # never confirmed across a restart.
             return False
+        snapshot = self._dispatch_cursors.get(operation.operation_id)
+        if snapshot is None:
+            return False
         if operation.origin_automation:
             for observation in group:
                 if (
@@ -1422,11 +1765,14 @@ class CoreCommandService:
                 return False
             if observation.source_sequence is None:
                 return False
-            if (
-                operation.pre_dispatch_sequence is not None
-                and observation.source_sequence
-                <= operation.pre_dispatch_sequence
-            ):
+            namespace = (
+                observation.source_id,
+                observation.source_epoch,
+                observation.binding_revision,
+                observation.boot_id,
+            )
+            floor = snapshot.get(namespace)
+            if floor is not None and observation.source_sequence <= floor:
                 return False
             if observation.property in seen and (
                 seen[observation.property] != observation.value
@@ -1439,12 +1785,14 @@ class CoreCommandService:
 
     def _revalidate_confirm_group(self, confirmation_key: tuple) -> None:
         """If a confirmed result was issued from a report group that later
-        becomes contradictory or invalid, the result is revoked for **any**
-        confirmed operation of that group — automatic ON with proof,
-        automatic OFF, manual or late confirmation (SEC-FIRST-CONF-02-R3).
-        The proof is cleared only when it belongs to the revoked
-        operation; a later ambiguous outcome blocks the operation's
-        episode."""
+        becomes contradictory or invalid, the result is revoked for a
+        confirmed operation issued in the current process — automatic ON
+        with proof, automatic OFF, manual or late confirmation
+        (SEC-FIRST-CONF-02-R3).  A restored confirmation is retained
+        history: the new process has no dispatch boundary with which to
+        revalidate that historical group.  The proof is cleared only when
+        it belongs to the revoked operation; a later ambiguous outcome
+        blocks the operation's episode."""
 
         for operation_id, key in list(self._confirm_keys.items()):
             if key != confirmation_key:
@@ -1454,6 +1802,11 @@ class CoreCommandService:
                 OperationPhase.CONFIRMED,
                 OperationPhase.CONFIRMED_LATE,
             ):
+                continue
+            if operation_id in self._restored_operation_ids:
+                # The retained confirmed outcome belongs to the prior
+                # process.  A new report group cannot revalidate it because
+                # its dispatch boundary was not restored.
                 continue
             group = self._report_groups.get(confirmation_key, [])
             if self._group_members_valid(operation, group):

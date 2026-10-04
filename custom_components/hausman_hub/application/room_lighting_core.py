@@ -32,7 +32,7 @@ from ..domain.core.models import (
     ResourceSpec,
     StabilityProfile,
 )
-from ..domain.lighting_plugin import LightingPlugin
+from ..domain.lighting_plugin import LightingPlugin, ProfileTransitionMemory
 from ..domain.room_lighting import RoomLightingConfig
 
 if TYPE_CHECKING:
@@ -193,6 +193,13 @@ class RoomLightingCoreBranch:
             bindings=self._bindings,
             clock=self._clock,
             source_epoch=f"{room_id}.shadow",
+            binding_revision=branch_config.config.version,
+        )
+        device_profiles = dict(branch_config.device_profiles or {})
+        main_target = next(
+            (target for target in branch_config.config.devices.light_targets
+             if target.role is not None and target.role.value == "main"),
+            None,
         )
         self._module = LightingPlugin(
             module_id=f"room_lighting.{room_id}",
@@ -200,6 +207,14 @@ class RoomLightingCoreBranch:
             timezone=branch_config.resolved_timezone(),
             sunrise=branch_config.resolved_sunrise(),
             sunset=branch_config.resolved_sunset(),
+            # The pure module receives one immutable value from the
+            # application-owned capability passport.  It never reaches
+            # through the adapter or invents a room-specific duration.
+            power_warmup_ms=(
+                device_profiles[main_target.id].power_warmup_ms
+                if main_target is not None and main_target.id in device_profiles
+                else 0
+            ),
         )
         resource_ids = self._resource_ids(branch_config.config)
         manifest = ModuleManifest(
@@ -220,7 +235,9 @@ class RoomLightingCoreBranch:
             for target in branch_config.config.devices.light_targets
             if isinstance(target.entity_id, str)
         }
-        device_profiles = dict(branch_config.device_profiles or {})
+        power = branch_config.config.devices.power_switch
+        if power is not None and isinstance(power.entity_id, str):
+            self._target_bindings[power.id] = power.entity_id
         self._device_adapter = ProfileBoundDeviceAdapter(
             LightDeviceAdapter(
                 profiles_by_resource=device_profiles,
@@ -244,6 +261,9 @@ class RoomLightingCoreBranch:
                 self._module.module_id: ModuleEntry(
                     manifest=manifest,
                     instance=self._module,
+                    memory_type=ProfileTransitionMemory,
+                    revalidate_automatic_off_before_dispatch=True,
+                    revalidate_automatic_on_before_dispatch=True,
                 )
             },
             stability_profiles={
@@ -429,6 +449,27 @@ class RoomLightingCoreBranch:
                 entity_id, old_state, new_state
             )
 
+    def report_device_state(
+        self, entity_id: str, old_state: object, new_state: object,
+        *, source_sequence: int,
+    ) -> None:
+        """Ingest an explicitly authenticated device report.
+
+        Legacy HA callbacks remain untrusted snapshots.  This narrow port is
+        for an upstream producer that already supplies the report provenance
+        and a positive monotonic sequence; it does not infer either fact from
+        a state object.
+        """
+        with self._lock:
+            if self._input_closed or self._mode is not self.MODE_SHADOW:
+                return
+            observations = self._input_adapter.observations(
+                entity_id, old_state, new_state,
+                trusted_device_report=True, source_sequence=source_sequence,
+            )
+            if observations:
+                self._ingest_many(observations)
+
     def _handle_runtime_event_locked(
         self, entity_id: str, old_state: object, new_state: object
     ) -> None:
@@ -438,12 +479,12 @@ class RoomLightingCoreBranch:
             # Minute boundary: the schedule recalculation tick.
             self._process_room_event()
             return
-        observation = self._input_adapter.observation(
+        observations = self._input_adapter.observations(
             entity_id, old_state, new_state
         )
-        if observation is None:
+        if not observations:
             return
-        self._ingest(observation)
+        self._ingest_many(observations)
 
     def process_schedule_tick(self) -> None:
         with self._lock:
@@ -472,17 +513,32 @@ class RoomLightingCoreBranch:
     def _resource_ids(config: RoomLightingConfig) -> tuple[str, ...]:
         sensor_ids = tuple(sensor.id for sensor in config.devices.sensors)
         target_ids = tuple(target.id for target in config.devices.light_targets)
-        return sensor_ids + target_ids
+        power = config.devices.power_switch
+        return sensor_ids + target_ids + ((power.id,) if power is not None else ())
 
     @staticmethod
     def _specs_from(config: RoomLightingConfig) -> dict:
         specs: dict[str, ResourceSpec] = {}
         for target in config.devices.light_targets:
+            dependencies = ()
+            if target.role is not None and target.role.value == "main" and config.devices.power_switch is not None:
+                dependencies = (config.devices.power_switch.id,)
             specs[target.id] = ResourceSpec(
                 resource_id=target.id,
                 owner_module=f"room_lighting.{config.room_id}",
                 adapter_id="ha.light",
                 capability_profile_id="light-basic",
+                binding_revision=config.version,
+                power_dependencies=dependencies,
+                manual_scopes=(config.room_id,),
+            )
+        power = config.devices.power_switch
+        if power is not None:
+            specs[power.id] = ResourceSpec(
+                resource_id=power.id,
+                owner_module=f"room_lighting.{config.room_id}",
+                adapter_id="ha.switch",
+                capability_profile_id="power-switch",
                 binding_revision=config.version,
                 manual_scopes=(config.room_id,),
             )
@@ -518,8 +574,8 @@ class RoomLightingCoreBranch:
         return records
 
     @staticmethod
-    def _bindings_from(config: RoomLightingConfig) -> dict[str, EntityBinding]:
-        bindings: dict[str, EntityBinding] = {}
+    def _bindings_from(config: RoomLightingConfig) -> dict[str, EntityBinding | tuple[EntityBinding, ...]]:
+        bindings: dict[str, EntityBinding | tuple[EntityBinding, ...]] = {}
         for sensor in config.devices.sensors:
             if sensor.entity_id is None:
                 continue
@@ -536,21 +592,33 @@ class RoomLightingCoreBranch:
         for target in config.devices.light_targets:
             if target.entity_id is None:
                 continue
-            bindings[target.entity_id] = EntityBinding(
-                resource_id=target.id,
-                property="on",
-                unit="bool",
-            )
+            target_bindings = [EntityBinding(
+                resource_id=target.id, property="on", unit="bool",
+            )]
             if target.brightness:
-                bindings[f"{target.entity_id}.brightness"] = EntityBinding(
-                    resource_id=target.id,
-                    property="brightness_pct",
-                    unit="pct",
-                )
+                target_bindings.append(EntityBinding(
+                    resource_id=target.id, property="brightness_pct", unit="pct",
+                ))
+            if target.color_temperature:
+                target_bindings.append(EntityBinding(
+                    resource_id=target.id, property="color_temperature_k", unit="kelvin",
+                ))
+            bindings[target.entity_id] = tuple(target_bindings)
+        power = config.devices.power_switch
+        if power is not None and power.entity_id is not None:
+            bindings[power.entity_id] = EntityBinding(
+                resource_id=power.id, property="on", unit="bool",
+            )
         return bindings
 
     def _ingest(self, observation: Observation) -> None:
         self._service.ingest_observation(observation)
+        self._process_room_event()
+
+    def _ingest_many(self, observations: tuple[Observation, ...]) -> None:
+        """Ingest one physical report as a complete group before evaluating."""
+        for observation in observations:
+            self._service.ingest_observation(observation)
         self._process_room_event()
 
     def _process_room_event(self) -> None:
