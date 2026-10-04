@@ -62,6 +62,7 @@ NATIVE_TARGET_HUMIDITY_FIELD = "native_target_humidity"
 RELIABLE_SCOPE_INTEGRITY_KEY_FIELD = "reliable_scope_integrity_key"
 RELIABLE_SCOPE_INTEGRITY_INITIALIZED_FIELD = "reliable_scope_integrity_initialized"
 RELIABLE_SCOPE_EXTERNAL_KEYRING_INITIALIZED_FIELD = "reliable_scope_external_keyring_initialized"
+CORE_SHADOW_ROOM_ID_FIELD = "core_shadow_room_id"
 
 CONNECTION_MODE_FIELD = "connection_mode"
 CONNECTION_MODE_DEFAULT = "home_assistant"
@@ -183,11 +184,13 @@ def effective_configuration(
             RELIABLE_SCOPE_INTEGRITY_KEY_FIELD,
             RELIABLE_SCOPE_INTEGRITY_INITIALIZED_FIELD,
             RELIABLE_SCOPE_EXTERNAL_KEYRING_INITIALIZED_FIELD,
+            CORE_SHADOW_ROOM_ID_FIELD,
         },
         "entry data",
     )
     if not {MODE_FIELD, DIRECT_EXECUTION_STATUS_FIELD}.issubset(entry_data):
         raise ConfigurationViolation("entry data is incomplete")
+    core_shadow_room_id_from_entry_data(entry_data)
     # The two retired local-integrity fields are accepted only long enough for
     # setup to remove them. Do not inspect their values: they can contain the
     # old signing secret and are never a source of trust for the new ledger.
@@ -270,6 +273,22 @@ def effective_configuration(
         smart_home_center_url_value,
         home_assistant_url_value,
     )
+
+
+def core_shadow_room_id_from_entry_data(entry_data: Mapping[str, Any]) -> str | None:
+    """Return the optional internal shadow-room selection after validation.
+
+    The value remains in entry data so existing clients do not acquire a new
+    option or API path.  Validate it at the configuration boundary before a
+    startup path can derive a file name from it.
+    """
+
+    value = entry_data.get(CORE_SHADOW_ROOM_ID_FIELD)
+    if value is None:
+        return None
+    if not isinstance(value, str) or re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", value) is None:
+        raise ConfigurationViolation("core shadow room id is invalid")
+    return value
 
 
 def _configuration_for(

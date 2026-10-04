@@ -6,9 +6,12 @@ returns proposals — without HA, storage or dispatch.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import time
 from decimal import Decimal
 from zoneinfo import ZoneInfo
+
+import pytest
 
 from custom_components.hausman_hub.domain.lighting_plugin import LightingPlugin
 from custom_components.hausman_hub.domain.core.models import (
@@ -259,3 +262,81 @@ def test_evaluation_is_deterministic():
     assert [p.reason_code for p in first.proposals] == [
         p.reason_code for p in second.proposals
     ]
+
+
+def test_sensor_ttl_default_and_duplicate_do_not_refresh_continuity():
+    plugin = _plugin()
+    first = plugin.evaluate(_frame(0, [
+        _observation("sensor_presence", "occupancy", False, 0),
+    ]), None)
+    original = first.next_memory.sensor_continuity[0]
+    duplicate = plugin.evaluate(_frame(1_000, [
+        _observation("sensor_presence", "occupancy", False, 0),
+    ]), first.next_memory)
+    retained = duplicate.next_memory.sensor_continuity[0]
+    assert original[8:] == (60_000, 0, 0)
+    assert retained[8:] == original[8:]
+
+
+def test_same_lineage_older_sequence_does_not_refresh_continuity():
+    plugin = _plugin()
+    first = plugin.evaluate(_frame(0, [replace(
+        _observation("sensor_presence", "occupancy", False, 0),
+        source_sequence=41,
+    )]), None)
+    older = plugin.evaluate(_frame(1_000, [replace(
+        _observation("sensor_presence", "occupancy", False, 1_000),
+        source_sequence=1,
+    )]), first.next_memory)
+    assert older.next_memory.sensor_continuity[0][8:] == (60_000, 0, 0)
+
+
+def test_sensor_continuity_resets_after_a_configured_90s_gap():
+    plugin = LightingPlugin(
+        module_id=MODULE_ID,
+        config=_config(),
+        timezone=TZ,
+        sunrise=time(8, 0),
+        sunset=time(18, 0),
+        sensor_max_age_ms={"sensor_presence": 90_000, "sensor_motion": 90_000},
+    )
+    first = plugin.evaluate(_frame(0, [
+        _observation("sensor_presence", "occupancy", False, 0),
+    ]), None)
+    continued = plugin.evaluate(_frame(60_000, [
+        _observation("sensor_presence", "occupancy", False, 60_000),
+    ]), first.next_memory)
+    reset = plugin.evaluate(_frame(150_001, [
+        _observation("sensor_presence", "occupancy", False, 150_001),
+    ]), continued.next_memory)
+    assert continued.next_memory.sensor_continuity[0][9] == 0
+    assert reset.next_memory.sensor_continuity[0][9] == 150_001
+
+
+@pytest.mark.parametrize("rollover", ("boot", "config", "binding"))
+def test_lineage_rollover_resets_even_for_an_equal_or_lower_sequence(rollover):
+    plugin = _plugin()
+    initial_observation = replace(
+        _observation("sensor_presence", "occupancy", False, 0),
+        source_sequence=41,
+        observation_id="producer-1",
+    )
+    first = plugin.evaluate(_frame(0, [initial_observation]), None)
+    next_observation = replace(
+        _observation("sensor_presence", "occupancy", False, 1_000),
+        source_sequence=1,
+        observation_id="producer-1",
+    )
+    next_frame = _frame(1_000, [next_observation])
+    if rollover == "boot":
+        next_observation = replace(next_observation, boot_id="test.boot2")
+        next_frame = replace(next_frame, boot_id="test.boot2", observations=(next_observation,))
+    elif rollover == "config":
+        next_frame = replace(next_frame, config_revision=2)
+    else:
+        next_observation = replace(next_observation, binding_revision=2)
+        next_frame = replace(next_frame, observations=(next_observation,))
+    result = plugin.evaluate(next_frame, first.next_memory)
+    continuity = result.next_memory.sensor_continuity[0]
+    assert continuity[6] == 1
+    assert continuity[9] == 1_000

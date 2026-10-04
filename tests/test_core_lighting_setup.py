@@ -28,6 +28,10 @@ from custom_components.hausman_hub.application.core.command_service import (
     _payload_digest,
 )
 from custom_components.hausman_hub.application.core_manual_input import CoreManualInput
+from custom_components.hausman_hub.application.configuration import (
+    ConfigurationViolation,
+    effective_configuration,
+)
 from custom_components.hausman_hub.application.room_lighting_runtime import RoomLightingRuntime
 from custom_components.hausman_hub.application.room_lighting_shadow import RoomLightingShadowService
 from custom_components.hausman_hub import _async_start_room_lighting_with_core
@@ -599,3 +603,16 @@ async def test_actual_setup_entry_calls_the_startup_helper_once(monkeypatch):
     assert helper.await_args.kwargs["core_shadow_room_id"] == "startup-room"
     intake = helper.await_args.kwargs["core_manual_input"]
     assert intake.registration_ready("any-target") is False
+
+
+def test_core_shadow_room_identifier_is_strictly_validated_in_entry_data():
+    entry = {
+        "mode": "read-only",
+        "direct_execution_status": "direct_execution_blocked",
+        "core_shadow_room_id": "shower_1",
+    }
+    assert effective_configuration(entry, {}).mode == "read-only"
+
+    entry["core_shadow_room_id"] = "../outside"
+    with pytest.raises(ConfigurationViolation, match="core shadow room id"):
+        effective_configuration(entry, {})

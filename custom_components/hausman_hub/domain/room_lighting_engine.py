@@ -104,6 +104,7 @@ class SensorSnapshot:
     last_changed: int
     lux: float | None = None
     lux_healthy: bool = True
+    continuous_absence_since: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.sensor_id, str) or not self.sensor_id:
@@ -114,6 +115,12 @@ class SensorSnapshot:
             raise RoomLightingEngineViolation("sensor state is invalid")
         if type(self.last_changed) is not int or self.last_changed < 0:
             raise RoomLightingEngineViolation("sensor timestamp is invalid")
+        if (
+            self.continuous_absence_since is not None
+            and (type(self.continuous_absence_since) is not int
+                 or self.continuous_absence_since < 0)
+        ):
+            raise RoomLightingEngineViolation("continuous absence timestamp is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1315,7 +1322,11 @@ def _absence_evidence(
             continue
         if context.now - sensor.last_changed > policy.staleness_seconds * 1000:
             return (False, None, True)
-        off_times.append(sensor.last_changed)
+        off_times.append(
+            sensor.continuous_absence_since
+            if sensor.continuous_absence_since is not None
+            else sensor.last_changed
+        )
     if not off_times:
         return (False, None, False)
     absence_since = max(off_times)

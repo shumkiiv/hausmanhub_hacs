@@ -23,6 +23,7 @@ from .application.configuration import (
     RELIABLE_SCOPE_EXTERNAL_KEYRING_INITIALIZED_FIELD,
     RELIABLE_SCOPE_INTEGRITY_INITIALIZED_FIELD,
     RELIABLE_SCOPE_INTEGRITY_KEY_FIELD,
+    core_shadow_room_id_from_entry_data,
     effective_configuration,
 )
 
@@ -583,8 +584,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .application.core_manual_input import CoreManualInput
 
     core_manual_input = CoreManualInput()
-    core_shadow_room_id = entry.data.get("core_shadow_room_id")
-    if isinstance(core_shadow_room_id, str) and core_shadow_room_id:
+    core_shadow_room_id = core_shadow_room_id_from_entry_data(entry.data)
+    if core_shadow_room_id is not None:
         # Close before publishing the provider or awaiting another startup
         # dependency; a missing/corrupt image must never leave a legacy
         # command window.
