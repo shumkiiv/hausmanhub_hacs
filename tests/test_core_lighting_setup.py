@@ -503,6 +503,201 @@ async def test_registered_startup_failure_keeps_exact_deny_only_reservation(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("recheck", "change"),
+    (
+        ("raises", "bound"),
+        ("none", "bound"),
+        ("corrupt", "bound"),
+        ("corrupt", "emptytuple"),
+        ("corrupt", "objecttuple"),
+        ("otherroom", "bound"),
+        ("valid", "unchanged"),
+        ("valid", "bound"),
+        ("valid", "empty"),
+        ("valid", "unbound"),
+        ("plugin", "unchanged"),
+    ),
+)
+async def test_startup_recheck_matrix_keeps_denied_targets_without_a_window(
+    tmp_path, request, recheck, change
+):
+    """One service feeds the startup helper and the real runtime.
+
+    HH-014.b B06-03/B06-02R1: the awaited recheck runs behind a re-armed
+    unknown barrier (the pending recheck denies globally); raises/None,
+    readable-but-corrupt objects (a faked empty or object-filled
+    ``light_targets`` tuple) and a valid configuration of another room
+    keep that global deny; a proved changed room reserves old plus its
+    real bound new entities; a proved empty/unbound room closes only its
+    own old scope; a constructor failure after a proved recheck keeps the
+    exact old scope while the neighbour keeps exactly one legacy command.
+    """
+
+    old = config_from_payload(_config_payload("startup-room"))
+    changed_payload = _config_payload("startup-room")
+    changed_payload["version"] = 2
+    changed_payload["devices"]["light_targets"][0]["entityId"] = "light.changed"
+    if change == "empty":
+        changed_payload["devices"]["light_targets"] = []
+    if change == "unbound":
+        changed_payload["devices"]["light_targets"][0]["entityId"] = None
+    changed = old if change == "unchanged" else config_from_payload(changed_payload)
+    other_room_payload = _config_payload("other-room")
+    other_room_payload["version"] = 2
+    other_room_payload["devices"]["light_targets"][0]["entityId"] = "light.changed"
+    other_room = config_from_payload(other_room_payload)
+    neighbor_payload = _config_payload("neighbor-room")
+    neighbor_payload["devices"]["light_targets"][0]["id"] = "neighbor-light"
+    neighbor_payload["devices"]["light_targets"][0]["entityId"] = "light.neighbor"
+    neighbor = config_from_payload(neighbor_payload)
+    _seed_registered_startup_image(tmp_path, old)
+
+    class _MovingService(_ConfigService):
+        def __init__(self):
+            super().__init__(changed, neighbor)
+            self.get_calls = 0
+            self.list_calls = 0
+            self.pending_probe = None
+
+        async def async_get_config(self, room_id):
+            self.get_calls += 1
+            if self.get_calls == 2 and self.pending_probe is not None:
+                probe, self.pending_probe = self.pending_probe, None
+                await probe()
+            if self.get_calls == 1:
+                return old
+            if recheck == "raises":
+                raise RuntimeError("synthetic recheck storage unavailable")
+            if recheck == "none":
+                return None
+            if recheck == "corrupt":
+                if change == "emptytuple":
+                    return SimpleNamespace(
+                        devices=SimpleNamespace(light_targets=())
+                    )
+                if change == "objecttuple":
+                    return SimpleNamespace(
+                        devices=SimpleNamespace(light_targets=(object(),))
+                    )
+                return SimpleNamespace(devices=None)
+            if recheck == "otherroom":
+                return other_room
+            return changed
+
+        async def async_list_configs(self):
+            self.list_calls += 1
+            return await super().async_list_configs()
+
+    hass = _StartupHass(tmp_path)
+    for entity_id in (
+        "binary_sensor.test_presence",
+        "light.test_main",
+        "light.changed",
+        "light.neighbor",
+        AWAY_ENTITY_ID,
+    ):
+        hass.states.set(entity_id, "off")
+    intake = CoreManualInput()
+    executor = _SpyExecutor()
+    service = _MovingService()
+    runtime = RoomLightingRuntime(
+        hass,
+        service,
+        RoomLightingShadowService(_MemoryShadowStore()),
+        executor=executor,
+        now_ms=lambda: _NOW_MS,
+        track_state_changes=lambda hass, entities, callback: (lambda: None),
+        track_interval=lambda hass, callback, interval: (lambda: None),
+        listen_bus=lambda hass, event_type, callback: (lambda: None),
+        reserved_entity_ids_provider=intake.command_entity_ids,
+        away_entity_id=AWAY_ENTITY_ID,
+    )
+    if recheck == "plugin":
+        import custom_components.hausman_hub.application.room_lighting_core as core_module
+
+        monkeypatch = request.getfixturevalue("monkeypatch")
+        monkeypatch.setattr(
+            core_module,
+            "LightingPlugin",
+            lambda **kwargs: (_ for _ in ()).throw(RuntimeError("plugin fault")),
+        )
+
+    async def assert_pending_recheck_is_globally_closed():
+        with pytest.raises(Exception):
+            intake.command_entity_ids()
+        assert intake.registration_ready("public-startup-main") is False
+
+    service.pending_probe = assert_pending_recheck_is_globally_closed
+    hooks = []
+    try:
+        branch = await _async_start_room_lighting_with_core(
+            hass,
+            SimpleNamespace(entry_id="recheck-matrix", async_on_unload=hooks.append),
+            room_lighting_service=service,
+            room_lighting_runtime=runtime,
+            core_manual_input=intake,
+            domain_data={},
+            core_shadow_room_id=old.room_id,
+            mutation_lock=asyncio.Lock(),
+            power_dependency_resolver=lambda: {},
+            expected_closed_image=True,
+        )
+        assert service.get_calls == 2
+        assert service.list_calls == 1
+        assert runtime.running is True
+        from custom_components.hausman_hub.domain.room_lighting_engine import (
+            LightAction,
+            PlannedCommand,
+        )
+
+        old_receipt = await runtime.async_execute_command(
+            old, PlannedCommand("test_main", LightAction.TURN_ON)
+        )
+        assert old_receipt["reason"] == "reserved_command_target"
+        neighbor_receipt = await runtime.async_execute_command(
+            neighbor, PlannedCommand("neighbor-light", LightAction.TURN_ON)
+        )
+        if recheck == "valid" and change == "unchanged":
+            assert branch is not None
+            assert intake.command_entity_ids() == frozenset({"light.test_main"})
+            assert intake.registration_ready("public-startup-main") is True
+        else:
+            assert branch is None
+            assert hooks == [runtime.cancel]
+            if recheck == "valid" and change == "bound":
+                new_receipt = await runtime.async_execute_command(
+                    changed, PlannedCommand("test_main", LightAction.TURN_ON)
+                )
+                assert new_receipt["reason"] == "reserved_command_target"
+                assert intake.command_entity_ids() == frozenset(
+                    {"light.test_main", "light.changed"}
+                )
+            elif recheck == "plugin":
+                assert intake.command_entity_ids() == frozenset({"light.test_main"})
+                assert intake.registration_ready("public-startup-main") is False
+            elif recheck == "valid":
+                assert intake.command_entity_ids() == frozenset({"light.test_main"})
+            else:
+                with pytest.raises(Exception):
+                    intake.command_entity_ids()
+                new_receipt = await runtime.async_execute_command(
+                    changed, PlannedCommand("test_main", LightAction.TURN_ON)
+                )
+                assert new_receipt["reason"] == "reserved_command_target"
+        if recheck in ("valid", "plugin"):
+            assert neighbor_receipt.get("reason") is None
+            assert [command.target_id for command in executor.calls] == [
+                "neighbor-light"
+            ]
+        else:
+            assert neighbor_receipt["reason"] == "reserved_command_target"
+            assert executor.calls == []
+    finally:
+        await runtime.stop()
+
+
+@pytest.mark.asyncio
 async def test_repeated_startup_does_not_add_hooks_or_start_again(tmp_path):
     config, hass, intake, executor, runtime, hooks, branch = await _start_with_image(
         tmp_path, expected=True, image_writer=_seed_registered_startup_image

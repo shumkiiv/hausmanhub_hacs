@@ -183,6 +183,31 @@ class CoreManualInput:
             self._unresolved_registration_scopes[branch_id] = previous | entity_ids
         self._unavailable = bool(self._unresolved_registration_scopes)
 
+    def resolve_closed_registration_scope(
+        self, *, branch_id: str, entity_ids: frozenset[str]
+    ) -> None:
+        """Resolve one proved temporary unknown into an exact scope.
+
+        Only a caller that proved a valid matching room configuration may
+        call this (HH-014.b B06-02R1): the exact scope may keep only the
+        already projected old entities plus the proved new ones, so a known
+        empty or unbound room closes its own scope without denying an
+        unrelated neighbour. An unproved caller must keep the global marker
+        through ``mark_closed_registration_unavailable`` instead.
+        """
+
+        if not all(
+            isinstance(entity_id, str) and entity_id for entity_id in entity_ids
+        ):
+            self.mark_closed_registration_unavailable(branch_id=branch_id)
+            return
+        resolved = frozenset(entity_ids)
+        previous = self._unresolved_registration_scopes.get(branch_id)
+        if previous is not None:
+            resolved = previous | resolved
+        self._unresolved_registration_scopes[branch_id] = resolved
+        self._unavailable = bool(self._unresolved_registration_scopes)
+
     def _globally_unresolved(self) -> bool:
         return any(scope is None for scope in self._unresolved_registration_scopes.values())
 

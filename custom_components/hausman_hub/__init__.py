@@ -46,6 +46,41 @@ def compose_reserved_entity_ids_provider(*providers: Callable[[], object]):
     return reserved_entity_ids
 
 
+def _proved_startup_recheck_scope(
+    registration, core_shadow_room_id, current_config
+) -> frozenset[str] | None:
+    """Exact executable scope proved by one valid matching recheck read.
+
+    ``None`` keeps the temporary unknown global (HH-014.b B06-03): only
+    the existing validated immutable ``RoomLightingConfig`` of the
+    configured core room proves a scope. A readable but non-config
+    object (a faked ``light_targets`` tuple included) and a valid
+    configuration of another room are no proof; the room id must match
+    the registered core room. A proved matching or changed room keeps
+    its old registration entities and adds only the bound entity ids of
+    the rechecked configuration, so a known empty or unbound room
+    resolves to the exact old scope instead of a global deny
+    (B06-02R1).
+    """
+
+    from .domain.room_lighting import RoomLightingConfig
+
+    if not isinstance(current_config, RoomLightingConfig):
+        return None
+    if current_config.room_id != core_shadow_room_id:
+        return None
+    entity_ids = {
+        target.entity_id
+        for target in current_config.devices.light_targets
+        if target.entity_id is not None
+    }
+    for target in registration.targets:
+        entity_id = target.entity_id
+        if isinstance(entity_id, str) and entity_id:
+            entity_ids.add(entity_id)
+    return frozenset(entity_ids)
+
+
 async def _async_start_room_lighting_with_core(
     hass,
     entry,
@@ -90,20 +125,35 @@ async def _async_start_room_lighting_with_core(
             )
             if registration is not None:
                 core_manual_input.install_closed_registration_projection(registration)
+                # Re-arm the unknown barrier before the awaited recheck: a
+                # failed, missing, unreadable or non-matching second read
+                # must never leave only the old published scope reserved
+                # (HH-014.b B06-03).
+                core_manual_input.mark_closed_registration_unavailable(
+                    branch_id=core_shadow_room_id
+                )
             else:
                 core_manual_input.resolve_closed_registration_as_legacy(
                     branch_id=core_shadow_room_id
                 )
             current_config = await room_lighting_service.async_get_config(core_shadow_room_id)
-            if current_config != config:
-                if registration is not None and current_config is not None:
-                    core_manual_input.mark_closed_registration_scope_unavailable(
-                        branch_id=core_shadow_room_id,
-                        entity_ids=frozenset(
-                            target.entity_id
-                            for target in current_config.devices.light_targets
-                        ),
+            if registration is not None:
+                proved_scope = _proved_startup_recheck_scope(
+                    registration, core_shadow_room_id, current_config
+                )
+                if proved_scope is None:
+                    raise RuntimeError(
+                        "core room configuration recheck is not a valid matching room"
                     )
+                # Resolve the proved unknown to an exact scope before the
+                # branch/plugin constructor: a later constructor failure keeps
+                # the exact known old scope and never denies a neighbour
+                # (HH-014.b B06-02R1).
+                core_manual_input.resolve_closed_registration_scope(
+                    branch_id=core_shadow_room_id,
+                    entity_ids=proved_scope,
+                )
+            if current_config != config:
                 raise RuntimeError("core room configuration moved during startup")
             branch = await hass.async_add_executor_job(partial(
                 RoomLightingCoreBranch,
