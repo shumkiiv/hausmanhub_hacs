@@ -184,6 +184,15 @@ class RoomLightingStorageError(RuntimeError):
     """Room lighting configuration storage did not durably save."""
 
 
+class RoomLightingRevisionConflictError(RuntimeError):
+    """The expected revision changed before the shared mutation lock was held."""
+
+    def __init__(self, expected: int, actual: int) -> None:
+        super().__init__("room lighting configuration revision conflict")
+        self.expected = expected
+        self.actual = actual
+
+
 class RoomLightingService:
     """Validate, version and persist room lighting configurations only."""
 
@@ -204,12 +213,23 @@ class RoomLightingService:
     async def async_list_configs(self) -> tuple[RoomLightingConfig, ...]:
         return await self._store.async_load_all()  # type: ignore[attr-defined]
 
-    async def async_put_config(self, config: RoomLightingConfig) -> RoomLightingConfig:
+    async def async_put_config(
+        self,
+        config: RoomLightingConfig,
+        *,
+        expected_version: int | None = None,
+        preserve_manual_control_return: bool = False,
+    ) -> RoomLightingConfig:
         """Validate, bump the version on a real change and persist."""
 
         if not isinstance(config, RoomLightingConfig):
             raise RoomLightingViolation("room lighting config is required")
         async with self._lock:
+            existing = await self._store.async_get(config.room_id)  # type: ignore[attr-defined]
+            if existing is not None and expected_version is not None and expected_version != existing.version:
+                raise RoomLightingRevisionConflictError(expected_version, existing.version)
+            if existing is not None and preserve_manual_control_return:
+                config = replace(config, manual_control_return=existing.manual_control_return)
             violations = room_lighting_violations(config)
             if violations:
                 raise RoomLightingViolation("; ".join(violations))
@@ -221,7 +241,6 @@ class RoomLightingService:
             collisions = room_lighting_entity_collisions((config, *others))
             if collisions:
                 raise RoomLightingViolation("; ".join(collisions))
-            existing = await self._store.async_get(config.room_id)  # type: ignore[attr-defined]
             if existing is not None and not _changed(existing, config):
                 return existing
             version = 1 if existing is None else existing.version + 1

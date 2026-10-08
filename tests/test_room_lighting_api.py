@@ -306,6 +306,122 @@ class RoomLightingApiTest(unittest.TestCase):
 
         asyncio.run(flow())
 
+    def test_legacy_put_preserves_existing_manual_priority(self) -> None:
+        async def flow() -> None:
+            payload = _config_payload()
+            payload["manualControlReturn"] = {"prioritySeconds": 7200}
+            created = await self.config_view.put(
+                _json_request(self._config_path(), payload, room_id=payload["roomId"])
+            )
+            self.assertEqual(created.status, 200)
+            legacy = _config_payload(name="Новое название")
+            updated = await self.config_view.put(
+                _json_request(self._config_path(), legacy, room_id=legacy["roomId"])
+            )
+            self.assertEqual(updated.status, 200)
+            self.assertEqual(updated.payload["name"], "Новое название")
+            self.assertEqual(updated.payload["manualControlReturn"]["prioritySeconds"], 7200)
+        asyncio.run(flow())
+
+    def test_put_rejects_revision_changed_by_other_service_writer(self) -> None:
+        async def flow() -> None:
+            from custom_components.hausman_hub.application.room_lighting_service import RoomLightingService
+            from custom_components.hausman_hub.domain.room_lighting import config_from_payload
+
+            lock = asyncio.Lock()
+            service = RoomLightingService(self.store, mutation_lock=lock)
+            self.hass.data["hausman_hub"][self.api.DATA_ROOM_LIGHTING_SERVICE] = service
+            original = _config_payload()
+            await service.async_put_config(config_from_payload(original))
+            await lock.acquire()
+            fresh = _config_payload(name="Изменено другим действием")
+            direct = asyncio.create_task(service.async_put_config(config_from_payload(fresh)))
+            old = _config_payload(name="Устаревшее изменение клиента")
+            http = asyncio.create_task(self.config_view.put(
+                _json_request(self._config_path(), old, room_id=old["roomId"])
+            ))
+            await asyncio.sleep(0)
+            lock.release()
+            await direct
+            response = await http
+            self.assertEqual(response.status, 409)
+            self.assertEqual(response.payload["code"], "revision_conflict")
+            self.assertEqual(response.payload["details"]["actualRevision"], 2)
+            stored = await service.async_get_config(old["roomId"])
+            self.assertEqual(stored.name, "Изменено другим действием")
+            self.assertEqual(stored.version, 2)
+        asyncio.run(flow())
+
+    def test_manual_priority_explicit_update_legacy_create_and_noop(self) -> None:
+        async def flow() -> None:
+            payload = _config_payload()
+            created = await self.config_view.put(
+                _json_request(self._config_path(), payload, room_id=payload["roomId"])
+            )
+            self.assertEqual(created.status, 200)
+            self.assertEqual(created.payload["manualControlReturn"]["prioritySeconds"], 3600)
+            payload["manualControlReturn"] = {"prioritySeconds": 7200}
+            changed = await self.config_view.put(
+                _json_request(self._config_path(), payload, room_id=payload["roomId"])
+            )
+            self.assertEqual(changed.status, 200)
+            self.assertEqual(changed.payload["version"], 2)
+            legacy = _config_payload()
+            legacy["version"] = 2
+            unchanged = await self.config_view.put(
+                _json_request(self._config_path(), legacy, room_id=legacy["roomId"])
+            )
+            self.assertEqual(unchanged.status, 200)
+            self.assertEqual(unchanged.payload, changed.payload)
+            payload["version"] = 2
+            payload["manualControlReturn"] = {"prioritySeconds": 5400}
+            explicit = await self.config_view.put(
+                _json_request(self._config_path(), payload, room_id=payload["roomId"])
+            )
+            self.assertEqual(explicit.status, 200)
+            self.assertEqual(explicit.payload["manualControlReturn"]["prioritySeconds"], 5400)
+            self.assertEqual(explicit.payload["version"], 3)
+        asyncio.run(flow())
+
+    def test_guarded_put_keeps_manual_graph_closed_until_durable_save(self) -> None:
+        """CRUD safety only; status contract validation is a separate known gap."""
+        async def flow() -> None:
+            from custom_components.hausman_hub.application.manual_light_authority import ManualLightAuthority
+            from custom_components.hausman_hub.application.related_light_sources import RelatedLightSources
+            from custom_components.hausman_hub.application.room_lighting_service import RoomLightingService
+            from custom_components.hausman_hub.domain.room_lighting import config_from_payload
+
+            initial = config_from_payload(_config_payload())
+            store = _DelayedMemoryStore(initial)
+            authority = ManualLightAuthority()
+            authority.set_related_sources(RelatedLightSources.from_configs((initial,)))
+            service = RoomLightingService(store, topology_invalidator=authority.invalidate_related_sources)
+            self.hass.data["hausman_hub"][self.api.DATA_ROOM_LIGHTING_SERVICE] = service
+            self.hass.data["hausman_hub"]["manual_light_authority"] = authority
+            changed = _config_payload(name="Изменённая конфигурация")
+            changed["devices"]["light_targets"][0]["entityId"] = "light.demo_changed"
+            pending = asyncio.create_task(self.config_view.put(
+                _json_request(self._config_path(), changed, room_id=changed["roomId"])
+            ))
+            await store.upsert_started.wait()
+            try:
+                authority.set_related_sources(RelatedLightSources.from_configs((initial,)))
+                self.assertEqual(authority.barrier_reason_for("light.demo_main"), "attribution_uncertain")
+                self.assertEqual(store.configs[initial.room_id], initial)
+                status = await self.status_view.get(_request(
+                    self.api.ROOM_LIGHTING_STATUS_PATH.format(room_id=initial.room_id), room_id=initial.room_id,
+                ))
+                self.assertEqual(status.status, 200)
+                self.assertTrue(status.payload["manual_control_return"]["active"])
+                self.assertEqual(status.payload["manual_control_return"]["reason"], "attribution_uncertain")
+            finally:
+                store.release.set()
+                response = await pending
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.payload["version"], 2)
+            self.assertEqual(store.configs[initial.room_id].devices.light_targets[0].entity_id, "light.demo_changed")
+        asyncio.run(flow())
+
     def test_invalid_config_returns_readable_400_without_details(self) -> None:
         async def flow() -> None:
             room_id = "room_demo_entry"
@@ -863,8 +979,23 @@ class RoomLightingApiTest(unittest.TestCase):
             self.assertEqual(200, response.status)
             _validate("room-lighting-config.schema.json", response.payload)
             for target in response.payload["devices"]["light_targets"]:
-                self.assertNotIn(None, [target.get("entityId")])
+                if "entityId" in target:
+                    self.assertIsNotNone(target["entityId"])
 
+        asyncio.run(flow())
+
+    def test_unbound_template_target_omits_optional_entity_id(self) -> None:
+        async def flow() -> None:
+            room_id = "room_demo_entry"
+            response = await self.apply_view.post(_json_request(
+                self.api.ROOM_LIGHTING_TEMPLATE_APPLY_PATH.format(room_id=room_id),
+                {"templateId": "day_profile", "keepDevices": True}, room_id=room_id,
+            ))
+            self.assertEqual(response.status, 200)
+            _validate("room-lighting-config.schema.json", response.payload)
+            self.assertTrue(response.payload["devices"]["light_targets"])
+            for target in response.payload["devices"]["light_targets"]:
+                self.assertNotIn("entityId", target)
         asyncio.run(flow())
 
     def test_live_test_safe_is_background_and_command_free(self) -> None:

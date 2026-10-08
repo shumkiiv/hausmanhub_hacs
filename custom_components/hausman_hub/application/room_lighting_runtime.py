@@ -51,6 +51,7 @@ from ..domain.shower_exhaust import (
 )
 from ..domain.room_lighting_engine import (
     DecisionReason,
+    EnginePolicy,
     LightAction,
     PlannedCommand,
     ProtectionSnapshot,
@@ -2203,6 +2204,7 @@ class RoomLightingRuntime:
                             "device_trigger",
                             f"{config.room_id}:{device_id}:{subtype}:{moment}:{target_id}",
                             observed_at_ms=moment,
+                            duration_ms=config.manual_control_return.priority_seconds * 1000,
                         )
                         if changed:
                             self._create_task(authority.async_drain())
@@ -2765,6 +2767,18 @@ class RoomLightingRuntime:
             config.room_id, {"since": None, "last_seen": None}
         )
         present = presence if presence is not None else self._curve_presence_state(context)
+        if present is SensorState.OFF:
+            aggregate = self._curve_presence_state(context)
+            if aggregate is SensorState.ON:
+                # A dedicated presence OFF may coexist with fresh motion ON.
+                # Keep its existing motion-confirmation path, but never count
+                # that interval as absence of both configured participants.
+                tracker["since"] = None
+                tracker["last_seen"] = moment
+                tracker["absence"] = 0
+                return False, 0
+            if aggregate is not SensorState.OFF:
+                present = SensorState.UNKNOWN
         if present is SensorState.ON:
             if tracker["since"] is None:
                 tracker["since"] = moment
@@ -2844,12 +2858,10 @@ class RoomLightingRuntime:
     def _curve_presence_state(context: RoomLightingContext) -> SensorState:
         """Classify the room presence for the day curve.
 
-        Only a *fresh* ``on`` counts as presence. A sensor that stopped
-        updating is ignored: it is neither presence nor absence. Absence is
-        therefore proven by the remaining sensors when none of them is a fresh
-        ``on``, none is unknown, and at least one is ``off``. This keeps a
-        stuck ``on`` sensor from blocking the absence fade forever while an
-        unknown or unavailable sensor still fails closed.
+        A fresh ON from either participant proves presence. Absence requires
+        every participant to be known OFF; a stale ON cannot be ignored to
+        manufacture absence from the remaining sensor. OFF uses the existing
+        larger staleness window, not the shorter ON confirmation freshness.
         """
 
         return RoomLightingRuntime._curve_sensor_state(context, _PRESENCE_KINDS)
@@ -2873,11 +2885,14 @@ class RoomLightingRuntime:
             if sensor.state is SensorState.ON:
                 if context.now - sensor.last_changed <= CURVE_SENSOR_FRESHNESS_MS:
                     fresh_on = True
-                # A stale "on" is ignored: it proves neither occupancy nor
-                # absence.
+                else:
+                    has_unknown = True
                 continue
             if sensor.state is SensorState.OFF:
-                has_off = True
+                if context.now - sensor.last_changed > EnginePolicy().staleness_seconds * 1000:
+                    has_unknown = True
+                else:
+                    has_off = True
         if fresh_on:
             return SensorState.ON
         if has_unknown:
@@ -5407,12 +5422,14 @@ class RoomLightingRuntime:
             return
         off_times: list[int] = []
         if any(sensor.state in {SensorState.UNKNOWN, SensorState.UNAVAILABLE}
+               or (sensor.state is SensorState.OFF
+                   and context.now - sensor.last_changed > EnginePolicy.from_config(config).staleness_seconds * 1000)
                for sensor in relevant):
             self._absence.pop(config.room_id, None)
             return
-        if config.profile == "day_curve" and any(
+        if any(
             sensor.state is SensorState.ON
-            and context.now - sensor.last_changed > CURVE_SENSOR_FRESHNESS_MS
+            and context.now - sensor.last_changed > EnginePolicy.from_config(config).sensor_freshness_seconds * 1000
             for sensor in relevant
         ):
             self._absence.pop(config.room_id, None)

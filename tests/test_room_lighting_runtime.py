@@ -1943,6 +1943,47 @@ async def test_device_trigger_dispatches_manual_action_when_enabled() -> None:
         await runtime.stop()
 
 
+@pytest.mark.parametrize("priority_seconds", [15, 3600, 7200, 86400])
+async def test_device_press_manual_record_uses_room_priority_and_preserves_dedup(priority_seconds) -> None:
+    class _AuthorityStore(_MemoryOwnershipStore):
+        recovered_previous = False
+
+    payload = _trigger_config_payload(action="turn_on")
+    payload["manualControlReturn"] = {"prioritySeconds": priority_seconds}
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    api = _FakeDeviceAutomationApi()
+    executor = _SpyExecutor()
+    clock = _Clock(_NOW_MS)
+    authority = ManualLightAuthority(_AuthorityStore())
+    await authority.async_load()
+    runtime = _make_runtime(hass, commands_enabled=False, payload=payload,
+                            device_automation_api=api, executor=executor,
+                            now_ms=clock, manual_light_authority=authority)
+    await runtime.start(hass, "entry")
+    try:
+        _, action, _ = api.attached[0]
+        await action({}, None)
+        record = authority.record("light.demo_main")
+        assert record is not None
+        assert record.action == "on" and record.source == "device_trigger"
+        assert record.deadline_ms - record.observed_at_ms == priority_seconds * 1000
+        generation = record.generation
+        await action({}, None)
+        assert authority.record("light.demo_main").generation == generation
+        assert authority.record("light.demo_main").deadline_ms == record.deadline_ms
+        clock.value += 3000
+        await action({}, None)
+        renewed = authority.record("light.demo_main")
+        assert renewed.observed_at_ms == clock.value
+        assert renewed.deadline_ms == clock.value + priority_seconds * 1000
+        assert renewed.generation > generation
+        assert executor.calls == []
+    finally:
+        await runtime.stop()
+
+
 async def test_device_trigger_duplicate_event_does_not_toggle_twice() -> None:
     hass = _FakeHass()
     hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
@@ -3972,7 +4013,7 @@ async def test_curve_stale_presence_is_not_presence() -> None:
     assert stale is SensorState.UNKNOWN
 
 
-async def test_curve_stale_presence_with_fresh_motion_off_proves_absence() -> None:
+async def test_curve_stale_presence_with_fresh_motion_off_does_not_prove_absence() -> None:
     hass = _FakeHass()
     runtime = _make_runtime(
         hass,
@@ -4002,7 +4043,7 @@ async def test_curve_stale_presence_with_fresh_motion_off_proves_absence() -> No
             )
         )
     )
-    assert stale_on_and_motion_off is SensorState.OFF
+    assert stale_on_and_motion_off is SensorState.UNKNOWN
 
     stale_on_and_unknown = runtime._curve_presence_state(  # type: ignore[attr-defined]
         context(
@@ -4055,6 +4096,113 @@ async def test_curve_lost_presence_invalidates_completed_manual_protection_absen
         ).commands
     finally:
         await runtime.stop()
+
+
+async def test_curve_two_sensor_stale_on_never_accumulates_absence() -> None:
+    payload = _curve_payload(commands_enabled=False)
+    config = config_from_payload(payload)
+    runtime = _make_runtime(_FakeHass(), payload=payload, now_ms=lambda: _NOW_MS)
+    for delta in (0, 600_000, 1_200_000):
+        now = _NOW_MS + delta
+        context = RoomLightingContext(now=now, timezone=_TZ, sunrise=time(7), sunset=time(19), sensors=(
+            SensorSnapshot("presence_demo", SensorKind.PRESENCE, SensorState.ON, _NOW_MS - 1_800_000),
+            SensorSnapshot("motion_demo", SensorKind.MOTION, SensorState.OFF, now),
+        ))
+        assert runtime._observe_curve_presence(config, context, now) == (False, 0)
+
+
+async def test_curve_stale_off_invalidates_old_manual_absence() -> None:
+    payload = _curve_payload(commands_enabled=False)
+    config = config_from_payload(payload)
+    runtime = _make_runtime(_FakeHass(), payload=payload, now_ms=lambda: _NOW_MS)
+    runtime._absence[config.room_id] = (True, _NOW_MS - 600_000)
+    context = RoomLightingContext(now=_NOW_MS, timezone=_TZ, sunrise=time(7), sunset=time(19), sensors=(
+        SensorSnapshot("presence_demo", SensorKind.PRESENCE, SensorState.OFF, _NOW_MS - 86_401_000),
+        SensorSnapshot("motion_demo", SensorKind.MOTION, SensorState.OFF, _NOW_MS),
+    ))
+    runtime._observe_absence(config, context)
+    assert config.room_id not in runtime._absence
+
+
+async def test_curve_two_known_off_sensors_count_fresh_ten_minutes_after_fault() -> None:
+    payload = _curve_payload(commands_enabled=False)
+    config = config_from_payload(payload)
+    runtime = _make_runtime(_FakeHass(), payload=payload, now_ms=lambda: _NOW_MS)
+
+    def context(now, first_state=SensorState.OFF):
+        return RoomLightingContext(now=now, timezone=_TZ, sunrise=time(7), sunset=time(19), sensors=(
+            SensorSnapshot("presence_demo", SensorKind.PRESENCE, first_state, _NOW_MS),
+            SensorSnapshot("motion_demo", SensorKind.MOTION, SensorState.OFF, _NOW_MS),
+        ))
+
+    assert runtime._observe_curve_presence(config, context(_NOW_MS), _NOW_MS) == (False, 0)
+    assert runtime._observe_curve_presence(config, context(_NOW_MS + 599_000), _NOW_MS + 599_000) == (False, 599)
+    assert runtime._observe_curve_presence(config, context(_NOW_MS + 600_000), _NOW_MS + 600_000) == (False, 600)
+    assert runtime._observe_curve_presence(config, context(_NOW_MS + 610_000, SensorState.UNKNOWN), _NOW_MS + 610_000) == (False, 0)
+    assert runtime._observe_curve_presence(config, context(_NOW_MS + 620_000), _NOW_MS + 620_000) == (False, 0)
+    assert runtime._observe_curve_presence(config, context(_NOW_MS + 1_220_000), _NOW_MS + 1_220_000) == (False, 600)
+
+
+@pytest.mark.parametrize("motion_state", ["unknown", "unavailable", "on"])
+async def test_actual_curve_process_does_not_accumulate_absence_with_uncertain_motion(motion_state) -> None:
+    payload = _curve_payload(commands_enabled=False)
+    payload["devices"]["sensors"].append({
+        "id": "sensor_demo_motion", "name": "Движение", "kind": "motion",
+        "entityId": "binary_sensor.demo_motion", "autoAdoptOverride": None,
+    })
+    hass = _FakeHass()
+    now = [_NOW_MS]
+    hass.states.set(AWAY_ENTITY_ID, "off", last_changed=_NOW_DT)
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
+    hass.states.set("binary_sensor.demo_motion", motion_state, last_changed=datetime.fromtimestamp((_NOW_MS - 700_000) / 1000, _TZ))
+    hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
+    hass.states.set("light.demo_mirror", "off", last_changed=_NOW_DT)
+    executor = _SpyExecutor()
+    runtime = _make_runtime(hass, payload=payload, now_ms=lambda: now[0], executor=executor)
+    await runtime.start(hass, "entry")
+    try:
+        now[0] += 600_000
+        await runtime.async_process((_ROOM_ID,))
+        assert runtime._curve_presence[_ROOM_ID].get("absence", 0) == 0
+        assert runtime._curve_presence[_ROOM_ID]["last_seen"] is None
+        recovered = datetime.fromtimestamp(now[0] / 1000, _TZ)
+        hass.states.set("binary_sensor.demo_motion", "off", last_changed=recovered)
+        await runtime.async_process((_ROOM_ID,))
+        assert runtime._curve_presence[_ROOM_ID].get("absence", 0) == 0
+        now[0] += 599_000
+        await runtime.async_process((_ROOM_ID,))
+        assert runtime._curve_presence[_ROOM_ID]["absence"] == 599
+        now[0] += 1000
+        await runtime.async_process((_ROOM_ID,))
+        assert runtime._curve_presence[_ROOM_ID]["absence"] == 600
+        assert executor.calls == []
+    finally:
+        await runtime.stop()
+
+
+async def test_regular_profile_stale_on_clears_old_manual_absence() -> None:
+    from custom_components.hausman_hub.domain.room_lighting_engine import LightSnapshot
+    payload = _config_payload(commands_enabled=False)
+    payload["devices"]["sensors"].append({
+        "id": "sensor_demo_motion", "name": "Движение", "kind": "motion",
+        "entityId": "binary_sensor.demo_motion", "autoAdoptOverride": None,
+    })
+    config = config_from_payload(payload)
+    runtime = _make_runtime(_FakeHass(), payload=payload, now_ms=lambda: _NOW_MS)
+    runtime._ownership.record_manual(config.room_id, "light_main", _NOW_MS - 700_000, confirmed=True, turned_off=True)
+    runtime._absence[config.room_id] = (True, _NOW_MS - 600_000)
+    context = RoomLightingContext(now=_NOW_MS, timezone=_TZ, sunrise=time(7), sunset=time(19), sensors=(
+        SensorSnapshot("sensor_demo_presence", SensorKind.PRESENCE, SensorState.ON, _NOW_MS - 700_000),
+        SensorSnapshot("sensor_demo_motion", SensorKind.MOTION, SensorState.ON, _NOW_MS),
+    ), lights=(LightSnapshot("light_main", SensorState.OFF, _NOW_MS),))
+    runtime._observe_absence(config, context)
+    protection = runtime._protection_for(config)
+    assert protection.active
+    assert not protection.absence_confirmed
+    from dataclasses import replace
+    from custom_components.hausman_hub.domain.room_lighting_engine import evaluate_room_lighting
+    checked = replace(context, protection=protection, ownership=runtime._ownership.snapshots_for(config.room_id, {"light_main"}))
+    assert not evaluate_room_lighting(config, checked).commands
 
 
 async def test_executor_context_does_not_hide_concurrent_identical_manual_call():
@@ -4129,5 +4277,98 @@ async def test_curve_reservation_acquired_during_power_on_blocks_target(reserved
     try:
         assert reserved == [reserved_entity]
         assert not executor.calls
+    finally:
+        await runtime.stop()
+
+
+@pytest.mark.parametrize("action", [LightAction.TURN_ON, LightAction.SET_BRIGHTNESS, LightAction.SET_COLOR_TEMPERATURE])
+@pytest.mark.parametrize("inverted", [False, True])
+@pytest.mark.parametrize("attributes, expected", [
+    ({"brightness": 102, "color_temp_kelvin": 3000}, True),
+    ({"brightness": 255, "color_temp_kelvin": 3000}, False),
+    ({"brightness": 102, "color_temp_kelvin": 3500}, False),
+    ({"brightness": 255, "color_temp_kelvin": 3500}, False),
+    ({"color_temp_kelvin": 3000}, False),
+    ({"brightness": 102}, False),
+    ({"brightness": 107, "color_temp_kelvin": 3050}, True),
+    ({"brightness": 110, "color_temp_kelvin": 3000}, False),
+    ({"brightness": 102, "color_temp_kelvin": 3051}, False),
+    ({"brightness": False, "color_temp_kelvin": 3000}, False),
+    ({"brightness": 102, "color_temp_kelvin": "not-a-colour"}, False),
+])
+async def test_executor_receipt_requires_every_requested_property(action, inverted, attributes, expected):
+    """No fabricated confirmed flag: production execute reads the fake device."""
+    hass = _FakeHass()
+    executor = _light_executor(hass, inverted=inverted)
+    observed = dict(attributes)
+    kelvin = observed.get("color_temp_kelvin")
+    if inverted and type(kelvin) is int:
+        observed["color_temp_kelvin"] = 6000 - kelvin
+    observed.update(min_color_temp_kelvin=2000, max_color_temp_kelvin=6535)
+
+    class ObservedServices(_FakeServices):
+        async def async_call(self, domain, service, data, blocking=True, context=None):
+            await super().async_call(domain, service, data, blocking, context)
+            hass.states.set("light.demo_main", "on", observed, last_changed=_NOW_DT)
+
+    hass.services = ObservedServices(hass)
+    receipt = await executor.execute(hass, PlannedCommand("light_main", action, brightness=40, color_temperature=3000))
+    assert receipt.sent and receipt.send_outcome == "sent"
+    assert receipt.confirmed is expected
+    assert receipt.to_payload()["confirmed"] is expected
+
+
+async def test_executor_plain_switch_on_keeps_state_only_confirmation():
+    hass = _FakeHass()
+    hass.states.set("switch.demo_mirror", "off", last_changed=_NOW_DT)
+    target = LightTarget(id="light_mirror", name="Зеркало", kind=LightKind.SWITCH,
+                         brightness=False, color_temperature=False, entity_id="switch.demo_mirror")
+    executor = RoomLightingHaExecutor({target.id: target})
+    receipt = await executor.execute(hass, PlannedCommand(target.id, LightAction.TURN_ON))
+    assert receipt.confirmed and receipt.sent
+    assert hass.services.calls == [("switch", "turn_on", {"entity_id": "switch.demo_mirror"})]
+
+
+@pytest.mark.parametrize("full_parameters", [False, True])
+async def test_curve_real_executor_full_main_controls_mirror_handover(full_parameters):
+    """Earn mirror ownership with real execute; wrong main params preserve it."""
+    hass = _FakeHass()
+    now = [int(datetime(2026, 10, 7, 7, 0, tzinfo=_TZ).timestamp() * 1000)]
+    payload = _curve_payload(commands_enabled=True)
+    config = config_from_payload(payload)
+    executor = RoomLightingHaExecutor({target.id: target for target in config.devices.light_targets})
+    for entity in ("light.demo_main", "light.demo_mirror"):
+        hass.states.set(entity, "off", last_changed=datetime.fromtimestamp(now[0] / 1000, _TZ))
+    hass.states.set("binary_sensor.demo_presence", "unknown", last_changed=datetime.fromtimestamp(now[0] / 1000, _TZ))
+
+    class ReportServices(_FakeServices):
+        async def async_call(self, domain, service, data, blocking=True, context=None):
+            await super().async_call(domain, service, data, blocking, context)
+            entity = data["entity_id"]
+            state = hass.states.get(entity)
+            attributes = dict(state.attributes)
+            if entity == "light.demo_main" and not full_parameters:
+                attributes.update(brightness=255, color_temp_kelvin=6500)
+            hass.states.set(entity, state.state, attributes, last_changed=datetime.fromtimestamp(now[0] / 1000, _TZ))
+
+    hass.services = ReportServices(hass)
+    runtime = _make_runtime(hass, executor=executor, payload=payload, now_ms=lambda: now[0])
+    await runtime.start(hass, "entry")
+    try:
+        assert any(c.target_id == "light_mirror" and c.action is LightAction.TURN_ON for c in executor.calls)
+        assert has_proven_auto_ownership(runtime._ownership.snapshots_for(_ROOM_ID, {"light_mirror"}), "light_mirror")
+        now[0] = int(datetime(2026, 10, 7, 10, 0, tzinfo=_TZ).timestamp() * 1000)
+        await runtime.async_process()
+        assert any(c.target_id == "light_main" for c in executor.calls)
+        now[0] += 1000
+        await runtime.async_process()
+        off = [c for c in executor.calls if c.target_id == "light_mirror" and c.action is LightAction.TURN_OFF]
+        assert bool(off) is full_parameters
+        if not full_parameters:
+            assert not has_proven_auto_ownership(runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"}), "light_main")
+            attempts = len([c for c in executor.calls if c.target_id == "light_main"])
+            now[0] += 1000
+            await runtime.async_process()
+            assert len([c for c in executor.calls if c.target_id == "light_main"]) == attempts
     finally:
         await runtime.stop()

@@ -1018,7 +1018,7 @@ def _evaluate_target(
     if presence_required and presence is SensorState.UNKNOWN:
         return _unchanged(
             target_id,
-            Skip(target_id, SkipReason.SENSOR_UNKNOWN),
+            Skip(target_id, SkipReason.SENSOR_STALE if absence_stale else SkipReason.SENSOR_UNKNOWN),
             extra_skips=skips,
         )
 
@@ -1281,13 +1281,14 @@ def _presence_state(context: RoomLightingContext, policy: EnginePolicy) -> Senso
         return SensorState.ON
     if any(
         sensor.state in {SensorState.UNKNOWN, SensorState.UNAVAILABLE}
+        or (sensor.state is SensorState.ON and not _is_fresh(sensor, context, policy))
+        or (sensor.state is SensorState.OFF and context.now - sensor.last_changed > policy.staleness_seconds * 1000)
         for sensor in relevant
     ):
         return SensorState.UNKNOWN
-    if any(sensor.state is SensorState.OFF for sensor in relevant):
-        # A stale "on" is ignored: it is neither presence nor absence. With no
-        # fresh presence, no unknown sensor and at least one off sensor the
-        # room is treated as absent, so a stuck sensor cannot block absence.
+    if all(sensor.state is SensorState.OFF for sensor in relevant):
+        # Absence requires every participant to be known OFF; uncertainty may
+        # not be discarded just because another sensor reports OFF.
         return SensorState.OFF
     return SensorState.UNKNOWN
 
@@ -1317,9 +1318,7 @@ def _absence_evidence(
         if sensor.state is SensorState.ON:
             if _is_fresh(sensor, context, policy):
                 return (False, None, False)
-            # A stale "on" is ignored rather than counted as presence; the
-            # remaining off sensors still prove the absence.
-            continue
+            return (False, None, True)
         if context.now - sensor.last_changed > policy.staleness_seconds * 1000:
             return (False, None, True)
         off_times.append(

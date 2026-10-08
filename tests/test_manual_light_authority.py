@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import asyncio
 import threading
 from datetime import datetime, timezone
@@ -1169,19 +1170,49 @@ async def test_selector_during_startup_drain_is_applied_before_dispatch_opens() 
     assert authority.barrier_reason_for("light.room_a") == "selector_uncertain"
 
 
+def _assert_startup_source_order(source: str) -> None:
+    functions = {node.name: node for node in ast.parse(source).body
+                 if isinstance(node, ast.AsyncFunctionDef)}
+    setup = ast.get_source_segment(source, functions["async_setup_entry"])
+    starter = ast.get_source_segment(source, functions["_async_start_room_lighting_with_core"])
+    assert "await room_lighting_runtime.start(hass, entry.entry_id)" in starter
+    assert setup.index("manual_light_events.start(buffer_startup=True)") < setup.index(
+        "await manual_light_authority.async_load()"
+    ) < setup.index(
+        "await _async_start_room_lighting_with_core("
+    ) < setup.index("await manual_light_events.async_complete_startup()") < setup.index(
+        "activation_latch.open()"
+    )
+    assert setup.index("await room_lighting_service.async_list_configs()") < setup.index(
+        "await manual_light_authority.async_capture_initial_room_scope("
+    ) < setup.index("await manual_light_events.async_complete_startup()")
+
+
 def test_startup_wiring_drains_room_events_before_activation() -> None:
     source = (Path(__file__).parents[1] / "custom_components" /
               "hausman_hub" / "__init__.py").read_text(encoding="utf-8")
-    assert source.index("manual_light_events.start(buffer_startup=True)") < source.index(
-        "await manual_light_authority.async_load()"
-    ) < source.index(
-        "await room_lighting_runtime.start(hass, entry.entry_id)"
-    ) < source.index("await manual_light_events.async_complete_startup()") < source.index(
-        "activation_latch.open()"
-    )
-    assert source.index("await room_lighting_service.async_list_configs()") < source.index(
-        "await manual_light_authority.async_capture_initial_room_scope("
-    ) < source.index("await manual_light_events.async_complete_startup()")
+    _assert_startup_source_order(source)
+
+
+@pytest.mark.parametrize("swapped", [(1, 4), (5, 6), (2, 3)])
+def test_startup_source_order_still_rejects_unsafe_activation(swapped) -> None:
+    calls = [
+        "manual_light_events.start(buffer_startup=True)",
+        "await manual_light_authority.async_load()",
+        "await room_lighting_service.async_list_configs()",
+        "await manual_light_authority.async_capture_initial_room_scope()",
+        "await _async_start_room_lighting_with_core()",
+        "await manual_light_events.async_complete_startup()",
+        "activation_latch.open()",
+    ]
+    first, second = swapped
+    calls[first], calls[second] = calls[second], calls[first]
+    source = ("async def _async_start_room_lighting_with_core():\n"
+              "    await room_lighting_runtime.start(hass, entry.entry_id)\n"
+              "async def async_setup_entry():\n" +
+              "\n".join("    " + call for call in calls) + "\n")
+    with pytest.raises(AssertionError):
+        _assert_startup_source_order(source)
 
 
 def test_drain_from_worker_thread_is_scheduled_on_loop_threadsafe() -> None:

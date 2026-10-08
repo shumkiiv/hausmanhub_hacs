@@ -1619,7 +1619,7 @@ def test_curve_unknown_target_is_not_treated_as_off() -> None:
     assert decision.commands == ()
 
 
-def test_stale_presence_on_does_not_block_absence_off() -> None:
+def test_stale_presence_on_blocks_absence_off() -> None:
     now = _at(12, 0)
     presence = SensorSnapshot(
         "sensor_presence", SensorKind.PRESENCE, SensorState.ON, now - 700_000
@@ -1638,8 +1638,7 @@ def test_stale_presence_on_does_not_block_absence_off() -> None:
     )
     main = decision_target(decision, "light_main")
     assert main is not None
-    assert main.desired_state == "off"
-    assert main.commands
+    assert not main.commands
 
 
 def test_unknown_sensor_still_blocks_absence_off() -> None:
@@ -1658,6 +1657,22 @@ def test_unknown_sensor_still_blocks_absence_off() -> None:
             lights=(_light("light_main", SensorState.ON, now - 700_000, brightness=80),),
             ownership=(_auto("light_main", now - 700_000),),
         ),
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert not main.commands
+
+
+@pytest.mark.parametrize("bad_state", [SensorState.ON, SensorState.UNKNOWN, SensorState.UNAVAILABLE])
+def test_two_sensors_never_confirm_absence_when_one_is_uncertain(bad_state) -> None:
+    now = _at(12)
+    decision = evaluate_room_lighting(
+        _config(timers={"absence_seconds": 600, "turn_off_seconds": 600}),
+        _ctx(now, sensors=(
+            SensorSnapshot("sensor_presence", SensorKind.PRESENCE, bad_state, now - 700_000),
+            SensorSnapshot("sensor_motion", SensorKind.MOTION, SensorState.OFF, now - 700_000),
+        ), lights=(_light("light_main", SensorState.ON, now - 700_000, brightness=80),),
+        ownership=(_auto("light_main", now - 700_000),)),
     )
     main = decision_target(decision, "light_main")
     assert main is not None

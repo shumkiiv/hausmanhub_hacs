@@ -9,12 +9,14 @@ observation and a ``confirmed`` flag.
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Mapping
 
 from ..domain.room_lighting import LightKind, LightTarget
 from ..domain.room_lighting_engine import (
+    BRIGHTNESS_TOLERANCE,
     COLOR_TEMPERATURE_TOLERANCE_KELVIN,
     LightAction,
     PlannedCommand,
@@ -378,19 +380,18 @@ def _confirmed(
         return raw != "on"
     if raw != "on":
         return False
-    # A colour-temperature command is only confirmed when the read-back
-    # matches the requested logical colour; a 2xx call is not enough.
-    if (
-        command.action is LightAction.SET_COLOR_TEMPERATURE
-        and command.color_temperature is not None
+    # TURN_ON can carry brightness and colour together. A receipt must confirm
+    # every requested property, not just power, before ownership or handover.
+    for property_name, requested, tolerance in (
+        ("brightness", command.brightness, BRIGHTNESS_TOLERANCE),
+        ("color_temperature", command.color_temperature, COLOR_TEMPERATURE_TOLERANCE_KELVIN),
     ):
-        observed = state_after.get("color_temperature")
-        if not isinstance(observed, (int, float)) or isinstance(observed, bool):
+        if requested is None:
+            continue
+        observed = state_after.get(property_name)
+        if type(observed) not in (int, float) or not math.isfinite(observed):
             return False
-        if (
-            abs(int(observed) - int(command.color_temperature))
-            > COLOR_TEMPERATURE_TOLERANCE_KELVIN
-        ):
+        if abs(observed - requested) > tolerance:
             return False
     return True
 

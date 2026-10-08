@@ -1,4 +1,52 @@
 # HausmanHub AI Context
+## HH-007: локальное сохранение переданной работы, НЕ PUSH — 2026-10-08
+
+OwnerGitпорядок/commit: сохраняется только явнаяпередача5sources+5tests+этотконтекст.
+Кодне менялся;362узкихtestsPASS0skip наCschemas29d9f82, runtimea8df/testb77e/
+authoritytestac329 SHAсовпадают07окт. Это не полныйnewprofile/неinstalledверсия.
+Все11files после mandatoryreviews в сохранительныйлокальныйcommit прежнейветки.
+**DO_NOT_PUSH** этуветку автоматически: частныйконтекст и102историческихкоммита
+относительностарыхoriginrefs ещё не прошлиpublicprivacyпроверку. Liveветканенайдена.
+Privatecontextдоэтойпамятки сохранёнexactpatchвPRIVATEroot сreverseapplycheckPASS.
+Никакихrestore/reset/clean/скрытияdiff/sourceversionchange/house/restart/install.
+Остальныеdirtyworktreesнеприсвоены; Desktopживойходотдельно. RootHH014.b содержит
+актуальныйcommit/учёт/остаток. Следующийprofilecontract/spec/macет по томужеownerplan,
+неавтоматическийpublicpush/sourceinstallation по чистомуgitstatus.
+
+## HH-007/014.b: локальные общие поправки, НЕ новый весь профиль — 2026-10-07
+
+Продолжение ownerдо12h по томужеHEADf724/ветке ипереданнойоснове, безcommit/push.
+OWNworkingdiff5sources: executor70921fullreceipt; runtimea8df strictabsence/maincaller/
+regularprofile+configureddevicepressduration; engine3e80 strictunknown/staleabsence;
+service88bd+API9f24 preserveexistingmanualsettingoldPUT/atomicrevisionguard.
+OWN5tests: runtimeb77e/engined44a/API335f/service7ffe/manualauthorityac329,
+последнийтолькоASTфикспрежнегоfalseStartupAssertion, source__init__BYTE==HEAD.
+101API/service/domain противCupdateddraftmanualschemas и334profile+12virtualcalendarPASS,
+freshGLM/security каждый boundedcandidatePASS_LOCAL, SHAafterunchanged.
+ArchivederivedbundleW15e679...: source5 точечнонаinstalledbasis, неwholeR,
+432behavioralPASS4deselectedRstatics/143archiveimports/обаPASS_PREPARATION_ARCHIVE.
+Actualderivedruntime8492/engine25da неRfullfiles! СтарыйtimestampASThelперсохранён.
+Новыйсуточныйowner12пунктовыйпрофиль/UI/globalreturn/away/arrival/automaticmanualexpiry
+не реализованыцеликом/неinstalled, codehouse/claim/settings/keys/restartнетдействий.
+RootитогHH-007-2026-10-07-local-foundation-final.md/тажеHH014bcard содержитexactpaths,
+stage92792/spent59252/rem33540/active=null иattempts(strictAbsence3closedLOCAL).
+Следующееboundedcontract-spec/солнечныекрая/UIмакет/exactinstallpermissions,
+неавтоставитьэтотwholeR/неотбрасыватьпереданныеdirty/не менятьсквознуюлогику.
+
+
+## HH-014.b / HH-006/007: локальная полная квитанция, не установка — 2026-10-07
+
+Ownerлокальныйплантамбурапродолженвтойжеветкеcodex/hh-014b-lighting-delivery-20261004,
+HEADbasisf724c290659c71381a57ddf5e1f5ff2b44cbb33bне менялся. OwnworkingdiffТОЛЬКО
+application/room_lighting_ha_executor.py (70921f63...) иtests/test_room_lighting_runtime.py
+(7d588e44...), плюсэтадокументальнаяпередача. Ниengine/runtime/Core/API/UI/storechanges.
+_confirmedтребуетвсезаданныеpropsсexisting2%/50K,tolerances/inversion/plainSwitch/
+sentunconfirmed/manual/retryнеизменены. 104uniquePASS0skip+AST/diffcheck иfreshGLM/security.
+Wvirtual12кейсовнадругойhashmatchedinstalledGit4fpairPASS, nofullinstalledclaim.
+Рабочаякопиянеclean/неотбрасыватьсвоюдельту; нетcommit/push/versionbump/install.
+Sourcepatch/паспорт/МFвкорневомW/docs;rootкарточкаHH-014.b-core-command-firstистория/бюджет.
+Дом/settings/keys/ACL/physicalнеизменны, N1sourcesunchanged. Nextвнешнийточныйпакет
+поставки/return/проверки,неwholeRinstallи неавторемонтsourceperownerobservation.
 
 ## Тамбур: быстрый возврат дневного света от присутствия и замка, 2026-09-16
 
