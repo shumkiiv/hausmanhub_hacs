@@ -67,8 +67,8 @@ class LightCurveProfile:
     evening_min_percent: int = 5
     evening_max_percent: int = 100
     day_max_percent: int = 100
-    warm_kelvin: int = 2200
-    neutral_kelvin: int = 3000
+    warm_kelvin: int = 3400
+    neutral_kelvin: int = 4000
     absence_start_seconds: int = 300
     absence_fade_seconds: int = 300
     presence_confirm_seconds: int = 15

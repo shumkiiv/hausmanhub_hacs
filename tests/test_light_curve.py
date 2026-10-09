@@ -90,7 +90,7 @@ def test_evening_curve_fades_and_warms_until_ten_pm() -> None:
     decision = evaluate_light_curve(PROFILE, _ctx(18, 30))
     assert decision.reason is CurveReason.EVENING
     assert decision.brightness_percent == 88  # 100 - 95 * 30/240
-    assert decision.color_temperature == 2900  # 3000 - 800 * 30/240
+    assert decision.color_temperature == 3925  # 4000 - 600 * 30/240
 
     after_sunset = evaluate_light_curve(PROFILE, _ctx(20, 30))
     assert after_sunset.reason is CurveReason.LATE_EVENING

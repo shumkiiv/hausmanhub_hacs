@@ -1340,7 +1340,7 @@ def test_curve_room_morning_ramp_sets_brightness_and_warm_colour() -> None:
     )
     assert any(
         command.action is LightAction.SET_COLOR_TEMPERATURE
-        and command.color_temperature == 2467
+        and command.color_temperature == 3600
         for command in main.commands
     )
 
@@ -1475,7 +1475,7 @@ def test_curve_room_unknown_presence_holds_brightness_but_updates_day_colour() -
     assert main is not None
     assert len(main.commands) == 1
     assert main.commands[0].action is LightAction.SET_COLOR_TEMPERATURE
-    assert main.commands[0].color_temperature == 3000
+    assert main.commands[0].color_temperature == 4000
 
 
 def test_day_transition_with_unknown_presence_starts_main_before_mirror_off() -> None:
@@ -1513,7 +1513,7 @@ def test_day_transition_turns_off_auto_mirror_after_main_confirmation() -> None:
     now = _at(12)
     decision = evaluate_curve_room(
         _config(profile="day_curve"),
-        _ctx(now, lights=(_light("light_main", SensorState.ON, now - 1000, 100, 3000),
+        _ctx(now, lights=(_light("light_main", SensorState.ON, now - 1000, 100, 4000),
                           _light("light_mirror", SensorState.ON, now - 1000)),
              ownership=(_auto("light_main", now - 2000), _auto("light_mirror", now - 2000))),
         presence_confirmed=False, absence_seconds=None,
