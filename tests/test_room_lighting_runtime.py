@@ -2249,7 +2249,8 @@ def test_return_history_preserves_newer_manual_and_never_old_auto() -> None:
     records = journal.snapshots_for(_ROOM_ID, {"light_main"})
     assert len(records) == 1
     assert records[0] == OwnershipSnapshot(
-        "light_main", OwnershipSource.MANUAL, True, _NOW_MS
+        "light_main", OwnershipSource.MANUAL, True, _NOW_MS,
+        turned_off=False, generation=2,
     )
 
 
@@ -2801,6 +2802,7 @@ def test_ownership_journal_migration_preserves_ambiguous_target_id() -> None:
     assert journal.to_payload()["records"] == [{
         "targetId": "chandelier", "source": "manual",
         "confirmed": True, "at": 4_000,
+        "turnedOff": False, "generation": 0,
     }]
     assert journal.to_payload()["manualOff"] == [{"targetId": "chandelier", "at": 4_000}]
     restored = RoomLightingOwnershipJournal()
@@ -3786,6 +3788,8 @@ async def test_curve_presence_confirms_after_fifteen_seconds() -> None:
     now = [_NOW_MS]
     runtime = _make_runtime(hass, payload=_curve_payload(commands_enabled=False), now_ms=lambda: now[0])
     config = config_from_payload(_curve_payload(commands_enabled=False))
+    # HA semantics: last_changed stays at the ON transition while the sensor
+    # holds ON; a moved last_changed would prove a new ON episode instead.
     context = RoomLightingContext(
         now=now[0], timezone=_TZ, sunrise=time(7, 0), sunset=time(19, 0),
         sensors=(SensorSnapshot("sensor_demo_presence", SensorKind.PRESENCE, SensorState.ON, now[0]),),
@@ -3794,7 +3798,7 @@ async def test_curve_presence_confirms_after_fifteen_seconds() -> None:
     now[0] += 15_000
     context = RoomLightingContext(
         now=now[0], timezone=_TZ, sunrise=time(7, 0), sunset=time(19, 0),
-        sensors=(SensorSnapshot("sensor_demo_presence", SensorKind.PRESENCE, SensorState.ON, now[0]),),
+        sensors=(SensorSnapshot("sensor_demo_presence", SensorKind.PRESENCE, SensorState.ON, now[0] - 15_000),),
     )
     assert runtime._observe_curve_presence(config, context, now[0]) == (True, 0)  # type: ignore[attr-defined]
 
@@ -3936,7 +3940,7 @@ async def test_curve_unknown_presence_does_not_accumulate_absence() -> None:
     )
     config = config_from_payload(_curve_payload(commands_enabled=False))
 
-    def context(state: SensorState, moment: int) -> RoomLightingContext:
+    def context(state: SensorState, moment: int, last_changed: int | None = None) -> RoomLightingContext:
         return RoomLightingContext(
             now=moment,
             timezone=_TZ,
@@ -3947,7 +3951,7 @@ async def test_curve_unknown_presence_does_not_accumulate_absence() -> None:
                     "sensor_demo_presence",
                     SensorKind.PRESENCE,
                     state,
-                    last_changed=moment,
+                    last_changed if last_changed is not None else moment,
                 ),
             ),
         )
@@ -3968,13 +3972,15 @@ async def test_curve_unknown_presence_does_not_accumulate_absence() -> None:
         config, context(SensorState.OFF, base + 1_800_000), base + 1_800_000
     )
     assert restarted == 0
-    # Presence observed again restarts the 12-second confirmation.
+    # Presence observed again restarts the confirmation: the new episode
+    # holds ON continuously (HA keeps last_changed at the transition).
     confirmed_now, _ = runtime._observe_curve_presence(  # type: ignore[attr-defined]
         config, context(SensorState.ON, base + 1_860_000), base + 1_860_000
     )
     assert confirmed_now is False
     confirmed_after, _ = runtime._observe_curve_presence(  # type: ignore[attr-defined]
-        config, context(SensorState.ON, base + 1_875_000), base + 1_875_000
+        config, context(SensorState.ON, base + 1_875_000, base + 1_860_000),
+        base + 1_875_000,
     )
     assert confirmed_after is True
 
@@ -4370,5 +4376,2873 @@ async def test_curve_real_executor_full_main_controls_mirror_handover(full_param
             now[0] += 1000
             await runtime.async_process()
             assert len([c for c in executor.calls if c.target_id == "light_main"]) == attempts
+    finally:
+        await runtime.stop()
+
+
+class _StubLightPriority:
+    """Minimal shared light-priority source for away-release tests."""
+
+    def __init__(self) -> None:
+        self.records: dict[str, dict[str, object]] = {}
+
+    def manual_claim_entity_ids(self, entity_ids: frozenset[str]) -> frozenset[str]:
+        return frozenset(entity_ids & self.records.keys())
+
+    async def async_release_manual_claims_before(
+        self, boundary_ms: int
+    ) -> frozenset[str]:
+        released = frozenset(
+            entity_id
+            for entity_id, record in self.records.items()
+            if isinstance(record.get("confirmedAt"), int)
+            and record["confirmedAt"] < boundary_ms
+        )
+        for entity_id in released:
+            self.records.pop(entity_id, None)
+        return released
+
+
+async def test_away_home_transition_releases_manual_protections() -> None:
+    """Away→home releases manual protections across all three sources.
+
+    Owner decision 2026-10-09: manual protections release when the away mode
+    clears, coordinated through the room journal, the shared authority and
+    the shared light priority. Manual actions observed after the return keep
+    their normal priority.
+    """
+
+    class _AuthorityStore(_MemoryOwnershipStore):
+        recovered_previous = False
+
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "on", last_changed=_dt(_NOW_MS))
+    hass.states.set("light.demo_main", "on", last_changed=_dt(_NOW_MS))
+    hass.states.set(AWAY_ENTITY_ID, "on", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    from custom_components.hausman_hub.application.manual_light_authority import (
+        ManualLightAuthority,
+    )
+    authority = ManualLightAuthority(_AuthorityStore())
+    await authority.async_load()
+    priority = _StubLightPriority()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock,
+        payload=payload, ownership_store=_MemoryOwnershipStore(),
+        manual_light_authority=authority, light_priority=priority,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        # A person switches the light off before leaving: room + shared holds.
+        runtime._service_event(_event("light", "turn_off", "light.demo_main"))
+        hass.states.set(
+            "light.demo_main", "off", last_changed=_dt(clock.value)
+        )
+        authority.capture(
+            "light.demo_main", "off", "device_trigger", "common-off",
+            observed_at_ms=clock.value,
+        )
+        await authority.async_drain()
+        priority.records["light.demo_main"] = {"confirmedAt": clock.value}
+        await asyncio.gather(*hass.tasks)
+        assert (
+            runtime._ownership.last_manual_off_at(_ROOM_ID, {"light_main"})  # type: ignore[attr-defined]
+            is not None
+        )
+        assert authority.blocks("light.demo_main")
+
+        # The household returns: the away source clears.
+        runtime._away = True  # type: ignore[attr-defined]
+        clock.value = _NOW_MS + 5_000
+        hass.states.set(AWAY_ENTITY_ID, "off", last_changed=_dt(clock.value))
+        runtime._release_away()
+        await asyncio.gather(*hass.tasks)
+
+        assert (
+            runtime._ownership.last_manual_off_at(_ROOM_ID, {"light_main"})  # type: ignore[attr-defined]
+            is None
+        ), "away→home must release manual-off anchors"
+        assert not authority.blocks(
+            "light.demo_main"
+        ), "away→home must release pre-return shared authority claims"
+        assert "light.demo_main" not in priority.manual_claim_entity_ids(
+            frozenset({"light.demo_main"})
+        ), "away→home must release pre-return priority claims"
+
+        # The returning person walks in: automation resumes immediately.
+        clock.value = _NOW_MS + 10_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        assert executor.calls, "auto must resume after the away release"
+    finally:
+        await runtime.stop()
+
+
+async def test_lock_unlock_alone_never_releases_manual_off_holds() -> None:
+    """A real unlock event releases nothing: only the away lifecycle does.
+
+    Owner decision 2026-10-09. The standing at-home release (minimum interval
+    plus stable absence) keeps working and must not be weakened here.
+    """
+
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    payload["devices"]["sensors"].append(  # type: ignore[index]
+        {
+            "id": "entry_door",
+            "name": "Замок",
+            "kind": "entry",
+            "entityId": "lock.demo_door",
+            "autoAdoptOverride": None,
+        }
+    )
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_dt(_NOW_MS))
+    hass.states.set("light.demo_main", "on", last_changed=_dt(_NOW_MS))
+    hass.states.set("lock.demo_door", "locked", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock, payload=payload
+    )
+    await runtime.start(hass, "entry")
+    try:
+        runtime._service_event(_event("light", "turn_off", "light.demo_main"))
+        hass.states.set(
+            "light.demo_main", "off", last_changed=_dt(clock.value)
+        )
+        await asyncio.gather(*hass.tasks)
+        anchor = runtime._ownership.last_manual_off_at(  # type: ignore[attr-defined]
+            _ROOM_ID, {"light_main"}
+        )
+        assert anchor is not None
+
+        # Somebody unlocks the door and steps in while the timer still runs:
+        # the unlock travels through the real state-event handler.
+        clock.value = _NOW_MS + 60_000
+        hass.states.set("lock.demo_door", "unlocked", last_changed=_dt(clock.value))
+        runtime._state_event(
+            SimpleNamespace(
+                data={
+                    "entity_id": "lock.demo_door",
+                    "new_state": SimpleNamespace(state="unlocked"),
+                    "old_state": SimpleNamespace(state="locked"),
+                }
+            )
+        )
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await asyncio.gather(*hass.tasks)
+        await runtime.async_process()
+        assert executor.calls == [], "an unlock must not release the protection"
+        assert (
+            runtime._ownership.last_manual_off_at(_ROOM_ID, {"light_main"})  # type: ignore[attr-defined]
+            == anchor
+        ), "the hold must survive an unlock"
+
+        # The standing at-home release still works: timer + stable absence.
+        clock.value = _NOW_MS + 660_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "off", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        clock.value = _NOW_MS + 720_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        assert executor.calls, "the standing at-home release must keep working"
+    finally:
+        await runtime.stop()
+
+
+async def test_away_home_release_bounds_absence_windows() -> None:
+    """Absence observed before the return must not count after it.
+
+    SEC-RP2-02: clearing the tracker dict is not enough — the away interval
+    is unobserved, so a confirmed-absence window may only start at the return
+    moment, the same fresh start a restart gets.
+    """
+
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    hass.states.set(
+        "binary_sensor.demo_presence", "off", last_changed=_dt(_NOW_MS - 600_000)
+    )
+    hass.states.set("light.demo_main", "off", last_changed=_dt(_NOW_MS))
+    hass.states.set(AWAY_ENTITY_ID, "on", last_changed=_dt(_NOW_MS))
+    runtime = _make_runtime(hass, now_ms=clock, payload=payload)
+    await runtime.start(hass, "entry")
+    try:
+        runtime._away = True  # type: ignore[attr-defined]
+        # Presence returns BEFORE the release; the old window is kept while
+        # the person is present, and must not survive the away→home release.
+        clock.value = _NOW_MS + 500
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        pre_return = runtime._absence.get(_ROOM_ID)  # type: ignore[attr-defined]
+        assert pre_return is not None and pre_return[0] is True, (
+            "the test requires an accumulated absence window before the return"
+        )
+        assert pre_return[1] < _NOW_MS + 1_000
+        clock.value = _NOW_MS + 1_000
+        hass.states.set(AWAY_ENTITY_ID, "off", last_changed=_dt(clock.value))
+        floor = clock.value
+        runtime._release_away()
+        await asyncio.gather(*hass.tasks)
+        await runtime.async_process()
+        absence = runtime._absence.get(_ROOM_ID)  # type: ignore[attr-defined]
+        assert absence is None or absence[1] >= floor, (
+            "pre-return absence must not count after return"
+        )
+        assert pre_return is None or pre_return[1] < floor
+        assert not runtime._curve_presence  # type: ignore[attr-defined]
+        assert not runtime._curve_motion  # type: ignore[attr-defined]
+    finally:
+        await runtime.stop()
+
+
+async def test_manual_action_after_return_survives_away_release() -> None:
+    """A fresh manual action wins the race against the away→home release.
+
+    The release is bounded by the return gesture: holds and claims observed
+    after it keep their normal priority and still block automation.
+    """
+
+    class _AuthorityStore(_MemoryOwnershipStore):
+        recovered_previous = False
+
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_dt(_NOW_MS))
+    hass.states.set("light.demo_main", "off", last_changed=_dt(_NOW_MS))
+    hass.states.set(AWAY_ENTITY_ID, "on", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    from custom_components.hausman_hub.application.manual_light_authority import (
+        ManualLightAuthority,
+    )
+    authority = ManualLightAuthority(_AuthorityStore())
+    await authority.async_load()
+    priority = _StubLightPriority()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock,
+        payload=payload, manual_light_authority=authority, light_priority=priority,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        # A pre-return claim exists before the household comes back.
+        priority.records["light.demo_main"] = {"confirmedAt": _NOW_MS + 500}
+        runtime._away = True  # type: ignore[attr-defined]
+        clock.value = _NOW_MS + 1_000
+        hass.states.set(AWAY_ENTITY_ID, "off", last_changed=_dt(clock.value))
+        runtime._release_away()
+        # A person acts right at the return millisecond, while the
+        # reconciliation is still pending, and refreshes the same claim.
+        runtime._service_event(_event("light", "turn_off", "light.demo_main"))
+        hass.states.set(
+            "light.demo_main", "off", last_changed=_dt(clock.value)
+        )
+        authority.capture(
+            "light.demo_main", "off", "device_trigger", "fresh-off",
+            observed_at_ms=clock.value,
+        )
+        await authority.async_drain()
+        priority.records["light.demo_main"] = {"confirmedAt": clock.value}
+        await asyncio.gather(*hass.tasks)
+
+        assert (
+            runtime._ownership.last_manual_off_at(_ROOM_ID, {"light_main"})  # type: ignore[attr-defined]
+            is not None
+        ), "a fresh manual hold must survive the away release"
+        assert authority.blocks("light.demo_main")
+        assert "light.demo_main" in priority.manual_claim_entity_ids(
+            frozenset({"light.demo_main"})
+        ), "a refreshed claim must survive the away release"
+        clock.value = _NOW_MS + 3_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        assert executor.calls == [], "a fresh manual hold still blocks automation"
+    finally:
+        await runtime.stop()
+
+
+async def test_away_authority_release_paused_save_keeps_fresh_capture() -> None:
+    """A capture arriving during the release save wins over the doomed record.
+
+    The pre-return pending claim is selected for release; while its save is
+    paused, a fresh manual action replaces the pending entry. After the save
+    only the exact frozen record object may be dropped — the fresh capture
+    keeps blocking automation.
+    """
+
+    class _GateStore:
+        def __init__(self) -> None:
+            self.payload: object | None = None
+            self.gate = asyncio.Event()
+            self.recovered_previous = False
+            self.paused = False
+
+        async def async_load(self) -> object | None:
+            return self.payload
+
+        async def async_save(self, payload: dict[str, object]) -> None:
+            if self.paused:
+                await self.gate.wait()
+            self.payload = payload
+
+    from custom_components.hausman_hub.application.manual_light_authority import (
+        ManualLightAuthority,
+    )
+    authority = ManualLightAuthority(_GateStore())
+    await authority.async_load()
+    assert authority.capture(
+        "light.demo_main", "off", "device_trigger", "pre-return",
+        observed_at_ms=_NOW_MS,
+    )
+    boundary = authority.current_generation()
+    authority._store.paused = True  # type: ignore[attr-defined]
+    task = asyncio.ensure_future(
+        authority.async_release_manual_claims_through(boundary)
+    )
+    await asyncio.sleep(0)
+    # A fresh manual action replaces the pending record mid-save.
+    assert authority.capture(
+        "light.demo_main", "off", "device_trigger", "fresh-after-return",
+        observed_at_ms=_NOW_MS + 1,
+    )
+    authority._store.gate.set()  # type: ignore[attr-defined]
+    released = await task
+    assert released == ()
+    record = authority.record("light.demo_main")
+    assert record is not None
+    assert record.fingerprint == "fresh-after-return", (
+        "the fresh capture must survive the release save window"
+    )
+    assert authority.blocks("light.demo_main")
+
+
+async def test_away_priority_release_failed_save_keeps_claim_blocking() -> None:
+    """A failed priority-store save must keep the manual claim blocking.
+
+    SEC-RP2-01/b: the reduced state is persisted before the claims leave
+    memory; a rejecting store releases nothing and the deny boundary stays.
+    Scope note: this covers the in-memory deny boundary for the FIRST save
+    of the reduced snapshot (no claim replacement happens in this test —
+    see test_away_priority_release_heal_save_failure_propagates for the
+    convergence-failure path). All async full-snapshot writers are
+    serialized through `_authority_lock`; the one synchronous mutating
+    path (`plan()`, which cannot take an asyncio lock) only removes a
+    claim on proven fresh off and never creates one (see
+    evidence/HH-014.b-2026-10-09-away-release-rp3-callers.txt). Claim
+    durability across a restart on a failing store is the store-wide
+    persistence posture, not specific to this release path.
+    """
+
+    from custom_components.hausman_hub.application.scenario_light_priority import (
+        LightAutomationPriority,
+    )
+
+    class _RejectingStore:
+        def __init__(self) -> None:
+            self.payload: object | None = None
+            self.saves = 0
+
+        async def async_load(self) -> object | None:
+            return self.payload
+
+        async def async_save(self, payload: dict[str, object]) -> None:
+            self.saves += 1
+            raise RuntimeError("storage unavailable")
+
+    store = _RejectingStore()
+    store.payload = {
+        "version": 1,
+        "records": [{
+            "entityId": "light.demo_main",
+            "targetId": "light_main",
+            "ownership": "manual",
+            "evidenceRevision": None,
+            "confirmedAt": _NOW_MS,
+        }],
+    }
+    priority = LightAutomationPriority(store)
+    await priority.async_load()
+    assert "light.demo_main" in priority.manual_claim_entity_ids(
+        frozenset({"light.demo_main"})
+    )
+    # The release propagates the storage failure: the runtime logs it and the
+    # deny boundary stays untouched — the claim keeps blocking.
+    with pytest.raises(RuntimeError):
+        await priority.async_release_manual_claims_before(_NOW_MS + 1_000)
+    assert store.saves == 1, "the reduced state must be attempted before giving up"
+    assert "light.demo_main" in priority.manual_claim_entity_ids(
+        frozenset({"light.demo_main"})
+    ), "the manual claim must keep blocking after a failed save"
+
+
+async def test_away_priority_release_paused_save_keeps_claims_blocking() -> None:
+    """Claims stay visible and blocking while the reduced save is in flight.
+
+    SEC-RP2-01/b: the reduced snapshot is persisted without mutating live
+    memory, so the dispatch read sees the claim during the save; a claim
+    replaced during the save is a fresh manual action and survives; a
+    cancelled save leaves the deny boundary untouched.
+    """
+
+    from custom_components.hausman_hub.application.scenario_light_priority import (
+        LightAutomationPriority,
+    )
+
+    class _GateStore:
+        def __init__(self) -> None:
+            self.payload: object | None = None
+            self.gate = asyncio.Event()
+            self.recovered_previous = False
+            self.paused = False
+
+        async def async_load(self) -> object | None:
+            return self.payload
+
+        async def async_save(self, payload: dict[str, object]) -> None:
+            if self.paused:
+                await self.gate.wait()
+            self.payload = payload
+
+    store = _GateStore()
+    store.payload = {
+        "version": 1,
+        "records": [{
+            "entityId": "light.demo_main",
+            "targetId": "light_main",
+            "ownership": "manual",
+            "evidenceRevision": None,
+            "confirmedAt": _NOW_MS,
+        }],
+    }
+    priority = LightAutomationPriority(store)
+    await priority.async_load()
+    claim = priority._manual_records["light.demo_main"]  # type: ignore[attr-defined]
+    store.paused = True
+    task = asyncio.ensure_future(
+        priority.async_release_manual_claims_before(_NOW_MS + 1_000)
+    )
+    await asyncio.sleep(0)
+    # The dispatch read must still see the claim while the save is in flight.
+    assert "light.demo_main" in priority.manual_claim_entity_ids(
+        frozenset({"light.demo_main"})
+    )
+    # A fresh manual action replaces the same claim mid-save.
+    priority._manual_records["light.demo_main"] = {  # type: ignore[attr-defined]
+        "entityId": "light.demo_main",
+        "targetId": "light_main",
+        "ownership": "manual",
+        "evidenceRevision": None,
+        "confirmedAt": _NOW_MS + 500,
+    }
+    store.gate.set()
+    released = await task
+    assert released == frozenset(), "the replaced claim must not be released"
+    fresh = priority._manual_records.get("light.demo_main")  # type: ignore[attr-defined]
+    assert fresh is not None and fresh["confirmedAt"] == _NOW_MS + 500, (
+        "the fresh claim must survive the release save window"
+    )
+
+    # A cancelled release must leave the deny boundary untouched.
+    store.paused = True
+    store.gate.clear()
+    cancelled = asyncio.ensure_future(
+        priority.async_release_manual_claims_before(_NOW_MS + 100_000)
+    )
+    await asyncio.sleep(0)
+    cancelled.cancel()
+    try:
+        await cancelled
+    except asyncio.CancelledError:
+        pass
+    assert "light.demo_main" in priority.manual_claim_entity_ids(
+        frozenset({"light.demo_main"})
+    ), "a cancelled release must keep the manual claim blocking"
+
+
+async def test_short_absence_return_does_not_stretch_release() -> None:
+    """Post-return time must not stretch a shorter absence (audit scenario).
+
+    Absent 10 s, then present: the stable-absence requirement measures the
+    actual absence to the return moment, so the release must NOT fire after
+    20 more seconds in the room. After a later absence of 30 s or more the
+    release fires and the light turns on.
+    """
+
+    ownership_store = _MemoryOwnershipStore()
+    ownership_store.payload = {
+        "version": 1,
+        "records": [{
+            "roomId": _ROOM_ID,
+            "targetId": "light_main",
+            "source": "manual",
+            "confirmed": True,
+            "at": _NOW_MS - 7_200_000,
+        }],
+        "manualOff": [],
+        "morning": [],
+    }
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_dt(_NOW_MS))
+    hass.states.set("light.demo_main", "off", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock,
+        payload=payload, ownership_store=ownership_store,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        # Confirm an ongoing absence first.
+        await runtime.async_process()
+
+        # Absent only 10 s, then present again.
+        clock.value = _NOW_MS + 10_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        # 20 more seconds in the room: the frozen window is only 10 s long.
+        clock.value = _NOW_MS + 30_000
+        await runtime.async_process()
+        assert executor.calls == [], (
+            "a 10 s absence must not be stretched into a release"
+        )
+
+        # Later: absent 40 s (fresh off, stable), then present — release.
+        clock.value = _NOW_MS + 70_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "off", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        clock.value = _NOW_MS + 110_000
+        await runtime.async_process()
+        clock.value = _NOW_MS + 115_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        assert executor.calls, (
+            "a stable absence of 30 s or more must release on the return"
+        )
+    finally:
+        await runtime.stop()
+
+
+async def test_away_priority_release_serialized_with_direct_action() -> None:
+    """The away release and a fresh direct action never overwrite each other.
+
+    Both writers serialize on the same lock: whichever lands second persists
+    a snapshot that contains the fresher state, so a survived claim is
+    durable in the store as well as in memory.
+    """
+
+    from custom_components.hausman_hub.application.scenario_light_priority import (
+        LightAutomationPriority,
+    )
+
+    class _GateStore:
+        def __init__(self) -> None:
+            self.payload: object | None = None
+            self.gate = asyncio.Event()
+            self.recovered_previous = False
+            self.paused = False
+
+        async def async_load(self) -> object | None:
+            return self.payload
+
+        async def async_save(self, payload: dict[str, object]) -> None:
+            if self.paused:
+                await self.gate.wait()
+            self.payload = payload
+
+    class _Allowed:
+        domain = "light"
+        service = "turn_on"
+
+    class _Device:
+        entity_id = "light.demo_main"
+
+        def action(self, action_id: str) -> _Allowed:
+            return _Allowed()
+
+    class _Catalog:
+        def device(self, target_id: str) -> _Device:
+            return _Device()
+
+    store = _GateStore()
+    store.payload = {
+        "version": 1,
+        "records": [{
+            "entityId": "light.demo_main",
+            "targetId": "light_main",
+            "ownership": "manual",
+            "evidenceRevision": None,
+            "confirmedAt": _NOW_MS,
+        }],
+    }
+    priority = LightAutomationPriority(store)
+    await priority.async_load()
+    store.paused = True
+    direct = asyncio.ensure_future(
+        priority.note_direct_action(
+            "light_main",
+            "turn_on",
+            {"status": "completed"},
+            _Catalog(),
+            SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None)),
+        )
+    )
+    await asyncio.sleep(0)
+    release = asyncio.ensure_future(
+        priority.async_release_manual_claims_before(_NOW_MS + 1_000)
+    )
+    await asyncio.sleep(0)
+    # Both writers are serialized: the direct action holds the lock first,
+    # the release waits behind it.
+    store.paused = False
+    store.gate.set()
+    await asyncio.gather(direct, release)
+    claim = priority._manual_records.get("light.demo_main")  # type: ignore[attr-defined]
+    assert claim is not None and claim["ownership"] == "manual", (
+        "the fresh direct-action claim must survive the away release"
+    )
+    saved_ids = {
+        record.get("entityId")
+        for record in (store.payload or {}).get("records", [])  # type: ignore[union-attr]
+    }
+    assert "light.demo_main" in saved_ids, (
+        "the store must keep the survived claim durable"
+    )
+    reloaded = LightAutomationPriority(store)
+    await reloaded.async_load()
+    assert "light.demo_main" in reloaded.manual_claim_entity_ids(
+        frozenset({"light.demo_main"})
+    ), "a reload must restore the claim so it keeps blocking"
+
+
+async def test_away_priority_release_heal_save_failure_propagates() -> None:
+    """A failing convergence save keeps the claim and reports the failure.
+
+    If an unsynchronized writer changed live state during the release save,
+    the release converges the store to the live state. When that convergence
+    save fails, the exception surfaces (the runtime logs it) and the
+    artificially replaced claim keeps blocking in memory. The replaced claim
+    is a direct stand-in for an unsynchronized writer, not the plan() path
+    (plan() only removes claims on proven fresh off).
+    """
+
+    from custom_components.hausman_hub.application.scenario_light_priority import (
+        LightAutomationPriority,
+    )
+
+    class _Store:
+        def __init__(self) -> None:
+            self.payload: object | None = None
+            self.saves = 0
+            self.fail_after = 1
+            self.gate = asyncio.Event()
+            self.entered = asyncio.Event()
+            self.recovered_previous = False
+            self.paused = False
+
+        async def async_load(self) -> object | None:
+            return self.payload
+
+        async def async_save(self, payload: dict[str, object]) -> None:
+            if self.paused:
+                self.entered.set()
+                await self.gate.wait()
+            self.saves += 1
+            if self.saves > self.fail_after:
+                raise RuntimeError("convergence save failed")
+            self.payload = payload
+
+    store = _Store()
+    store.payload = {
+        "version": 1,
+        "records": [{
+            "entityId": "light.demo_main",
+            "targetId": "light_main",
+            "ownership": "manual",
+            "evidenceRevision": None,
+            "confirmedAt": _NOW_MS,
+        }],
+    }
+    priority = LightAutomationPriority(store)
+    await priority.async_load()
+    store.paused = True
+    release = asyncio.ensure_future(
+        priority.async_release_manual_claims_before(_NOW_MS + 1_000)
+    )
+    # Deterministic: wait until the release save is inside the paused store.
+    await store.entered.wait()
+    # An unsynchronized writer replaces the claim while the release save is
+    # paused: the fresh claim survives the identity check and the release
+    # must converge the store to the live state — and report a convergence
+    # save failure instead of silently dropping it.
+    priority._manual_records["light.demo_main"] = {  # type: ignore[attr-defined]
+        "entityId": "light.demo_main",
+        "targetId": "light_main",
+        "ownership": "manual",
+        "evidenceRevision": None,
+        "confirmedAt": _NOW_MS + 1_000,
+    }
+    store.paused = False
+    store.gate.set()
+    with pytest.raises(RuntimeError):
+        await release
+    claim = priority._manual_records.get("light.demo_main")  # type: ignore[attr-defined]
+    assert claim is not None and claim["confirmedAt"] == _NOW_MS + 1_000, (
+        "the surviving claim must stay in memory after a failed convergence"
+    )
+    assert "light.demo_main" in priority.manual_claim_entity_ids(
+        frozenset({"light.demo_main"})
+    )
+
+
+async def test_restored_manual_record_releases_via_real_absence() -> None:
+    """A restored manual record must release via the room's real absence.
+
+    Live tambur failure 2026-10-09: after a restart the journal holds a
+    manual record while the manual-off anchor is absent; the ownership
+    release check was fed a default snapshot with absence_confirmed=False,
+    so the record never expired and the room stayed dark on entry.
+    """
+
+    ownership_store = _MemoryOwnershipStore()
+    ownership_store.payload = {
+        "version": 1,
+        "records": [{
+            "roomId": _ROOM_ID,
+            "targetId": "light_main",
+            "source": "manual",
+            "confirmed": True,
+            "at": _NOW_MS - 7_200_000,
+        }],
+        "manualOff": [],
+        "morning": [],
+    }
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_dt(_NOW_MS))
+    hass.states.set("light.demo_main", "off", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock,
+        payload=payload, ownership_store=ownership_store,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        # Absence confirms while the room is empty.
+        clock.value = _NOW_MS + 60_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "off", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        absence = runtime._absence.get(_ROOM_ID)  # type: ignore[attr-defined]
+        assert absence is not None and absence[0] is True
+
+        # The owner walks in: the restored manual record must release via the
+        # real absence evidence and the light must turn on.
+        clock.value = _NOW_MS + 120_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        assert executor.calls, (
+            "a restored manual record must release via the real absence "
+            "evidence even without a manual-off anchor"
+        )
+    finally:
+        await runtime.stop()
+
+
+async def test_restored_manual_record_releases_via_real_absence_day_curve() -> None:
+    """The same release on the day-curve profile (the tambur's own profile).
+
+    The tambur runs `day_curve`; the release must work there too, including
+    the curve presence confirmation on the tick after the walk-in.
+    """
+
+    ownership_store = _MemoryOwnershipStore()
+    ownership_store.payload = {
+        "version": 1,
+        "records": [{
+            "roomId": _ROOM_ID,
+            "targetId": "light_main",
+            "source": "manual",
+            "confirmed": True,
+            "at": _NOW_MS - 7_200_000,
+        }],
+        "manualOff": [],
+        "morning": [],
+    }
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    payload["profile"] = "day_curve"
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_dt(_NOW_MS))
+    hass.states.set("light.demo_main", "off", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock,
+        payload=payload, ownership_store=ownership_store,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        clock.value = _NOW_MS + 60_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "off", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        absence = runtime._absence.get(_ROOM_ID)  # type: ignore[attr-defined]
+        assert absence is not None and absence[0] is True
+
+        clock.value = _NOW_MS + 120_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        # Presence confirmation completes on the next tick: the sensor keeps
+        # holding ON (last_changed stays at the T+120 transition).
+        clock.value = _NOW_MS + 180_000
+        await runtime.async_process()
+        assert executor.calls, (
+            "the day-curve profile must resume after the away-release fix"
+        )
+    finally:
+        await runtime.stop()
+
+
+async def test_restored_manual_record_holds_without_confirmed_absence() -> None:
+    """Without confirmed absence the restored record keeps the room held.
+
+    The release must fire only on real evidence: a room whose presence
+    sensor has never been proven off stays held after a restart.
+    """
+
+    ownership_store = _MemoryOwnershipStore()
+    ownership_store.payload = {
+        "version": 1,
+        "records": [{
+            "roomId": _ROOM_ID,
+            "targetId": "light_main",
+            "source": "manual",
+            "confirmed": True,
+            "at": _NOW_MS - 7_200_000,
+        }],
+        "manualOff": [],
+        "morning": [],
+    }
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    # The presence sensor was left ON by the previous run: absence is NOT
+    # proven after the restart until a fresh off is observed.
+    hass.states.set("binary_sensor.demo_presence", "on", last_changed=_dt(_NOW_MS))
+    hass.states.set("light.demo_main", "off", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock,
+        payload=payload, ownership_store=ownership_store,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        clock.value = _NOW_MS + 120_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        assert executor.calls == [], (
+            "without confirmed absence the restored record must keep holding"
+        )
+    finally:
+        await runtime.stop()
+
+
+async def test_restored_manual_record_holds_on_stale_presence_sensor() -> None:
+    """A stale presence sensor must not confirm the release either.
+
+    Unknown, unavailable or stale readings break the absence evidence; the
+    restored manual record keeps holding instead of silently releasing.
+    """
+
+    ownership_store = _MemoryOwnershipStore()
+    ownership_store.payload = {
+        "version": 1,
+        "records": [{
+            "roomId": _ROOM_ID,
+            "targetId": "light_main",
+            "source": "manual",
+            "confirmed": True,
+            "at": _NOW_MS - 7_200_000,
+        }],
+        "manualOff": [],
+        "morning": [],
+    }
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    hass.states.set(
+        "binary_sensor.demo_presence",
+        "unavailable",
+        last_changed=_dt(_NOW_MS - 600_000),
+    )
+    hass.states.set("light.demo_main", "off", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock,
+        payload=payload, ownership_store=ownership_store,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        clock.value = _NOW_MS + 120_000
+        hass.states.set(
+            "binary_sensor.demo_presence",
+            "unavailable",
+            last_changed=_dt(_NOW_MS - 600_000),
+        )
+        await runtime.async_process()
+        absence = runtime._absence.get(_ROOM_ID)  # type: ignore[attr-defined]
+        assert absence is None or absence[0] is not True, (
+            "an unavailable sensor must not confirm absence"
+        )
+        assert executor.calls == []
+    finally:
+        await runtime.stop()
+
+
+async def test_delayed_processing_freezes_end_at_sensor_return() -> None:
+    """The frozen absence end is the sensor's return time, not processing time.
+
+    Audit scenario: the absence started at T; the sensor flipped ON at T+10 s;
+    the room evaluation ran late, at T+30 s. The stored window end must be
+    T+10 s (the proven return), so the 10 s absence stays shorter than the
+    30 s stable requirement and the room keeps holding.
+    """
+
+    ownership_store = _MemoryOwnershipStore()
+    ownership_store.payload = {
+        "version": 1,
+        "records": [{
+            "roomId": _ROOM_ID,
+            "targetId": "light_main",
+            "source": "manual",
+            "confirmed": True,
+            "at": _NOW_MS - 7_200_000,
+        }],
+        "manualOff": [],
+        "morning": [],
+    }
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_dt(_NOW_MS))
+    hass.states.set("light.demo_main", "off", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock,
+        payload=payload, ownership_store=ownership_store,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        await runtime.async_process()
+        # The sensor flipped ON at T+10 s; the room was evaluated only at T+30 s.
+        sensor_return = _NOW_MS + 10_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(sensor_return)
+        )
+        clock.value = _NOW_MS + 30_000
+        await runtime.async_process()
+        absence = runtime._absence.get(_ROOM_ID)  # type: ignore[attr-defined]
+        assert absence is not None and absence[0] is True
+        assert absence[2] == sensor_return, (
+            f"the frozen end must be the sensor return time, got {absence[2]}"
+        )
+        assert executor.calls == [], (
+            "a 10 s absence must not be stretched into a release"
+        )
+    finally:
+        await runtime.stop()
+
+
+async def test_new_manual_off_after_completed_window_starts_fresh() -> None:
+    """A manual off after a completed absence window starts a fresh window.
+
+    Completed window → the release fired → the person switches the light off
+    again: the new hold must anchor to the new manual action, not inherit the
+    released window.
+    """
+
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "on", last_changed=_dt(_NOW_MS))
+    hass.states.set("light.demo_main", "on", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock, payload=payload
+    )
+    await runtime.start(hass, "entry")
+    try:
+        runtime._service_event(_event("light", "turn_off", "light.demo_main"))
+        hass.states.set("light.demo_main", "off", last_changed=_dt(clock.value))
+        clock.value = _NOW_MS + 660_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "off", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        clock.value = _NOW_MS + 720_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        assert executor.calls, "the completed window must release"
+
+        # The person switches the light off again: a fresh hold anchors now.
+        executor.calls.clear()
+        runtime._service_event(_event("light", "turn_off", "light.demo_main"))
+        hass.states.set(
+            "light.demo_main", "off", last_changed=_dt(clock.value)
+        )
+        clock.value = _NOW_MS + 730_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "off", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        anchor = runtime._ownership.last_manual_off_at(  # type: ignore[attr-defined]
+            _ROOM_ID, {"light_main"}
+        )
+        assert anchor == _NOW_MS + 720_000, "the fresh hold must anchor to the new action"
+        clock.value = _NOW_MS + 780_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        assert executor.calls == [], (
+            "the fresh hold must keep blocking before its own timer elapses"
+        )
+    finally:
+        await runtime.stop()
+
+
+def _restored_record_store() -> _MemoryOwnershipStore:
+    store = _MemoryOwnershipStore()
+    store.payload = {
+        "version": 1,
+        "records": [{
+            "roomId": _ROOM_ID,
+            "targetId": "light_main",
+            "source": "manual",
+            "confirmed": True,
+            "at": _NOW_MS - 7_200_000,
+        }],
+        "manualOff": [],
+        "morning": [],
+    }
+    return store
+
+
+async def test_absence_latch_survives_short_reentries() -> None:
+    """Short re-entries must not erase a proven stable absence (the tambur).
+
+    Live scenario 2026-10-09: a restored manual record holds the room; the
+    person moves in short in/out cycles (2-20 s windows), so the LATEST
+    absence window never reaches the stable requirement — the earlier
+    >= 30 s empty window must latch the release eligibility instead of
+    being erased.
+    """
+
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_dt(_NOW_MS))
+    hass.states.set("light.demo_main", "off", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock,
+        payload=payload, ownership_store=_restored_record_store(),
+    )
+    await runtime.start(hass, "entry")
+    try:
+        await runtime.async_process()
+        assert runtime._absence_release_latch == set()  # type: ignore[attr-defined]
+
+        # Short in/out cycles: windows of 2-20 s, never stable.
+        moment = _NOW_MS + 1_000
+        for cycle in range(3):
+            moment += 20_000
+            hass.states.set(
+                "binary_sensor.demo_presence", "on", last_changed=_dt(moment)
+            )
+            clock.value = moment
+            await runtime.async_process()
+            moment += 5_000
+            hass.states.set(
+                "binary_sensor.demo_presence", "off", last_changed=_dt(moment)
+            )
+            clock.value = moment
+            await runtime.async_process()
+        assert executor.calls == [], (
+            "short cycles before a stable window must keep the room held"
+        )
+
+        # One stable empty window (35 s) latches the release eligibility.
+        moment += 35_000
+        clock.value = moment
+        await runtime.async_process()
+        assert _ROOM_ID in runtime._absence_release_latch  # type: ignore[attr-defined]
+
+        # The person walks in: the automation resumes and turns the light on.
+        moment += 2_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(moment)
+        )
+        clock.value = moment
+        await runtime.async_process()
+        assert executor.calls, (
+            "the latched release must resume automation on the return"
+        )
+    finally:
+        await runtime.stop()
+
+
+async def test_new_manual_action_clears_absence_latch() -> None:
+    """A fresh manual action clears the latch and restarts the cycle."""
+
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_dt(_NOW_MS))
+    hass.states.set("light.demo_main", "off", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock, payload=payload
+    )
+    await runtime.start(hass, "entry")
+    try:
+        # The empty-room window matures (30 s) and latches the eligibility:
+        # the sensor stays off from the seed, only the clock advances.
+        clock.value = _NOW_MS + 35_000
+        await runtime.async_process()
+        assert _ROOM_ID in runtime._absence_release_latch  # type: ignore[attr-defined]
+
+        # A fresh manual action clears the latch: the hold restarts.
+        runtime._service_event(_event("light", "turn_off", "light.demo_main"))
+        await asyncio.gather(*hass.tasks)
+        assert _ROOM_ID not in runtime._absence_release_latch  # type: ignore[attr-defined]
+
+        # The person walks in right away: the fresh hold keeps blocking until
+        # its own timer and a new stable absence.
+        clock.value = _NOW_MS + 5_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        assert executor.calls == []
+    finally:
+        await runtime.stop()
+
+
+async def test_absence_latch_survives_unavailable_sensor() -> None:
+    """A sensor dropout must not erase a proven stable absence.
+
+    The latch is a historical fact (a completed >= stable empty window since
+    the manual action); sensor faults clear the ongoing WINDOW but not the
+    latch. The dropout also means no fresh evidence: no command fires while
+    the sensor is unavailable.
+    """
+
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_dt(_NOW_MS))
+    hass.states.set("light.demo_main", "off", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock, payload=payload
+    )
+    await runtime.start(hass, "entry")
+    try:
+        # The empty-room window matures (30 s) and latches the eligibility.
+        clock.value = _NOW_MS + 35_000
+        await runtime.async_process()
+        assert _ROOM_ID in runtime._absence_release_latch  # type: ignore[attr-defined]
+
+        # A sensor dropout clears the ongoing WINDOW but not the latch.
+        hass.states.set(
+            "binary_sensor.demo_presence",
+            "unavailable",
+            last_changed=_dt(_NOW_MS + 36_000),
+        )
+        clock.value = _NOW_MS + 37_000
+        await runtime.async_process()
+        assert runtime._absence.get(_ROOM_ID) is None  # type: ignore[attr-defined]
+        assert _ROOM_ID in runtime._absence_release_latch  # type: ignore[attr-defined]
+        assert executor.calls == [], (
+            "no commands on an unavailable sensor"
+        )
+    finally:
+        await runtime.stop()
+
+
+async def test_manual_off_protection_respects_absence_latch() -> None:
+    """With an active anchor, the latch satisfies the absence condition.
+
+    Live flow: manual off → a stable empty window latches the eligibility →
+    short re-entries afterwards must not re-block: the release holds and the
+    automation resumes on presence. The minimum interval stays mandatory.
+    """
+
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_dt(_NOW_MS))
+    hass.states.set("light.demo_main", "off", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock, payload=payload
+    )
+    await runtime.start(hass, "entry")
+    try:
+        # Manual off: the anchor arms; the empty window matures and latches.
+        runtime._service_event(_event("light", "turn_off", "light.demo_main"))
+        await asyncio.gather(*hass.tasks)
+        clock.value = _NOW_MS + 35_000
+        await runtime.async_process()
+        assert _ROOM_ID in runtime._absence_release_latch  # type: ignore[attr-defined]
+
+        # The minimum interval elapses while the room stays empty.
+        clock.value = _NOW_MS + 610_000
+        await runtime.async_process()
+
+        # Short re-entries AFTER the latch: the release holds.
+        clock.value = _NOW_MS + 615_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        assert executor.calls, "the latched release must resume on presence"
+        executor.calls.clear()
+
+        clock.value = _NOW_MS + 620_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "off", last_changed=_dt(clock.value)
+        )
+        clock.value = _NOW_MS + 625_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        assert executor.calls, "the latched release must keep resuming"
+    finally:
+        await runtime.stop()
+
+
+async def test_manual_off_protection_respects_absence_latch_day_curve() -> None:
+    """The same latch release on the day-curve profile (the tambur's own)."""
+
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    payload["profile"] = "day_curve"
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_dt(_NOW_MS))
+    hass.states.set("light.demo_main", "off", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock, payload=payload
+    )
+    await runtime.start(hass, "entry")
+    try:
+        runtime._service_event(_event("light", "turn_off", "light.demo_main"))
+        await asyncio.gather(*hass.tasks)
+        clock.value = _NOW_MS + 35_000
+        await runtime.async_process()
+        assert _ROOM_ID in runtime._absence_release_latch  # type: ignore[attr-defined]
+        clock.value = _NOW_MS + 610_000
+        await runtime.async_process()
+        clock.value = _NOW_MS + 615_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        # The curve confirms presence on the next tick after the walk-in.
+        clock.value = _NOW_MS + 645_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        assert executor.calls, (
+            "the latched release must resume on the day-curve profile"
+        )
+    finally:
+        await runtime.stop()
+
+
+async def test_power_manual_floor_blocks_latch_from_stale_sensor_off() -> None:
+    """The room POWER manual path gets the same action floor as the light paths.
+
+    Audit scenario (SEC-RP6-01), differentiating: the presence sensor stays
+    OFF continuously from T+5 s; the room POWER is switched off manually at
+    T+10 s — the floor restarts the absence evidence at the action. At T+35
+    s (30 s since the sensor off, but only 25 s since the action) the latch
+    must NOT set without the floor, and must NOT set with it either. At
+    T+45 s (35 s after the action) the honest window latches. The power is
+    restored and the person returns at T+50 s: the release fires and the
+    light turns on.
+    """
+
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    payload["devices"]["power_switch"] = {
+        "id": "power",
+        "name": "Питание",
+        "entityId": "switch.demo_power",
+        "autoAdoptOverride": None,
+    }
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    # The presence sensor starts unknown at T0 and is proven off at T+5 s
+    # (the evidence predates the action, but the sequence is monotonic).
+    hass.states.set("binary_sensor.demo_presence", "unknown", last_changed=_dt(_NOW_MS))
+    hass.states.set("light.demo_main", "off", last_changed=_dt(_NOW_MS))
+    hass.states.set("switch.demo_power", "on", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock, payload=payload
+    )
+    await runtime.start(hass, "entry")
+    try:
+        # The presence sensor is proven off at T+5 s (fresh off evidence,
+        # before the action).
+        clock.value = _NOW_MS + 5_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "off", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+
+        # The room power is switched off manually at T+10 s: the floor lands.
+        clock.value = _NOW_MS + 10_000
+        hass.states.set("switch.demo_power", "off", last_changed=_dt(clock.value))
+        runtime._observe_power_transition("switch.demo_power")
+        await asyncio.gather(*hass.tasks)
+        assert runtime._manual_absence_floor.get(_ROOM_ID) == _NOW_MS + 10_000  # type: ignore[attr-defined]
+
+        # T+35 s: 30 s since the sensor off (T+5), but only 25 s since the
+        # action (T+10). The floor makes the difference — the window starts
+        # at the ACTION, so the latch must not set yet.
+        clock.value = _NOW_MS + 35_000
+        await runtime.async_process()
+        assert _ROOM_ID not in runtime._absence_release_latch  # type: ignore[attr-defined]
+        assert runtime._absence.get(_ROOM_ID) == (True, _NOW_MS + 10_000, None)  # type: ignore[attr-defined]
+
+        # T+45 s: 35 s after the action — the honest window (action → now)
+        # completes and latches.
+        clock.value = _NOW_MS + 45_000
+        await runtime.async_process()
+        assert _ROOM_ID in runtime._absence_release_latch  # type: ignore[attr-defined]
+
+        # At T+50 s (only 40 s after the action) the minimum-interval timer
+        # still blocks — correctly: the fresh manual action's own 10-minute
+        # protection is not bypassed by the latch.
+        hass.states.set("switch.demo_power", "on", last_changed=_dt(clock.value))
+        clock.value = _NOW_MS + 50_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        assert executor.calls == [], (
+            "the latch must not bypass the minimum-interval timer"
+        )
+
+        # The power is restored and the person returns after the minimum
+        # interval: the release fires and the light turns on.
+        clock.value = _NOW_MS + 615_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        assert executor.calls, (
+            "the honest post-action absence must release on the return"
+        )
+    finally:
+        await runtime.stop()
+
+
+async def test_manual_floor_blocks_latch_from_stale_sensor_off() -> None:
+    """The manual-action floor blocks a premature latch after the action.
+
+    The sensor goes off 5 s after the start; the manual action lands 10 s
+    after the start (the absence floor restarts the evidence at the action).
+    Without the floor the latch would set 30 s after the sensor-off — only
+    25 s after the action. With the floor it sets no earlier than 30 s after
+    the action itself.
+    """
+
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    # The presence sensor starts unknown at T0 and is proven off at T+5 s.
+    hass.states.set("binary_sensor.demo_presence", "unknown", last_changed=_dt(_NOW_MS))
+    hass.states.set("light.demo_main", "off", last_changed=_dt(_NOW_MS))
+    hass.states.set("switch.demo_power", "on", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock, payload=payload
+    )
+    await runtime.start(hass, "entry")
+    try:
+        # The sensor goes off 5 s after the start (fresh off evidence).
+        clock.value = _NOW_MS + 5_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "off", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        assert _ROOM_ID not in runtime._absence_release_latch  # type: ignore[attr-defined]
+
+        # The manual action at T+10 s restarts the absence evidence.
+        clock.value = _NOW_MS + 10_000
+        runtime._service_event(_event("light", "turn_off", "light.demo_main"))
+        await asyncio.gather(*hass.tasks)
+        assert _ROOM_ID not in runtime._absence_release_latch  # type: ignore[attr-defined]
+
+        # 25 s after the action (30 s after the sensor-off): no latch — the
+        # floor requires the stable window to be 30 s after the ACTION.
+        clock.value = _NOW_MS + 35_000
+        await runtime.async_process()
+        assert _ROOM_ID not in runtime._absence_release_latch  # type: ignore[attr-defined]
+
+        # 35 s after the action: the genuine window latches.
+        clock.value = _NOW_MS + 45_000
+        await runtime.async_process()
+        assert _ROOM_ID in runtime._absence_release_latch  # type: ignore[attr-defined]
+    finally:
+        await runtime.stop()
+
+
+async def test_sensor_failure_during_absence_self_heals() -> None:
+    """A sensor failure during the empty period: the latch survives (a
+    historical fact), the ongoing window is dropped, and the person's
+    presence is invisible (no reading — no auto-on, fail-closed). When the
+    sensor recovers with a valid fresh ON reading, the latch plus the valid
+    presence resume the automation.
+    """
+
+    ownership_store = _MemoryOwnershipStore()
+    ownership_store.payload = {
+        "version": 1,
+        "records": [{
+            "roomId": _ROOM_ID,
+            "targetId": "light_main",
+            "source": "manual",
+            "confirmed": True,
+            "at": _NOW_MS - 7_200_000,
+        }],
+        "manualOff": [],
+        "morning": [],
+    }
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_dt(_NOW_MS))
+    hass.states.set("light.demo_main", "off", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock,
+        payload=payload, ownership_store=ownership_store,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        # The room is empty; the window matures and latches.
+        clock.value = _NOW_MS + 35_000
+        await runtime.async_process()
+        assert _ROOM_ID in runtime._absence_release_latch  # type: ignore[attr-defined]
+
+        # The sensor fails (unavailable): the latch survives, the person's
+        # presence is invisible.
+        hass.states.set(
+            "binary_sensor.demo_presence",
+            "unavailable",
+            last_changed=_dt(_NOW_MS + 36_000),
+        )
+        clock.value = _NOW_MS + 37_000
+        await runtime.async_process()
+        clock.value = _NOW_MS + 40_000
+        await runtime.async_process()
+        assert _ROOM_ID in runtime._absence_release_latch  # type: ignore[attr-defined]
+        assert executor.calls == [], (
+            "no auto-on while the presence reading is unavailable"
+        )
+
+        # The sensor recovers with a valid fresh ON reading: the latch
+        # (proven earlier) + the valid presence → the release.
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(_NOW_MS + 50_000)
+        )
+        clock.value = _NOW_MS + 50_000
+        await runtime.async_process()
+        clock.value = _NOW_MS + 65_000
+        await runtime.async_process()
+        assert executor.calls, (
+            "the recovery with valid presence resumes the automation"
+        )
+    finally:
+        await runtime.stop()
+
+
+
+
+async def test_day_curve_no_anchor_unknown_presence_stays_dark() -> None:
+    """Day curve, restored manual record, NO anchor: UNKNOWN presence →
+    the auto-on waits; a fresh valid ON reading resumes it."""
+
+    ownership_store = _MemoryOwnershipStore()
+    ownership_store.payload = {
+        "version": 1,
+        "records": [{
+            "roomId": _ROOM_ID,
+            "targetId": "light_main",
+            "source": "manual",
+            "confirmed": True,
+            "at": _NOW_MS - 7_200_000,
+        }],
+        "manualOff": [],
+        "morning": [],
+    }
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    payload["profile"] = "day_curve"
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_dt(_NOW_MS))
+    hass.states.set("light.demo_main", "off", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock,
+        payload=payload, ownership_store=ownership_store,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        # The empty room matures the window; the latch sets (via the real
+        # absence evidence with working sensors).
+        clock.value = _NOW_MS + 35_000
+        await runtime.async_process()
+        assert _ROOM_ID in runtime._absence_release_latch  # type: ignore[attr-defined]
+
+        # The sensor becomes UNKNOWN (unreliable): the auto-on must wait.
+        hass.states.set(
+            "binary_sensor.demo_presence", "unknown", last_changed=_dt(_NOW_MS + 36_000)
+        )
+        clock.value = _NOW_MS + 40_000
+        await runtime.async_process()
+        assert executor.calls == [], (
+            "no auto-on with an unreliable presence reading"
+        )
+
+        # A fresh valid ON reading: the automation resumes.
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(_NOW_MS + 50_000)
+        )
+        clock.value = _NOW_MS + 65_000
+        await runtime.async_process()
+        assert executor.calls, "the automation resumes on the valid return"
+    finally:
+        await runtime.stop()
+
+
+async def test_entry_wakeup_wake_does_not_bypass_manual_presence_gate() -> None:
+    """A synthetic unlock wake (the presence_confirmed flag) is not presence.
+
+    With a proven manual record the unlock wakeup alone keeps the room dark
+    (fail-closed): the flag does not pass the presence gate without a valid
+    ON sensor reading. The light resumes when the sensor itself proves
+    presence (a fresh ON held for the confirmation floor).
+    """
+
+    ownership_store = _MemoryOwnershipStore()
+    ownership_store.payload = {
+        "version": 1,
+        "records": [{
+            "roomId": _ROOM_ID,
+            "targetId": "light_main",
+            "source": "manual",
+            "confirmed": True,
+            "at": _NOW_MS - 7_200_000,
+        }],
+        "manualOff": [],
+        "morning": [],
+    }
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    payload["profile"] = "day_curve"
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_dt(_NOW_MS))
+    hass.states.set("light.demo_main", "off", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock,
+        payload=payload, ownership_store=ownership_store,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        # The empty room matures the window; the latch sets.
+        clock.value = _NOW_MS + 35_000
+        await runtime.async_process()
+        assert _ROOM_ID in runtime._absence_release_latch  # type: ignore[attr-defined]
+
+        # The entry unlocks: the wakeup window is active while the presence
+        # reading is unreliable. The synthetic confirmation flag must not
+        # light the room.
+        runtime._entry_wakeup_until[_ROOM_ID] = _NOW_MS + 120_000  # type: ignore[attr-defined]
+        hass.states.set(
+            "binary_sensor.demo_presence", "unknown", last_changed=_dt(_NOW_MS + 36_000)
+        )
+        clock.value = _NOW_MS + 40_000
+        await runtime.async_process()
+        assert executor.calls == [], (
+            "the unlock wake must not bypass the presence gate"
+        )
+
+        # The sensor proves presence (a fresh ON held for the confirmation
+        # floor): the gate passes on sensor evidence.
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(_NOW_MS + 50_000)
+        )
+        clock.value = _NOW_MS + 65_000
+        await runtime.async_process()
+        assert executor.calls, "the light resumes on the sensor's own evidence"
+    finally:
+        await runtime.stop()
+
+
+def test_new_on_episode_restarts_curve_confirmation() -> None:
+    """A moved last_changed proves a new ON episode: the floor restarts.
+
+    A delayed processing pass must not confirm presence across a hidden
+    OFF: the sensor went off and on again between two observations, so the
+    continuous ON duration follows the newest ON transition, not the first
+    episode start (SEC-RP9-PRESENCE-01).
+    """
+
+    hass = _FakeHass()
+    runtime = _make_runtime(
+        hass, payload=_curve_payload(commands_enabled=False), now_ms=lambda: _NOW_MS
+    )
+    config = config_from_payload(_curve_payload(commands_enabled=False))
+
+    def context(moment: int, last_changed: int) -> RoomLightingContext:
+        return RoomLightingContext(
+            now=moment, timezone=_TZ, sunrise=time(7, 0), sunset=time(19, 0),
+            sensors=(SensorSnapshot(
+                "sensor_demo_presence", SensorKind.PRESENCE, SensorState.ON, last_changed,
+            ),),
+        )
+
+    start = _NOW_MS
+    # The first ON episode begins; the processing pass is on time.
+    assert runtime._observe_curve_presence(  # type: ignore[attr-defined]
+        config, context(start, start), start
+    ) == (False, 0)
+    # Hidden OFF at start+11s, a new ON at start+12s; the next processing
+    # pass at start+15s only sees the current ON (last_changed=start+12s).
+    # Three seconds of continuous ON must not confirm presence.
+    confirmed, _ = runtime._observe_curve_presence(  # type: ignore[attr-defined]
+        config, context(start + 15_000, start + 12_000), start + 15_000
+    )
+    assert confirmed is False
+    # The new episode holds for its own confirmation floor.
+    confirmed, _ = runtime._observe_curve_presence(  # type: ignore[attr-defined]
+        config, context(start + 27_000, start + 12_000), start + 27_000
+    )
+    assert confirmed is True
+
+
+async def test_manual_power_on_resets_absence_evidence() -> None:
+    """A manual power restore is an action boundary for the absence proof.
+
+    The latch proven before the action must not release the manual hold on
+    old evidence: after the owner powers the room back, a fresh stable
+    absence is required before the automation may light the room again.
+    """
+
+    ownership_store = _MemoryOwnershipStore()
+    ownership_store.payload = {
+        "version": 1,
+        "records": [{
+            "roomId": _ROOM_ID,
+            "targetId": "light_main",
+            "source": "manual",
+            "confirmed": True,
+            "at": _NOW_MS - 7_200_000,
+        }],
+        "manualOff": [],
+        "morning": [],
+    }
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    payload["devices"]["power_switch"] = {
+        "id": "power",
+        "name": "Питание",
+        "entityId": "switch.demo_power",
+        "autoAdoptOverride": None,
+    }
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_dt(_NOW_MS))
+    hass.states.set("light.demo_main", "off", last_changed=_dt(_NOW_MS))
+    hass.states.set("switch.demo_power", "off", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock,
+        payload=payload, ownership_store=ownership_store,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        # The empty room matures the window; the latch sets.
+        clock.value = _NOW_MS + 35_000
+        await runtime.async_process()
+        assert _ROOM_ID in runtime._absence_release_latch  # type: ignore[attr-defined]
+
+        # The owner restores the room power: the proven latch and the
+        # absence window are stale from this action onwards.
+        clock.value = _NOW_MS + 40_000
+        runtime._service_event(_event("switch", "turn_on", "switch.demo_power"))
+        hass.states.set("switch.demo_power", "on", last_changed=_dt(clock.value))
+        await asyncio.gather(*hass.tasks)
+        assert _ROOM_ID not in runtime._absence_release_latch  # type: ignore[attr-defined]
+        assert runtime._manual_absence_floor.get(_ROOM_ID) == _NOW_MS + 40_000  # type: ignore[attr-defined]
+
+        # The person returns: presence is confirmed, but the hold must not
+        # release on the pre-action evidence.
+        clock.value = _NOW_MS + 50_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        clock.value = _NOW_MS + 65_000
+        await runtime.async_process()
+        assert executor.calls == [], (
+            "the stale latch must not release after a manual power action"
+        )
+
+        # A fresh stable absence after the action restores the honest path.
+        clock.value = _NOW_MS + 70_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "off", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        # The sensor keeps holding OFF (last_changed stays at T+70).
+        clock.value = _NOW_MS + 105_000
+        await runtime.async_process()
+        assert _ROOM_ID in runtime._absence_release_latch  # type: ignore[attr-defined]
+        clock.value = _NOW_MS + 110_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        # The sensor keeps holding ON (last_changed stays at T+110); the
+        # confirmation floor completes 15 s into the return.
+        clock.value = _NOW_MS + 125_000
+        await runtime.async_process()
+        assert executor.calls, "the fresh absence releases the hold on the return"
+    finally:
+        await runtime.stop()
+
+
+async def test_morning_door_wake_does_not_release_manual_holds() -> None:
+    """An unlock releases nothing (owner rule 2026-10-09).
+
+    During the morning wait the room keeps its night state: the unlock wake
+    does not start the day and must not delete the manual holds
+    (SEC-RP9-MORNING-02). Only a trusted presence reading starts the day,
+    releasing the holds dated before the boundary; a manual action made
+    after the boundary keeps its ordinary hold.
+    """
+
+    ownership_store = _MemoryOwnershipStore()
+    ownership_store.payload = {
+        "version": 1,
+        "records": [
+            {
+                "roomId": _ROOM_ID,
+                "targetId": "light_main",
+                "source": "manual",
+                "confirmed": True,
+                # 06:00 UTC: dated before the 07:00 boundary.
+                "at": _NOW_MS - 14_400_000,
+            },
+            {
+                "roomId": _ROOM_ID,
+                "targetId": "light_main",
+                "source": "manual",
+                "confirmed": True,
+                "turnedOff": True,
+                # 08:00 UTC: dated after the 07:00 boundary.
+                "at": _NOW_MS - 7_200_000,
+            },
+        ],
+        "manualOff": [],
+        "morning": [],
+    }
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    payload["profile"] = "day_curve"
+    payload["morningBoundary"] = {
+        "enabled": True, "time": "07:00", "presenceGate": True,
+    }
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "unknown", last_changed=_dt(_NOW_MS))
+    hass.states.set("light.demo_main", "off", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock,
+        payload=payload, ownership_store=ownership_store,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        # A morning wait is pending since the 07:00 boundary (matching the
+        # wall time); nobody trusted has been seen yet.
+        runtime._ownership.mark_morning_waiting(  # type: ignore[attr-defined]
+            _ROOM_ID, "2026-09-11", _NOW_MS - 10_800_000, _NOW_MS - 10_800_000
+        )
+        config = runtime._configs[_ROOM_ID]
+
+        # The entry unlocks while the presence reading stays unreliable:
+        # the room keeps its night state (the curve is not evaluated during
+        # the wait), no commands are sent, both holds survive.
+        runtime._entry_wakeup_until[_ROOM_ID] = _NOW_MS + 60_000  # type: ignore[attr-defined]
+        await runtime.async_process()
+        assert (
+            runtime._morning_gate(config, config.morning, clock.value)  # type: ignore[attr-defined]
+            == "wait"
+        )
+        assert executor.calls == [], "the wake must not light a waiting room"
+        assert len(runtime._ownership.snapshots_for(  # type: ignore[attr-defined]
+            _ROOM_ID, ("light_main",)
+        )) == 2, "an unlock must not delete either manual hold"
+
+        # A trusted presence reading starts the day (the processing pass
+        # itself transitions): the pre-boundary hold is released, the
+        # post-boundary hold keeps its ordinary protection.
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        entry = runtime._ownership.morning_entry(_ROOM_ID)  # type: ignore[attr-defined]
+        assert entry is not None and not entry.get("waiting"), (
+            "the trusted presence starts the day"
+        )
+        remaining = runtime._ownership.snapshots_for(  # type: ignore[attr-defined]
+            _ROOM_ID, ("light_main",)
+        )
+        assert not [
+            snapshot for snapshot in remaining
+            if snapshot.source is OwnershipSource.MANUAL
+            and snapshot.at < _NOW_MS - 10_800_000
+        ], "the morning transition releases the pre-boundary hold"
+        assert any(
+            snapshot.source is OwnershipSource.MANUAL
+            and snapshot.at == _NOW_MS - 7_200_000
+            for snapshot in remaining
+        ), "the post-boundary manual action keeps its ordinary hold"
+    finally:
+        await runtime.stop()
+
+
+async def test_proven_power_pair_plans_relight_after_release() -> None:
+    """The wall key and the chandelier are one pair (owner rule 2026-10-10).
+
+    While the room power switch proves the circuit off, the pair reads the
+    room target off (a bulb that lost power cannot report; its stale
+    ``on`` is voided) and the released hold plans the relight. The dispatch
+    order (power first) and the send-gate proof are pinned by
+    test_dispatch_switches_power_on_before_the_target and
+    test_turn_on_matrix_honors_captured_pair_proof.
+    """
+
+    payload = _config_payload(
+        minimum_interval_seconds=30, stable_absence_seconds=30,
+        power_switch_entity='switch.demo_power',
+    )
+    payload['profile'] = 'day_curve'
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    # The bulb was on long ago; the wall key cut the circuit at T0, so the
+    # report is stale (beyond the freshness window) and HA still says "on".
+    # The tambur's own profile (day_curve) runs this path.
+    hass.states.set(
+        'light.demo_main', 'on', last_changed=_dt(_NOW_MS - 600_000)
+    )
+    hass.states.set('switch.demo_power', 'off', last_changed=_dt(_NOW_MS))
+    hass.states.set('binary_sensor.demo_presence', 'off', last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor,
+        now_ms=clock, payload=payload,
+    )
+    await runtime.start(hass, 'entry')
+    try:
+        # The manual switch-off lands at T0 (the wall key act, attributed).
+        clock.value = _NOW_MS
+        runtime._service_event(_event('light', 'turn_off', 'light.demo_main'))
+        await asyncio.gather(*hass.tasks)
+
+        # The empty room matures the window; the latch sets (the presence
+        # sensor keeps holding OFF from T0). While the power is proven off,
+        # the pair reads the room target off (state OFF, the stale report
+        # voided).
+        clock.value = _NOW_MS + 35_000
+        await runtime.async_process()
+        assert _ROOM_ID in runtime._absence_release_latch  # type: ignore[attr-defined]
+        context = await runtime.async_context_for(runtime._configs[_ROOM_ID])
+        assert context.light('light_main').state is SensorState.OFF and (
+            context.light('light_main').reported_state is None
+        ), 'the proven-off power must read the room target off (the pair)'
+
+        # The person returns; the curve confirms the presence and the
+        # released hold plans the relight (turn_on: the pair view reads the
+        # target off).
+        clock.value = _NOW_MS + 40_000
+        hass.states.set(
+            'binary_sensor.demo_presence', 'on', last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        clock.value = _NOW_MS + 55_000
+        hass.states.set(
+            'binary_sensor.demo_presence', 'on', last_changed=_dt(_NOW_MS + 40_000)
+        )
+        await runtime.async_process()
+        from custom_components.hausman_hub.domain.room_lighting_engine import (
+            decision_target,
+            evaluate_curve_room,
+        )
+        from custom_components.hausman_hub.domain.room_lighting_ownership import SensorState as SS
+        context = await runtime.async_context_for(runtime._configs[_ROOM_ID])
+        assert context.light('light_main').state is SensorState.OFF
+        decision = evaluate_curve_room(
+            runtime._configs[_ROOM_ID], context,
+            presence=SS.ON, presence_confirmed=True, absence_seconds=None,
+        )
+        main = decision_target(decision, 'light_main')
+        assert main is not None, "the held room must still be evaluated"
+        assert any(
+            command.action is LightAction.TURN_ON for command in main.commands
+        ), (
+            "the relight must be planned: the stale reported on must not "
+            f"keep the room dark (skips={[s.reason.value for s in main.skips]})"
+        )
+        assert all(
+            skip.reason is not SkipReason.MANUAL_OWNERSHIP for skip in main.skips
+        ), "the manual hold must release on the proven-off power"
+    finally:
+        await runtime.stop()
+
+
+async def test_pair_proof_survives_repower_and_delivers() -> None:
+    """The delivery chain through the REAL dispatch: the pair proof is
+    captured BEFORE the power preparation, survives the confirmed re-power
+    and the final check, and the target command fires (the stale ``on``
+    must not block the send)."""
+
+    payload = _config_payload(
+        minimum_interval_seconds=30, stable_absence_seconds=30,
+        power_switch_entity='switch.demo_power',
+    )
+    payload['profile'] = 'day_curve'
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    hass.states.set(
+        'light.demo_main', 'on', last_changed=_dt(_NOW_MS - 600_000)
+    )
+    hass.states.set('switch.demo_power', 'off', last_changed=_dt(_NOW_MS))
+    hass.states.set('binary_sensor.demo_presence', 'off', last_changed=_dt(_NOW_MS))
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=RoomLightingHaExecutor(),
+        now_ms=clock, payload=payload,
+    )
+    await runtime.start(hass, 'entry')
+    try:
+        clock.value = _NOW_MS
+        runtime._service_event(_event('light', 'turn_off', 'light.demo_main'))
+        await asyncio.gather(*hass.tasks)
+        clock.value = _NOW_MS + 35_000
+        await runtime.async_process()
+        clock.value = _NOW_MS + 40_000
+        hass.states.set(
+            'binary_sensor.demo_presence', 'on', last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        await asyncio.gather(*hass.tasks)
+        # The relay confirms the re-power: the deferred target command
+        # delivers through the final check.
+        hass.states.set('switch.demo_power', 'on', last_changed=_dt(_NOW_MS + 41_000))
+        clock.value = _NOW_MS + 42_000
+        await runtime.async_process()
+        await asyncio.gather(*hass.tasks)
+        entities = [call[2].get('entity_id') for call in hass.services.calls]
+        assert 'switch.demo_power' in entities, 'the pair must re-power first'
+        assert 'light.demo_main' in entities, (
+            'the captured pair proof must survive the re-power and deliver '
+            'the target command'
+        )
+        assert entities.index('switch.demo_power') < entities.index('light.demo_main')
+    finally:
+        await runtime.stop()
+
+
+async def test_untrusted_on_voided_by_newest_manual_off_delivers_without_pair() -> None:
+    """The dispatch send-gate without a captured pair proof (SEC-RP10-01).
+
+    The bulb's raw HA state is a stale ``on`` (it lost power before it
+    could report and no pair is bound), and the newest manual action for
+    the target is the turn-off. The released hold plans the relight; the
+    send-gate must read the voided report off (the journal's own
+    manual-off evidence, not a snapshot field) and deliver the additive
+    turn_on — not crash on a missing attribute and not answer
+    ``already_on`` from the voided report."""
+
+    payload = _config_payload(
+        minimum_interval_seconds=30, stable_absence_seconds=30,
+    )
+    payload['profile'] = 'day_curve'
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    # A stale raw "on": the trusted context view is unknown+reported-on,
+    # and the dispatch evidence stays untrusted with last_known "on".
+    hass.states.set(
+        'light.demo_main', 'on', last_changed=_dt(_NOW_MS - 600_000)
+    )
+    hass.states.set('binary_sensor.demo_presence', 'off', last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor,
+        now_ms=clock, payload=payload,
+    )
+    await runtime.start(hass, 'entry')
+    try:
+        # The newest manual action for the target is the turn-off.
+        clock.value = _NOW_MS
+        runtime._service_event(_event('light', 'turn_off', 'light.demo_main'))
+        await asyncio.gather(*hass.tasks)
+
+        # The empty room matures the window and the latch sets; the engine
+        # releases the hold on the voided stale report (no pair involved).
+        clock.value = _NOW_MS + 35_000
+        await runtime.async_process()
+        assert _ROOM_ID in runtime._absence_release_latch  # type: ignore[attr-defined]
+
+        # The person returns; the curve plans the relight and the dispatch
+        # delivers it through the manual-off void (no pair proof).
+        clock.value = _NOW_MS + 40_000
+        hass.states.set(
+            'binary_sensor.demo_presence', 'on', last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        clock.value = _NOW_MS + 55_000
+        await runtime.async_process()
+        assert any(
+            call.target_id == 'light_main' and call.action is LightAction.TURN_ON
+            for call in executor.calls
+        ), (
+            "the voided stale on must deliver the relight through the "
+            f"send-gate without a pair proof (calls={executor.calls})"
+        )
+    finally:
+        await runtime.stop()
+
+
+def test_newest_manual_action_is_off_generation_semantics() -> None:
+    """The journal's own proof (SEC-RP10-01): the newest manual action is
+    the off exactly when the manual-off generation matches the newest
+    manual record generation; a later manual turn-on clears the answer,
+    and targets without manual records prove nothing."""
+
+    from custom_components.hausman_hub.application.room_lighting_runtime import (
+        RoomLightingOwnershipJournal,
+    )
+
+    journal = RoomLightingOwnershipJournal(now_ms=lambda: 1_000)
+    assert journal.newest_manual_action_is_off('room', 'light_main') is False
+
+    journal.record_manual('room', 'light_main', 1_000, turned_off=True)
+    assert journal.newest_manual_action_is_off('room', 'light_main') is True
+
+    journal.record_manual('room', 'light_main', 2_000, turned_off=False)
+    assert journal.newest_manual_action_is_off('room', 'light_main') is False, (
+        "a newer manual turn-on must clear the turn-off answer"
+    )
+
+    journal.record_manual('room', 'light_main', 3_000, turned_off=True)
+    assert journal.newest_manual_action_is_off('room', 'light_main') is True
+
+    journal.record_auto('room', 'light_main', 4_000)
+    assert journal.newest_manual_action_is_off('room', 'light_main') is True, (
+        "an automatic record does not change the manual lineage"
+    )
+
+    # SEC-RP10B-01: the generations must survive a save/restore round-trip;
+    # a journal restored without them must answer False (safe), never
+    # mistake the restored zero generations for a proof of the turn-off.
+    payload = journal.to_payload()
+    restored = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
+    restored.restore(payload)
+    assert restored.newest_manual_action_is_off('room', 'light_main') is True, (
+        "the round-trip must keep the turn-off distinguishable"
+    )
+
+    switched = RoomLightingOwnershipJournal(now_ms=lambda: 1_000)
+    switched.record_manual('room', 'light_main', 1_000, turned_off=True)
+    switched.record_manual('room', 'light_main', 2_000, turned_off=False)
+    restored_switched = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
+    restored_switched.restore(switched.to_payload())
+    assert restored_switched.newest_manual_action_is_off(
+        'room', 'light_main'
+    ) is False, (
+        "after restore a newer manual turn-on must still clear the answer"
+    )
+
+    legacy = dict(payload)
+    legacy.pop('manualRecordGenerations', None)
+    legacy.pop('manualOffGenerations', None)
+    restored_legacy = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
+    restored_legacy.restore(legacy)
+    assert restored_legacy.newest_manual_action_is_off(
+        'room', 'light_main'
+    ) is False, (
+        "an old payload without the generation maps must answer False, "
+        "never a false proof of the turn-off"
+    )
+
+    # SEC-RP10B-01 (second round): a NEW manual action after the restore
+    # must take a strictly fresh generation — the restored turn-off proof
+    # must not swallow it. Exact audit sequence: the restored off holds
+    # generation 1; without the counter bump the next on would reuse 1.
+    single = RoomLightingOwnershipJournal(now_ms=lambda: 1_000)
+    single.record_manual('room', 'light_main', 1_000, turned_off=True)
+    assert single.newest_manual_action_is_off('room', 'light_main') is True
+    after_single = RoomLightingOwnershipJournal(now_ms=lambda: 6_000)
+    after_single.restore(single.to_payload())
+    after_single.record_manual('room', 'light_main', 6_000, turned_off=False)
+    assert after_single.newest_manual_action_is_off(
+        'room', 'light_main'
+    ) is False, (
+        "a manual turn-on after the restore must clear the restored "
+        "turn-off answer (no generation reuse)"
+    )
+    after = RoomLightingOwnershipJournal(now_ms=lambda: 6_000)
+    after.restore(payload)
+    after.record_manual('room', 'light_main', 6_000, turned_off=False)
+    assert after.newest_manual_action_is_off('room', 'light_main') is False, (
+        "a manual turn-on after the restore must clear the restored "
+        "turn-off answer (no generation reuse)"
+    )
+    after_off = RoomLightingOwnershipJournal(now_ms=lambda: 7_000)
+    after_off.restore(payload)
+    after_off.record_manual('room', 'light_main', 7_000, turned_off=True)
+    assert after_off.newest_manual_action_is_off(
+        'room', 'light_main'
+    ) is True, "a manual turn-off after the restore must prove the off"
+
+    # SEC-RP10B-04: generations without their own evidence (no manual-off
+    # anchor / no manual record) must not fabricate the proof; a damaged
+    # document stays fail-safe.
+    damaged = {
+        'records': [
+            {'roomId': 'room', 'targetId': 'light_main',
+             'source': 'manual', 'confirmed': True, 'at': 1_000},
+        ],
+        'manualOff': [],
+        'manualRecordGenerations': [
+            {'roomId': 'room', 'targetId': 'light_main', 'generation': 5},
+        ],
+        'manualOffGenerations': [
+            {'roomId': 'room', 'targetId': 'light_main', 'generation': 5},
+        ],
+    }
+    damaged_journal = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
+    damaged_journal.restore(damaged)
+    assert damaged_journal.newest_manual_action_is_off(
+        'room', 'light_main'
+    ) is False, (
+        "equal positive generations without a manual-off anchor must not "
+        "prove the turn-off"
+    )
+    orphan = {
+        'records': [],
+        'manualOff': [],
+        'manualRecordGenerations': [
+            {'roomId': 'room', 'targetId': 'light_main', 'generation': 5},
+        ],
+        'manualOffGenerations': [
+            {'roomId': 'room', 'targetId': 'light_main', 'generation': 5},
+        ],
+    }
+    orphan_journal = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
+    orphan_journal.restore(orphan)
+    assert orphan_journal.newest_manual_action_is_off(
+        'room', 'light_main'
+    ) is False, "generations without any manual record prove nothing"
+
+    # SEC-RP10B-05: the restored maps are bounded; the next save stays
+    # bounded too (a damaged document cannot grow the journal). The flood
+    # carries CONSISTENT counterparts for every pair (a manual record, an
+    # off anchor at the same moment, equal generations), so only the cap
+    # can bound the maps — and the bound is checked on their FULL size.
+    flooded = {
+        'records': [
+            {'roomId': f'room{n}', 'targetId': 'light_main',
+             'source': 'manual', 'confirmed': True, 'at': 1_000}
+            for n in range(5000)
+        ],
+        'manualOff': [
+            {'roomId': f'room{n}', 'targetId': 'light_main', 'at': 1_000}
+            for n in range(5000)
+        ],
+        'manualRecordGenerations': [
+            {'roomId': f'room{n}', 'targetId': 'light_main', 'generation': 1}
+            for n in range(5000)
+        ],
+        'manualOffGenerations': [
+            {'roomId': f'room{n}', 'targetId': 'light_main', 'generation': 1}
+            for n in range(5000)
+        ],
+    }
+    flooded_journal = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
+    flooded_journal.restore(flooded)
+    # No zero placeholders: the maps hold only accepted entries, and the
+    # bound covers their FULL size (both maps, at the cap boundary).
+    assert len(flooded_journal._manual_record_generation) == 4096
+    assert len(flooded_journal._manual_off_generation) == 4096
+    assert not any(
+        value <= 0
+        for value in flooded_journal._manual_record_generation.values()
+    )
+    assert not any(
+        value <= 0
+        for value in flooded_journal._manual_off_generation.values()
+    )
+    resaved = flooded_journal.to_payload()
+    # No growth on the re-save: the maps stay within the bound.
+    assert len(resaved['manualRecordGenerations']) <= 4096
+    assert len(resaved['manualOffGenerations']) <= 4096
+    resaved_journal = RoomLightingOwnershipJournal(now_ms=lambda: 6_000)
+    resaved_journal.restore(resaved)
+    assert len(resaved_journal._manual_record_generation) <= 4096
+    assert len(resaved_journal._manual_off_generation) <= 4096
+
+    # Conflicting duplicates: the first valid entry wins, deterministically.
+    duplicated = {
+        'records': [
+            {'roomId': 'room', 'targetId': 'light_main',
+             'source': 'manual', 'confirmed': True, 'at': 1_000,
+             'turnedOff': True, 'generation': 2},
+        ],
+        'manualOff': [
+            {'roomId': 'room', 'targetId': 'light_main', 'at': 1_000},
+        ],
+        'manualRecordGenerations': [
+            {'roomId': 'room', 'targetId': 'light_main', 'generation': 2},
+            {'roomId': 'room', 'targetId': 'light_main', 'generation': 9},
+        ],
+        'manualOffGenerations': [
+            {'roomId': 'room', 'targetId': 'light_main', 'generation': 2},
+            {'roomId': 'room', 'targetId': 'light_main', 'generation': 9},
+        ],
+    }
+    duplicated_journal = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
+    duplicated_journal.restore(duplicated)
+    assert duplicated_journal._manual_record_generation[
+        ('room', 'light_main')
+    ] == 2, "the first valid generation entry must win"
+    assert duplicated_journal.newest_manual_action_is_off(
+        'room', 'light_main'
+    ) is True
+
+    # SEC-RP10B-04 (fourth round, the exact audit sequence): a damaged
+    # document bumped the off generation (1 → 2) to equal the newer manual
+    # record's generation, but the anchor still points at the older action
+    # — the contradiction must answer False, never a forged off proof.
+    real = RoomLightingOwnershipJournal(now_ms=lambda: 1_000)
+    real.record_manual('room', 'light_main', 1_000, turned_off=True)
+    real.record_manual('room', 'light_main', 2_000, turned_off=False)
+    damaged_off = real.to_payload()
+    for entry in damaged_off['manualOffGenerations']:
+        if entry['targetId'] == 'light_main':
+            entry['generation'] = 2
+    restored_damaged = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
+    restored_damaged.restore(damaged_off)
+    assert restored_damaged.newest_manual_action_is_off(
+        'room', 'light_main'
+    ) is False, (
+        "the anchor at 1000 contradicts the newest manual record at 2000: "
+        "the bumped generation must not forge the off proof"
+    )
+    # The honest document keeps the distinguishable answers.
+    restored_real = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
+    restored_real.restore(real.to_payload())
+    assert restored_real.newest_manual_action_is_off(
+        'room', 'light_main'
+    ) is False, "the honest OFF→ON document must restore the False answer"
+
+    # SEC-RP10B-04 (fifth round, equal timestamps): OFF@1000 gen1 and
+    # ON@1000 gen2 share the moment — a document that bumps the off
+    # generation to 2 is indistinguishable from the honest one, so the
+    # ambiguous match must answer False, never resolve the command.
+    same_ms = RoomLightingOwnershipJournal(now_ms=lambda: 1_000)
+    same_ms.record_manual('room', 'light_main', 1_000, turned_off=True)
+    same_ms.record_manual('room', 'light_main', 1_000, turned_off=False)
+    damaged_same = same_ms.to_payload()
+    for entry in damaged_same['manualOffGenerations']:
+        if entry['targetId'] == 'light_main':
+            entry['generation'] = 2
+    restored_same = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
+    restored_same.restore(damaged_same)
+    assert restored_same.newest_manual_action_is_off(
+        'room', 'light_main'
+    ) is False, (
+        "two manual actions share the anchor moment: the bumped generation "
+        "must not resolve the ambiguity into an off proof"
+    )
+
+    # SEC-RP10B-04 (sixth round): the bucket trimming must not turn the
+    # ambiguous document into an unambiguous one — the check reads the RAW
+    # document history, not the trimmed 500-record bucket.
+    trimmed_history = {
+        'records': (
+            [{'roomId': 'room', 'targetId': 'light_main',
+              'source': 'manual', 'confirmed': True, 'at': 1_000}]
+            + [{'roomId': 'room', 'targetId': 'light_main',
+                'source': 'auto', 'confirmed': True, 'at': 2_000 + n}
+               for n in range(499)]
+            + [{'roomId': 'room', 'targetId': 'light_main',
+                'source': 'manual', 'confirmed': True, 'at': 1_000}]
+        ),
+        'manualOff': [
+            {'roomId': 'room', 'targetId': 'light_main', 'at': 1_000},
+        ],
+        'manualRecordGenerations': [
+            {'roomId': 'room', 'targetId': 'light_main', 'generation': 2},
+        ],
+        'manualOffGenerations': [
+            {'roomId': 'room', 'targetId': 'light_main', 'generation': 2},
+        ],
+    }
+    assert len(trimmed_history['records']) > 500, "the trim must be exercised"
+    trimmed_journal = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
+    trimmed_journal.restore(trimmed_history)
+    assert trimmed_journal.newest_manual_action_is_off(
+        'room', 'light_main'
+    ) is False, (
+        "the trimmed bucket hides the second same-moment manual action: "
+        "the ambiguous document must stay False"
+    )
+    resaved_trimmed = trimmed_journal.to_payload()
+    resaved_trimmed_journal = RoomLightingOwnershipJournal(now_ms=lambda: 6_000)
+    resaved_trimmed_journal.restore(resaved_trimmed)
+    assert resaved_trimmed_journal.newest_manual_action_is_off(
+        'room', 'light_main'
+    ) is False, "the re-saved document must keep the safe answer"
+
+    # SEC-RP10B-04 (seventh round, the LIVE journal sequence): the trimming
+    # happens inside the running journal too — the off record is gone from
+    # the saved document before any restore. The proof must stay False
+    # through the full save → damage → restore → re-save → restore cycle.
+    live = RoomLightingOwnershipJournal(now_ms=lambda: 1_000)
+    live.record_manual('room', 'light_main', 1_000, turned_off=True)
+    for n in range(499):
+        live.record_auto('room', 'light_main', 2_000 + n)
+    live.record_manual('room', 'light_main', 1_000, turned_off=False)
+    live_payload = live.to_payload()
+    assert len(live_payload['records']) == 500, "the trim must be exercised"
+    for entry in live_payload['manualOffGenerations']:
+        if entry['targetId'] == 'light_main':
+            entry['generation'] = 2
+    live_restored = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
+    live_restored.restore(live_payload)
+    assert live_restored.newest_manual_action_is_off(
+        'room', 'light_main'
+    ) is False, (
+        "the live-trimmed document cannot prove the trimmed turn-off: "
+        "the bumped generation must not resolve into an off proof"
+    )
+    live_resaved = live_restored.to_payload()
+    live_again = RoomLightingOwnershipJournal(now_ms=lambda: 6_000)
+    live_again.restore(live_resaved)
+    assert live_again.newest_manual_action_is_off(
+        'room', 'light_main'
+    ) is False, "the re-saved trimmed document must keep the safe answer"
+
+    # The honest limited history keeps the positive answer: the newest
+    # manual action IS the turn-off and its record survived the bound.
+    honest = RoomLightingOwnershipJournal(now_ms=lambda: 1_000)
+    honest.record_manual('room', 'light_main', 1_000, turned_off=True)
+    for n in range(400):
+        honest.record_auto('room', 'light_main', 2_000 + n)
+    honest_restored = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
+    honest_restored.restore(honest.to_payload())
+    assert honest_restored.newest_manual_action_is_off(
+        'room', 'light_main'
+    ) is True, (
+        "an honest bounded history with the turn-off as the newest manual "
+        "action must keep the off proof after a round-trip"
+    )
+
+    # The call-time validation is the last line of defence: even a forged
+    # off-generation in the maps cannot match the anchor record's own
+    # generation and direction.
+    forged = RoomLightingOwnershipJournal(now_ms=lambda: 1_000)
+    forged.record_manual('room', 'light_main', 1_000, turned_off=True)
+    forged.record_manual('room', 'light_main', 2_000, turned_off=False)
+    forged._manual_off_generation[('room', 'light_main')] = 2
+    assert forged.newest_manual_action_is_off(
+        'room', 'light_main'
+    ) is False, (
+        "the anchor record (moment 1000) carries generation 1: a forged "
+        "off-generation of 2 must not match it"
+    )
+
+    # SEC-RP10B-04 (eighth round): a later manual record whose generation
+    # was DAMAGED to zero (a string payload value parses to 0) still vetoes
+    # the proof — its later moment proves a newer manual action.
+    damaged_generation = RoomLightingOwnershipJournal(now_ms=lambda: 1_000)
+    damaged_generation.record_manual(
+        'room', 'light_main', 1_000, turned_off=True
+    )
+    damaged_generation.record_manual(
+        'room', 'light_main', 2_000, turned_off=False
+    )
+    payload_damaged = damaged_generation.to_payload()
+    payload_damaged['records'][1]['generation'] = "2"
+    restored_damaged_generation = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
+    restored_damaged_generation.restore(payload_damaged)
+    assert restored_damaged_generation.newest_manual_action_is_off(
+        'room', 'light_main'
+    ) is False, (
+        "the later manual ON keeps its later moment even when its "
+        "generation was damaged: it must veto the off proof"
+    )
+
+    # (eighth round): duplicate positive generations — two manual records
+    # claiming the same place in the lineage make the newest action
+    # ambiguous, even when one of them matches the anchor.
+    duplicated_generation = {
+        'records': [
+            {'roomId': 'room', 'targetId': 'light_main',
+             'source': 'manual', 'confirmed': True, 'at': 1_000,
+             'turnedOff': False, 'generation': 2},
+            {'roomId': 'room', 'targetId': 'light_main',
+             'source': 'manual', 'confirmed': True, 'at': 2_000,
+             'turnedOff': True, 'generation': 2},
+        ],
+        'manualOff': [
+            {'roomId': 'room', 'targetId': 'light_main', 'at': 2_000},
+        ],
+        'manualRecordGenerations': [
+            {'roomId': 'room', 'targetId': 'light_main', 'generation': 2},
+        ],
+        'manualOffGenerations': [
+            {'roomId': 'room', 'targetId': 'light_main', 'generation': 2},
+        ],
+    }
+    duplicated_gen_journal = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
+    duplicated_gen_journal.restore(duplicated_generation)
+    assert duplicated_gen_journal.newest_manual_action_is_off(
+        'room', 'light_main'
+    ) is False, (
+        "two manual records with the same generation make the newest "
+        "action ambiguous: no off proof"
+    )
+
+    # (ninth round): the honest same-moment sequence (an older turn-on and
+    # a newer turn-off, distinct valid generations) keeps its positive
+    # proof across a round-trip — the restore must not reject it just
+    # because two manual actions share the moment.
+    same_ms_honest = RoomLightingOwnershipJournal(now_ms=lambda: 1_000)
+    same_ms_honest.record_manual('room', 'light_main', 1_000, turned_off=False)
+    same_ms_honest.record_manual('room', 'light_main', 1_000, turned_off=True)
+    assert same_ms_honest.newest_manual_action_is_off(
+        'room', 'light_main'
+    ) is True
+    same_ms_restored = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
+    same_ms_restored.restore(same_ms_honest.to_payload())
+    assert same_ms_restored.newest_manual_action_is_off(
+        'room', 'light_main'
+    ) is True, (
+        "the honest same-moment ON-then-OFF with distinct generations must "
+        "keep the off proof after a round-trip"
+    )
+
+    # (ninth round): the mirror case — a same-moment turn-on whose
+    # generation was DAMAGED cannot prove its order, and the uncertainty
+    # must not turn into a positive off proof.
+    same_ms_damaged = same_ms_honest.to_payload()
+    for entry in same_ms_damaged['records']:
+        if entry.get('source') == 'manual' and not entry.get('turnedOff'):
+            entry['generation'] = 0
+    same_ms_damaged_restored = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
+    same_ms_damaged_restored.restore(same_ms_damaged)
+    assert same_ms_damaged_restored.newest_manual_action_is_off(
+        'room', 'light_main'
+    ) is False, (
+        "a same-moment turn-on with a lost generation cannot prove its "
+        "order: the uncertainty must not become an off proof"
+    )
+
+    # (tenth round): the mirrored honest sequence (an older turn-off and a
+    # newer same-moment turn-on) with the ON's generation damaged DOWN to
+    # the off's generation — equal generations at the same moment are
+    # ambiguous too: False, in the live journal and after a round-trip.
+    off_then_on = RoomLightingOwnershipJournal(now_ms=lambda: 1_000)
+    off_then_on.record_manual('room', 'light_main', 1_000, turned_off=True)
+    off_then_on.record_manual('room', 'light_main', 1_000, turned_off=False)
+    assert off_then_on.newest_manual_action_is_off(
+        'room', 'light_main'
+    ) is False, "the live journal knows the turn-on was newest"
+    damaged_equal = off_then_on.to_payload()
+    for entry in damaged_equal['records']:
+        if entry.get('source') == 'manual' and not entry.get('turnedOff'):
+            entry['generation'] = 1
+    for entry in damaged_equal.get('manualRecordGenerations', []):
+        entry['generation'] = 1
+    for entry in damaged_equal.get('manualOffGenerations', []):
+        entry['generation'] = 1
+    damaged_equal_restored = RoomLightingOwnershipJournal(now_ms=lambda: 5_000)
+    damaged_equal_restored.restore(damaged_equal)
+    assert damaged_equal_restored.newest_manual_action_is_off(
+        'room', 'light_main'
+    ) is False, (
+        "equal generations at the same moment are ambiguous: the damaged "
+        "turn-on must veto the off proof"
+    )
+
+
+def test_apply_proven_power_pair_unit() -> None:
+    """The pair override: proven-off power reads the PAIRED chandelier off
+    and voids its stale report; the pair binds the chandelier only — an
+    independent room target keeps its own evidence even when stale. A
+    fresh ON target (independent circuit or newer report), a non-config
+    target, power on, unknown power and no power switch leave the context
+    untouched."""
+
+    payload = _config_payload(power_switch_entity='switch.demo_power')
+    payload['devices']['light_targets'].append({
+        'id': 'light_second',
+        'name': 'Вторая',
+        'kind': 'light',
+        'role': 'accent',
+        'groupId': None,
+        'brightness': False,
+        'color_temperature': False,
+        'entityId': 'light.demo_second',
+        'autoAdoptOverride': None,
+    })
+    hass = _FakeHass()
+    from custom_components.hausman_hub.domain.room_lighting import config_from_payload
+    from custom_components.hausman_hub.domain.room_lighting_engine import (
+        LightSnapshot,
+        RoomLightingContext,
+    )
+    config = config_from_payload(payload)
+    runtime = _make_runtime(
+        hass, payload=payload, now_ms=lambda: _NOW_MS
+    )
+    lights = (
+        # The paired chandelier with a stale on: overridden.
+        LightSnapshot(target_id='light_main', state=SensorState.UNKNOWN,
+                      last_changed=_NOW_MS - 600_000, reported_state=SensorState.ON),
+        # A fresh ON target of the room: contradicts the proven-off power
+        # (an independent circuit) — untouched.
+        LightSnapshot(target_id='light_second', state=SensorState.ON,
+                      last_changed=_NOW_MS, reported_state=SensorState.ON),
+        # An INDEPENDENT room target with an unknown state and a stale
+        # report: whether it shares the chandelier circuit is an open
+        # wiring question, so the pair must NOT silently override it.
+        LightSnapshot(target_id='light_second', state=SensorState.UNKNOWN,
+                      last_changed=_NOW_MS - 600_000, reported_state=SensorState.ON),
+        # A foreign (not configured) stale target: untouched even though it
+        # is stale — the pair covers only its own paired target.
+        LightSnapshot(target_id='foreign', state=SensorState.UNKNOWN,
+                      last_changed=_NOW_MS - 600_000, reported_state=SensorState.ON),
+    )
+
+    def ctx(lights_tuple):
+        return RoomLightingContext(
+            now=_NOW_MS, timezone=_TZ, sunrise=time(7, 0), sunset=time(19, 0),
+            sensors=(), lights=lights_tuple,
+        )
+
+    hass.states.set('switch.demo_power', 'off', last_changed=_dt(_NOW_MS))
+    paired = runtime._apply_proven_power_pair(ctx(lights), config)  # type: ignore[attr-defined]
+    assert paired.lights[0].state is SensorState.OFF
+    assert paired.lights[0].reported_state is None
+    assert paired.lights[1] == lights[1], (
+        'a fresh ON target of the room is untouched'
+    )
+    assert paired.lights[2] == lights[2], (
+        'an independent stale target keeps its own evidence: the pair '
+        'binds the chandelier only'
+    )
+    assert paired.lights[3] == lights[3], 'a foreign stale target is untouched'
+
+    # Unknown power: fail-closed, no override.
+    hass.states.set('switch.demo_power', 'unknown', last_changed=_dt(_NOW_MS))
+    unknown = runtime._apply_proven_power_pair(ctx(lights), config)  # type: ignore[attr-defined]
+    assert unknown.lights == lights
+
+    hass.states.set('switch.demo_power', 'on', last_changed=_dt(_NOW_MS))
+    untouched = runtime._apply_proven_power_pair(ctx(lights), config)  # type: ignore[attr-defined]
+    assert untouched.lights == lights
+
+    payload_bare = _config_payload()
+    config_bare = config_from_payload(payload_bare)
+    runtime_bare = _make_runtime(
+        _FakeHass(), payload=payload_bare, now_ms=lambda: _NOW_MS
+    )
+    bare = runtime_bare._apply_proven_power_pair(ctx(lights), config_bare)  # type: ignore[attr-defined]
+    assert bare.lights == lights
+
+
+async def test_room_power_off_proof_binds_the_chandelier_only() -> None:
+    """The room power action blocks every target, but its positive
+    manual-off proof binds the chandelier only (SEC-RP10B-06): an
+    independent target that stays on and silent must not get its stale
+    report voided by the room-wide record."""
+
+    payload = _config_payload(power_switch_entity='switch.demo_power')
+    payload['devices']['light_targets'].append({
+        'id': 'light_second',
+        'name': 'Вторая',
+        'kind': 'light',
+        'role': 'accent',
+        'groupId': None,
+        'brightness': False,
+        'color_temperature': False,
+        'entityId': 'light.demo_second',
+        'autoAdoptOverride': None,
+    })
+    hass = _FakeHass()
+    hass.states.set('switch.demo_power', 'on', last_changed=_dt(_NOW_MS))
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=_SpyExecutor(),
+        now_ms=lambda: _NOW_MS, payload=payload,
+    )
+    await runtime.start(hass, 'entry')
+    try:
+        # The person cuts the room power (the chandelier's wall key).
+        runtime._record_power_manual(_ROOM_ID, 'switch.demo_power', 'turn_off')
+        await asyncio.gather(*hass.tasks)
+        config = runtime._configs[_ROOM_ID]
+
+        # The paired chandelier keeps the full off-proof.
+        assert runtime._ownership.newest_manual_action_is_off(
+            _ROOM_ID, 'light_main'
+        ) is True
+        assert runtime._untrusted_on_voided_by_manual_off(
+            config, 'light_main'
+        ) is True
+
+        # The independent target keeps the blocking manual hold but no
+        # positive off-proof: its stale report cannot be voided by the
+        # room-wide power record.
+        assert any(
+            snapshot.source is OwnershipSource.MANUAL
+            for snapshot in runtime._ownership.snapshots_for(
+                _ROOM_ID, ('light_second',)
+            )
+        ), 'the blocking protection must stay for every target'
+        assert runtime._ownership.newest_manual_action_is_off(
+            _ROOM_ID, 'light_second'
+        ) is False, (
+            'the room power record must not serve as the independent '
+            "target's manual-off evidence"
+        )
+        assert runtime._untrusted_on_voided_by_manual_off(
+            config, 'light_second'
+        ) is False, (
+            'the send-gate must refuse to void the independent target on '
+            'the room-wide record'
+        )
+
+        # A DIFFERENT power source (not the configured pair switch — e.g. an
+        # exact-map relay of the mirror) must not grant the chandelier its
+        # off-proof either: its own circuit is a different one.
+        hass.states.set('switch.other_source', 'on', last_changed=_dt(_NOW_MS))
+        runtime._record_power_manual(
+            _ROOM_ID, 'switch.other_source', 'turn_off'
+        )
+        await asyncio.gather(*hass.tasks)
+        assert runtime._ownership.newest_manual_action_is_off(
+            _ROOM_ID, 'light_main'
+        ) is False, (
+            "a non-pair power source must not prove the chandelier's "
+            "manual off"
+        )
+        assert runtime._untrusted_on_voided_by_manual_off(
+            config, 'light_main'
+        ) is False, (
+            'the send-gate must refuse the pair void on a non-pair source'
+        )
+    finally:
+        await runtime.stop()
+
+
+async def test_completed_absence_latches_on_frozen_return() -> None:
+    """The latch sets when the window completes at the frozen return.
+
+    If no evaluation runs between the completion moment and the return, the
+    proven stable absence must still latch: the next short window must not
+    erase it (Sol scenario, RP-9). OFF at T0, return at T+35 (35 s proven,
+    frozen at the sensor's own return time), leave at T+40, return at T+45:
+    the release fires on the latch, and the light turns on after the curve
+    confirms the presence.
+    """
+
+    ownership_store = _MemoryOwnershipStore()
+    ownership_store.payload = {
+        "version": 1,
+        "records": [{
+            "roomId": _ROOM_ID,
+            "targetId": "light_main",
+            "source": "manual",
+            "confirmed": True,
+            "at": _NOW_MS - 7_200_000,
+        }],
+        "manualOff": [],
+        "morning": [],
+    }
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    payload["profile"] = "day_curve"
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_dt(_NOW_MS))
+    hass.states.set("light.demo_main", "off", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock,
+        payload=payload, ownership_store=ownership_store,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        # The window opens at T0 and is not evaluated again until the
+        # return: no processing pass observes the 30 s completion moment.
+        clock.value = _NOW_MS
+        await runtime.async_process()
+
+        # The person returns at T+35: the window freezes at the sensor's
+        # own return time — and the completed 35 s absence latches.
+        clock.value = _NOW_MS + 35_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        absence = runtime._absence.get(_ROOM_ID)  # type: ignore[attr-defined]
+        assert absence is not None and absence[2] == _NOW_MS + 35_000, (
+            "the window end freezes at the return"
+        )
+        assert _ROOM_ID in runtime._absence_release_latch, (  # type: ignore[attr-defined]
+            "the completed window latches at the frozen return"
+        )
+
+        # A short second window starts: the latch (the historical fact)
+        # survives it.
+        clock.value = _NOW_MS + 40_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "off", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        assert _ROOM_ID in runtime._absence_release_latch  # type: ignore[attr-defined]
+
+        # The person returns again after 5 s: the release fires on the
+        # latch, and the light turns on once the curve confirms presence.
+        clock.value = _NOW_MS + 45_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        assert executor.calls == [], (
+            "no light before the curve confirms the returned presence"
+        )
+        clock.value = _NOW_MS + 60_000
+        await runtime.async_process()
+        assert executor.calls, "the latch releases the hold on the return"
+    finally:
+        await runtime.stop()
+
+
+async def test_mirror_night_turn_on_gated_by_unreliable_presence() -> None:
+    """The night mirror auto-on waits for confirmed presence while a manual
+    hold exists (the restored record; the pipeline view — the engine-level
+    differentiators cover the gate semantics directly)."""
+
+    ownership_store = _MemoryOwnershipStore()
+    ownership_store.payload = {
+        "version": 1,
+        "records": [{
+            "roomId": _ROOM_ID,
+            "targetId": "light_main",
+            "source": "manual",
+            "confirmed": True,
+            "at": _NOW_MS - 7_200_000,
+        }],
+        "manualOff": [],
+        "morning": [],
+    }
+    payload = _config_payload(minimum_interval_seconds=600, stable_absence_seconds=30)
+    payload["profile"] = "day_curve"
+    payload["devices"]["light_targets"].append({
+        "id": "light_mirror",
+        "name": "Зеркало",
+        "kind": "switch",
+        "role": "mirror",
+        "groupId": None,
+        "brightness": False,
+        "color_temperature": False,
+        "entityId": "switch.demo_mirror",
+        "autoAdoptOverride": None,
+    })
+    clock = _Clock(_NOW_MS)
+    hass = _FakeHass()
+    hass.states.set("binary_sensor.demo_presence", "off", last_changed=_dt(_NOW_MS))
+    hass.states.set("light.demo_main", "off", last_changed=_dt(_NOW_MS))
+    hass.states.set("switch.demo_mirror", "off", last_changed=_dt(_NOW_MS))
+    executor = _SpyExecutor()
+    runtime = _make_runtime(
+        hass, commands_enabled=True, executor=executor, now_ms=clock,
+        payload=payload, ownership_store=ownership_store,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        runtime._service_event(_event("light", "turn_off", "light.demo_main"))
+        hass.states.set("light.demo_main", "off", last_changed=_dt(clock.value))
+        await asyncio.gather(*hass.tasks)
+
+        # Night: the mirror's schedule wants on; the presence is unreliable.
+        clock.value = _NOW_MS + 660_000
+        hass.states.set(
+            "binary_sensor.demo_presence", "unknown", last_changed=_dt(clock.value)
+        )
+        await runtime.async_process()
+        mirror_calls = [
+            c for c in executor.calls
+            if getattr(c, "target_id", "") == "light_mirror"
+            and getattr(c, "action", None) is LightAction.TURN_ON
+        ]
+        assert mirror_calls == [], (
+            "the mirror auto-on must wait for confirmed presence"
+        )
     finally:
         await runtime.stop()

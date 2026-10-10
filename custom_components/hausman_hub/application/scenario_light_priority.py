@@ -754,6 +754,22 @@ class LightAutomationPriority:
         catalog: ScenarioCatalog,
         hass: object,
     ) -> None:
+        # Serialized with the away→home release through the same lock: two
+        # full-snapshot writers must never interleave, or the later save
+        # could silently drop a fresher manual claim.
+        async with self._authority_lock:
+            await self._note_direct_action_unlocked(
+                target_id, action_id, receipt, catalog, hass
+            )
+
+    async def _note_direct_action_unlocked(
+        self,
+        target_id: str,
+        action_id: str,
+        receipt: Mapping[str, object],
+        catalog: ScenarioCatalog,
+        hass: object,
+    ) -> None:
         device = catalog.device(target_id)
         allowed = device.action(action_id) if device else None
         if (
@@ -967,6 +983,61 @@ class LightAutomationPriority:
 
         return frozenset(entity_ids & self.manual_entity_ids())
 
+    async def async_release_manual_claims_before(
+        self, boundary_ms: int
+    ) -> frozenset[str]:
+        """Release only manual markers confirmed before the away→home return.
+
+        Owner decision 2026-10-09: the away→home transition re-arms
+        automation for a returning household. A claim confirmed at or after
+        the return moment is a fresh manual action and keeps its priority.
+        Records without a readable confirmation time are never released.
+        """
+
+        if type(boundary_ms) is not int or boundary_ms < 0:
+            return frozenset()
+        async with self._authority_lock:
+            doomed = {
+                entity_id: record
+                for entity_id, record in self._manual_records.items()
+                if isinstance(record, dict)
+                and type(record.get("confirmedAt")) is int
+                and record["confirmedAt"] < boundary_ms
+            }
+            if not doomed:
+                return frozenset()
+            # Persist the reduced snapshot WITHOUT touching live memory: the
+            # manual claims keep blocking while the save is in flight, and a
+            # failed or cancelled save leaves the deny boundary untouched.
+            # Only after a successful save are the selected records removed —
+            # and only the exact objects that were selected: a claim replaced
+            # during the save is a fresh manual action and survives.
+            reduced_manual = [
+                record
+                for entity_id, record in self._manual_records.items()
+                if entity_id not in doomed
+            ]
+            payload = self._payload(manual_records=reduced_manual)
+            try:
+                if self._store is not None:
+                    await self._store.async_save(payload)
+            except BaseException:
+                # Memory was never modified: the deny boundary stays intact.
+                raise
+            removed = frozenset()
+            for entity_id, doomed_record in doomed.items():
+                if self._manual_records.get(entity_id) is doomed_record:
+                    self._manual_records.pop(entity_id, None)
+                    removed |= {entity_id}
+            # A writer that does not take this lock may have changed live
+            # state while the release save was in flight; the saved snapshot
+            # can be stale relative to memory. Converge the store to the
+            # live state so a survived fresh claim is durable too.
+            if self._dirty or self._payload() != payload:
+                self._dirty = True
+                await self._async_save_if_dirty()
+            return removed
+
     def manual_entity_ids(self) -> frozenset[str]:
         """Snapshot durable manual entities without requiring a live catalog."""
 
@@ -1051,12 +1122,24 @@ class LightAutomationPriority:
         await self._store.async_save(self._payload())
         self._dirty = False
 
-    def _payload(self) -> dict[str, object]:
-        """Return one complete, bounded storage document."""
+    def _payload(
+        self,
+        manual_records: Mapping[str, dict[str, object]] | None = None,
+    ) -> dict[str, object]:
+        """Return one complete, bounded storage document.
 
+        ``manual_records`` overrides the live manual journal so a caller can
+        persist a reduced snapshot without mutating live state first.
+        """
+
+        manual = (
+            self._manual_records.values()
+            if manual_records is None
+            else manual_records
+        )
         records = [
             *(dict(item) for item in self._owned_records.values()),
-            *(dict(item) for item in self._manual_records.values()),
+            *(dict(item) for item in manual),
             *(dict(item) for item in self._reassert_records.values()),
         ]
         if len(records) > 256:

@@ -444,6 +444,86 @@ class ManualLightAuthority:
         self._explicit_return_pending = False
         self._active_return_operation_id = None
 
+    async def async_release_manual_claims_through(
+        self, boundary_generation: int
+    ) -> tuple[str, ...]:
+        """Release pre-return manual claims (the away→home transition).
+
+        Owner decision 2026-10-09: the away→home transition is the single
+        contour point that re-arms automation for a returning household.
+        Only records with a generation at or before the return gesture are
+        released: a manual action observed after it — including the same
+        millisecond — keeps its normal priority. The reduced state is
+        persisted BEFORE anything is dropped from memory, so the deny
+        boundary never opens ahead of durable storage; a storage failure
+        releases nothing.
+        """
+
+        if type(boundary_generation) is not int or boundary_generation < 0:
+            return ()
+        async with self._writer:
+            if self._storage_failed:
+                return ()
+            # Freeze the exact record objects selected for release. A capture
+            # that arrives while the save is pending replaces the dict entry
+            # with a new object of a later generation: only the frozen
+            # objects themselves may be dropped after the save.
+            doomed_records = {
+                entity_id: record
+                for entity_id, record in self._records.items()
+                if record.generation <= boundary_generation
+            }
+            doomed_pending = {
+                entity_id: record
+                for entity_id, record in self._pending.items()
+                if record.generation <= boundary_generation
+            }
+            if not doomed_records and not doomed_pending:
+                return ()
+            removed: list[str] = []
+            kept = frozenset(doomed_records) | frozenset(doomed_pending)
+            snapshot = {
+                **{
+                    entity_id: record
+                    for entity_id, record in self._records.items()
+                    if entity_id not in kept
+                },
+                **{
+                    entity_id: record
+                    for entity_id, record in self._pending.items()
+                    if entity_id not in kept
+                },
+            }
+            payload = {
+                "version": 2,
+                "records": [_record_payload(r) for r in
+                            sorted(snapshot.values(), key=lambda item: item.entity_id)],
+                "recentFingerprints": [
+                    fingerprint for fingerprint, seen_generation in self._recent.items()
+                    if seen_generation <= self._generation
+                ],
+            }
+            try:
+                if self._store is not None:
+                    await self._store.async_save(copy.deepcopy(payload))
+            except Exception:
+                # The in-memory deny boundary stays exactly as it was.
+                return ()
+            for entity_id, doomed in doomed_records.items():
+                if self._records.get(entity_id) is doomed:
+                    self._records.pop(entity_id, None)
+                    removed.append(entity_id)
+            for entity_id, doomed in doomed_pending.items():
+                if self._pending.get(entity_id) is doomed:
+                    self._pending.pop(entity_id, None)
+                    removed.append(entity_id)
+            return tuple(sorted(removed))
+
+    def current_generation(self) -> int:
+        """Freeze the manual-event generation at the away→home gesture."""
+
+        return self._generation
+
 
 def _record_payload(record: ManualLightRecord) -> dict[str, object]:
     return {

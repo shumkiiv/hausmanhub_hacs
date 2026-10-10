@@ -31,12 +31,20 @@ class SensorState(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class OwnershipSnapshot:
-    """One attribution record for one light target."""
+    """One attribution record for one light target.
+
+    ``turned_off`` and ``generation`` carry the record's direction and its
+    place in the manual lineage (RP-10): the manual-off proof is validated
+    against the specific record — its moment, its generation and its
+    direction — not against a bare anchor. Both default to the unknown
+    values so older documents and existing constructors stay valid."""
 
     target_id: str
     source: OwnershipSource
     confirmed: bool
     at: int
+    turned_off: bool = False
+    generation: int = 0
 
     def __post_init__(self) -> None:
         if not isinstance(self.target_id, str) or not self.target_id:
@@ -47,6 +55,10 @@ class OwnershipSnapshot:
             raise OwnershipViolation("ownership confirmation flag is invalid")
         if type(self.at) is not int or self.at < 0:
             raise OwnershipViolation("ownership time is invalid")
+        if type(self.turned_off) is not bool:
+            raise OwnershipViolation("ownership turn-off flag is invalid")
+        if type(self.generation) is not int or self.generation < 0:
+            raise OwnershipViolation("ownership generation is invalid")
 
 
 def latest_ownership(
@@ -124,6 +136,8 @@ def release_expired_manual(
     absence_confirmed: bool,
     absence_since: int | None,
     release_mode: str = "timer_and_absence",
+    absence_until: int | None = None,
+    absence_latch: bool = False,
 ) -> bool:
     """Whether an expired manual-off protection releases manual ownership.
 
@@ -133,8 +147,10 @@ def release_expired_manual(
     interval returns everything to automatic after the light is switched off.
     Every other mode additionally requires a stable absence confirmed *after*
     the manual action; a historical absence that predates it must not release
-    the protection. It is a pure predicate: the caller still requires a new
-    event before turning light on.
+    the protection. The stable duration is measured to ``absence_until`` —
+    the moment presence returned — when provided, so post-return time never
+    stretches a shorter absence. It is a pure predicate: the caller still
+    requires a new event before turning light on.
     """
 
     latest = latest_ownership(records, target_id)
@@ -146,11 +162,18 @@ def release_expired_manual(
         return False
     if release_mode == "timer_only":
         return True
-    if not absence_confirmed or absence_since is None:
-        return False
-    if absence_since < latest.at:
-        return False
-    return now - absence_since >= stable_absence_seconds * 1000
+    # The absence evidence is satisfied either by the proven stable-absence
+    # latch (a completed >= stable window since the manual action — short
+    # re-entries do not erase it) or by the current window measurement.
+    if not absence_latch:
+        if not absence_confirmed or absence_since is None:
+            return False
+        if absence_since < latest.at:
+            return False
+        end = absence_until if absence_until is not None else now
+        if end - absence_since < stable_absence_seconds * 1000:
+            return False
+    return True
 
 
 def restore_after_restart(

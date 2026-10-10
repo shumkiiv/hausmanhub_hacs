@@ -257,6 +257,23 @@ def _auto(target_id: str, at: int) -> OwnershipSnapshot:
     return OwnershipSnapshot(target_id, OwnershipSource.AUTO, True, at)
 
 
+def _manual(target_id: str, at: int) -> OwnershipSnapshot:
+    return OwnershipSnapshot(target_id, OwnershipSource.MANUAL, True, at)
+
+
+def _latched_protection(now: int) -> ProtectionSnapshot:
+    """A proven hold released by the absence latch: only the presence gate
+    still separates the room from the automatic light."""
+    return ProtectionSnapshot(
+        active=True,
+        started_at=now - 7_200_000,
+        minimum_interval_seconds=600,
+        stable_absence_seconds=30,
+        release_mode="timer_and_absence",
+        absence_latch=True,
+    )
+
+
 def _ctx(
     now: int,
     *,
@@ -1373,6 +1390,397 @@ def test_curve_room_requires_the_profile() -> None:
             presence_confirmed=False,
             absence_seconds=None,
         )
+
+
+def test_curve_manual_gate_ignores_synthetic_flag_without_sensor_on() -> None:
+    """The presence gate needs the observed ON state, not only the flag.
+
+    A synthetic confirmation (an unlock entry wakeup passes
+    ``presence_confirmed=True``) with an unreliable reading must keep a
+    held room dark: the flag is not presence (SEC-RP9-TEST-04)."""
+    now = _at(14, 0)
+    decision = evaluate_curve_room(
+        _config(profile="day_curve"),
+        _ctx(
+            now,
+            presence=SensorState.UNKNOWN,
+            lights=(_light("light_main", SensorState.OFF, now - 1000),),
+            ownership=(_manual("light_main", now - 7_200_000),),
+            protection=_latched_protection(now),
+        ),
+        presence_confirmed=True,
+        absence_seconds=None,
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.commands == ()
+    assert main.skips[0].reason is SkipReason.NIGHT_MINIMUM
+
+
+def test_curve_manual_gate_ignores_motion_preview_without_presence() -> None:
+    """A motion preview is a trial, not confirmation: a held room stays
+    dark until the presence sensor itself reports ON."""
+    now = _at(14, 0)
+    decision = evaluate_curve_room(
+        _config(profile="day_curve"),
+        _ctx(
+            now,
+            presence=SensorState.UNKNOWN,
+            lights=(_light("light_main", SensorState.OFF, now - 1000),),
+            ownership=(_manual("light_main", now - 7_200_000),),
+            protection=_latched_protection(now),
+        ),
+        presence_confirmed=False,
+        absence_seconds=None,
+        motion_preview=True,
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.commands == ()
+    assert main.skips[0].reason is SkipReason.NIGHT_MINIMUM
+
+
+def _unknown_stale_on_light(target_id: str, now: int, *, stale: bool) -> LightSnapshot:
+    """A bulb that lost power before it could report: HA keeps ``on`` while
+    the trusted view is unknown; the report ages past the freshness window."""
+    return LightSnapshot(
+        target_id=target_id,
+        state=SensorState.UNKNOWN,
+        last_changed=now - (600_000 if stale else 0),
+        reported_state=SensorState.ON,
+    )
+
+
+def test_curve_stale_reported_on_does_not_hold_manual_on() -> None:
+    """The wall-key pair (RP-10): a proven-off circuit voids the stale
+    reported ``on`` — the released hold plans the relight."""
+    now = _at(14, 0)
+    decision = evaluate_curve_room(
+        _config(profile="day_curve"),
+        _ctx(
+            now,
+            presence=SensorState.ON,
+            lights=(_unknown_stale_on_light("light_main", now, stale=True),),
+            ownership=(_manual("light_main", now - 7_200_000),),
+            protection=_latched_protection(now),
+        ),
+        presence_confirmed=True,
+        absence_seconds=None,
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.commands, "the released hold plans the relight"
+    assert all(
+        skip.reason is not SkipReason.MANUAL_OWNERSHIP for skip in main.skips
+    )
+
+
+def test_curve_fresh_reported_on_holds_manual_on() -> None:
+    """A FRESH reported ``on`` keeps the full manual protection."""
+    now = _at(14, 0)
+    decision = evaluate_curve_room(
+        _config(profile="day_curve"),
+        _ctx(
+            now,
+            presence=SensorState.ON,
+            lights=(_unknown_stale_on_light("light_main", now, stale=False),),
+            ownership=(_manual("light_main", now - 7_200_000),),
+            protection=_latched_protection(now),
+        ),
+        presence_confirmed=True,
+        absence_seconds=None,
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert main.commands == ()
+    assert main.skips[0].reason is SkipReason.MANUAL_OWNERSHIP
+
+
+def test_generic_stale_reported_on_releases_and_fresh_holds() -> None:
+    """The generic path honors the same stale-report rule: stale releases
+    (with presence and the release evidence), fresh keeps the hold."""
+    now = _at(12, 0)
+    from custom_components.hausman_hub.domain.room_lighting_engine import ProtectionSnapshot
+
+    def decision_for(stale: bool):
+        protection = ProtectionSnapshot(
+            active=True,
+            started_at=now - 7_200_000,
+            minimum_interval_seconds=30,
+            stable_absence_seconds=30,
+            release_mode="timer_and_absence",
+            absence_confirmed=True,
+            absence_since=now - 60_000,
+            absence_until=now - 30_000,
+        )
+        return evaluate_room_lighting(
+            _config(schedule=[_schedule_day()]),
+            _ctx(
+                now,
+                presence=SensorState.ON,
+                lights=(_unknown_stale_on_light("light_main", now, stale=stale),),
+                ownership=(_manual("light_main", now - 7_200_000),),
+                protection=protection,
+            ),
+        )
+
+    released = decision_for(stale=True)
+    main = decision_target(released, "light_main")
+    assert main is not None
+    assert all(
+        skip.reason is not SkipReason.MANUAL_OWNERSHIP for skip in main.skips
+    ), "the stale report must not hold the manual on"
+    held = decision_for(stale=False)
+    held_main = decision_target(held, "light_main")
+    assert held_main is not None
+    assert held_main.commands == ()
+    assert held_main.skips[0].reason is SkipReason.MANUAL_OWNERSHIP
+
+
+def test_curve_mirror_stale_reported_on_voids_gate_and_suppression() -> None:
+    """The mirror reads the same light-state rule (SEC-RP10-03): a stale
+    reported ``on`` neither suppresses the night light nor skips the
+    presence gate — with a confirmed presence the night light is planned,
+    without it the gate waits (SEC-RP10-03 fix distinguishes here)."""
+    now = _at(23, 30)
+    lights = (_unknown_stale_on_light("light_mirror", now, stale=True),)
+    held = (_manual("light_mirror", now - 7_200_000),)
+
+    confirmed = decision_target(
+        evaluate_curve_room(
+            _config(profile="day_curve"),
+            _ctx(
+                now,
+                presence=SensorState.ON,
+                lights=lights,
+                ownership=held,
+                protection=_latched_protection(now),
+            ),
+            presence_confirmed=True,
+            absence_seconds=None,
+        ),
+        "light_mirror",
+    )
+    assert confirmed is not None
+    assert any(
+        command.action is LightAction.TURN_ON for command in confirmed.commands
+    ), (
+        "the stale reported on must not suppress the night mirror light "
+        f"(skips={[skip.reason.value for skip in confirmed.skips]})"
+    )
+
+    unconfirmed = decision_target(
+        evaluate_curve_room(
+            _config(profile="day_curve"),
+            _ctx(
+                now,
+                presence=SensorState.ON,
+                lights=lights,
+                ownership=held,
+                protection=_latched_protection(now),
+            ),
+            presence_confirmed=False,
+            absence_seconds=None,
+        ),
+        "light_mirror",
+    )
+    assert unconfirmed is not None
+    assert unconfirmed.commands == ()
+    assert unconfirmed.skips[0].reason is SkipReason.NIGHT_MINIMUM, (
+        "the presence gate must apply to the mirror even when a stale "
+        f"report claims it is already on (skips="
+        f"{[skip.reason.value for skip in unconfirmed.skips]})"
+    )
+
+
+def test_curve_stale_reported_on_with_auto_ownership_keeps_scheduled_off() -> None:
+    """Proven auto ownership is the automation's own evidence: the mirror
+    handover (and the scheduled off) stays armed even when the report aged
+    past the freshness window — no contradicting evidence arrived."""
+    now = _at(14, 0)
+    decision = evaluate_curve_room(
+        _config(profile="day_curve"),
+        _ctx(
+            now,
+            presence=SensorState.ON,
+            lights=(_unknown_stale_on_light("light_mirror", now, stale=True),),
+            ownership=(_auto("light_mirror", now - 10_800_000),),
+        ),
+        presence_confirmed=True,
+        absence_seconds=None,
+    )
+    mirror = decision_target(decision, "light_mirror")
+    assert mirror is not None
+    assert any(
+        command.action is LightAction.TURN_OFF for command in mirror.commands
+    ), (
+        "the scheduled mirror off must not be lost to report aging when the "
+        f"automation owns the on (skips={[s.reason.value for s in mirror.skips]})"
+    )
+
+
+def test_curve_main_stale_reported_on_with_auto_ownership_keeps_scheduled_off() -> None:
+    """The main target reads the same rule: a long-on chandelier owned by
+    the automation turns off by schedule even though its report is stale."""
+    now = _at(2, 0)
+    decision = evaluate_curve_room(
+        _config(profile="day_curve"),
+        _ctx(
+            now,
+            presence=SensorState.ON,
+            lights=(_unknown_stale_on_light("light_main", now, stale=True),),
+            ownership=(_auto("light_main", now - 10_800_000),),
+        ),
+        presence_confirmed=True,
+        absence_seconds=None,
+    )
+    main = decision_target(decision, "light_main")
+    assert main is not None
+    assert any(
+        command.action is LightAction.TURN_OFF for command in main.commands
+    ), (
+        "the scheduled night off must survive report aging under proven "
+        f"auto ownership (skips={[s.reason.value for s in main.skips]})"
+    )
+
+
+def test_auto_belief_never_overrides_explicit_off_main_and_mirror() -> None:
+    """Explicit fresh OFF is stronger than the ownership record (SEC-RP10B-02):
+    the automation records AUTO after any confirmed command, including a
+    turn-off — the next scheduled on must not be suppressed by it."""
+    now = _at(10, 0)
+    main = decision_target(
+        evaluate_curve_room(
+            _config(profile="day_curve"),
+            _ctx(
+                now,
+                presence=SensorState.ON,
+                lights=(
+                    _light("light_main", SensorState.OFF, now - 1000),
+                    _light("light_mirror", SensorState.OFF, now - 1000),
+                ),
+                ownership=(_auto("light_main", now - 3_600_000),),
+            ),
+            presence_confirmed=True,
+            absence_seconds=None,
+        ),
+        "light_main",
+    )
+    assert main is not None
+    assert any(
+        command.action is LightAction.TURN_ON for command in main.commands
+    ), (
+        "the fresh OFF must win over the auto record: the scheduled on "
+        f"must be planned (skips={[s.reason.value for s in main.skips]})"
+    )
+
+    night = _at(23, 30)
+    mirror = decision_target(
+        evaluate_curve_room(
+            _config(profile="day_curve"),
+            _ctx(
+                night,
+                presence=SensorState.ON,
+                lights=(
+                    _light("light_main", SensorState.OFF, night - 1000),
+                    _light("light_mirror", SensorState.OFF, night - 1000),
+                ),
+                ownership=(_auto("light_mirror", night - 3_600_000),),
+            ),
+            presence_confirmed=True,
+            absence_seconds=None,
+        ),
+        "light_mirror",
+    )
+    assert mirror is not None
+    assert any(
+        command.action is LightAction.TURN_ON for command in mirror.commands
+    ), (
+        "the mirror night light must not be suppressed by the auto record "
+        f"of an earlier command (skips={[s.reason.value for s in mirror.skips]})"
+    )
+
+
+def test_auto_belief_does_not_cross_unobserved_period() -> None:
+    """An ownership record older than the observation gap proves nothing
+    (SEC-RP10B-03): after a restart-shaped gap the automation must not
+    plan a scheduled off from the pre-gap belief."""
+    now = _at(14, 0)
+    mirror = decision_target(
+        evaluate_curve_room(
+            _config(profile="day_curve"),
+            _ctx(
+                now,
+                presence=SensorState.ON,
+                lights=(_unknown_stale_on_light("light_mirror", now, stale=True),),
+                ownership=(_auto("light_mirror", now - 10_800_000),),
+                unobserved_since=now - 60_000,
+            ),
+            presence_confirmed=True,
+            absence_seconds=None,
+        ),
+        "light_mirror",
+    )
+    assert mirror is not None
+    assert not any(
+        command.action is LightAction.TURN_OFF for command in mirror.commands
+    ), (
+        "the pre-gap auto record must not arm the scheduled off across the "
+        f"unobserved period (skips={[s.reason.value for s in mirror.skips]})"
+    )
+
+    night = _at(23, 30)
+    main = decision_target(
+        evaluate_curve_room(
+            _config(profile="day_curve"),
+            _ctx(
+                night,
+                presence=SensorState.ON,
+                lights=(_unknown_stale_on_light("light_main", night, stale=True),),
+                ownership=(_auto("light_main", night - 10_800_000),),
+                unobserved_since=night - 60_000,
+            ),
+            presence_confirmed=True,
+            absence_seconds=None,
+        ),
+        "light_main",
+    )
+    assert main is not None
+    assert not any(
+        command.action is LightAction.TURN_OFF for command in main.commands
+    ), (
+        "the main scheduled off must equally wait out the unobserved gap "
+        f"(skips={[s.reason.value for s in main.skips]})"
+    )
+
+
+def test_curve_mirror_gate_ignores_synthetic_flag_and_preview() -> None:
+    """The mirror waits for the same proven presence: neither a synthetic
+    flag nor a motion preview lights it while the hold exists."""
+    now = _at(23, 30)
+    lights = (
+        _light("light_main", SensorState.OFF, now - 1000),
+        _light("light_mirror", SensorState.OFF, now - 1000),
+    )
+    context = _ctx(
+        now,
+        presence=SensorState.UNKNOWN,
+        lights=lights,
+        ownership=(_manual("light_main", now - 7_200_000),),
+        protection=_latched_protection(now),
+    )
+    for kwargs in (
+        {"presence_confirmed": True},
+        {"presence_confirmed": False, "motion_preview": True},
+    ):
+        decision = evaluate_curve_room(
+            _config(profile="day_curve"), context,
+            absence_seconds=None, **kwargs,  # type: ignore[arg-type]
+        )
+        mirror = decision_target(decision, "light_mirror")
+        assert mirror is not None
+        assert mirror.commands == (), kwargs
+        assert mirror.skips[0].reason is SkipReason.NIGHT_MINIMUM, kwargs
 
 
 def test_curve_room_on_light_without_ownership_stays_manual() -> None:

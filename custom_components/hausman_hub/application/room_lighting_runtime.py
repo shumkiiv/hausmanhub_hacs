@@ -28,6 +28,7 @@ from ..domain.device_power_dependencies import (
     effective_device_state,
 )
 from ..domain.room_lighting import (
+    LightRole,
     RoomLightingConfig,
     SensorKind,
     SwitchAction,
@@ -120,6 +121,9 @@ CURVE_SENSOR_FRESHNESS_MS = 300_000
 _MORNING_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 DEFAULT_INTERVAL_SECONDS = 60
 MAX_OWNERSHIP_RECORDS = 500
+# Bound for the restored generation maps (RP-10): far above any real home,
+# small enough that a damaged document cannot grow the journal without limit.
+MAX_RESTORED_GENERATION_ENTRIES = 4096
 OWNERSHIP_STORAGE_VERSION = 1
 # MQTT can replay one event, but a person can deliberately make a second press
 # within the three-second configurable sequence window.  A short transport
@@ -144,7 +148,9 @@ _PRESENCE_KINDS = frozenset({SensorKind.PRESENCE, SensorKind.MOTION})
 
 NowMs = Callable[[], int]
 EntityRooms = dict[str, set[str]]
-AbsenceState = dict[str, tuple[bool, int | None]]
+# Per room: (absence confirmed, window start, window end). The end is frozen
+# at the proven presence return and stays None while the room stays empty.
+AbsenceState = dict[str, tuple[bool, int | None, int | None]]
 
 
 def _default_now_ms() -> int:
@@ -241,15 +247,21 @@ class RoomLightingOwnershipJournal:
         turned_off: bool = False,
     ) -> OwnershipSnapshot:
         moment = self._now_ms() if at is None else at
+        self._manual_generation += 1
+        generation = self._manual_generation
         record = OwnershipSnapshot(
-            target_id, OwnershipSource.MANUAL, confirmed, moment
+            target_id,
+            OwnershipSource.MANUAL,
+            confirmed,
+            moment,
+            turned_off=turned_off,
+            generation=generation,
         )
         self._append(room_id, record)
-        self._manual_generation += 1
-        self._manual_record_generation[(room_id, target_id)] = self._manual_generation
+        self._manual_record_generation[(room_id, target_id)] = generation
         if turned_off:
             self._manual_off[(room_id, target_id)] = moment
-            self._manual_off_generation[(room_id, target_id)] = self._manual_generation
+            self._manual_off_generation[(room_id, target_id)] = generation
         self._mark_dirty()
         return record
 
@@ -401,6 +413,93 @@ class RoomLightingOwnershipJournal:
         ]
         return max(moments) if moments else None
 
+    def newest_manual_action_is_off(self, room_id: str, target_id: str) -> bool:
+        """Whether the newest manual record for one target is its turn-off.
+
+        The proof is the SPECIFIC record: the manual-off anchor names the
+        moment, the off-generation names the record's place in the manual
+        lineage, and the record itself must carry the turn-off direction
+        and be the newest manual record for the target (by generation).
+        Everything else answers False (fail-safe): a trimmed history, a
+        damaged generation, an ambiguous same-moment action, a later
+        manual turn-on, a non-pair power source, a legacy record without
+        direction."""
+
+        bucket = self._records.get((room_id, target_id))
+        if not bucket:
+            return False
+        off_moment = self._manual_off.get((room_id, target_id))
+        off_generation = self._manual_off_generation.get((room_id, target_id))
+        if off_moment is None or not off_generation:
+            return False
+        manual_records = [
+            record for record in bucket
+            if record.source is OwnershipSource.MANUAL
+        ]
+        if not manual_records:
+            return False
+        anchor_records = [
+            record for record in manual_records
+            if record.at == off_moment
+            and record.generation == off_generation
+            and record.turned_off
+        ]
+        if len(anchor_records) != 1:
+            # No — or ambiguous — anchor record: the document cannot prove
+            # which action the off-generation names.
+            return False
+        anchor = anchor_records[0]
+        for record in manual_records:
+            if record is anchor:
+                continue
+            if record.at > anchor.at:
+                # A later manual action exists — even one whose generation
+                # was lost to damage vetoes the proof.
+                return False
+            if record.at == anchor.at:
+                # Another action at the very same moment: only a VALID
+                # strictly older generation keeps the order provable. A
+                # lost (zero), equal or newer generation cannot prove it
+                # was not the newest — the turn-off is not proven.
+                if record.generation == 0 or record.generation >= anchor.generation:
+                    return False
+                continue
+            if record.generation >= off_generation:
+                # Another record claims the same or a newer place in the
+                # manual lineage: the lineage is duplicated or the off is
+                # not the newest — fail safe.
+                return False
+        return True
+
+    def release_manual_protections_through(self, through_generation: int) -> int:
+        """Drop manual-off anchors and pre-return manual records (away→home).
+
+        Owner decision 2026-10-09: the away→home transition is the single
+        contour point that re-arms automation for a returning household.
+        Only evidence at or before the return gesture is released; a fresh
+        manual action that wins the race keeps its normal priority. Manual
+        evidence observed after the boundary is never touched here.
+        """
+
+        released = 0
+        for key in list(self._manual_off):
+            if self._manual_off_generation.get(key, 0) <= through_generation:
+                self._manual_off.pop(key, None)
+                self._manual_off_generation.pop(key, None)
+                released += 1
+        for key, bucket in list(self._records.items()):
+            latest = bucket[-1] if bucket else None
+            if latest is None or latest.source is not OwnershipSource.MANUAL:
+                continue
+            if self._manual_record_generation.get(key, 0) > through_generation:
+                continue
+            self._records.pop(key, None)
+            self._manual_record_generation.pop(key, None)
+            released += 1
+        if released:
+            self._mark_dirty()
+        return released
+
     def clear_explicit_manual_ownership(
         self, room_id: str, target_ids: Iterable[str]
     ) -> tuple[str, ...]:
@@ -447,6 +546,8 @@ class RoomLightingOwnershipJournal:
                     "source": record.source.value,
                     "confirmed": record.confirmed,
                     "at": record.at,
+                    "turnedOff": record.turned_off,
+                    "generation": record.generation,
                 }
                 for (room_id, _), bucket in self._records.items()
                 for record in bucket
@@ -457,6 +558,8 @@ class RoomLightingOwnershipJournal:
                     "source": record.source.value,
                     "confirmed": record.confirmed,
                     "at": record.at,
+                    "turnedOff": record.turned_off,
+                    "generation": record.generation,
                 }
                 for record in self._legacy_records
             ],
@@ -467,6 +570,30 @@ class RoomLightingOwnershipJournal:
             + [
                 {"targetId": target_id, "at": moment}
                 for target_id, moment in self._legacy_manual_off.items()
+            ],
+            # Generations keep the manual-off proof distinguishable across a
+            # restart (RP-10): which manual action was newest. An older
+            # payload without the maps restores zeros — the safe answer is
+            # then False (see newest_manual_action_is_off).
+            "manualRecordGenerations": [
+                {
+                    "roomId": room_id,
+                    "targetId": target_id,
+                    "generation": generation,
+                }
+                for (room_id, target_id), generation in (
+                    self._manual_record_generation.items()
+                )
+            ],
+            "manualOffGenerations": [
+                {
+                    "roomId": room_id,
+                    "targetId": target_id,
+                    "generation": generation,
+                }
+                for (room_id, target_id), generation in (
+                    self._manual_off_generation.items()
+                )
             ],
             "morning": [
                 {
@@ -603,8 +730,9 @@ class RoomLightingOwnershipJournal:
                 room_id = raw.get("roomId") if isinstance(raw, Mapping) else None
                 if isinstance(room_id, str) and room_id:
                     self._append(room_id, record)
-                    if record.source is OwnershipSource.MANUAL:
-                        self._manual_record_generation[(room_id, record.target_id)] = 0
+                    # No zero placeholder in the generation maps: a missing
+                    # value already means "unknown" (the safe answer), and
+                    # placeholder entries would bypass the restored bound.
                 else:
                     self._legacy_records.append(record)
         raw_manual_off = payload.get("manualOff")
@@ -634,7 +762,6 @@ class RoomLightingOwnershipJournal:
                     and moment >= 0
                 ):
                     self._manual_off[(room_id, target_id)] = moment
-                    self._manual_off_generation[(room_id, target_id)] = 0
                 elif (
                     isinstance(target_id, str)
                     and target_id
@@ -648,6 +775,74 @@ class RoomLightingOwnershipJournal:
                     previous = self._legacy_manual_off.get(target_id)
                     if previous is None or moment > previous:
                         self._legacy_manual_off[target_id] = moment
+        # Generations are accepted only with their own evidence (a manual
+        # record / a manual-off anchor for the same room+target) and within
+        # a bounded count: a damaged document must not fabricate a proof or
+        # grow the journal without limit. First valid entry wins.
+        counterpart_limits = (
+            ("manualRecordGenerations", self._manual_record_generation),
+            ("manualOffGenerations", self._manual_off_generation),
+        )
+        for key, target_map in counterpart_limits:
+            raw_generations = payload.get(key)
+            if not isinstance(raw_generations, (list, tuple)):
+                continue
+            accepted = 0
+            for raw in raw_generations:
+                if accepted >= MAX_RESTORED_GENERATION_ENTRIES:
+                    break
+                if not isinstance(raw, Mapping):
+                    continue
+                room_id = raw.get("roomId")
+                target_id = raw.get("targetId")
+                generation = raw.get("generation")
+                if not (
+                    isinstance(room_id, str)
+                    and room_id
+                    and isinstance(target_id, str)
+                    and target_id
+                    and type(generation) is int
+                    and generation > 0
+                ):
+                    continue
+                pair = (room_id, target_id)
+                if target_map.get(pair, 0) > 0:
+                    # First valid entry wins; the pre-existing zero is only
+                    # the "restored, generation unknown" placeholder.
+                    continue
+                if key == "manualRecordGenerations":
+                    bucket = self._records.get(pair)
+                    has_manual = bool(bucket) and any(
+                        record.source is OwnershipSource.MANUAL
+                        for record in bucket
+                    )
+                else:
+                    anchor_moment = self._manual_off.get(pair)
+                    if anchor_moment is None:
+                        continue
+                    record_generation = self._manual_record_generation.get(pair, 0)
+                    if generation > record_generation:
+                        # A turn-off is itself a manual record: its
+                        # generation can never exceed the newest manual
+                        # record's generation.
+                        continue
+                    # The moment/ambiguity checks are superseded: the
+                    # call-time validation proves the off against the
+                    # specific record (moment, generation, direction) and
+                    # its novelty — a forged map value alone cannot
+                    # produce a positive proof.
+                    has_manual = True
+                if not has_manual:
+                    continue
+                target_map[pair] = generation
+                accepted += 1
+        # New manual actions must take strictly fresh generations: reuse of
+        # a restored number would forge a false newest-action proof (RP-10).
+        restored_generations = [
+            *self._manual_record_generation.values(),
+            *self._manual_off_generation.values(),
+        ]
+        self._manual_generation = max(restored_generations, default=0)
         raw_morning = payload.get("morning")
         if isinstance(raw_morning, (list, tuple)):
             for raw in raw_morning:
@@ -789,11 +984,17 @@ def _ownership_record(raw: object) -> OwnershipSnapshot | None:
     if not isinstance(raw, Mapping):
         return None
     try:
+        turned_off = raw.get("turnedOff")
+        generation = raw.get("generation")
         return OwnershipSnapshot(
             target_id=str(raw.get("targetId") or ""),
             source=OwnershipSource(str(raw.get("source") or "")),
             confirmed=bool(raw.get("confirmed")),
             at=raw.get("at"),  # type: ignore[arg-type]
+            # Older documents carry neither field: the unknown values
+            # (False/0) keep the manual-off proof fail-safe.
+            turned_off=turned_off is True,
+            generation=generation if type(generation) is int and generation > 0 else 0,
         )
     except (OwnershipViolation, ValueError, TypeError):
         return None
@@ -934,6 +1135,17 @@ class RoomLightingRuntime:
         # the first resumed observation does not let pre-restart absence count.
         self._started_at: int | None = None
         self._absence: AbsenceState = {}
+        # The away→home boundary: absence windows never start before it.
+        self._absence_floor_ms: int | None = None
+        # Rooms whose completed stable absence has been proven since the last
+        # manual action: the ownership release may fire on this latch even
+        # when the LATEST absence window is shorter (short re-entries must
+        # not erase the earlier stable-absence evidence).
+        self._absence_release_latch: set[str] = set()
+        # Per room: the last manual-action time. New absence windows start
+        # no earlier than this floor, so a stale sensor "off" predating the
+        # action cannot latch the release immediately after it.
+        self._manual_absence_floor: dict[str, int] = {}
         self._curve_presence: dict[str, dict[str, int | None]] = {}
         self._curve_motion: dict[str, dict[str, int | None]] = {}
         self._shower_exhaust: dict[str, dict[str, int | None]] = {}
@@ -1107,6 +1319,9 @@ class RoomLightingRuntime:
         self._unobserved_since = self._now_ms()
         self._started_at = self._unobserved_since
         self._absence = {}
+        self._absence_floor_ms = None
+        self._absence_release_latch = set()
+        self._manual_absence_floor = {}
         if self._ownership_store is not None:
             try:
                 payload = await self._ownership_store.async_load()
@@ -1306,7 +1521,88 @@ class RoomLightingRuntime:
             self._hass, config, self._now_ms() if now is None else now
         )
         self._observe_absence(config, context)
-        return replace(context, away=self._away, protection=self._protection_for(config))
+        context = replace(context, away=self._away, protection=self._protection_for(config))
+        return self._apply_proven_power_pair(context, config)
+
+    def _pair_main_target_id(self, config: RoomLightingConfig) -> str | None:
+        """The chandelier target of the owner's pair (RP-10).
+
+        The owner's rule binds ONE pair — the wall key and the chandelier.
+        Whether the mirror and the point lights share that circuit is an
+        open wiring question, so the proven-off proof must not silently
+        cover the whole room."""
+
+        main_target = next(
+            (
+                item for item in config.devices.light_targets
+                if item.role is LightRole.MAIN
+            ),
+            None,
+        )
+        return main_target.id if main_target is not None else None
+
+    def _proven_power_pair_off(self, config: RoomLightingConfig) -> bool:
+        """Whether the room power switch proves the circuit off (RP-10)."""
+
+        power = config.devices.power_switch
+        if power is None or power.entity_id is None:
+            return False
+        return self._entity_trusted_state(power.entity_id) == "off"
+
+    def _untrusted_on_voided_by_manual_off(
+        self, config: RoomLightingConfig, target_id: str
+    ) -> bool:
+        """Whether an untrusted reported ``on`` contradicts the newest manual
+        action (RP-10): when the newest manual record for the target is a
+        turn-off, a report that could not refresh (the bulb lost power)
+        cannot prove a current selection. The proof is the journal's own
+        manual-off evidence tied to the newest manual record generation —
+        the snapshot carries no turn-off flag."""
+
+        records = self._ownership.snapshots_for(
+            config.room_id, config.devices.light_target_ids
+        )
+        latest = latest_ownership(records, target_id)
+        if latest is None or latest.source is not OwnershipSource.MANUAL:
+            # A newer automatic action supersedes the manual lineage.
+            return False
+        return self._ownership.newest_manual_action_is_off(
+            config.room_id, target_id
+        )
+
+    def _apply_proven_power_pair(
+        self, context: RoomLightingContext, config: RoomLightingConfig
+    ) -> RoomLightingContext:
+        """The owner's pair rule (RP-10): the wall key and the chandelier are
+        one pair. When the room power switch PROVES the circuit off, the
+        CHANDELIER (the main target) that cannot report (its ``on`` is
+        stale, the trusted view is not a fresh ON) reads off: a bulb that
+        lost power before it could report keeps a stale ``on`` report, and
+        that report must not hold manual ownership (``manual on`` never
+        expires) or block the curve. A fresh ON report contradicts the
+        proven-off power (an independent circuit, a newer trusted report)
+        and is left untouched. Other room targets keep their own evidence:
+        whether the mirror and the point lights share the chandelier
+        circuit is an open wiring question, so the pair proof must not
+        silently cover them. The dispatch re-powers the circuit before the
+        paired target, so the planned turn-on reaches a powered lamp; an
+        external re-power is attributed by the existing power-path rules."""
+
+        if not self._proven_power_pair_off(config):
+            return context
+        paired = self._pair_main_target_id(config)
+        scoped = {paired} if paired is not None else set()
+        replaced = tuple(
+            replace(
+                light,
+                state=SensorState.OFF,
+                reported_state=None,
+            )
+            if light.target_id in scoped and light.state is not SensorState.ON
+            else light
+            for light in context.lights
+        )
+        return replace(context, lights=replaced)
 
     async def async_context_for(
         self, config: RoomLightingConfig
@@ -1791,6 +2087,9 @@ class RoomLightingRuntime:
             room_id, target_id, moment, confirmed=True, turned_off=True
         )
         self._absence.pop(room_id, None)
+        self._absence_release_latch.discard(room_id)
+        self._manual_absence_floor[room_id] = moment
+        self._manual_absence_floor[room_id] = moment
         self._schedule_ownership_save()
 
     def _current_away_state(self, hass: HomeAssistant) -> bool | None:
@@ -1836,7 +2135,70 @@ class RoomLightingRuntime:
         if not self._away:
             return
         self._away = False
+        # Away→home is the single contour point that releases manual
+        # protections (owner decision 2026-10-09): holds and manual records
+        # armed before or during the away period must not keep rooms dark
+        # for the returning household. The release is bounded by the return
+        # gesture: manual actions observed after it keep their normal
+        # priority. Shared sources are reconciled through their own APIs
+        # against the same boundary, without deleting evidence mid-flight.
+        # Unlock events do not reach this method and release nothing. The
+        # away interval is unobserved: absence windows start from the return
+        # moment, the same fresh start a restart gets.
+        boundary_ms = self._now_ms()
+        boundary_generation = self._ownership.manual_return_boundary()
+        authority_boundary = None
+        authority_generation = getattr(
+            self._manual_light_authority, "current_generation", None
+        )
+        if callable(authority_generation):
+            try:
+                authority_boundary = authority_generation()
+            except Exception:  # noqa: BLE001 - no boundary, no shared release
+                authority_boundary = None
+        self._ownership.release_manual_protections_through(boundary_generation)
+        self._absence.clear()
+        self._absence_release_latch.clear()
+        self._manual_absence_floor.clear()
+        self._absence_floor_ms = boundary_ms
+        self._curve_presence.clear()
+        self._curve_motion.clear()
+        self._schedule_ownership_save()
+        self._create_task(
+            self._async_release_shared_manual_sources(
+                boundary_ms, authority_boundary
+            )
+        )
         self._create_task(self.async_process())
+
+    async def _async_release_shared_manual_sources(
+        self, boundary_ms: int, authority_boundary_generation: int | None
+    ) -> None:
+        """Reconcile the shared manual sources with the away→home boundary.
+
+        Only claims and records observed at or before the return gesture are
+        released; each source filters by its own version of the boundary and
+        keeps its deny boundary on any failure.
+        """
+
+        authority = self._manual_light_authority
+        authority_release = getattr(
+            authority, "async_release_manual_claims_through", None
+        )
+        if callable(authority_release) and authority_boundary_generation is not None:
+            try:
+                await authority_release(authority_boundary_generation)
+            except Exception:  # noqa: BLE001 - the deny boundary stays intact
+                _LOGGER.warning("room lighting away authority release failed")
+        priority = self._light_priority
+        priority_release = getattr(
+            priority, "async_release_manual_claims_before", None
+        )
+        if callable(priority_release):
+            try:
+                await priority_release(boundary_ms)
+            except Exception:  # noqa: BLE001 - the deny boundary stays intact
+                _LOGGER.warning("room lighting away priority release failed")
 
     async def _async_away_after_debounce(self, generation: int) -> None:
         if self._away_debounce_seconds > 0:
@@ -1906,6 +2268,8 @@ class RoomLightingRuntime:
                 ),
             )
             self._absence.pop(room_id, None)
+            self._absence_release_latch.discard(room_id)
+            self._manual_absence_floor[room_id] = moment
             self._schedule_ownership_save()
 
     def _observe_power_transition(self, entity_id: str) -> None:
@@ -1969,24 +2333,47 @@ class RoomLightingRuntime:
         config = self._configs.get(room_id)
         if config is None:
             return
-        if service == "turn_on":
-            # Powering a room is not itself evidence that a person selected a
-            # light source. In particular, an unattributed startup call must
-            # not make every target permanently manual-only.
-            return
         turned_off = service == "turn_off" or (
             service == "toggle" and self._entity_is_on(entity_id)
         )
         moment = self._now_ms()
+        if not turned_off:
+            # Restoring room power is a human action boundary for the absence
+            # evidence (a proven latch must not release the automation on
+            # evidence that predates this action), but it is NOT evidence
+            # that a person selected a light source: an unattributed startup
+            # call must not make every target permanently manual-only, so no
+            # ownership records are created here.
+            self._absence.pop(room_id, None)
+            self._absence_release_latch.discard(room_id)
+            self._manual_absence_floor[room_id] = moment
+            return
+        paired_main = self._pair_main_target_id(config)
+        pair_switch = (
+            config.devices.power_switch.entity_id
+            if config.devices.power_switch is not None else None
+        )
+        # The pair's positive off-proof binds the chandelier AND the source:
+        # only the configured pair switch proves the chandelier's circuit.
+        # Another power source (an exact-map relay of the mirror or the
+        # points) blocks every target's automatic branch, but must not
+        # serve as the chandelier's manual-off evidence either — its own
+        # circuit is a different one.
+        main_off_proof = turned_off and entity_id == pair_switch
         for target in config.devices.light_targets:
             self._ownership.record_manual(
                 room_id,
                 target.id,
                 moment,
                 confirmed=True,
-                turned_off=turned_off,
+                turned_off=main_off_proof and target.id == paired_main,
             )
         self._absence.pop(room_id, None)
+        self._absence_release_latch.discard(room_id)
+        # The room power action restarts the absence evidence, exactly like
+        # the light/switch manual paths: a stale sensor "off" predating the
+        # action must not latch the release right after it (SEC-RP6-01).
+        self._manual_absence_floor[room_id] = moment
         self._schedule_ownership_save()
 
     # -- device triggers ---------------------------------------------------
@@ -2218,6 +2605,8 @@ class RoomLightingRuntime:
                     turned_off=_binding_turns_off(self._hass, target, binding),
                 )
                 self._absence.pop(config.room_id, None)
+                self._absence_release_latch.discard(config.room_id)
+                self._manual_absence_floor[config.room_id] = moment
             self._schedule_ownership_save()
             if not enabled or not self._running:
                 continue
@@ -2780,8 +3169,31 @@ class RoomLightingRuntime:
             if aggregate is not SensorState.OFF:
                 present = SensorState.UNKNOWN
         if present is SensorState.ON:
-            if tracker["since"] is None:
-                tracker["since"] = moment
+            # The confirmation floor follows the sensor's own evidence: a
+            # fresh ON reading has held ON continuously since its
+            # last_changed, and an advancing last_changed proves a NEW ON
+            # episode began (a state transition happened in between), so the
+            # proven duration restarts from it. Only fresh ON readings count;
+            # a stale ON is classified unreliable upstream and never reaches
+            # this branch as ON. The most recent ON start among the
+            # participants is the conservative (shortest proven) continuity,
+            # and the floor never moves backwards.
+            on_starts = [
+                sensor.last_changed
+                for sensor in context.sensors
+                if sensor.kind in _PRESENCE_KINDS
+                and sensor.state is SensorState.ON
+                and context.now - sensor.last_changed
+                <= CURVE_SENSOR_FRESHNESS_MS
+            ]
+            episode = max(on_starts) if on_starts else moment
+            previous_since = tracker["since"]
+            tracker["since"] = (
+                episode
+                if previous_since is None
+                else max(int(previous_since), episode)
+            )
+            if previous_since is None:
                 tracker["absence"] = (
                     0
                     if tracker["last_seen"] is None
@@ -3309,6 +3721,14 @@ class RoomLightingRuntime:
                 and entity_id is not None
                 and self._legacy_unpowered_target_assumed_off(config, entity_id)
             )
+            # RP-10 pair: capture the proven-off power evidence BEFORE the
+            # power preparation — after the relay confirms on, the stale
+            # target report must not turn into "already_on".
+            pair_power_off = (
+                not exact.active
+                and command.action is LightAction.TURN_ON
+                and self._proven_power_pair_off(config)
+            )
             if (
                 entity_id is not None
                 and self._target_attempt_blocked(failure_key, entity_id, command.action)
@@ -3452,6 +3872,7 @@ class RoomLightingRuntime:
                         exact_active=False,
                         current_reason="target_on_after_power_wait",
                         allow_legacy_unpowered_recheck=legacy_unpowered_assumed_off,
+                        pair_power_off=pair_power_off,
                     )
                     if reason is None:
                         pass
@@ -3508,6 +3929,7 @@ class RoomLightingRuntime:
                     dependencies=exact_dependencies,
                     exact_active=exact.active,
                     allow_legacy_unpowered_recheck=legacy_unpowered_assumed_off,
+                    pair_power_off=pair_power_off,
                 )
                 if turn_on_block == "already_on":
                     receipt["evidenceRevision"] = revision_before
@@ -3615,6 +4037,7 @@ class RoomLightingRuntime:
                     exact_active=exact.active,
                     operation_moment=moment,
                     allow_legacy_unpowered_recheck=legacy_unpowered_assumed_off,
+                    pair_power_off=pair_power_off,
                 )
                 if post_pending_profile_block is not None:
                     post_pending_block = post_pending_profile_block
@@ -3791,9 +4214,18 @@ class RoomLightingRuntime:
         exact_active: bool,
         current_reason: str = "target_on_before_dispatch",
         allow_legacy_unpowered_recheck: bool = False,
+        pair_power_off: bool = False,
     ) -> str | None:
-        """Synchronous target-state proof before automatic turn_on dispatch."""
+        """Synchronous target-state proof before automatic turn_on dispatch.
 
+        ``pair_power_off`` is captured BEFORE the power preparation (RP-10):
+        the pair proof stays valid while the target's own evidence is
+        unchanged, even after the dispatch re-powers the circuit. The pair
+        binds the chandelier only (the owner's rule): other targets keep
+        their own evidence."""
+
+        if pair_power_off and command.target_id != self._pair_main_target_id(config):
+            pair_power_off = False
         if entity_id is None:
             return "target_unavailable"
         if self._auto_on_blocked(config, self._now_ms()):
@@ -3811,20 +4243,32 @@ class RoomLightingRuntime:
         # Матрица turn_on: доверенное OFF/ON — штатные проверки; молчаливо-
         # выключенное — команда аддитивная, разрешена (подтверждение свежим
         # чтением обязательно); молчаливо-включённое — «уже включено»;
-        # неизвестное/недоступное — вслепую не командуем.
-        if not trusted and last_known != "off":
-            if last_known == "on":
+        # неизвестное/недоступное — вслепую не командуем. Пара «выключатель ↔
+        # люстра» (RP-10): доказанно снятое питание (захвачено ДО
+        # восстановления) обнуляет устаревшее «on» обесточенной лампы —
+        # команда аддитивная, как для молчаливо-выключенной, пока по цели
+        # не появилось новое достоверное свидетельство.
+        if not trusted:
+            effective_last_known = last_known
+            if effective_last_known == "on" and (
+                pair_power_off
+                or self._untrusted_on_voided_by_manual_off(config, command.target_id)
+            ):
+                effective_last_known = "off"
+            if effective_last_known == "on":
                 return "already_on"
-            return "target_state_untrusted"
-        current_state = (
-            self._effective_entity_state(entity_id, dependencies)
-            if exact_active and dependencies is not None and trusted
-            else (
-                self._entity_trusted_state(entity_id)
-                if trusted
-                else last_known or "off"
+            if effective_last_known != "off":
+                return "target_state_untrusted"
+            # Обнулённое «on» (пара или новейшее ручное выключение) читается
+            # как «off» ДО КОНЦА проверки: команда аддитивная, как для
+            # молчаливо-выключенной, с обязательным свежим подтверждением.
+            current_state = "off"
+        else:
+            current_state = (
+                self._effective_entity_state(entity_id, dependencies)
+                if exact_active and dependencies is not None
+                else self._entity_trusted_state(entity_id)
             )
-        )
         if current_state == "unknown":
             return "target_state_untrusted"
         if current_state == "on":
@@ -4036,6 +4480,7 @@ class RoomLightingRuntime:
         exact_active: bool,
         operation_moment: int,
         allow_legacy_unpowered_recheck: bool = False,
+        pair_power_off: bool = False,
     ) -> str | None:
         """Final synchronous permit check after durable pending and before executor.
 
@@ -4072,6 +4517,7 @@ class RoomLightingRuntime:
                 dependencies=dependencies,
                 exact_active=exact_active,
                 allow_legacy_unpowered_recheck=allow_legacy_unpowered_recheck,
+                pair_power_off=pair_power_off,
             )
         if command.action in {
             LightAction.SET_BRIGHTNESS,
@@ -4094,6 +4540,8 @@ class RoomLightingRuntime:
             now=moment,
             absence_proven=protection.absence_confirmed,
             absence_since=protection.absence_since,
+            absence_until=protection.absence_until,
+            absence_latch=protection.absence_latch,
         )
 
     async def _ensure_power_source(
@@ -4863,11 +5311,11 @@ class RoomLightingRuntime:
             cutoff = entry.get("boundaryMs")  # type: ignore[union-attr]
             if not type(cutoff) is int:
                 cutoff = boundary_ms
-            # Открытие входной двери (замок/датчик входа) после границы —
-            # то же «первое присутствие»: будим день сразу, не ждём минуту
-            # до срабатывания датчика присутствия.
-            door_wake = self._entry_wakeup_until.get(config.room_id, 0) >= moment
-            if self._morning_presence_confirmed(config) or door_wake:
+            # Владелец (2026-10-09): отпирание замка ничего не снимает.
+            # День начинается только по доверенному показанию датчика
+            # присутствия; отпирание будит кривую (entry wakeup в ветке
+            # оценки), но не удаляет ручные защиты (SEC-RP9-MORNING-02).
+            if self._morning_presence_confirmed(config):
                 self._morning_apply_transition(
                     config, morning, moment, min(cutoff, moment)
                 )
@@ -5386,15 +5834,35 @@ class RoomLightingRuntime:
     def _protection_for(self, config: RoomLightingConfig) -> ProtectionSnapshot:
         if not config.manual_off_protection.enabled:
             return ProtectionSnapshot()
+        protection = config.manual_off_protection
+        absence_confirmed, absence_since, absence_until = self._absence.get(
+            config.room_id, (False, None, None)
+        )
         started_at = self._ownership.last_manual_off_at(
             config.room_id,
             (target.id for target in config.devices.light_targets),
         )
         if started_at is None:
-            return ProtectionSnapshot()
+            # No manual-off anchor: the protection itself is inactive, but the
+            # room's real absence evidence must still reach the ownership
+            # release checks (_curve_manual_blocked reads these fields). A bare
+            # default here would keep restored manual records locked forever,
+            # because their absence condition would read as never confirmed.
+            return ProtectionSnapshot(
+                active=False,
+                minimum_interval_seconds=protection.minimum_interval_seconds,
+                stable_absence_seconds=protection.stable_absence_seconds,
+                release_mode=protection.release_mode.value,
+                absence_confirmed=absence_confirmed,
+                absence_since=absence_since,
+                absence_until=absence_until,
+                absence_latch=(
+                    config.room_id in self._absence_release_latch
+                ),
+            )
         protection = config.manual_off_protection
-        absence_confirmed, absence_since = self._absence.get(
-            config.room_id, (False, None)
+        absence_confirmed, absence_since, absence_until = self._absence.get(
+            config.room_id, (False, None, None)
         )
         return ProtectionSnapshot(
             active=True,
@@ -5405,6 +5873,10 @@ class RoomLightingRuntime:
             reason="manual_off",
             absence_confirmed=absence_confirmed,
             absence_since=absence_since,
+            absence_until=absence_until,
+            absence_latch=(
+                config.room_id in self._absence_release_latch
+            ),
         )
 
     def _observe_absence(
@@ -5419,6 +5891,7 @@ class RoomLightingRuntime:
         ]
         if not relevant:
             self._absence.pop(config.room_id, None)
+            self._absence_release_latch.discard(config.room_id)
             return
         off_times: list[int] = []
         if any(sensor.state in {SensorState.UNKNOWN, SensorState.UNAVAILABLE}
@@ -5426,6 +5899,10 @@ class RoomLightingRuntime:
                    and context.now - sensor.last_changed > EnginePolicy.from_config(config).staleness_seconds * 1000)
                for sensor in relevant):
             self._absence.pop(config.room_id, None)
+            # Sensor uncertainty invalidates the ongoing WINDOW (fail-closed
+            # forward), but the already-completed stable absence latch is a
+            # historical fact and survives: it is cleared only by a new
+            # manual action, not by sensor faults.
             return
         if any(
             sensor.state is SensorState.ON
@@ -5433,19 +5910,74 @@ class RoomLightingRuntime:
             for sensor in relevant
         ):
             self._absence.pop(config.room_id, None)
+            # A stale on-reading invalidates the ongoing WINDOW; the latch
+            # (a historical fact) survives, as with other sensor faults.
             return
+        held = self._absence.get(config.room_id)
         for sensor in relevant:
             if sensor.state is SensorState.ON:
                 # Presence returned: keep the earlier confirmed absence so the
-                # manual protection can still release on this new presence.
+                # manual protection can still release on this new presence —
+                # but freeze its end at the proven return moment: the sensor's
+                # own ON transition time, not the (possibly delayed) processing
+                # time. Post-return processing delay must never stretch a
+                # shorter absence, and later evaluations while the person stays
+                # must not slide the end forward (SEC-RP5-DEPENDENCY-01).
+                if held is not None and held[0]:
+                    frozen_end = held[2]
+                    if frozen_end is None:
+                        on_times = [
+                            other.last_changed
+                            for other in relevant
+                            if other.state is SensorState.ON
+                        ]
+                        frozen_end = min(on_times)
+                    self._absence[config.room_id] = (True, held[1], frozen_end)
+                    # A completed stable absence is a historical fact: the
+                    # latch sets here too, not only while the room is still
+                    # empty. An evaluation gap over the completion moment
+                    # (nobody processed between 30s and the return) must not
+                    # let the next short window erase the proven window.
+                    # The since already includes the start/action floors and
+                    # the uncertainty guards above, so only honest windows
+                    # reach this branch.
+                    if (
+                        config.manual_off_protection.enabled
+                        and config.manual_off_protection.stable_absence_seconds > 0
+                        and frozen_end - held[1]
+                        >= config.manual_off_protection.stable_absence_seconds * 1000
+                    ):
+                        self._absence_release_latch.add(config.room_id)
                 return
             off_times.append(sensor.last_changed)
         if not off_times:
             return
         since = max(off_times)
+        # An unobserved interval is not absence: a restart makes the confirmed
+        # absence window start anew instead of inheriting a stale OFF timestamp.
+        # The away→home boundary does the same for the return moment: absence
+        # observed before the household came back must not count after it.
         if self._started_at is not None:
             since = max(since, self._started_at)
-        self._absence[config.room_id] = (True, since)
+        if self._absence_floor_ms is not None:
+            since = max(since, self._absence_floor_ms)
+        # A new manual action restarts the absence evidence: a stale sensor
+        # "off" predating the action must not latch the release right after
+        # it (SEC-RP6-01).
+        manual_floor = self._manual_absence_floor.get(config.room_id)
+        if manual_floor is not None:
+            since = max(since, manual_floor)
+        self._absence[config.room_id] = (True, since, None)
+        # A stable completed absence latches the release eligibility: short
+        # re-entries must not erase this evidence (the tambur held dark
+        # because the latest short window overwrote an 11-minute absence).
+        if (
+            config.manual_off_protection.enabled
+            and config.manual_off_protection.stable_absence_seconds > 0
+            and context.now - since
+            >= config.manual_off_protection.stable_absence_seconds * 1000
+        ):
+            self._absence_release_latch.add(config.room_id)
 
     def _schedule_ownership_save(self) -> None:
         if self._ownership_store is None or self._hass is None:

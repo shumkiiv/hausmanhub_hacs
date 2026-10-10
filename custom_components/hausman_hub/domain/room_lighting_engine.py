@@ -155,6 +155,14 @@ class ProtectionSnapshot:
     reason: str = "none"
     absence_confirmed: bool = False
     absence_since: int | None = None
+    # The moment presence returned, freezing the absence window end. While
+    # the room is still empty this stays None and ``now`` is used instead:
+    # post-return time must never stretch a shorter absence.
+    absence_until: int | None = None
+    # A completed stable absence has been proven since the last manual
+    # action: the ownership release may fire on this latch even when the
+    # LATEST absence window is shorter (short re-entries do not erase it).
+    absence_latch: bool = False
 
     def blocks_auto_on(
         self,
@@ -162,6 +170,8 @@ class ProtectionSnapshot:
         now: int,
         absence_proven: bool,
         absence_since: int | None,
+        absence_until: int | None = None,
+        absence_latch: bool = False,
     ) -> bool:
         if not self.active:
             return False
@@ -169,6 +179,7 @@ class ProtectionSnapshot:
             self.started_at is not None
             and now - self.started_at >= self.minimum_interval_seconds * 1000
         )
+        stable_end = absence_until if absence_until is not None else now
         absence_ok = (
             absence_proven
             and absence_since is not None
@@ -176,13 +187,19 @@ class ProtectionSnapshot:
             # absence that predates the manual action must not release it.
             and self.started_at is not None
             and absence_since >= self.started_at
-            and now - absence_since >= self.stable_absence_seconds * 1000
+            and stable_end - absence_since >= self.stable_absence_seconds * 1000
         )
+        # The proven stable-absence latch satisfies the absence condition on
+        # its own (a completed >= stable window since the manual action). In
+        # timer-including modes the minimum-interval timer stays mandatory;
+        # an absence_only room releases on the absence per its own config and
+        # never had a timer requirement.
+        absence_ok = absence_ok or absence_latch
         if self.release_mode == "timer_only":
             return not timer_ok
         if self.release_mode == "absence_only":
-            return not absence_ok
-        return not (timer_ok and absence_ok)
+            return not (absence_ok or absence_latch)
+        return not (timer_ok and (absence_ok or absence_latch))
 
 
 @dataclass(frozen=True, slots=True)
@@ -531,8 +548,30 @@ def evaluate_curve_room(
 
     targets: list[TargetDecision] = []
     main_decision = None
+    # When a manual hold exists for the room (a restored or fresh manual
+    # record), the auto-on requires proven presence: a latched release
+    # resumes automation, but the physical turn-on waits for the curve's
+    # own presence confirmation (variant a): an UNKNOWN/unavailable sensor
+    # keeps the room dark (fail-closed). The confirmation flag alone does
+    # not pass the gate: a synthetic wake (an unlock entry wakeup) without
+    # a valid sensor ON is not presence, so the gate also requires the
+    # observed ON state. A motion preview is likewise not confirmation:
+    # until the presence sensor itself reports ON (the promotion step of
+    # the confirmation cycle), the preview must not light a held room. The
+    # curve tracker and the motion promotion only confirm while the
+    # aggregate reading is ON, so the honest paths are unaffected.
+    manual_hold = any(
+        _proven_manual_ownership(context.ownership, item.id)
+        for item in (main_target, mirror_target) if item is not None
+    )
+    presence_gate = (
+        manual_hold
+        and not (presence_confirmed and presence is SensorState.ON)
+    )
     if main_target is not None:
-        main_decision = _curve_main_decision(main_target, curve, context)
+        main_decision = _curve_main_decision(
+            main_target, curve, context, presence_gate=presence_gate
+        )
         targets.append(main_decision)
     if mirror_target is not None:
         # Two observed phases: establish the main state and settings first,
@@ -558,7 +597,9 @@ def evaluate_curve_room(
             _unchanged(mirror_target.id, Skip(
                 mirror_target.id, SkipReason.UNOBSERVED,
                 "Ожидается подтверждение дневного источника и его настроек",
-            )) if waiting_for_main else _curve_mirror_decision(mirror_target, curve, context)
+            )) if waiting_for_main else _curve_mirror_decision(
+                mirror_target, curve, context, presence_gate=presence_gate
+            )
         )
     return RoomLightingDecision(
         room_id=config.room_id,
@@ -566,6 +607,54 @@ def evaluate_curve_room(
         mode=MODE_SHADOW,
         targets=tuple(targets),
     )
+
+
+def _effective_light_off(light, now: int, manual_at: int | None) -> bool:
+    """Единое правило состояния света (иерархия доказательств, RP-10).
+
+    Решения движка читают состояние цели только через эту функцию. Отчёт
+    лампы «включена» доказывает текущее состояние лишь пока не опровергнут
+    более сильным свидетельством:
+
+    1. Доказанный отчёт «выключена» — сильнее любого «включена».
+    2. Свежесть: отчёт «включена» старше окна свежести не доказывает
+       настоящее (лампа могла потерять питание и не успеть отчитаться —
+       клавиша выключателя обесточивает цепь).
+    3. Приоритет человека: отчёт «включена», сделанный ДО последнего
+       ручного действия, перекрыт этим действием.
+
+    Слои применения одного правила: контекст рантайма (пара
+    «питание комнаты → цели», `_apply_proven_power_pair`), решения
+    движка (эта функция: `_curve_main_decision`, `_curve_mirror_decision`,
+    `_curve_manual_blocked`, `_manual_off_released`), отправка (захваченное
+    доказательство пары и `_untrusted_on_voided_by_manual_off` в диспетчере).
+    Новое правило не добавляет исключений поверх старых — оно уточняет
+    чтение состояния, которым все существующие защиты уже пользуется."""
+
+    if light is None:
+        return False
+    if light.state is SensorState.OFF or light.reported_state is SensorState.OFF:
+        return True
+    return (
+        light.state is SensorState.UNKNOWN
+        and _reported_on_is_void(light, now, manual_at)
+    )
+
+
+def _reported_on_is_void(light, now: int, manual_at: int | None) -> bool:
+    """Whether a reported ``on`` cannot prove a current selection.
+
+    A bulb that lost power before it could report (the wall-key pair) keeps
+    its last ``on`` report indefinitely. The report is void when it is
+    older than the freshness window or when it predates the newest manual
+    action: the person's own switch-off happened AFTER that report, so the
+    light cannot honestly be on."""
+
+    if light.reported_state is not SensorState.ON:
+        return False
+    if now - light.last_changed > EnginePolicy().sensor_freshness_seconds * 1000:
+        return True
+    return manual_at is not None and light.last_changed < manual_at
 
 
 def _curve_manual_blocked(context: RoomLightingContext, target_id: str) -> bool:
@@ -577,9 +666,8 @@ def _curve_manual_blocked(context: RoomLightingContext, target_id: str) -> bool:
     latest = latest_ownership(context.ownership, target_id)
     if latest is None or latest.source is not OwnershipSource.MANUAL:
         return False
-    light_off = light is not None and (
-        light.state is SensorState.OFF or light.reported_state is SensorState.OFF
-    )
+    manual_at = latest.at
+    light_off = _effective_light_off(light, context.now, manual_at)
     return not (
         light_off
         and release_expired_manual(
@@ -588,6 +676,8 @@ def _curve_manual_blocked(context: RoomLightingContext, target_id: str) -> bool:
             stable_absence_seconds=context.protection.stable_absence_seconds,
             absence_confirmed=context.protection.absence_confirmed,
             absence_since=context.protection.absence_since,
+            absence_until=context.protection.absence_until,
+            absence_latch=context.protection.absence_latch,
             release_mode=context.protection.release_mode,
         )
     )
@@ -603,6 +693,8 @@ def curve_profile_block_reason(
     if context.protection.blocks_auto_on(
         now=context.now, absence_proven=context.protection.absence_confirmed,
         absence_since=context.protection.absence_since,
+        absence_until=context.protection.absence_until,
+        absence_latch=context.protection.absence_latch,
     ):
         return SkipReason.MANUAL_PROTECTION
     for target in config.devices.light_targets:
@@ -622,13 +714,47 @@ def curve_profile_block_reason(
 
 
 def _curve_main_decision(
-    target: object, curve: object, context: RoomLightingContext
+    target: object,
+    curve: object,
+    context: RoomLightingContext,
+    *,
+    presence_gate: bool = False,
 ) -> TargetDecision:
     target_id = target.id  # type: ignore[attr-defined]
     light = context.light(target_id)
     reported = light.reported_state if light is not None else None
+    latest_manual = latest_ownership(context.ownership, target_id)
+    manual_at = (
+        latest_manual.at
+        if latest_manual is not None and latest_manual.source is OwnershipSource.MANUAL
+        else None
+    )
+    light_off = _effective_light_off(light, context.now, manual_at)
+    # Подтверждённое авто-владение — собственное доказательство автоматики:
+    # пока нет противоречащего свежего свидетельства (свежий OFF, снятое
+    # питание, ручное действие) и ненаблюдаемого разрыва, выключение по
+    # расписанию опирается на подтверждённое включение, а не на свежесть
+    # отчёта. Явный OFF сильнее владения: авто-запись создаётся после любой
+    # подтверждённой команды, включая выключение.
+    latest_record = latest_ownership(context.ownership, target_id)
+    auto_believed_on = (
+        light is not None
+        and latest_record is not None
+        and latest_record.confirmed
+        and latest_record.source is OwnershipSource.AUTO
+        and light.state is not SensorState.OFF
+        and light.reported_state is not SensorState.OFF
+        and not (
+            context.unobserved_since is not None
+            and context.unobserved_since > latest_record.at
+        )
+    )
     light_on = light is not None and (
-        light.state is SensorState.ON or reported is SensorState.ON
+        (
+            not light_off
+            and (light.state is SensorState.ON or reported is SensorState.ON)
+        )
+        or auto_believed_on
     )
     if not target.auto_control:  # type: ignore[attr-defined]
         return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_MODE))
@@ -642,6 +768,15 @@ def _curve_main_decision(
     if _curve_manual_blocked(context, target_id):
         return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_OWNERSHIP))
 
+    # When the manual protection is active and the presence is not
+    # confirmed, the auto-on waits for a fresh confirmed presence reading:
+    # a latched release resumes automation, but the physical turn-on still
+    # requires valid presence evidence (fail-closed on sensor faults).
+    if presence_gate and not light_on:
+        return _unchanged(
+            target_id, Skip(target_id, SkipReason.NIGHT_MINIMUM,
+                            "защита активна: ожидается подтверждённое присутствие"),
+        )
     fade = int(curve.fade_seconds)  # type: ignore[attr-defined]
     if not curve.chandelier_on:  # type: ignore[attr-defined]
         if not light_on:
@@ -736,13 +871,47 @@ def _curve_main_decision(
 
 
 def _curve_mirror_decision(
-    target: object, curve: object, context: RoomLightingContext
+    target: object,
+    curve: object,
+    context: RoomLightingContext,
+    *,
+    presence_gate: bool = False,
 ) -> TargetDecision:
     target_id = target.id  # type: ignore[attr-defined]
     light = context.light(target_id)
     reported = light.reported_state if light is not None else None
+    # One light-state rule for every engine decision (RP-10): a stale or
+    # overridden reported ``on`` proves nothing, exactly like for the main
+    # target (see _effective_light_off).
+    latest_record = latest_ownership(context.ownership, target_id)
+    manual_at = (
+        latest_record.at
+        if latest_record is not None and latest_record.source is OwnershipSource.MANUAL
+        else None
+    )
+    light_off = _effective_light_off(light, context.now, manual_at)
+    # Same rule as the main target: proven auto ownership is the
+    # automation's own evidence — the scheduled handover off stays armed
+    # until a fresh contradicting report arrives. Explicit OFF and an
+    # unobserved gap are stronger than the ownership record.
+    auto_believed_on = (
+        light is not None
+        and latest_record is not None
+        and latest_record.confirmed
+        and latest_record.source is OwnershipSource.AUTO
+        and light.state is not SensorState.OFF
+        and light.reported_state is not SensorState.OFF
+        and not (
+            context.unobserved_since is not None
+            and context.unobserved_since > latest_record.at
+        )
+    )
     light_on = light is not None and (
-        light.state is SensorState.ON or reported is SensorState.ON
+        (
+            not light_off
+            and (light.state is SensorState.ON or reported is SensorState.ON)
+        )
+        or auto_believed_on
     )
     if not target.auto_control:  # type: ignore[attr-defined]
         return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_MODE))
@@ -753,6 +922,15 @@ def _curve_mirror_decision(
         return _unchanged(target_id, Skip(target_id, SkipReason.SENSOR_UNKNOWN))
     if _curve_manual_blocked(context, target_id):
         return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_OWNERSHIP))
+    # The auto-on waits for a fresh confirmed presence when the manual
+    # protection is in play (a latched release resumes automation, but the
+    # physical turn-on waits for valid presence evidence — fail-closed on
+    # sensor faults).
+    if presence_gate and not light_on:
+        return _unchanged(
+            target_id, Skip(target_id, SkipReason.NIGHT_MINIMUM,
+                            "защита активна: ожидается подтверждённое присутствие"),
+        )
     if curve.mirror_on and not light_on:  # type: ignore[attr-defined]
         return TargetDecision(
             target_id=target_id,
@@ -813,9 +991,9 @@ def _manual_off_released(
     """
 
     light = context.light(target_id)
-    light_off = light is not None and (
-        light.state is SensorState.OFF or light.reported_state is SensorState.OFF
-    )
+    latest = latest_ownership(context.ownership, target_id)
+    manual_at = latest.at if latest is not None else None
+    light_off = _effective_light_off(light, context.now, manual_at)
     return (
         light_off
         and presence is SensorState.ON
@@ -826,6 +1004,8 @@ def _manual_off_released(
             absence_confirmed=context.protection.absence_confirmed or absence_proven,
             absence_since=(context.protection.absence_since
                            if context.protection.absence_since is not None else absence_since),
+            absence_until=context.protection.absence_until,
+            absence_latch=context.protection.absence_latch,
             release_mode=context.protection.release_mode,
         )
     )
@@ -1027,6 +1207,8 @@ def _evaluate_target(
             now=context.now,
             absence_proven=effective_absence,
             absence_since=effective_absence_since,
+            absence_until=context.protection.absence_until,
+            absence_latch=context.protection.absence_latch,
         ):
             return _unchanged(
                 target_id,
