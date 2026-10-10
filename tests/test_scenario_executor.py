@@ -3900,6 +3900,11 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(receipt["accepted"])
         self.assertEqual("power_source_unavailable", receipt["error"])
+        # The source command was dispatched before the confirmation failed:
+        # the receipt must keep that fact honestly (HH-008.b-AUD-02).
+        self.assertTrue(receipt["power_precondition"]["sourceCommandSent"])
+        self.assertIsNotNone(receipt["power_precondition"]["sourceCommandSentAt"])
+        self.assertFalse(receipt["power_precondition"]["sourceTurnedOn"])
         self.assertEqual(
             ["switch.wall"],
             [item.args[2]["entity_id"] for item in self.hass.services.async_call.await_args_list],

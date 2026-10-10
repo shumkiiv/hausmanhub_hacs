@@ -779,6 +779,15 @@ class ScenarioExecutor:
                     "attempts": 0,
                 },
                 "error": receipt.get("error", "device_action_failed"),
+                # A dispatched power-source command is a fact the owner must
+                # see even in a failed receipt (HH-008.b-AUD-02): the
+                # preparation evidence travels with the failure instead of
+                # disappearing.
+                **(
+                    {"power_precondition": receipt["power_precondition"]}
+                    if isinstance(receipt.get("power_precondition"), Mapping)
+                    else {}
+                ),
             }
 
         device = self._catalog.device(target_id)
@@ -3965,50 +3974,12 @@ class ScenarioExecutor:
             if dependency.policy == AUTO_TURN_ON_POLICY:
                 if state in {None, "unknown", "unavailable"}:
                     return "power_source_unavailable", precondition, upstream_sources
-                # Already on: skip the redundant turn_on + state-change wait.
-                # The warmup delay still applies because the device behind
-                # the switch needs time to stabilise. Without this shortcut
-                # an always-on source would time out waiting for a state
-                # change that never comes.
-                if state == "on":
-                    precondition["sourceTurnedOn"] = False
-                    precondition["sourceAlreadyOn"] = True
-                    if not dry_run and dependency.warmup_seconds > 0:
-                        if cancellation_event is None:
-                            await asyncio.sleep(dependency.warmup_seconds)
-                        else:
-                            try:
-                                await asyncio.wait_for(
-                                    cancellation_event.wait(),
-                                    dependency.warmup_seconds,
-                                )
-                            except TimeoutError:
-                                pass
-                            else:
-                                return (
-                                    "dispatch_cancelled",
-                                    precondition,
-                                    upstream_sources,
-                                )
-                    confirmed = self._entity_state_object(source_entity_id)
-                    read_back = int(time.time() * 1000)
-                    precondition["sourceEvidenceRevision"] = _state_revision(
-                        confirmed
-                    )
-                    precondition["sourceReadBackAt"] = read_back_at = read_back
-                    precondition["readyAt"] = read_back
-                    precondition["powerPreparation"] = (
-                        self._power_preparation_proof(
-                            entity_id,
-                            dependency,
-                            confirmed,
-                            request_id=request_id,
-                            source_command_sent_at=None,
-                            source_read_back_at=read_back,
-                            ready_at=read_back,
-                        )
-                    )
-                    return None, precondition, upstream_sources | {source_entity_id}
+                # Re-assert contract (HH-008.b): an "already on" source is
+                # still commanded and its confirmation must come from fresh
+                # evidence — a state change or the relay's own report. A
+                # bare bookkeeping update (last_updated) proves nothing
+                # about the circuit now, so the confirmation waits for a
+                # trustworthy report and fails closed otherwise.
                 if self._command_guard is None:
                     return (
                         "power_source_guard_unavailable",
@@ -4085,6 +4056,11 @@ class ScenarioExecutor:
                         ) from err
                     return "power_source_unavailable", precondition, upstream_sources
                 source_turned_on = True
+                # The dispatch itself is a fact that must survive a failed
+                # confirmation (HH-008.b-AUD-02): the receipt carries it even
+                # when the readiness proof never materialises.
+                precondition["sourceCommandSent"] = True
+                precondition["sourceCommandSentAt"] = source_command_sent_at
                 if not await self._wait_for_entity_state(
                     source_entity_id,
                     "on",
@@ -4111,6 +4087,13 @@ class ScenarioExecutor:
                         return "dispatch_cancelled", precondition, upstream_sources
             precondition["sourceTurnedOn"] = source_turned_on
             precondition["waitedSeconds"] = wait_seconds
+            # Two-tier evidence rule (HH-008.b, tests 4138 vs 4192): an
+            # EXISTING last_changed claim may only be overridden by a state
+            # change or the relay's own last_reported report — a bare
+            # bookkeeping last_updated refreshes nothing. When the journal
+            # has no last_changed at all, a fresh last_updated answering OUR
+            # OWN turn_on is the only evidence available and is accepted
+            # (the same-state fallback in the freshness check reads it).
             confirmed_source = self._entity_state_object(source_entity_id)
             if (
                 confirmed_source is None
