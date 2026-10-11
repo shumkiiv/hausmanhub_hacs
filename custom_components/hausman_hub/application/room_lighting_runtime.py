@@ -1163,7 +1163,9 @@ class RoomLightingRuntime:
         # pre-attempt evidence revision here: the same command is not repeated
         # while the device reports exactly the same evidence. The shadow journal
         # restores these blocks after a restart through the receipts it carries.
-        self._dispatch_failures: dict[tuple[str, str], tuple[str, str]] = {}
+        self._dispatch_failures: dict[
+            tuple[str, str], tuple[str, str, int | None]
+        ] = {}
         # Последняя отправленная на недостоверном свидетельстве регулировка
         # (молчание светильника): дедупликация — одна и та же регулировка не
         # отправляется повторно, пока прибор не отчитается новым значением.
@@ -2977,7 +2979,14 @@ class RoomLightingRuntime:
         except Exception:  # noqa: BLE001 - no durable marker, no command
             _LOGGER.warning("room lighting pending dispatch write failed")
             return False
-        self._dispatch_failures[(room_id, target_id)] = (action, evidence_revision)
+        # The third element is the attempt anchor (HH-014.b morning defect):
+        # when the evidence revision carries no parseable timestamp, this
+        # anchor still lets a newer proven target report release the guard.
+        self._dispatch_failures[(room_id, target_id)] = (
+            action,
+            evidence_revision,
+            at,
+        )
         return True
 
     async def _persist_pending_power_dispatch(
@@ -3915,6 +3924,14 @@ class RoomLightingRuntime:
                         receipt["_supersededFailure"] = {
                             "action": previous_failure[0],
                             "evidenceRevision": previous_failure[1],
+                            "anchorMs": (
+                                previous_failure[2]
+                                if len(previous_failure) > 2
+                                and isinstance(previous_failure[2], int)
+                                and not isinstance(previous_failure[2], bool)
+                                and previous_failure[2] > 0
+                                else None
+                            ),
                         }
                     receipts.append(receipt)
                     continue
@@ -3977,8 +3994,13 @@ class RoomLightingRuntime:
                 grace_marker = (service_name, self._now_ms())
                 self._executing_actions[entity_id] = service_name
                 self._command_grace[entity_id] = grace_marker
+                # HH-014.b: the attempt boundary is fixed HERE — immediately
+                # before the pre-send marker — not at the room processing
+                # start, so a report between the two can never release the
+                # restored latch without a report newer than the attempt.
+                attempt_boundary = self._now_ms()
                 pending_saved = await self._persist_pending_target_dispatch(
-                    at=moment,
+                    at=attempt_boundary,
                     room_id=config.room_id,
                     target_id=command.target_id,
                     action=command.action.value,
@@ -3986,6 +4008,7 @@ class RoomLightingRuntime:
                     operation_id=operation_id,
                     config_version=config_version,
                 )
+                receipt["_attemptAt"] = attempt_boundary
                 if not pending_saved:
                     self._restore_unsent_command_markers(
                         entity_id,
@@ -4007,6 +4030,14 @@ class RoomLightingRuntime:
                         receipt["_supersededFailure"] = {
                             "action": previous_failure[0],
                             "evidenceRevision": previous_failure[1],
+                            "anchorMs": (
+                                previous_failure[2]
+                                if len(previous_failure) > 2
+                                and isinstance(previous_failure[2], int)
+                                and not isinstance(previous_failure[2], bool)
+                                and previous_failure[2] > 0
+                                else None
+                            ),
                         }
                     receipts.append(receipt)
                     continue
@@ -4063,6 +4094,14 @@ class RoomLightingRuntime:
                         receipt["_supersededFailure"] = {
                             "action": previous_failure[0],
                             "evidenceRevision": previous_failure[1],
+                            "anchorMs": (
+                                previous_failure[2]
+                                if len(previous_failure) > 2
+                                and isinstance(previous_failure[2], int)
+                                and not isinstance(previous_failure[2], bool)
+                                and previous_failure[2] > 0
+                                else None
+                            ),
                         }
                     closed = await self._persist_not_sent_dispatch_closure(
                         at=moment,
@@ -4138,9 +4177,24 @@ class RoomLightingRuntime:
                 else:
                     receipt["reason"] = f"dispatch_{send_outcome}"
                 if entity_id is not None and receipt["dispatchAttempt"] is True:
+                    # One attempt boundary for memory and the durable store:
+                    # keep the pre-send marker's anchor when it exists, so a
+                    # report between the processing start and the dispatch
+                    # cannot release the restored latch without a report
+                    # newer than the attempt itself.
+                    existing = self._dispatch_failures.get(failure_key)
+                    anchor = (
+                        existing[2]
+                        if isinstance(existing, tuple)
+                        and len(existing) > 2
+                        and isinstance(existing[2], int)
+                        and not isinstance(existing[2], bool)
+                        else self._now_ms()
+                    )
                     self._dispatch_failures[failure_key] = (
                         command.action.value,
                         revision_before,
+                        anchor,
                     )
                 elif entity_id is not None:
                     if superseding_off:
@@ -4152,6 +4206,14 @@ class RoomLightingRuntime:
                         receipt["_supersededFailure"] = {
                             "action": previous_failure[0],
                             "evidenceRevision": previous_failure[1],
+                            "anchorMs": (
+                                previous_failure[2]
+                                if len(previous_failure) > 2
+                                and isinstance(previous_failure[2], int)
+                                and not isinstance(previous_failure[2], bool)
+                                and previous_failure[2] > 0
+                                else None
+                            ),
                         }
                     else:
                         self._dispatch_failures.pop(failure_key, None)
@@ -5522,37 +5584,47 @@ class RoomLightingRuntime:
                 return True
             observed = self._target_evidence_observed_ms(entity_id)
             return observed is None or observed <= boundary
-        if recorded[1] == current_revision:
-            return True
-        recorded_ms = _revision_observed_ms(recorded[1])
-        if recorded_ms is not None:
+        # HH-014.b morning defect: the anchor comparison runs BEFORE the
+        # revision-equality shortcut. A genuine newer proven report of the
+        # SAME value (state_2 stays "off", the relay simply answers again)
+        # must release the guard even after the report has aged out of the
+        # freshness window and the revision collapsed back to "untrusted:…".
+        # HH-014.b (AUD-LATCH-05 + AUD-LATCH-08): the attempt boundary is
+        # authoritative and the anchor states are explicit. A valid positive
+        # int marked attemptBoundary is the exact attempt boundary: only a
+        # proven physical report strictly newer than it releases the target
+        # (even aged out of the freshness window); the revision timestamp
+        # predates the attempt and is never a substitute boundary. An
+        # absent, unknown or corrupted boundary fails closed for turn_on
+        # while the evidence is untrusted; a FRESH trusted live report
+        # bounds the block to one freshness window and releases (the device
+        # proved it is alive). A planned off keeps the safe-direction
+        # semantics and is allowed WITHOUT dropping the existing record.
+        anchor = None
+        if len(recorded) > 2:
+            candidate = recorded[2]
+            if (
+                isinstance(candidate, int)
+                and not isinstance(candidate, bool)
+                and candidate > 0
+            ):
+                anchor = candidate
+        if anchor is not None:
             latest_ms = self._proven_report_ms(entity_id)
-            if latest_ms is not None and latest_ms > recorded_ms:
-                # A proven physical report newer than the failed attempt
-                # releases the whole target, even when that report has since
-                # aged out of the freshness window: the guard must not outlive
-                # the evidence it was recorded against.
+            if latest_ms is not None and latest_ms > anchor:
                 self._dispatch_failures.pop(failure_key, None)
                 return False
-            # The recorded failure is not older than any proven report: no
-            # blind repeat while the evidence window is unchanged.
+            if recorded[1] == current_revision:
+                return True
             if not safe_off:
                 return True
             if recorded[0] == LightAction.TURN_OFF.value:
                 return True
             return False
-        if safe_off:
-            # A planned off is the safe direction, and the trust matrix already
-            # permits it for a silently-on target with proven auto ownership.
-            # Allow it WITHOUT dropping the existing record: if the off is
-            # refused before it was sent, the protection for other actions must
-            # survive, and a prior unconfirmed OFF for the now-stale evidence is
-            # not repeated (only a new physical report releases it).
-            if (
-                recorded[0] == LightAction.TURN_OFF.value
-                and not self._trusted_evidence_revision(current_revision)
-            ):
-                return True
+        if safe_off and not (
+            recorded[0] == LightAction.TURN_OFF.value
+            and not self._trusted_evidence_revision(current_revision)
+        ):
             return False
         if not self._trusted_evidence_revision(current_revision):
             return True
@@ -5715,9 +5787,24 @@ class RoomLightingRuntime:
                         and isinstance(target_id, str)
                         and (room_id, target_id) in targets
                     ):
+                        # Only entries with the explicit attempt-boundary
+                        # marker carry an exact boundary. Older entries
+                        # (blockedAfterMs was the room pass time) restore as
+                        # UNKNOWN and stay fail-closed for turn_on with a
+                        # bounded live-report release.
+                        anchor = None
+                        boundary = raw.get("blockedAfterMs")
+                        if (
+                            raw.get("attemptBoundary") is True
+                            and isinstance(boundary, int)
+                            and not isinstance(boundary, bool)
+                            and boundary > 0
+                        ):
+                            anchor = boundary
                         self._dispatch_failures[(room_id, target_id)] = (
                             action,
                             evidence_revision,
+                            anchor,
                         )
                     elif not (isinstance(room_id, str) and isinstance(target_id, str)):
                         durable_failures_malformed = True
@@ -5755,6 +5842,11 @@ class RoomLightingRuntime:
             receipts = entry.get("dispatch")
             if not isinstance(room_id, str) or not isinstance(receipts, list):
                 continue
+            # AUD-LATCH-04 + luna P1: the old-format journal has no per-receipt
+            # attempt boundary (_attemptAt), so the true attempt moment is
+            # unknown. The entry time is the room-processing pass time, not a
+            # provable attempt boundary — the latch restores with an UNKNOWN
+            # anchor and stays fail-closed for turn_on.
             for raw in receipts:
                 if not isinstance(raw, Mapping):
                     continue
@@ -5778,9 +5870,13 @@ class RoomLightingRuntime:
                         raw.get("dispatchAttempt") is True
                         and raw.get("confirmed") is not True
                     ):
+                        # The true attempt moment is unknown for old-format
+                        # receipts: the latch restores with an UNKNOWN anchor
+                        # and stays fail-closed for turn_on.
                         self._dispatch_failures[key] = (
                             str(raw.get("action") or ""),
                             evidence_revision,
+                            None,
                         )
                 power = raw.get("power")
                 if not isinstance(power, Mapping):

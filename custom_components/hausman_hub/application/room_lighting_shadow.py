@@ -359,19 +359,21 @@ class RoomLightingShadowService:
         async with self._lock:
             await self._ensure_loaded_locked()
             snapshot = self._snapshot_locked()
-            self._remember_dispatch_failure(
-                key,
-                {
-                    "key": key,
-                    "kind": "target",
-                    "roomId": room_id,
-                    "targetId": target_id,
-                    "action": action,
-                    "evidenceRevision": evidence_revision,
-                    "blockedAfterMs": at,
-                    "reason": "pending_dispatch",
-                },
-            )
+            marker = {
+                "key": key,
+                "kind": "target",
+                "roomId": room_id,
+                "targetId": target_id,
+                "action": action,
+                "evidenceRevision": evidence_revision,
+            }
+            if isinstance(at, int) and not isinstance(at, bool) and at > 0:
+                # HH-014.b: the pre-send marker carries the exact attempt
+                # boundary so a crash before the receipt keeps it.
+                marker["blockedAfterMs"] = at
+                marker["attemptBoundary"] = True
+            marker["reason"] = "pending_dispatch"
+            self._remember_dispatch_failure(key, marker)
             self._entries.append(entry)
             self._entries = self._entries[-MAX_JOURNAL_ENTRIES:]
             try:
@@ -468,33 +470,60 @@ class RoomLightingShadowService:
                     ):
                         # A safe planned off that superseded another action but
                         # was never sent must not erase that older protection.
-                        self._remember_dispatch_failure(
-                            key,
-                            {
-                                "key": key,
-                                "kind": "target",
-                                "roomId": room_id,
-                                "targetId": target_id,
-                                "action": str(superseded.get("action") or ""),
-                                "evidenceRevision": str(
-                                    superseded.get("evidenceRevision") or ""
-                                ),
-                                "blockedAfterMs": at,
-                            },
-                        )
-                elif raw.get("dispatchAttempt") is True:
-                    self._remember_dispatch_failure(
-                        key,
-                        {
+                        superseded_entry = {
                             "key": key,
                             "kind": "target",
                             "roomId": room_id,
                             "targetId": target_id,
-                            "action": str(raw.get("action") or ""),
-                            "evidenceRevision": evidence_revision,
-                            "blockedAfterMs": at,
-                        },
-                    )
+                            "action": str(superseded.get("action") or ""),
+                            "evidenceRevision": str(
+                                superseded.get("evidenceRevision") or ""
+                            ),
+                        }
+                        superseded_anchor = superseded.get("anchorMs")
+                        if (
+                            isinstance(superseded_anchor, int)
+                            and not isinstance(superseded_anchor, bool)
+                            and superseded_anchor > 0
+                        ):
+                            # The superseded latch keeps its own exact attempt
+                            # boundary across restarts (HH-014.b). A missing
+                            # or invalid anchor stays unknown (AUD-LATCH-03).
+                            superseded_entry["blockedAfterMs"] = superseded_anchor
+                            superseded_entry["attemptBoundary"] = True
+                        # AUD-LATCH-03: an unknown boundary stays unknown — the
+                        # failure time must not be invented as the boundary.
+                        self._remember_dispatch_failure(key, superseded_entry)
+                elif raw.get("dispatchAttempt") is True:
+                    # HH-014.b: the durable boundary is the attempt boundary
+                    # captured immediately before the dispatch, not the room
+                    # processing start — a report between the two must not
+                    # release the restored latch. Entries WITH a valid
+                    # _attemptAt carry the exact attempt boundary
+                    # ("attemptBoundary": true). A receipt WITHOUT
+                    # _attemptAt comes from an older producer whose pass time
+                    # is not a provable attempt boundary: its entry is saved
+                    # WITHOUT a boundary (unknown → fail-closed for turn_on
+                    # with a bounded live-report release), never inventing
+                    # one from the pass time. A PRESENT but invalid
+                    # _attemptAt stays unknown for the same reason.
+                    entry = {
+                        "key": key,
+                        "kind": "target",
+                        "roomId": room_id,
+                        "targetId": target_id,
+                        "action": str(raw.get("action") or ""),
+                        "evidenceRevision": evidence_revision,
+                    }
+                    attempt_at = raw.get("_attemptAt")
+                    if (
+                        isinstance(attempt_at, int)
+                        and not isinstance(attempt_at, bool)
+                        and attempt_at > 0
+                    ):
+                        entry["blockedAfterMs"] = attempt_at
+                        entry["attemptBoundary"] = True
+                    self._remember_dispatch_failure(key, entry)
             power = raw.get("power")
             if not isinstance(power, Mapping):
                 continue
