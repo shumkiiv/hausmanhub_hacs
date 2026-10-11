@@ -1136,3 +1136,156 @@ async def test_invalid_in_memory_anchor_types_fail_closed(bad_anchor) -> None:
         assert (_ROOM_ID, "light_main") in runtime._dispatch_failures  # type: ignore[attr-defined]
     finally:
         await runtime.stop()
+
+
+# ---------------------------------------------------------------------------
+# Tambur curveParams engine (HH-007): D/P/L matrix coverage
+
+
+def _tambur():
+    from custom_components.hausman_hub.domain.tambur_curve import (
+        PresencePolicy,
+        TamburCurveParams,
+        TamburCurveSnapshot,
+        evaluate_tambur_curve,
+    )
+    params = TamburCurveParams()
+    def snap(now, *, sunset=1200, sunrise=480, healthy=True, lux=None,
+             absence=False, presence=True, away=False):
+        return TamburCurveSnapshot(
+            now_minutes=now, sunrise_minutes=sunrise, sunset_minutes=sunset,
+            sun_healthy=healthy, outdoor_lux=lux,
+            presence_confirmed=presence, absence_confirmed=absence, away=away,
+        )
+    return params, snap, evaluate_tambur_curve
+
+
+def test_curve_morning_ramp_20_to_100_by_12() -> None:
+    """D-03: the computed maximum grows 20%→100% from dayStart(09:00) to
+    fullBy(12:00)."""
+    params, snap, evaluate = _tambur()
+    at_9 = evaluate(params, snap(540))
+    at_1030 = evaluate(params, snap(630))
+    at_12 = evaluate(params, snap(720))
+    assert at_9.required_percent == 20
+    assert at_1030.required_percent == 60
+    assert at_12.required_percent == 100
+    assert at_9.chandelier_on and at_12.chandelier_on
+
+
+def test_curve_day_hold_and_evening_decline_to_5_by_21() -> None:
+    """D-01/D-05: 100% at day; the decline reaches 5% by 21:00; the mirror
+    takes over at 22:00; everything is off at 23:00."""
+    params, snap, evaluate = _tambur()
+    at_12 = evaluate(params, snap(720))
+    at_18 = evaluate(params, snap(1080))
+    at_21 = evaluate(params, snap(1260))
+    at_2159 = evaluate(params, snap(1259 + 60))  # 21:59
+    assert at_12.required_percent == 100
+    assert at_18.mode.value == "day"
+    assert at_21.required_percent == 5
+    assert at_2159.required_percent == 5
+    # 22:00 by_time: mirror on, chandelier off.
+    at_22 = evaluate(params, snap(1320))
+    assert at_22.mirror_on is True and at_22.chandelier_on is False
+    # 23:00: everything off.
+    at_23 = evaluate(params, snap(1380))
+    assert at_23.chandelier_on is False and at_23.mirror_on is False
+
+
+def test_curve_wait_absence_holds_then_releases() -> None:
+    """P-02/P-03: wait_absence holds the transition while the person is
+    present; the confirmed absence completes it."""
+    from custom_components.hausman_hub.domain.tambur_curve import (
+        PresencePolicy,
+        TamburCurveParams,
+    )
+    params = TamburCurveParams(
+        mirror_transition_policy=PresencePolicy.WAIT_ABSENCE,
+        all_off_policy=PresencePolicy.WAIT_ABSENCE,
+    )
+    _, snap, evaluate = _tambur()
+    p2 = (params, snap)
+    at_22_person = evaluate(params, snap(1320, absence=False))
+    assert at_22_person.transition_pending is True
+    assert at_22_person.chandelier_on is True  # held, not switched
+    at_22_absent = evaluate(params, snap(1325, absence=True))
+    assert at_22_absent.mirror_on is True and at_22_absent.chandelier_on is False
+    # all-off at 23:00 with the same policy.
+    at_23_person = evaluate(params, snap(1380, absence=False))
+    assert at_23_person.transition_pending is True or (
+        at_23_person.chandelier_on is True or at_23_person.mirror_on is True
+    )
+    at_23_absent = evaluate(params, snap(1400, absence=True))
+    assert at_23_absent.chandelier_on is False and at_23_absent.mirror_on is False
+
+
+def test_curve_late_sunset_reserve_decline() -> None:
+    """L-03/L-04: a genuinely late sunset (after 21:00) starts the reserve
+    decline at 20:00, evenly toward 5% by 21:00; never raising a lower
+    brightness."""
+    params, snap, evaluate = _tambur()
+    # Sunset 22:30 (later than targetBy 21:00).
+    at_2020 = evaluate(params, snap(1220, sunset=1350))
+    at_2045 = evaluate(params, snap(1245, sunset=1350))
+    at_2100 = evaluate(params, snap(1260, sunset=1350))
+    # 20:20 — the decline has started from 100% toward 5%.
+    assert at_2020.required_percent < 100
+    assert at_2045.required_percent < at_2020.required_percent
+    # By 21:00 the target holds.
+    assert at_2100.required_percent == 5
+    # An already lower brightness is never raised: the decline is monotone.
+    values = [evaluate(params, snap(m, sunset=1350)).required_percent
+              for m in range(1200, 1261, 10)]
+    assert values == sorted(values, reverse=True)
+
+
+def test_curve_unavailable_sunset_no_reserve() -> None:
+    """L-07: an unavailable sun is NOT replaced by the reserve; the evening
+    decline waits for proof (the lux fallback governs §10 in the caller)."""
+    params, snap, evaluate = _tambur()
+    at_2030 = evaluate(params, snap(1250, sunset=None, healthy=False, lux=None))
+    # Without proof the day computation continues (no invented decline).
+    assert at_2030.mode.value in ("day", "ramp")
+    # The lux fallback: 300 < 400 = sunset.
+    at_2030_lux = evaluate(params, snap(1250, sunset=None, healthy=False, lux=300))
+    assert at_2030_lux.required_percent <= 100
+    # Exactly 400 is NOT sunset (план §10).
+    at_2030_400 = evaluate(params, snap(1250, sunset=None, healthy=False, lux=400))
+    assert at_2030_400.mode.value in ("day", "ramp")
+
+
+def test_curve_late_sunrise_no_morning_mirror() -> None:
+    """L-06: a late/unavailable sunrise — no morning mirror by guesswork;
+    the day chandelier mode starts at dayStart (09:00)."""
+    params, snap, evaluate = _tambur()
+    at_8 = evaluate(params, snap(480, sunset=1200, sunrise=None, healthy=False))
+    assert at_8.chandelier_on is False and at_8.mirror_on is False
+    at_9 = evaluate(params, snap(540, sunset=1200, sunrise=None, healthy=False))
+    assert at_9.chandelier_on is True
+
+
+def test_curve_away_overrides_everything() -> None:
+    params, snap, evaluate = _tambur()
+    at_12_away = evaluate(params, snap(720, away=True))
+    assert at_12_away.chandelier_on is False
+    assert at_12_away.required_percent == 0
+
+
+def test_curve_params_order_validation() -> None:
+    """Server-side order rules: dayStart < fullBy; reserveStart < targetBy;
+    startPercent <= fullPercent."""
+    from custom_components.hausman_hub.domain.tambur_curve import (
+        TamburCurveParams,
+    )
+    import pytest
+    with pytest.raises(Exception):
+        TamburCurveParams(
+            day_start=__import__("datetime").time(13, 0),
+            morning_full_by=__import__("datetime").time(12, 0),
+        )
+    with pytest.raises(Exception):
+        TamburCurveParams(
+            evening_reserve_start=__import__("datetime").time(21, 30),
+            evening_target_by=__import__("datetime").time(21, 0),
+        )
