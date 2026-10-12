@@ -229,7 +229,7 @@ class RoomLightingHaStateProvider:
         now: int,
     ) -> RoomLightingContext:
         tz = _resolve_timezone(hass)
-        sunrise, sunset = self._sun_times(hass, tz)
+        sunrise, sunset, sun_healthy = self._sun_times(hass, tz)
         dependencies = self._power_dependencies()
         # Only a room with an explicit release-owned migration claim switches
         # to exact per-target semantics. Every other room keeps the legacy
@@ -256,6 +256,7 @@ class RoomLightingHaStateProvider:
             timezone=tz,
             sunrise=sunrise,
             sunset=sunset,
+            sun_healthy=sun_healthy,
             sensors=tuple(
                 self._sensor_snapshot(hass, sensor, now)
                 for sensor in config.devices.sensors
@@ -340,15 +341,26 @@ class RoomLightingHaStateProvider:
 
     def _sun_times(
         self, hass: HomeAssistant, tz: tzinfo
-    ) -> tuple[dt_time, dt_time]:
+    ) -> tuple[dt_time, dt_time, bool]:
+        """Sunrise/sunset plus the honest health of the sun evidence.
+
+        The sunrise/sunset override (tests) is always healthy. A live read
+        is healthy only when BOTH next_rising and next_setting parsed: a
+        missing half must never fall back to the built-in default and be
+        trusted as proof (L-06/L-07). The defaults still feed the legacy
+        engine, which does not read the health flag.
+        """
+
         if self._sunrise is not None and self._sunset is not None:
-            return self._sunrise, self._sunset
+            return self._sunrise, self._sunset, True
         sunrise, sunset = DEFAULT_SUNRISE, DEFAULT_SUNSET
+        healthy = False
         state = hass.states.get(SUN_ENTITY_ID)
         attributes = getattr(state, "attributes", None)
         if isinstance(attributes, dict):
             parsed_rising = _parse_sun_time(attributes.get("next_rising"), tz)
             parsed_setting = _parse_sun_time(attributes.get("next_setting"), tz)
+            healthy = parsed_rising is not None and parsed_setting is not None
             if parsed_rising is not None:
                 sunrise = parsed_rising
             if parsed_setting is not None:
@@ -356,6 +368,7 @@ class RoomLightingHaStateProvider:
         return (
             self._sunrise or sunrise,
             self._sunset or sunset,
+            healthy,
         )
 
     def _sensor_snapshot(

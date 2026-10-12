@@ -323,6 +323,103 @@ class RoomLightingApiTest(unittest.TestCase):
             self.assertEqual(updated.payload["manualControlReturn"]["prioritySeconds"], 7200)
         asyncio.run(flow())
 
+    def test_curve_params_creation_normalizes_dimming_target_to_five(self) -> None:
+        async def flow() -> None:
+            payload = _config_payload()
+            payload["profile"] = "day_curve"
+            payload["curveParams"] = {
+                "confirmedAbsenceSeconds": 600,
+                "riseSeconds": 10,
+                "dayStart": "09:00",
+                "morningRamp": {
+                    "startPercent": 20,
+                    "fullPercent": 100,
+                    "fullBy": "12:00",
+                },
+                "eveningDimming": {
+                    "targetPercent": 5,
+                    "targetBy": "21:00",
+                    "reserveStart": "20:00",
+                },
+            }
+            del payload["dimming"]["targetPercent"]  # omitted, not zero
+            created = await self.config_view.put(
+                _json_request(self._config_path(), payload, room_id=payload["roomId"])
+            )
+            self.assertEqual(created.status, 200)
+            # The approved creation rule: a curve room created without an
+            # explicit dimming target gets the documented decline goal 5.
+            self.assertEqual(created.payload["dimming"]["targetPercent"], 5)
+            self.assertEqual(
+                created.payload["curveParams"],
+                payload["curveParams"],
+            )
+
+            # An update that omits the whole block keeps the saved curve.
+            update = _config_payload(name="Новое название")
+            update["version"] = created.payload["version"]
+            del update["dimming"]["targetPercent"]
+            updated = await self.config_view.put(
+                _json_request(self._config_path(), update, room_id=update["roomId"])
+            )
+            self.assertEqual(updated.status, 200)
+            self.assertEqual(updated.payload["curveParams"], payload["curveParams"])
+            self.assertEqual(updated.payload["dimming"]["targetPercent"], 5)
+        asyncio.run(flow())
+
+    def test_curve_params_creation_respects_explicit_zero_target(self) -> None:
+        async def flow() -> None:
+            payload = _config_payload()
+            payload["profile"] = "day_curve"
+            payload["curveParams"] = {"riseSeconds": 10}
+            payload["dimming"]["targetPercent"] = 0
+            created = await self.config_view.put(
+                _json_request(self._config_path(), payload, room_id=payload["roomId"])
+            )
+            self.assertEqual(created.status, 200)
+            self.assertEqual(created.payload["dimming"]["targetPercent"], 0)
+        asyncio.run(flow())
+
+    def test_curve_params_forms_never_mix_over_http(self) -> None:
+        async def flow() -> None:
+            payload = _config_payload()
+            payload["profile"] = "day_curve"
+            payload["curveParams"] = {"eveningMaxPercent": 40, "riseSeconds": 10}
+            rejected = await self.config_view.put(
+                _json_request(self._config_path(), payload, room_id=payload["roomId"])
+            )
+            self.assertEqual(rejected.status, 400)
+            self.assertIn("curveParams", str(rejected.payload))
+        asyncio.run(flow())
+
+    def test_curve_params_explicit_null_is_rejected_over_http(self) -> None:
+        """AUD-CURVE-01: an explicit ``curveParams: null`` must be a 400 —
+        only the MISSING key preserves a saved block, so accepting null
+        would silently erase the saved ceiling (the live tambur document
+        carries the legacy evening maximum)."""
+        async def flow() -> None:
+            payload = _config_payload()
+            payload["profile"] = "day_curve"
+            payload["curveParams"] = {"eveningMaxPercent": 40}
+            created = await self.config_view.put(
+                _json_request(self._config_path(), payload, room_id=payload["roomId"])
+            )
+            self.assertEqual(created.status, 200)
+            update = _config_payload(name="Новое название")
+            update["version"] = created.payload["version"]
+            update["curveParams"] = None
+            rejected = await self.config_view.put(
+                _json_request(self._config_path(), update, room_id=update["roomId"])
+            )
+            self.assertEqual(rejected.status, 400)
+            self.assertIn("curveParams", str(rejected.payload))
+            got = await self.config_view.get(
+                _request(self._config_path(), room_id=payload["roomId"])
+            )
+            self.assertEqual(got.status, 200)
+            self.assertEqual(got.payload["curveParams"], {"eveningMaxPercent": 40})
+        asyncio.run(flow())
+
     def test_put_rejects_revision_changed_by_other_service_writer(self) -> None:
         async def flow() -> None:
             from custom_components.hausman_hub.application.room_lighting_service import RoomLightingService

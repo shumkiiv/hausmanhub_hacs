@@ -976,26 +976,209 @@ class MorningBoundary:
         _flag(self.presence_gate, "morning presence gate flag")
 
 
+_PRESENCE_POLICIES = ("by_time", "wait_absence")
+
+
+def _optional_curve_time(value: object, label: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or _TIME_OF_DAY.fullmatch(value) is None:
+        raise RoomLightingViolation(f"{label} must be HH:MM")
+    return value
+
+
+def _curve_minutes(value: str) -> int:
+    hour, minute = (int(part) for part in value.split(":"))
+    return hour * 60 + minute
+
+
 @dataclass(frozen=True, slots=True)
 class CurveParams:
-    """Day-curve parameters a room may deviate from the supplied document.
+    """The ``curveParams`` block of a room lighting configuration.
 
-    Absent values keep the engine defaults. ``evening_max_percent`` is the
-    evening brightness ceiling: the curve starts the evening at this level
-    and fades to the evening minimum (HH-016.c). The floor follows the
-    engine's fixed evening minimum: the evening branch interpolates from
-    the ceiling down to that minimum, so a lower ceiling cannot execute.
+    Two forms live in this block and never mix (a document carrying both
+    is a validation error):
+
+    * the legacy form (HH-016.c): ``evening_max_percent`` only — the
+      evening brightness ceiling of the legacy day curve;
+    * the new form (HH-007 curveParams v1.0, owner-approved): every field
+      is optional and an absent field keeps the engine default
+      (``confirmedAbsenceSeconds`` 600, ``riseSeconds`` 10, presence
+      policies ``by_time``, ``dayStart`` 09:00, the morning ramp 20→100
+      by 12:00, the evening decline to 5% by 21:00 with the late-sunset
+      reserve from 20:00).
+
+    A room without the block, or with the legacy form, keeps the legacy
+    day-curve behaviour byte-for-byte: the new engine runs only when the
+    block carries at least one new-form field.
     """
 
-    evening_max_percent: int = 100
+    evening_max_percent: int | None = None
+    confirmed_absence_seconds: int | None = None
+    rise_seconds: int | None = None
+    mirror_transition: str | None = None
+    all_off: str | None = None
+    evening_dimming_policy: str | None = None
+    day_start: str | None = None
+    morning_start_percent: int | None = None
+    morning_full_percent: int | None = None
+    morning_full_by: str | None = None
+    evening_target_percent: int | None = None
+    evening_target_by: str | None = None
+    evening_reserve_start: str | None = None
+
+    @property
+    def has_new_form(self) -> bool:
+        """Whether the block carries at least one new-form field."""
+
+        return any(
+            getattr(self, field) is not None
+            for field in (
+                "confirmed_absence_seconds",
+                "rise_seconds",
+                "mirror_transition",
+                "all_off",
+                "evening_dimming_policy",
+                "day_start",
+                "morning_start_percent",
+                "morning_full_percent",
+                "morning_full_by",
+                "evening_target_percent",
+                "evening_target_by",
+                "evening_reserve_start",
+            )
+        )
+
+    def to_payload(self) -> dict[str, object]:
+        """Encode exactly the contract fields that are present.
+
+        The new form uses the contract's nested objects: ``presencePolicy``,
+        ``morningRamp`` and ``eveningDimming`` appear only when at least one
+        of their fields is set.
+        """
+
+        payload: dict[str, object] = {}
+        if self.evening_max_percent is not None:
+            payload["eveningMaxPercent"] = self.evening_max_percent
+        if self.confirmed_absence_seconds is not None:
+            payload["confirmedAbsenceSeconds"] = self.confirmed_absence_seconds
+        if self.rise_seconds is not None:
+            payload["riseSeconds"] = self.rise_seconds
+        presence: dict[str, object] = {}
+        if self.mirror_transition is not None:
+            presence["mirrorTransition"] = self.mirror_transition
+        if self.all_off is not None:
+            presence["allOff"] = self.all_off
+        if self.evening_dimming_policy is not None:
+            presence["eveningDimming"] = self.evening_dimming_policy
+        if presence:
+            payload["presencePolicy"] = presence
+        ramp: dict[str, object] = {}
+        if self.morning_start_percent is not None:
+            ramp["startPercent"] = self.morning_start_percent
+        if self.morning_full_percent is not None:
+            ramp["fullPercent"] = self.morning_full_percent
+        if self.morning_full_by is not None:
+            ramp["fullBy"] = self.morning_full_by
+        if ramp:
+            payload["morningRamp"] = ramp
+        evening: dict[str, object] = {}
+        if self.evening_target_percent is not None:
+            evening["targetPercent"] = self.evening_target_percent
+        if self.evening_target_by is not None:
+            evening["targetBy"] = self.evening_target_by
+        if self.evening_reserve_start is not None:
+            evening["reserveStart"] = self.evening_reserve_start
+        if evening:
+            payload["eveningDimming"] = evening
+        if self.day_start is not None:
+            payload["dayStart"] = self.day_start
+        return payload
 
     def __post_init__(self) -> None:
-        _integer(
-            self.evening_max_percent,
-            "curve evening max percent",
-            minimum=_ENGINE_DEFAULT_PROFILE.evening_min_percent,
-            maximum=100,
+        if self.evening_max_percent is not None:
+            _integer(
+                self.evening_max_percent,
+                "curve evening max percent",
+                minimum=_ENGINE_DEFAULT_PROFILE.evening_min_percent,
+                maximum=100,
+            )
+        if self.confirmed_absence_seconds is not None:
+            _integer(
+                self.confirmed_absence_seconds,
+                "curve confirmedAbsenceSeconds",
+                minimum=60,
+                maximum=86400,
+            )
+        if self.rise_seconds is not None:
+            _integer(
+                self.rise_seconds,
+                "curve riseSeconds",
+                minimum=0,
+                maximum=3600,
+            )
+        for label, value in (
+            ("curve morningRamp.startPercent", self.morning_start_percent),
+            ("curve morningRamp.fullPercent", self.morning_full_percent),
+            ("curve eveningDimming.targetPercent", self.evening_target_percent),
+        ):
+            if value is None:
+                continue
+            _integer(value, label, minimum=0, maximum=100)
+        for label, value in (
+            ("curve presencePolicy.mirrorTransition", self.mirror_transition),
+            ("curve presencePolicy.allOff", self.all_off),
+            ("curve presencePolicy.eveningDimming", self.evening_dimming_policy),
+        ):
+            if value is None:
+                continue
+            if value not in _PRESENCE_POLICIES:
+                raise RoomLightingViolation(
+                    f"{label} must be one of: {', '.join(_PRESENCE_POLICIES)}"
+                )
+        for label, value in (
+            ("curve dayStart", self.day_start),
+            ("curve morningRamp.fullBy", self.morning_full_by),
+            ("curve eveningDimming.targetBy", self.evening_target_by),
+            ("curve eveningDimming.reserveStart", self.evening_reserve_start),
+        ):
+            _optional_curve_time(value, label)
+        if self.evening_max_percent is not None and self.has_new_form:
+            raise RoomLightingViolation(
+                "curveParams mixes the legacy eveningMaxPercent with the "
+                "curveParams v1.0 fields; the forms never combine"
+            )
+        # Order rules compare the EFFECTIVE values: an absent field keeps
+        # its engine default, so a one-sided value is validated against
+        # that default before the document is ever saved. Otherwise a
+        # block that passes here would fail the engine at evaluation time
+        # and skip the room entirely.
+        effective_day_start = self.day_start or "09:00"
+        effective_full_by = self.morning_full_by or "12:00"
+        effective_reserve_start = self.evening_reserve_start or "20:00"
+        effective_target_by = self.evening_target_by or "21:00"
+        effective_start_percent = (
+            20 if self.morning_start_percent is None else self.morning_start_percent
         )
+        effective_full_percent = (
+            100 if self.morning_full_percent is None else self.morning_full_percent
+        )
+        if _curve_minutes(effective_day_start) >= _curve_minutes(effective_full_by):
+            raise RoomLightingViolation(
+                "curve dayStart must be before morningRamp.fullBy"
+            )
+        if _curve_minutes(effective_reserve_start) >= _curve_minutes(
+            effective_target_by
+        ):
+            raise RoomLightingViolation(
+                "curve eveningDimming.reserveStart must be before "
+                "eveningDimming.targetBy"
+            )
+        if effective_start_percent > effective_full_percent:
+            raise RoomLightingViolation(
+                "curve morningRamp must grow: startPercent must not exceed "
+                "fullPercent"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1302,9 +1485,7 @@ class RoomLightingConfig:
                 "presenceGate": self.morning.presence_gate,
             }
         if self.curve is not None:
-            payload["curveParams"] = {
-                "eveningMaxPercent": self.curve.evening_max_percent,
-            }
+            payload["curveParams"] = self.curve.to_payload()
         if self.profile is not None:
             payload["profile"] = self.profile
         return payload
@@ -1797,10 +1978,109 @@ def _morning_from_payload(payload: object) -> MorningBoundary:
     )
 
 
+def _curve_value(data: dict[str, object], key: str, label: str) -> object:
+    """Read one optional curve field; an explicit ``null`` is a type error.
+
+    The contract types every field (integer, string or object): only the
+    ABSENT key means "keep the default". An explicit ``null`` is not the
+    absence of the field and must not silently become a default.
+    """
+
+    if key not in data:
+        return None
+    value = data[key]
+    if value is None:
+        raise RoomLightingViolation(f"{label} must not be null")
+    return value
+
+
 def _curve_from_payload(payload: object) -> CurveParams:
-    data = _as_dict(payload, "curve params")
+    """Decode the strict ``curveParams`` block (closed by the contract).
+
+    The contract declares the block closed (``additionalProperties: false``),
+    including the nested ``presencePolicy``/``morningRamp``/``eveningDimming``
+    objects; an unknown key is a validation error with its exact name, so a
+    mistyped setting is never silently ignored.
+    """
+
+    data = _as_dict(payload, "curveParams")
+    allowed = {
+        "eveningMaxPercent",
+        "confirmedAbsenceSeconds",
+        "riseSeconds",
+        "presencePolicy",
+        "dayStart",
+        "morningRamp",
+        "eveningDimming",
+    }
+    unknown = sorted(set(data) - allowed)
+    if unknown:
+        raise RoomLightingViolation(
+            f"curveParams has unknown fields: {', '.join(unknown)}"
+        )
+    presence = _curve_value(data, "presencePolicy", "curveParams.presencePolicy")
+    if presence is not None:
+        presence_data = _as_dict(presence, "curveParams.presencePolicy")
+        unknown = sorted(presence_data.keys() - {"mirrorTransition", "allOff", "eveningDimming"})
+        if unknown:
+            raise RoomLightingViolation(
+                "curveParams.presencePolicy has unknown fields: "
+                f"{', '.join(unknown)}"
+            )
+        presence_data = {
+            key: _curve_value(
+                presence_data, key, f"curveParams.presencePolicy.{key}"
+            )
+            for key in presence_data
+        }
+    else:
+        presence_data = {}
+    ramp = _curve_value(data, "morningRamp", "curveParams.morningRamp")
+    if ramp is not None:
+        ramp_data = _as_dict(ramp, "curveParams.morningRamp")
+        unknown = sorted(ramp_data.keys() - {"startPercent", "fullPercent", "fullBy"})
+        if unknown:
+            raise RoomLightingViolation(
+                "curveParams.morningRamp has unknown fields: "
+                f"{', '.join(unknown)}"
+            )
+        ramp_data = {
+            key: _curve_value(ramp_data, key, f"curveParams.morningRamp.{key}")
+            for key in ramp_data
+        }
+    else:
+        ramp_data = {}
+    evening = _curve_value(data, "eveningDimming", "curveParams.eveningDimming")
+    if evening is not None:
+        evening_data = _as_dict(evening, "curveParams.eveningDimming")
+        unknown = sorted(evening_data.keys() - {"targetPercent", "targetBy", "reserveStart"})
+        if unknown:
+            raise RoomLightingViolation(
+                "curveParams.eveningDimming has unknown fields: "
+                f"{', '.join(unknown)}"
+            )
+        evening_data = {
+            key: _curve_value(evening_data, key, f"curveParams.eveningDimming.{key}")
+            for key in evening_data
+        }
+    else:
+        evening_data = {}
     return CurveParams(
-        evening_max_percent=data.get("eveningMaxPercent", 100),
+        evening_max_percent=_curve_value(data, "eveningMaxPercent", "curve eveningMaxPercent"),
+        confirmed_absence_seconds=_curve_value(
+            data, "confirmedAbsenceSeconds", "curve confirmedAbsenceSeconds"
+        ),
+        rise_seconds=_curve_value(data, "riseSeconds", "curve riseSeconds"),
+        mirror_transition=presence_data.get("mirrorTransition"),
+        all_off=presence_data.get("allOff"),
+        evening_dimming_policy=presence_data.get("eveningDimming"),
+        day_start=_curve_value(data, "dayStart", "curve dayStart"),
+        morning_start_percent=ramp_data.get("startPercent"),
+        morning_full_percent=ramp_data.get("fullPercent"),
+        morning_full_by=ramp_data.get("fullBy"),
+        evening_target_percent=evening_data.get("targetPercent"),
+        evening_target_by=evening_data.get("targetBy"),
+        evening_reserve_start=evening_data.get("reserveStart"),
     )
 
 
@@ -1827,6 +2107,12 @@ def room_lighting_config_from_payload(payload: object) -> RoomLightingConfig:
     behaviors = data.get("behaviors")
     auxiliary = data.get("auxiliary")
     morning = data.get("morningBoundary")
+    if "curveParams" in data and data["curveParams"] is None:
+        # An explicit null is not the absence of the block: only the
+        # MISSING key triggers the preserve-merge, so accepting null here
+        # would silently ERASE a saved curve configuration through the
+        # API (AUD-CURVE-01). The block itself is never null.
+        raise RoomLightingViolation("curveParams must not be null")
     curve_params = data.get("curveParams")
     profile = data.get("profile")
     return RoomLightingConfig(

@@ -14,7 +14,9 @@ from enum import StrEnum
 
 from .light_curve import (
     LightCurveContext,
+    LightCurveDecision,
     LightCurveProfile,
+    CurveReason,
     evaluate_light_curve,
 )
 from .room_lighting import (
@@ -36,6 +38,13 @@ from .room_lighting_ownership import (
     release_expired_manual,
     resolve_manual_ownership,
     restore_after_restart,
+)
+from .tambur_curve import (
+    LUX_SUNSET_THRESHOLD,
+    PresencePolicy,
+    TamburCurveParams,
+    TamburCurveSnapshot,
+    evaluate_tambur_curve,
 )
 
 MODE_SHADOW = "shadow"
@@ -215,6 +224,10 @@ class RoomLightingContext:
     holiday: bool = False
     unobserved_since: int | None = None
     away: bool = False
+    # Whether the sunrise/sunset evidence is provably from the sun service.
+    # The default True keeps every legacy context unchanged; the parameterized
+    # curve treats an unhealthy sun as no sunrise/sunset proof (L-06/L-07).
+    sun_healthy: bool = True
 
     def __post_init__(self) -> None:
         if type(self.now) is not int or self.now < 0:
@@ -223,6 +236,8 @@ class RoomLightingContext:
             raise RoomLightingEngineViolation("context timezone is required")
         if type(self.away) is not bool:
             raise RoomLightingEngineViolation("context away flag is invalid")
+        if type(self.sun_healthy) is not bool:
+            raise RoomLightingEngineViolation("context sun health is invalid")
 
     def light(self, target_id: str) -> LightSnapshot | None:
         for item in self.lights:
@@ -473,12 +488,362 @@ def curve_profile_from_config(config: RoomLightingConfig) -> LightCurveProfile:
 
     Rooms without a ``curveParams`` block keep the supplied document
     unchanged; configured values overlay only the parameters a room may
-    deviate (HH-016.c evening maximum).
+    deviate (HH-016.c evening maximum). A legacy block without the ceiling
+    keeps the engine default (100).
     """
 
     if config.curve is None:
         return LightCurveProfile()
-    return LightCurveProfile(evening_max_percent=config.curve.evening_max_percent)
+    ceiling = config.curve.evening_max_percent
+    if ceiling is None:
+        return LightCurveProfile()
+    return LightCurveProfile(evening_max_percent=ceiling)
+
+
+def curve_params_block(config: RoomLightingConfig) -> TamburCurveParams | None:
+    """The parameterized day curve of a room, or ``None`` for the legacy path.
+
+    The new engine runs only for a ``day_curve`` room whose ``curveParams``
+    block carries at least one v1.0 field; the legacy form
+    (``eveningMaxPercent``) and rooms without the block keep the legacy
+    engine byte-for-byte.
+    """
+
+    if config.profile != "day_curve" or config.curve is None:
+        return None
+    curve = config.curve
+    if not curve.has_new_form:
+        return None
+
+    def _time(value: str | None, default: dt_time) -> dt_time:
+        if value is None:
+            return default
+        hour, minute = (int(part) for part in value.split(":"))
+        return dt_time(hour, minute)
+
+    def _policy(value: str | None, default: PresencePolicy) -> PresencePolicy:
+        if value is None:
+            return default
+        return PresencePolicy(value)
+
+    return TamburCurveParams(
+        day_start=_time(curve.day_start, dt_time(9, 0)),
+        morning_start_percent=(
+            20 if curve.morning_start_percent is None else curve.morning_start_percent
+        ),
+        morning_full_percent=(
+            100 if curve.morning_full_percent is None else curve.morning_full_percent
+        ),
+        morning_full_by=_time(curve.morning_full_by, dt_time(12, 0)),
+        evening_target_percent=(
+            5 if curve.evening_target_percent is None else curve.evening_target_percent
+        ),
+        evening_target_by=_time(curve.evening_target_by, dt_time(21, 0)),
+        evening_reserve_start=_time(curve.evening_reserve_start, dt_time(20, 0)),
+        mirror_transition_policy=_policy(curve.mirror_transition, PresencePolicy.BY_TIME),
+        all_off_policy=_policy(curve.all_off, PresencePolicy.BY_TIME),
+        evening_dimming_policy=_policy(
+            curve.evening_dimming_policy, PresencePolicy.BY_TIME
+        ),
+        confirmed_absence_seconds=(
+            600 if curve.confirmed_absence_seconds is None
+            else curve.confirmed_absence_seconds
+        ),
+        rise_seconds=(
+            10 if curve.rise_seconds is None else curve.rise_seconds
+        ),
+    )
+
+
+_TAMBUR_REASON_TO_CURVE = {
+    "off": CurveReason.OFF,
+    "night": CurveReason.NIGHT,
+    "pre_dawn": CurveReason.OFF,
+    "ramp": CurveReason.RAMP,
+    "day": CurveReason.DAY,
+    "evening_decline": CurveReason.EVENING,
+    "evening_hold": CurveReason.LATE_EVENING,
+    "reserve_decline": CurveReason.EVENING,
+    "mirror": CurveReason.NIGHT,
+    "all_off": CurveReason.NIGHT,
+    "away": CurveReason.NIGHT,
+    "wait_absence": CurveReason.UNKNOWN,
+    "unknown": CurveReason.UNKNOWN,
+}
+
+
+def _tambur_kelvin(
+    params: TamburCurveParams, now_minutes: int, sunset_minutes: int | None
+) -> int:
+    """The agreed colour rule: neutral day, gentle evening warmth.
+
+    The owner-approved colour plan (4000K neutral day, 3400K warm evening)
+    stays the same for the parameterized curve: the morning ramp and the
+    evening decline interpolate between the two profile constants, the day
+    holds neutral, the mirror holds warm. The curve's §12.4 open question
+    (the shape between the boundaries) stays untouched: the same smooth
+    interpolation as the legacy curve is reused, not a new form.
+    """
+
+    profile = LightCurveProfile()
+    full_by = params.morning_full_by.hour * 60 + params.morning_full_by.minute
+    day_start = params.day_start.hour * 60 + params.day_start.minute
+    target_by = params.evening_target_by.hour * 60 + params.evening_target_by.minute
+    mirror_at = params.mirror_time.hour * 60 + params.mirror_time.minute
+    if sunset_minutes is not None and now_minutes >= sunset_minutes:
+        decline_start = min(
+            day_start, params.evening_reserve_start.hour * 60 + params.evening_reserve_start.minute
+        )
+        start = decline_start if now_minutes >= decline_start else now_minutes
+        ratio = _ratio_value(now_minutes, start, target_by)
+        kelvin = profile.neutral_kelvin + (
+            profile.warm_kelvin - profile.neutral_kelvin
+        ) * ratio
+        return round(kelvin)
+    if now_minutes >= full_by:
+        return profile.neutral_kelvin
+    if now_minutes >= day_start:
+        ratio = _ratio_value(now_minutes, day_start, full_by)
+        kelvin = profile.warm_kelvin + (
+            profile.neutral_kelvin - profile.warm_kelvin
+        ) * ratio
+        return round(kelvin)
+    return profile.warm_kelvin
+
+
+def _ratio_value(now: int, start: int, end: int) -> float:
+    span = end - start
+    if span <= 0 or now <= start:
+        return 0.0
+    if now >= end:
+        return 1.0
+    return (now - start) / span
+
+
+def tambur_curve_light_decision(
+    params: TamburCurveParams,
+    config: RoomLightingConfig,
+    context: RoomLightingContext,
+    curve_profile: LightCurveProfile,
+    *,
+    presence: SensorState,
+    presence_confirmed: bool,
+    absence_seconds: int | None,
+    motion_preview: bool = False,
+    motion_rejected: bool = False,
+    outdoor_lux: float | None = None,
+) -> LightCurveDecision:
+    """The parameterized curve decision in the shared decision shape.
+
+    The pure ``evaluate_tambur_curve`` result supplies the time mode: the
+    computed maximum, the chandelier/mirror order and the wait_absence
+    holds. On top of it the shared occupancy semantics apply exactly like
+    the legacy curve: a motion trial fades, an unknown presence holds, a
+    confirmed presence raises the actual brightness to the computed
+    maximum over ``riseSeconds``, and a confirmed absence starts the
+    decline to ``dimming.targetPercent`` over the existing absence fade.
+    """
+
+    now_time = datetime.fromtimestamp(context.now / 1000, context.timezone).time()
+    now_minutes = now_time.hour * 60 + now_time.minute
+    sun_healthy = context.sun_healthy
+    sunrise_minutes: int | None = (
+        context.sunrise.hour * 60 + context.sunrise.minute if sun_healthy else None
+    )
+    sunset_minutes: int | None = (
+        context.sunset.hour * 60 + context.sunset.minute if sun_healthy else None
+    )
+    if (
+        not sun_healthy
+        and outdoor_lux is not None
+        and outdoor_lux < LUX_SUNSET_THRESHOLD
+    ):
+        # The documented outdoor-lux fallback (§10): an unavailable sun with
+        # a dark outdoor reading proves the sunset; exactly 400 is not dark.
+        sunset_minutes = now_minutes
+    snapshot = TamburCurveSnapshot(
+        now_minutes=now_minutes,
+        sunrise_minutes=sunrise_minutes,
+        sunset_minutes=sunset_minutes,
+        sun_healthy=sun_healthy,
+        outdoor_lux=outdoor_lux,
+        presence_confirmed=presence_confirmed,
+        absence_confirmed=(
+            # The CONFIRMED absence is the CURRENT proven absence: the
+            # tracker freezes the pre-return absence for the reduced-level
+            # hold while a returning occupant is unconfirmed, and the
+            # house rule is that NEW presence cancels the accrued absence.
+            # A transition (mirror/all-off) or the evening decline may
+            # therefore run only while the room is honestly empty — a
+            # live ON reading voids it regardless of the frozen seconds
+            # (AUD-CURVE-02).
+            absence_seconds is not None
+            and absence_seconds >= params.confirmed_absence_seconds
+            and presence is SensorState.OFF
+        ),
+        away=context.away,
+    )
+    base = evaluate_tambur_curve(params, snapshot)
+    reason = _TAMBUR_REASON_TO_CURVE[base.reason.value]
+    kelvin = _tambur_kelvin(params, now_minutes, sunset_minutes)
+    dimming = config.dimming
+    mode_fade = curve_profile.mode_fade_seconds
+    if not base.chandelier_on:
+        if presence not in (SensorState.ON, SensorState.OFF):
+            # A mode switch (mirror, all-off, morning mirror) must not
+            # command the room while the presence evidence is unknown or
+            # unavailable: the hold keeps the actual lights untouched
+            # instead of turning the chandelier off over someone's head
+            # (AUD-CURVE-05a).
+            return LightCurveDecision(
+                reason=CurveReason.UNKNOWN,
+                chandelier_on=True,
+                brightness_percent=None,
+                color_temperature=None,
+                fade_seconds=mode_fade,
+                mirror_on=base.mirror_on,
+                hold=True,
+            )
+        return LightCurveDecision(
+            reason=reason,
+            chandelier_on=False,
+            brightness_percent=None,
+            color_temperature=None,
+            fade_seconds=mode_fade,
+            mirror_on=base.mirror_on,
+        )
+    evening_wait_hold = (
+        params.evening_dimming_policy is PresencePolicy.WAIT_ABSENCE
+        and base.mode.value == "evening_decline"
+        and not snapshot.absence_confirmed
+    )
+    if base.transition_pending or evening_wait_hold:
+        # wait_absence holds: the 22:00/23:00 transition pending, or the
+        # evening decline whose policy waits for the confirmed absence
+        # (AUD-CURVE-03): the computed maximum keeps changing, but the
+        # ACTUAL decline waits until the room is honestly empty. The
+        # lights are left alone — no raise, no decline, no move toward
+        # the mirror, no motion trial on top — until the caller confirms
+        # the absence.
+        return LightCurveDecision(
+            reason=reason,
+            chandelier_on=True,
+            brightness_percent=None,
+            color_temperature=None,
+            fade_seconds=mode_fade,
+            mirror_on=base.mirror_on,
+            hold=True,
+        )
+    if (
+        presence is SensorState.ON
+        and not presence_confirmed
+        and absence_seconds is not None
+        and absence_seconds >= params.confirmed_absence_seconds
+    ):
+        # A returning occupant before the presence confirmation: the
+        # tracker still reports the frozen pre-return absence (that hold
+        # keeps the reduced level), so the curve neither declines further
+        # nor raises to the computed maximum yet — the actual lights stay
+        # exactly as they are until the presence confirms (AUD-CURVE-02).
+        return LightCurveDecision(
+            reason=reason,
+            chandelier_on=True,
+            brightness_percent=None,
+            color_temperature=None,
+            fade_seconds=mode_fade,
+            mirror_on=base.mirror_on,
+            hold=True,
+        )
+    if presence not in (SensorState.ON, SensorState.OFF):
+        # An unknown or unavailable presence is not absence: the curve
+        # holds without planning brightness moves (fail-closed on sensor
+        # faults), and a motion trial cannot unlock it either.
+        return LightCurveDecision(
+            reason=CurveReason.UNKNOWN,
+            chandelier_on=True,
+            brightness_percent=None,
+            color_temperature=kelvin,
+            fade_seconds=mode_fade,
+            mirror_on=base.mirror_on,
+            hold=True,
+        )
+    if motion_rejected:
+        return LightCurveDecision(
+            reason=CurveReason.MOTION_REJECTED,
+            chandelier_on=True,
+            brightness_percent=min(
+                curve_profile.evening_min_percent, base.required_percent
+            ),
+            color_temperature=kelvin,
+            fade_seconds=curve_profile.motion_rejected_fade_seconds,
+            mirror_on=base.mirror_on,
+        )
+    if motion_preview:
+        return LightCurveDecision(
+            reason=CurveReason.MOTION_PREVIEW,
+            chandelier_on=True,
+            brightness_percent=min(
+                base.required_percent, curve_profile.motion_preview_percent
+            ),
+            color_temperature=kelvin,
+            fade_seconds=curve_profile.motion_preview_fade_seconds,
+            mirror_on=base.mirror_on,
+        )
+    if presence is SensorState.ON and presence_confirmed:
+        return LightCurveDecision(
+            reason=CurveReason.PRESENCE_RETURN,
+            chandelier_on=True,
+            brightness_percent=base.required_percent,
+            color_temperature=kelvin,
+            fade_seconds=params.rise_seconds,
+            mirror_on=base.mirror_on,
+        )
+    if (
+        absence_seconds is not None
+        and absence_seconds >= params.confirmed_absence_seconds
+        and dimming.enabled
+        and dimming.on_absence
+    ):
+        # The confirmed-absence decline: the target stays dimming.targetPercent
+        # (the approved decline goal), the fade duration is the existing
+        # dimming.fadeSeconds. A room with dimming disabled keeps the mode
+        # level — the same rule as the legacy curve's enabled flag. The
+        # effective target never EXCEEDS the current computed maximum: the
+        # computed maximum caps the actual brightness from above (spec
+        # 4.2), so a saved 40% goal cannot RAISE an empty evening room
+        # whose maximum has already declined to 5% (AUD-CURVE-06).
+        target = min(dimming.target_percent, base.required_percent)
+        progress = min(
+            1.0,
+            (absence_seconds - params.confirmed_absence_seconds)
+            / max(1, dimming.fade_seconds),
+        )
+        level = base.required_percent - (
+            base.required_percent - target
+        ) * progress
+        remaining = max(
+            1,
+            int(
+                dimming.fade_seconds
+                - (absence_seconds - params.confirmed_absence_seconds)
+            ),
+        )
+        return LightCurveDecision(
+            reason=CurveReason.ABSENCE,
+            chandelier_on=True,
+            brightness_percent=round(level),
+            color_temperature=kelvin,
+            fade_seconds=remaining if progress < 1.0 else 0,
+            mirror_on=base.mirror_on,
+        )
+    return LightCurveDecision(
+        reason=reason,
+        chandelier_on=True,
+        brightness_percent=base.required_percent,
+        color_temperature=kelvin,
+        fade_seconds=mode_fade,
+        mirror_on=base.mirror_on,
+    )
 
 
 def evaluate_curve_room(
@@ -528,23 +893,57 @@ def evaluate_curve_room(
                 for item in (main_target, mirror_target) if item is not None
             ),
         )
-    curve = evaluate_light_curve(
-        profile if profile is not None else curve_profile_from_config(config),
-        LightCurveContext(
-            now=now_time,
-            sunrise=context.sunrise,
-            sunset=context.sunset,
+    curve_params = curve_params_block(config)
+    if curve_params is not None:
+        curve = tambur_curve_light_decision(
+            curve_params,
+            config,
+            context,
+            profile if profile is not None else curve_profile_from_config(config),
             presence=presence,
-            chandelier=(
-                chandelier.state if chandelier is not None else SensorState.UNKNOWN
-            ),
-            mirror=mirror.state if mirror is not None else SensorState.UNKNOWN,
             presence_confirmed=presence_confirmed,
             absence_seconds=absence_seconds,
             motion_preview=motion_preview,
             motion_rejected=motion_rejected,
-        ),
-    )
+        )
+        if curve.hold:
+            # The parameterized hold (wait_absence pending, or an unknown
+            # presence) leaves BOTH targets untouched: no turn-on without
+            # brightness, no mirror handover — the transition completes
+            # when the confirmed absence arrives (P-02/P-03). The legacy
+            # engine path below is unchanged.
+            return RoomLightingDecision(
+                room_id=config.room_id, evaluated_at=context.now, mode=MODE_SHADOW,
+                targets=tuple(
+                    _unchanged(
+                        item.id,
+                        Skip(
+                            item.id,
+                            SkipReason.ABSENCE_UNPROVEN,
+                            "Профиль держит свет: переход ожидает подтверждённое отсутствие",
+                        ),
+                    )
+                    for item in (main_target, mirror_target) if item is not None
+                ),
+            )
+    else:
+        curve = evaluate_light_curve(
+            profile if profile is not None else curve_profile_from_config(config),
+            LightCurveContext(
+                now=now_time,
+                sunrise=context.sunrise,
+                sunset=context.sunset,
+                presence=presence,
+                chandelier=(
+                    chandelier.state if chandelier is not None else SensorState.UNKNOWN
+                ),
+                mirror=mirror.state if mirror is not None else SensorState.UNKNOWN,
+                presence_confirmed=presence_confirmed,
+                absence_seconds=absence_seconds,
+                motion_preview=motion_preview,
+                motion_rejected=motion_rejected,
+            ),
+        )
 
     targets: list[TargetDecision] = []
     main_decision = None

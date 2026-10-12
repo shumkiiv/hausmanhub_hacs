@@ -219,8 +219,19 @@ class RoomLightingService:
         *,
         expected_version: int | None = None,
         preserve_manual_control_return: bool = False,
+        preserve_curve_params: bool = False,
+        dimming_target_omitted: bool = False,
     ) -> RoomLightingConfig:
-        """Validate, bump the version on a real change and persist."""
+        """Validate, bump the version on a real change and persist.
+
+        ``preserve_curve_params`` keeps an existing ``curveParams`` block
+        when the PUT omits the whole block (the approved projection rule:
+        an omitted block never erases the saved one). ``dimming_target_omitted``
+        applies the approved creation normalization: a NEW room created with
+        ``curveParams`` and no explicit ``dimming.targetPercent`` gets the
+        documented decline goal 5 (an explicit value, including 0, is
+        always respected).
+        """
 
         if not isinstance(config, RoomLightingConfig):
             raise RoomLightingViolation("room lighting config is required")
@@ -230,6 +241,33 @@ class RoomLightingService:
                 raise RoomLightingRevisionConflictError(expected_version, existing.version)
             if existing is not None and preserve_manual_control_return:
                 config = replace(config, manual_control_return=existing.manual_control_return)
+            if existing is not None and preserve_curve_params and existing.curve is not None:
+                config = replace(config, curve=existing.curve)
+            if existing is None and dimming_target_omitted and config.curve is not None:
+                # The approved creation rule (spec 4.2): a room created WITH
+                # a curveParams block and no explicit dimming target gets
+                # the documented decline goal 5 (any block form; an
+                # explicit value, including 0, is always respected).
+                config = replace(
+                    config,
+                    dimming=replace(config.dimming, target_percent=5),
+                )
+            if (
+                existing is not None
+                and dimming_target_omitted
+                and config.curve is not None
+            ):
+                # The approved projection rule for curve rooms: a PUT that
+                # omits dimming.targetPercent keeps the saved value instead
+                # of the legacy zero default. Rooms without the block keep
+                # the legacy full-replacement behaviour unchanged.
+                config = replace(
+                    config,
+                    dimming=replace(
+                        config.dimming,
+                        target_percent=existing.dimming.target_percent,
+                    ),
+                )
             violations = room_lighting_violations(config)
             if violations:
                 raise RoomLightingViolation("; ".join(violations))

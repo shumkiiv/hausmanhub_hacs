@@ -194,6 +194,176 @@ async def test_omitted_manual_policy_is_preserved_under_service_lock() -> None:
     assert changed.version == 2
 
 
+async def test_omitted_curve_params_block_is_preserved_under_service_lock() -> None:
+    store = _MemoryStore()
+    lock = asyncio.Lock()
+    service = RoomLightingService(store, mutation_lock=lock)
+    original = _payload("room_a")
+    original["profile"] = "day_curve"
+    original["curveParams"] = {
+        "confirmedAbsenceSeconds": 600,
+        "riseSeconds": 10,
+        "dayStart": "09:00",
+        "morningRamp": {"startPercent": 20, "fullPercent": 100, "fullBy": "12:00"},
+        "eveningDimming": {
+            "targetPercent": 5,
+            "targetBy": "21:00",
+            "reserveStart": "20:00",
+        },
+    }
+    saved = await service.async_put_config(config_from_payload(original))
+    update = _payload("room_a")
+    update["version"] = saved.version
+    update["name"] = "Новое название"
+    changed = await service.async_put_config(
+        config_from_payload(update), expected_version=saved.version,
+        preserve_curve_params=True,
+    )
+    assert changed.curve is not None
+    assert changed.curve.confirmed_absence_seconds == 600
+    assert changed.curve.rise_seconds == 10
+    assert changed.name == "Новое название"
+    assert changed.version == 2
+
+
+async def test_explicit_curve_params_block_replaces_the_saved_one() -> None:
+    store = _MemoryStore()
+    lock = asyncio.Lock()
+    service = RoomLightingService(store, mutation_lock=lock)
+    original = _payload("room_a")
+    original["profile"] = "day_curve"
+    original["curveParams"] = {"riseSeconds": 30}
+    saved = await service.async_put_config(config_from_payload(original))
+    update = _payload("room_a")
+    update["version"] = saved.version
+    update["profile"] = "day_curve"
+    update["curveParams"] = {"riseSeconds": 45}
+    changed = await service.async_put_config(
+        config_from_payload(update), expected_version=saved.version,
+    )
+    assert changed.curve is not None
+    assert changed.curve.rise_seconds == 45
+
+
+async def test_creation_with_curve_params_normalizes_dimming_target_to_five() -> None:
+    store = _MemoryStore()
+    lock = asyncio.Lock()
+    service = RoomLightingService(store, mutation_lock=lock)
+    payload = _payload("room_a")
+    payload["profile"] = "day_curve"
+    payload["curveParams"] = {"riseSeconds": 10}
+    created = await service.async_put_config(
+        config_from_payload(payload),
+        dimming_target_omitted=True,
+    )
+    assert created.dimming.target_percent == 5
+
+
+async def test_creation_with_explicit_zero_target_is_respected() -> None:
+    store = _MemoryStore()
+    lock = asyncio.Lock()
+    service = RoomLightingService(store, mutation_lock=lock)
+    payload = _payload("room_a")
+    payload["profile"] = "day_curve"
+    payload["curveParams"] = {"riseSeconds": 10}
+    payload["dimming"]["targetPercent"] = 0
+    created = await service.async_put_config(
+        config_from_payload(payload),
+        dimming_target_omitted=False,
+    )
+    assert created.dimming.target_percent == 0
+
+
+async def test_update_is_never_normalized_automatically() -> None:
+    store = _MemoryStore()
+    lock = asyncio.Lock()
+    service = RoomLightingService(store, mutation_lock=lock)
+    payload = _payload("room_a")
+    payload["dimming"]["targetPercent"] = 40
+    saved = await service.async_put_config(config_from_payload(payload))
+    update = _payload("room_a")
+    update["version"] = saved.version
+    update["profile"] = "day_curve"
+    update["curveParams"] = {"riseSeconds": 10}
+    update["dimming"] = {"enabled": True, "onAbsence": True, "fadeSeconds": 5}
+    changed = await service.async_put_config(
+        config_from_payload(update),
+        expected_version=saved.version,
+        dimming_target_omitted=True,
+    )
+    # The normalization is a CREATION rule only: an update that omits the
+    # dimming target keeps the saved 40 unchanged (projection rule).
+    assert changed.dimming.target_percent == 40
+
+
+async def test_creation_with_legacy_block_normalizes_dimming_target_to_five() -> None:
+    """The spec 4.2 rule applies to a room created with ANY curveParams
+    block form, including the legacy eveningMaxPercent."""
+    store = _MemoryStore()
+    lock = asyncio.Lock()
+    service = RoomLightingService(store, mutation_lock=lock)
+    payload = _payload("room_a")
+    payload["profile"] = "day_curve"
+    payload["curveParams"] = {"eveningMaxPercent": 40}
+    created = await service.async_put_config(
+        config_from_payload(payload),
+        dimming_target_omitted=True,
+    )
+    assert created.curve is not None
+    assert created.curve.evening_max_percent == 40
+    assert created.curve.has_new_form is False
+    assert created.dimming.target_percent == 5
+
+
+async def test_legacy_block_update_keeps_the_saved_target() -> None:
+    """An update of a legacy-form curve room that omits dimming.targetPercent
+    keeps the saved value (the projection rule), not the legacy zero."""
+    store = _MemoryStore()
+    lock = asyncio.Lock()
+    service = RoomLightingService(store, mutation_lock=lock)
+    payload = _payload("room_a")
+    payload["profile"] = "day_curve"
+    payload["curveParams"] = {"eveningMaxPercent": 40}
+    payload["dimming"]["targetPercent"] = 25
+    saved = await service.async_put_config(config_from_payload(payload))
+    update = _payload("room_a")
+    update["version"] = saved.version
+    update["profile"] = "day_curve"
+    update["curveParams"] = {"eveningMaxPercent": 60}
+    update["dimming"] = {"enabled": True, "onAbsence": True, "fadeSeconds": 5}
+    changed = await service.async_put_config(
+        config_from_payload(update),
+        expected_version=saved.version,
+        dimming_target_omitted=True,
+    )
+    # The explicit new block replaces the ceiling; the omitted dimming
+    # target keeps the saved 25.
+    assert changed.curve is not None
+    assert changed.curve.evening_max_percent == 60
+    assert changed.dimming.target_percent == 25
+
+
+async def test_rooms_without_the_curve_keep_the_legacy_zero_target() -> None:
+    """Rooms without curveParams keep the legacy behaviour unchanged: an
+    omitted dimming target in an update falls back to the legacy zero."""
+
+    store = _MemoryStore()
+    lock = asyncio.Lock()
+    service = RoomLightingService(store, mutation_lock=lock)
+    payload = _payload("room_a")
+    payload["dimming"]["targetPercent"] = 40
+    saved = await service.async_put_config(config_from_payload(payload))
+    update = _payload("room_a")
+    update["version"] = saved.version
+    update["dimming"] = {"enabled": True, "onAbsence": True, "fadeSeconds": 5}
+    changed = await service.async_put_config(
+        config_from_payload(update),
+        expected_version=saved.version,
+        dimming_target_omitted=True,
+    )
+    assert changed.dimming.target_percent == 0
+
+
 async def test_stale_service_write_is_rejected_without_save_or_invalidation() -> None:
     store = _MemoryStore()
     invalidations = []

@@ -238,10 +238,17 @@ class RoomLightingConfigView(_RoomLightingView):
         except RoomLightingViolation as error:
             return self._invalid(error)
         try:
+            dimming_payload = payload.get("dimming")
+            dimming_target_omitted = not (
+                isinstance(dimming_payload, Mapping)
+                and isinstance(dimming_payload.get("targetPercent"), (int, float))
+            )
             saved = await service.async_put_config(
                 config,
                 expected_version=config.version,
                 preserve_manual_control_return="manualControlReturn" not in payload,
+                preserve_curve_params="curveParams" not in payload,
+                dimming_target_omitted=dimming_target_omitted,
             )
         except RoomLightingRevisionConflictError as error:
             return self._error(

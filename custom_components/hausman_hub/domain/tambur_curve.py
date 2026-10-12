@@ -279,16 +279,32 @@ def evaluate_tambur_curve(
     all_off_at = _minutes(params.all_off_time)
     target = params.evening_target_percent
 
+    # --- morning mirror window (plan §3.1: sunrise..day_start) ------------
+    # An EARLY, PROVEN sunrise (before day_start) lights the mirror from
+    # the sunrise minute until day_start; the chandelier stays off and the
+    # day_start boundary hands over to the day mode. A late (>= day_start)
+    # or unavailable sunrise is NO proof: no morning mirror by guesswork
+    # (L-06), the pre-dawn side stays dark.
+    if (
+        snapshot.sun_healthy
+        and snapshot.sunrise_minutes is not None
+        and snapshot.sunrise_minutes < day_start
+        and snapshot.sunrise_minutes <= now < day_start
+    ):
+        return TamburCurveDecision(
+            TamburMode.MIRROR, TamburReason.MIRROR, 0, False, True,
+            sun_source=sun_source,
+        )
+
     # --- 23:00 all off (P-03) — checked before the mirror window ----------
     if now >= all_off_at or now < day_start:
-        # P-03: the same wait_absence policy applies. While a person is
-        # present the lights are HELD (transition pending); the confirmed
-        # absence completes the all-off. The pre-dawn window (after
-        # midnight) returns the all-off state: by then the pending
-        # transition has long been completed or the hold was released.
+        # P-03: the wait_absence policy gates the all-off INCLUDING after
+        # midnight: the calendar date change does not replace the proof of
+        # the confirmed absence, so while a person is present the lights
+        # stay held (transition pending) past 00:00 as well; the confirmed
+        # absence completes the all-off (AUD-CURVE-04).
         if (
-            now >= all_off_at
-            and params.all_off_policy is PresencePolicy.WAIT_ABSENCE
+            params.all_off_policy is PresencePolicy.WAIT_ABSENCE
             and not snapshot.absence_confirmed
         ):
             return TamburCurveDecision(
@@ -319,22 +335,38 @@ def evaluate_tambur_curve(
             sun_source=sun_source,
         )
 
-    # --- evening decline (sunset-lead .. mirror_at) -----------------------
+    # --- day ceiling (L-05) and evening decline (sunset-lead..mirror) -----
+    # The early-sunset ceiling (L-05): an early sunset (after day_start, no
+    # later than full_by) stops the morning growth — the computed maximum
+    # freezes at the ramp level of the sunset minute for the rest of the
+    # day. A later or unavailable sunset keeps the full day maximum.
+    early_ceiling = params.morning_full_percent
+    if sunset is not None and day_start < sunset <= full_by:
+        early_ratio = _ratio(sunset, day_start, full_by)
+        early_ceiling = round(
+            params.morning_start_percent
+            + (params.morning_full_percent - params.morning_start_percent)
+            * early_ratio
+        )
     # The computed maximum declines toward the target, reaching it by
-    # target_by (21:00). The reserve start (20:00) begins the decline for a
-    # genuinely LATE sunset (L-03): evenly toward the target by target_by;
-    # an already lower brightness is never raised (L-03). An unavailable sun
-    # is not replaced by the reserve (L-07): the decline waits for proof.
+    # target_by (21:00). A genuinely LATE sunset (after target_by) starts
+    # the decline at the CONFIGURED reserve start (L-03) — the owner's
+    # setting is the decline start, it is never shifted by a fixed lead; an
+    # already lower brightness is never raised (L-03, and the L-05 ceiling
+    # keeps the decline below the frozen level). A sunset at or before
+    # target_by starts the decline AT THE SUNSET (plan §3.1.4: the sunset
+    # is authoritative). An unavailable sun is not replaced by the reserve
+    # (L-07): the decline waits for proof.
     if sunset is not None:
-        decline_start = min(
-            sunset - _RESERVE_LEAD_FALLBACK, reserve_start
-        ) if sunset > target_by else reserve_start
+        if sunset > target_by:
+            decline_start = reserve_start
+        else:
+            decline_start = sunset
         if now >= decline_start:
             if now < target_by:
                 ratio = _ratio(now, decline_start, target_by)
                 computed = round(
-                    params.morning_full_percent
-                    - (params.morning_full_percent - target) * ratio
+                    early_ceiling - (early_ceiling - target) * ratio
                 )
                 computed = max(computed, target)
                 return TamburCurveDecision(
@@ -354,8 +386,6 @@ def evaluate_tambur_curve(
 
     # --- day ramp and day hold (before the evening decline) ---------------
     if now >= day_start:
-        # L-05: an early sunset (before full_by) stops the morning growth —
-        # the evening decline branch above takes over at decline_start.
         if now < full_by:
             ratio = _ratio(now, day_start, full_by)
             computed = round(
@@ -363,26 +393,23 @@ def evaluate_tambur_curve(
                 + (params.morning_full_percent - params.morning_start_percent)
                 * ratio
             )
+            computed = min(computed, early_ceiling)
             return TamburCurveDecision(
                 TamburMode.RAMP, TamburReason.RAMP, computed, True, False,
                 sun_source=sun_source,
             )
         return TamburCurveDecision(
             TamburMode.DAY, TamburReason.DAY,
-            params.morning_full_percent, True, False,
+            early_ceiling, True, False,
             sun_source=sun_source,
         )
 
     # --- pre-dawn (sunrise..day_start): dark day side (L-06) --------------
-    # No morning mirror by guesswork for a late/unavailable sunrise; the
-    # early-sunrise morning mirror is the caller's arrival logic.
+    # No morning mirror by guesswork for a late/unavailable sunrise.
     return TamburCurveDecision(
         TamburMode.PRE_DAY, TamburReason.PRE_DAWN, 0, False, False,
         sun_source=sun_source,
     )
-
-
-_RESERVE_LEAD_FALLBACK = 60  # minutes; the legacy evening lead
 
 
 __all__ = [
