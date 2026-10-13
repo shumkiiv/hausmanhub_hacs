@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 from .related_light_sources import RelatedLightSources
@@ -62,6 +62,13 @@ class ManualLightAuthority:
         # A loaded file alone therefore cannot prove a clean observation gap.
         self._restart_uncertain = False
         self._startup_observation_pending = False
+        self._observation_started_ms: int | None = None
+        self._restart_scope_registered = False
+        self._observed_scope: frozenset[str] = frozenset()
+        self._reconciled_entities: set[str] = set()
+        self._recovery_scopes: dict[frozenset[str], int] = {}
+        self._recovery_scope_floors: dict[frozenset[str], int] = {}
+        self._scope_generation = 0
         # Releasing a proved manual ON spans the authority store and the old
         # room journal.  Keep every automatic route closed between those two
         # durable writes; this is not an AUTO ownership claim.
@@ -81,6 +88,23 @@ class ManualLightAuthority:
     def set_related_sources(self, graph: RelatedLightSources) -> None:
         """Atomically replace the only relation graph; an invalid graph denies all."""
         if not self._related_sources_invalidated:
+            if graph != self._related_sources:
+                self._scope_generation += 1
+                changed = {
+                    item for item in self._related_sources.components.keys() | graph.components.keys()
+                    if self._related_sources.related(item) != graph.related(item)
+                }
+                if not graph.ready or not self._related_sources.ready:
+                    changed.update(self._reconciled_entities)
+                self._reconciled_entities.difference_update(changed)
+                self._recovery_scopes = {
+                    scope: version for scope, version in self._recovery_scopes.items()
+                    if not scope.intersection(changed)
+                }
+                self._recovery_scope_floors = {
+                    scope: floor for scope, floor in self._recovery_scope_floors.items()
+                    if scope in self._recovery_scopes
+                }
             self._related_sources = graph
 
     def invalidate_related_sources(self) -> None:
@@ -108,7 +132,7 @@ class ManualLightAuthority:
             or self._storage_failed
             or self._dispatch_failed
             or self._recovery
-            or self._restart_uncertain
+            or (self._restart_uncertain and not self._restart_scope_registered)
             or self._startup_observation_pending
             or self._explicit_return_pending
         )
@@ -123,7 +147,7 @@ class ManualLightAuthority:
         """Expose the global deny cause without promising an expiry."""
         if not self._ready or self._storage_failed or self._dispatch_failed or self._recovery:
             return "storage_unavailable"
-        if self._restart_uncertain:
+        if self._restart_uncertain and not self._restart_scope_registered:
             return "restart_uncertain"
         if self._startup_observation_pending:
             return "restart_uncertain"
@@ -143,15 +167,122 @@ class ManualLightAuthority:
             for domain in self._selector_uncertain_domains
         ):
             return "selector_uncertain"
+        if self._restart_uncertain and not (
+            self._related_sources.related(entity_id) <= self._reconciled_entities
+        ):
+            return "restart_uncertain"
         return None
 
     def begin_startup_observation(self) -> None:
         """Close dispatch until the full room entity set has been restored."""
         self._startup_observation_pending = True
+        self._observation_started_ms = int(time.time() * 1000)
+        self._restart_scope_registered = False
+        self._reconciled_entities.clear()
+        self._scope_generation += 1
 
-    def finish_startup_observation(self) -> None:
-        """Open dispatch only after buffered evidence was verified."""
+    def finish_startup_observation(
+        self, entity_ids: Iterable[str] | None = None,
+    ) -> None:
+        """Finish the common startup; each restarted scope still needs proof."""
+        if entity_ids is not None:
+            scope = frozenset(entity_ids)
+            if any(not isinstance(item, str) or not item.startswith(MANAGED_LIGHT_DOMAINS)
+                   for item in scope):
+                self.mark_unhealthy()
+                return
+            self._observed_scope = scope
+            self._restart_scope_registered = True
         self._startup_observation_pending = False
+
+    def register_recovery_scope(self, entity_ids: Iterable[str], version: int) -> None:
+        """Bind recovery to the complete configured group and its revision."""
+        scope = frozenset(entity_ids)
+        if not scope or type(version) is not int or version < 1:
+            return
+        if any(self._related_sources.related(item) != scope for item in scope):
+            return
+        if self._recovery_scopes.get(scope) != version:
+            self._scope_generation += 1
+            self._reconciled_entities.difference_update(scope)
+            self._recovery_scopes[scope] = version
+            self._recovery_scope_floors[scope] = (
+                self._observation_started_ms
+                if self._startup_observation_pending and self._observation_started_ms is not None
+                else int(time.time() * 1000)
+            )
+            # Runtime groups are included by the listener's dynamic managed
+            # scope. A newly configured group needs observations AFTER this
+            # registration, never reports from before it became managed.
+            if self._restart_scope_registered:
+                self._observed_scope = self._observed_scope | scope
+
+    async def async_reconcile_restart(
+        self, entity_ids: Iterable[str], *, version: int,
+        observe_off: Callable[[], Mapping[str, int] | None],
+        now_ms: Callable[[], int],
+    ) -> bool:
+        """Reconcile one group, without releasing records or issuing commands.
+
+        The adapter proves current OFF and a new absence window. This boundary
+        alone checks the saved manual evidence, persists it, then fences both
+        new manual events and changed observations across the storage await.
+        Recovery is deliberately not durable: another restart needs new proof.
+        """
+        scope = frozenset(entity_ids)
+        if not self._restart_uncertain or scope <= self._reconciled_entities:
+            return False
+        generation, scope_generation = self._generation, self._scope_generation
+
+        def eligible() -> bool:
+            return (
+                bool(scope) and self.persistence_ready
+                and self.barrier_reason is None
+                and self._related_sources.ready
+                and self._restart_scope_registered
+                and self._observation_started_ms is not None
+                and scope <= self._observed_scope
+                and self._recovery_scopes.get(scope) == version
+                and self._scope_generation == scope_generation
+                and self._generation == generation
+                and not self._pending
+                and all(self._related_sources.related(item) == scope for item in scope)
+                and all(self.barrier_reason_for(item) in {None, "restart_uncertain"}
+                        for item in scope)
+                and not any(
+                    (record := self.record(item)) is not None
+                    and self._priority_active(record, now_ms())
+                    for item in scope
+                )
+            )
+
+        async with self._writer:
+            if not eligible():
+                return False
+            observed = observe_off()
+            if observed is None or set(observed) != scope:
+                return False
+            observed = dict(observed)
+            if any(type(stamp) is not int or not (
+                max(self._observation_started_ms, self._recovery_scope_floors[scope])
+                <= stamp <= now_ms()
+            ) for stamp in observed.values()):
+                return False
+            payload = {
+                "version": 2,
+                "records": [_record_payload(record) for record in sorted(
+                    self._records.values(), key=lambda item: item.entity_id)],
+                "recentFingerprints": list(self._recent),
+            }
+            try:
+                await self._store.async_save(copy.deepcopy(payload))
+            except BaseException:
+                self._storage_failed = True
+                raise
+            if not eligible() or observe_off() != observed:
+                return False
+            self._reconciled_entities.update(scope)
+            return True
 
     def record(self, entity_id: str) -> ManualLightRecord | None:
         return self._pending.get(entity_id) or self._records.get(entity_id)
@@ -163,25 +294,44 @@ class ManualLightAuthority:
             and not self._pending
             and all(entity_id in self._records for entity_id in entity_ids)
         )
-
     def blocks(self, entity_id: str) -> bool:
-        # First slice: the clock never releases a manual choice. A later
-        # migration must prove every other condition before using deadline.
+        # Global barriers are unconditional. A proved manual priority is
+        # temporary (owner rule 2026-10-09: one hour by default); a lapsed
+        # record must not keep blocking dispatch. Legacy imports and
+        # unknown-action records carry no proved gesture time, so their
+        # technical deadline never opens this deny boundary by the clock.
         if self.barrier_reason_for(entity_id) is not None:
             return True
+        now_ms = int(time.time() * 1000)
         return any(
-            related in self._pending or related in self._records
+            (record := self.record(related)) is not None
+            and self._priority_active(record, now_ms)
             for related in self._related_sources.related(entity_id)
         )
 
+    @staticmethod
+    def _priority_active(record: ManualLightRecord, now_ms: int) -> bool:
+        # ``deadline_ms > now_ms`` means still active; equality is expired.
+        if record.legacy or record.action == "unknown":
+            return True
+        return record.deadline_ms > now_ms
+
     def blocking_evidence(self, entity_id: str) -> ManualLightRecord | None:
-        """Return linked evidence without copying it to a sibling entity."""
+        """Return linked evidence without copying it to a sibling entity.
+
+        Only records whose priority is still active can be blocking
+        evidence: a lapsed own record must not hide an active linked one,
+        and with no active record there is no deny evidence at all.
+        """
+
+        now_ms = int(time.time() * 1000)
         own = self.record(entity_id)
-        if own is not None:
+        if own is not None and self._priority_active(own, now_ms):
             return own
         records = [
             record for related in self._related_sources.related(entity_id)
             if (record := self.record(related)) is not None
+            and self._priority_active(record, now_ms)
         ]
         return max(records, key=lambda record: (record.generation, record.entity_id), default=None)
 
@@ -305,8 +455,11 @@ class ManualLightAuthority:
         async with self._writer:
             while self._pending and not self._storage_failed:
                 generation = self._generation
-                snapshot = dict(self._records)
-                snapshot.update(self._pending)
+                # Expiry ends a deny, not its evidence. Retain the last proved
+                # action per entity so startup migration cannot turn an expired
+                # action back into unknown legacy protection, or fail its
+                # durable-import check after saving another entity.
+                snapshot = {**self._records, **self._pending}
                 payload = {
                     "version": 2,
                     "records": [_record_payload(r) for r in
@@ -348,7 +501,8 @@ class ManualLightAuthority:
             for entity_id in scope
         ):
             return None
-        if self.barrier_reason is not None or self._explicit_return_pending:
+        if (self.barrier_reason is not None or self._explicit_return_pending
+                or any(self.barrier_reason_for(item) is not None for item in scope)):
             return None
         # This fence belongs to the physical gesture, not to the moment this
         # coroutine eventually acquires the writer.  A later manual event must

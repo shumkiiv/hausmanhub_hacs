@@ -297,6 +297,13 @@ class RoomLightingShadowService:
             }
             for receipt in receipts
         ]
+        for receipt in persisted_receipts:
+            power = receipt.get("power")
+            if isinstance(power, Mapping):
+                receipt["power"] = {
+                    key: value for key, value in power.items()
+                    if not str(key).startswith("_")
+                }
         entry: dict[str, object] = {
             "at": at,
             "roomId": room_id,
@@ -527,6 +534,10 @@ class RoomLightingShadowService:
             power = raw.get("power")
             if not isinstance(power, Mapping):
                 continue
+            if power.get("_durable_recorded") is True:
+                # The source lock already committed this part. A later room
+                # receipt must not overwrite a newer result from another room.
+                continue
             source = power.get("sourceEntityId")
             power_revision = power.get("evidenceRevision")
             if not isinstance(source, str) or not isinstance(power_revision, str):
@@ -535,12 +546,38 @@ class RoomLightingShadowService:
             if power.get("reason") == "power_source_on":
                 self._dispatch_failures.pop(power_key, None)
                 continue
+            previous = power.get("_preservedFailure")
+            if (
+                power.get("dispatchAttempt") is False
+                and power.get("sendOutcome") == "not_sent"
+                and isinstance(previous, Mapping)
+            ):
+                self._remember_dispatch_failure(power_key, dict(previous))
+                continue
             if (
                 power.get("dispatchAttempt") is False
                 and power.get("sendOutcome") == "not_sent"
                 and power.get("reason") != "power_source_unconfirmed"
+                and power.get("deliveryEpisodeOpen") is not True
             ):
                 self._dispatch_failures.pop(power_key, None)
+                continue
+            if power.get("deliveryEpisodeOpen") is True:
+                # AUD-POWER-PERSIST-02 (luna 2026-10-12): an open delivery
+                # episode keeps its durable latch across the not-sent
+                # closure; a restart restores it fail-closed (exhausted)
+                # until fresh trusted relay evidence arrives.
+                self._remember_dispatch_failure(
+                    power_key,
+                    {
+                        "key": power_key,
+                        "kind": "power",
+                        "entityId": source,
+                        "action": str(power.get("action") or "turn_on"),
+                        "evidenceRevision": power_revision,
+                        "blockedAfterMs": at,
+                    },
+                )
                 continue
             preparation = power.get("powerPreparation")
             attempted = (
@@ -553,6 +590,12 @@ class RoomLightingShadowService:
                 )
             )
             if attempted:
+                attempt_at = power.get("_attemptAt")
+                boundary = (
+                    attempt_at
+                    if isinstance(attempt_at, int) and not isinstance(attempt_at, bool)
+                    and attempt_at > 0 else at
+                )
                 self._remember_dispatch_failure(
                     power_key,
                     {
@@ -561,7 +604,7 @@ class RoomLightingShadowService:
                         "entityId": source,
                         "action": "turn_on",
                         "evidenceRevision": power_revision,
-                        "blockedAfterMs": at,
+                        "blockedAfterMs": boundary,
                     },
                 )
 

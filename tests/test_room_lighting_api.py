@@ -9,6 +9,7 @@ import asyncio
 import importlib
 import json
 import os
+import time
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -577,7 +578,7 @@ class RoomLightingApiTest(unittest.TestCase):
             authority = ManualLightAuthority()
             authority.capture(
                 "light.demo_main", "on", "service", "context-1",
-                observed_at_ms=1_000,
+                observed_at_ms=int(time.time() * 1000),
             )
             self.hass.data["hausman_hub"]["manual_light_authority"] = authority
             request = _request(
@@ -666,16 +667,17 @@ class RoomLightingApiTest(unittest.TestCase):
             }, inactive["manual_control_return"])
             _validate("room-lighting-status.schema.json", inactive)
 
+            observed = int(time.time() * 1000)
             authority.capture(
                 "light.demo_main", "off", "service", "context-off",
-                observed_at_ms=2_000,
+                observed_at_ms=observed,
             )
             manual_off = (await self.status_view.get(request)).payload
             returned = manual_off["manual_control_return"]
             self.assertTrue(returned["active"])
             self.assertEqual("manual_off_wait", returned["reason"])
             self.assertEqual("blocked", returned["scope"])
-            self.assertEqual(2, returned["since"])
+            self.assertEqual(observed // 1000, returned["since"])
             self.assertIsNone(returned["remaining_seconds"])
             self.assertEqual("manual_off_wait", returned["sources"][0]["reason"])
             self.assertEqual("blocked", returned["sources"][0]["scope"])
@@ -719,7 +721,8 @@ class RoomLightingApiTest(unittest.TestCase):
             )
             self.assertEqual(200, response.status)
             authority = ManualLightAuthority()
-            authority.capture("light.demo_main", "on", "service", "alias", observed_at_ms=1_000)
+            observed = int(time.time() * 1000)
+            authority.capture("light.demo_main", "on", "service", "alias", observed_at_ms=observed)
             self.hass.data["hausman_hub"]["manual_light_authority"] = authority
             request = _request(
                 self.api.ROOM_LIGHTING_STATUS_PATH.format(room_id=room_id), room_id=room_id
@@ -730,7 +733,7 @@ class RoomLightingApiTest(unittest.TestCase):
                 source["entityId"] for source in returned["sources"]
             ])
             self.assertEqual("manual_on_wait", returned["reason"])
-            self.assertEqual(1, returned["since"])
+            self.assertEqual(observed // 1000, returned["since"])
             _validate("room-lighting-status.schema.json", deduplicated)
 
             alias["autoControl"] = False
@@ -769,7 +772,7 @@ class RoomLightingApiTest(unittest.TestCase):
             authority = ManualLightAuthority()
             authority.capture_legacy("light.demo_main", source="startup_unobserved")
             authority.capture(
-                "light.demo_secondary", "off", "service", "manual-off", observed_at_ms=2_000
+                "light.demo_secondary", "off", "service", "manual-off", observed_at_ms=int(time.time() * 1000)
             )
             self.hass.data["hausman_hub"]["manual_light_authority"] = authority
             request = _request(
@@ -807,12 +810,16 @@ class RoomLightingApiTest(unittest.TestCase):
                 ))),
             ))
             authority.set_related_sources(graph)
-            authority.capture("light.demo_main", "on", "service", "related-api", observed_at_ms=2_000)
+            observed = int(time.time() * 1000)
+            authority.capture("light.demo_main", "on", "service", "related-api", observed_at_ms=observed)
             self.hass.data["hausman_hub"]["manual_light_authority"] = authority
             request = _request(self.api.ROOM_LIGHTING_STATUS_PATH.format(room_id=room_id), room_id=room_id)
             status = (await self.status_view.get(request)).payload
             returned = status["manual_control_return"]
-            self.assertEqual(("blocked", "manual_on_wait", 2), (returned["scope"], returned["reason"], returned["since"]))
+            self.assertEqual(
+                ("blocked", "manual_on_wait", observed // 1000),
+                (returned["scope"], returned["reason"], returned["since"]),
+            )
             sibling = next(item for item in returned["sources"] if item["entityId"] == "switch.demo_related")
             self.assertEqual((True, "blocked", "manual_on_wait"), (sibling["active"], sibling["scope"], sibling["reason"]))
             _validate("room-lighting-status.schema.json", status)

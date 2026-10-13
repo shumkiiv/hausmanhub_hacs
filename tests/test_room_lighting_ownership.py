@@ -224,3 +224,21 @@ def test_timer_only_releases_without_absence_evidence() -> None:
         absence_since=None,
         release_mode="timer_only",
     )
+
+
+def test_manual_on_survives_authority_priority_expiry() -> None:
+    """2026-10-12 evening repair: the one-hour authority priority expiry
+    must NOT weaken the separate manual-ON ownership rule. Ownership is a
+    different, clock-independent system: after the authority's hour a
+    manual-on light still resolves as manual, so the automatic branch has
+    no proven auto ownership and can neither turn it off nor re-use it."""
+
+    at = 1_800_000_000_000
+    records = [_record(OwnershipSource.MANUAL, at)]
+    hour_later = at + 3_600_000 + 1
+
+    assert resolve_manual_ownership(records, "light_main", light_on=True)
+    assert not has_proven_auto_ownership(records, "light_main")
+    assert resolve_manual_ownership(records, "light_main", light_on=False)
+    assert latest_ownership(records, "light_main").at == at
+    assert hour_later > at  # the authority priority lapsed; ownership did not

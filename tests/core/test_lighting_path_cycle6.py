@@ -512,7 +512,12 @@ def test_real_fingerprints_are_opaque_at_transfer():
             return self._record
 
         def blocks(self, entity_id):
-            return False
+            # The 2026-10-12 expiry repair: only an ACTIVE priority is
+            # projected; this double models an active record.
+            return True
+
+        def blocking_evidence(self, entity_id):
+            return self._record
 
     runtime = RoomLightingRuntime(
         hass=None,

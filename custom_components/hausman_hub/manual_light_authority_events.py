@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -39,6 +40,7 @@ class _StartupEvidence:
     source: str
     context_id: str | None
     event_identity: str
+    observed_at_ms: int | None = None
 
 
 class ManualLightAuthorityEvents:
@@ -107,7 +109,7 @@ class ManualLightAuthorityEvents:
                 # The loop drains that new generation before opening dispatch.
                 if not self._startup_evidence and not self._ambiguous_startup_domains:
                     self._managed_ready = True
-                    self._authority.finish_startup_observation()
+                    self._authority.finish_startup_observation(managed)
                     return
         except Exception:
             self._authority.mark_unhealthy()
@@ -162,7 +164,8 @@ class ManualLightAuthorityEvents:
         )
         try:
             changed = self._authority.capture(
-                evidence.entity_id, evidence.action, evidence.source, fingerprint
+                evidence.entity_id, evidence.action, evidence.source, fingerprint,
+                observed_at_ms=evidence.observed_at_ms,
             )
         except Exception:
             self._authority.mark_unhealthy()
@@ -254,6 +257,7 @@ class ManualLightAuthorityEvents:
             entity_id, action, source,
             context_id if isinstance(context_id, str) else None,
             str(event_identity),
+            int(time.time() * 1000),
         )
         if not self._managed_ready:
             if len(self._startup_evidence) >= MAX_STARTUP_EVENTS:

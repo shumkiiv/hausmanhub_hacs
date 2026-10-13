@@ -10,7 +10,8 @@ from __future__ import annotations
 import asyncio
 import copy
 import importlib
-from datetime import datetime, time, timezone
+from dataclasses import replace
+from datetime import datetime, time, timedelta, timezone
 import logging
 import pytest
 from types import SimpleNamespace
@@ -37,9 +38,14 @@ from custom_components.hausman_hub.application.room_lighting_ha_state import (
 )
 from custom_components.hausman_hub.application.room_lighting_runtime import (
     AWAY_ENTITY_ID,
+    CURVE_SENSOR_FRESHNESS_MS,
     RoomLightingOwnershipJournal,
     RoomLightingRuntime,
     legacy_manual_authority_plan,
+    CURVE_PRESENCE_CONFIRM_MS,
+    PowerDeliveryEpisode,
+    POWER_RETRY_INTERVAL_MS,
+    POWER_RETRY_LIMIT_PER_REVISION,
 )
 from custom_components.hausman_hub.application.manual_light_authority import (
     ManualLightAuthority,
@@ -1191,6 +1197,11 @@ async def test_repeat_without_state_change_does_not_resend() -> None:
         await runtime.stop()
 
 
+def _now_ms(offset_ms: int = 0) -> int:
+    import time as _time
+    return int(_time.time() * 1000) + offset_ms
+
+
 class _Clock:
     def __init__(self, value: int) -> None:
         self.value = value
@@ -2159,7 +2170,7 @@ async def test_explicit_return_removes_old_auto_history_without_evaluation() -> 
     try:
         runtime._ownership.record_auto(_ROOM_ID, "light_main", _NOW_MS - 1)  # type: ignore[attr-defined]
         runtime._ownership.record_manual(_ROOM_ID, "light_main", _NOW_MS)  # type: ignore[attr-defined]
-        authority.capture("light.demo_main", "on", "device_trigger", "manual-on", observed_at_ms=_NOW_MS)
+        authority.capture("light.demo_main", "on", "device_trigger", "manual-on", observed_at_ms=_now_ms())
         await authority.async_drain()
         processed: list[object] = []
 
@@ -2197,7 +2208,7 @@ async def test_explicit_return_refuses_manual_off_journal_mismatch() -> None:
     await runtime.start(hass, "entry")
     try:
         runtime._ownership.record_manual(_ROOM_ID, "light_main", turned_off=True)  # type: ignore[attr-defined]
-        authority.capture("light.demo_main", "on", "device_trigger", "common-on", observed_at_ms=_NOW_MS)
+        authority.capture("light.demo_main", "on", "device_trigger", "common-on", observed_at_ms=_now_ms())
         await authority.async_drain()
 
         assert await runtime.async_return_room_to_automatic(_ROOM_ID) == ()
@@ -2225,7 +2236,7 @@ async def test_explicit_return_refuses_common_on_without_matching_room_manual_on
     await runtime.start(hass, "entry")
     try:
         runtime._ownership.record_auto(_ROOM_ID, "light_main", _NOW_MS)  # type: ignore[attr-defined]
-        authority.capture("light.demo_main", "on", "service", "common-on", observed_at_ms=_NOW_MS)
+        authority.capture("light.demo_main", "on", "service", "common-on", observed_at_ms=_now_ms())
         await authority.async_drain()
 
         assert await runtime.async_return_room_to_automatic(_ROOM_ID) == ()
@@ -2999,6 +3010,7 @@ async def test_untrusted_away_closes_only_saved_power_intent(
                 room_id=_ROOM_ID,
                 operation_id="away-power-test",
                 config_version=1,
+command_action="turn_on",
             )
         else:
             powered, detail = await runtime._ensure_legacy_room_power_locked(
@@ -3007,6 +3019,7 @@ async def test_untrusted_away_closes_only_saved_power_intent(
                 room_id=_ROOM_ID,
                 operation_id="away-power-test",
                 config_version=1,
+command_action="turn_on",
             )
 
         assert not powered
@@ -3093,6 +3106,226 @@ async def test_dispatch_switches_power_on_before_the_target() -> None:
         assert POWER_ENTITY in entities
         assert "light.demo_main" in entities
         assert entities.index(POWER_ENTITY) < entities.index("light.demo_main")
+    finally:
+        await runtime.stop()
+
+
+async def test_manual_on_survives_hour_and_restart_without_auto_off() -> None:
+    """Luna 2026-10-12 ( сквозной критерий): a manual ON keeps its
+    protection after the one-hour authority priority lapsed AND after a
+    runtime restart: the automatic branch neither turns the light off nor
+    re-arms it, and no automatic ownership is created."""
+    payload = _config_payload(
+        minimum_interval_seconds=600,
+        stable_absence_seconds=30,
+        commands_enabled=True,
+    )
+    ownership_store = _MemoryOwnershipStore()
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    hass.states.set("light.demo_main", "on", last_changed=_NOW_DT)
+    executor = RoomLightingHaExecutor()
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=True,
+        executor=executor,
+        payload=payload,
+        ownership_store=ownership_store,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        # A person turns the light on manually (no auto command ever ran).
+        runtime._ownership.record_manual(_ROOM_ID, "light_main", _NOW_MS)  # type: ignore[attr-defined]
+        await runtime._persist_ownership()  # type: ignore[attr-defined]
+    finally:
+        await runtime.stop()
+
+    # A manual priority record exists too; one hour later it has EXPIRED.
+    from custom_components.hausman_hub.application.manual_light_authority import (
+        ManualLightAuthority,
+    )
+    authority = ManualLightAuthority()
+    authority.set_related_sources(
+        __import__(
+            "custom_components.hausman_hub.application.related_light_sources",
+            fromlist=["RelatedLightSources"],
+        ).RelatedLightSources.from_configs(()),
+    )
+    # The manual priority was captured more than an hour before the
+    # restart moment (the authority uses the real clock).
+    authority.capture(
+        "light.demo_main", "on", "device_trigger", "manual-on",
+        observed_at_ms=int(datetime.now(timezone.utc).timestamp() * 1000)
+        - 2 * 3_600_000,
+    )
+    await runtime.stop()
+
+    # One hour passes (the authority priority has expired) and the runtime
+    # restarts on the SAME ownership store.
+    later = _NOW_MS + 3_600_000 + 5_000
+    assert not authority.blocks("light.demo_main"), (
+        "the one-hour priority must have expired"
+    )
+    hass2 = _FakeHass()
+    hass2.states.set("binary_sensor.demo_presence", "on", last_changed=_dt(later))
+    hass2.states.set("light.demo_main", "on", last_changed=_dt(later))
+    hass2.states.set(AWAY_ENTITY_ID, "off", last_changed=_dt(later))
+    executor2 = RoomLightingHaExecutor(manual_light_authority=authority)
+    runtime2 = _make_runtime(
+        hass2,
+        commands_enabled=True,
+        executor=executor2,
+        payload=payload,
+        ownership_store=ownership_store,
+        now_ms=lambda: later,
+        manual_light_authority=authority,
+    )
+    await runtime2.start(hass2, "entry")
+    try:
+        await asyncio.gather(*hass2.tasks)
+        # NO automatic commands to the manual-on light at all: no turn_off,
+        # no re-arming brightness/color changes.
+        light_commands = [
+            call for call in hass2.services.calls
+            if call[2].get("entity_id") == "light.demo_main"
+        ]
+        assert not light_commands, light_commands
+        # The MANUAL ownership evidence survived the restart in memory of
+        # the same journal: the light still resolves as manual (no proven
+        # auto ownership), and no AUTO record exists.
+        snapshots = [
+            snapshot
+            for snapshot in runtime2._ownership.snapshots()  # type: ignore[attr-defined]
+            if snapshot.target_id == "light_main"
+        ]
+        assert snapshots, "the manual ownership journal must survive the restart"
+        assert any(
+            snapshot.source.value == "manual" for snapshot in snapshots
+        ), snapshots
+        assert not any(
+            snapshot.source.value == "auto" for snapshot in snapshots
+        ), snapshots
+    finally:
+        await runtime2.stop()
+
+
+async def test_expired_manual_off_on_sibling_target_allows_autolight() -> None:
+    """Evening live test 2026-10-12: a manual OFF on one room target (the
+    spots switch) blocked the WHOLE component forever — even the pair
+    power preparation of the chandelier was denied with
+    ``manual_light_priority`` long after the owner's one-hour priority had
+    lapsed. After the expiry repair the automatic branch powers the pair
+    and turns the chandelier on."""
+    payload = _config_payload(
+        minimum_interval_seconds=600,
+        stable_absence_seconds=30,
+        commands_enabled=True,
+        power_switch_entity=POWER_ENTITY,
+    )
+    payload["devices"]["light_targets"].append({  # type: ignore[index]
+        "id": "light_spots",
+        "name": "Точки",
+        "kind": "switch",
+        "entityId": "switch.demo_spots",
+        "role": "accent",
+        "groupId": None,
+        "brightness": False,
+        "color_temperature": False,
+        "autoAdoptOverride": None,
+    })
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    hass.states.set(POWER_ENTITY, "off", last_changed=_NOW_DT)
+    hass.states.set("switch.demo_spots", "off", last_changed=_NOW_DT)
+
+    class _AuthorityStore(_MemoryOwnershipStore):
+        recovered_previous = False
+
+    from custom_components.hausman_hub.application.manual_light_authority import (
+        ManualLightAuthority,
+    )
+    authority = ManualLightAuthority(_AuthorityStore())
+    await authority.async_load()
+    # A person switched the spots off MORE than an hour ago.
+    authority.capture(
+        "switch.demo_spots", "off", "state", "spots-off",
+        observed_at_ms=int(datetime.now(timezone.utc).timestamp() * 1000)
+        - 2 * 3_600_000,
+    )
+    await authority.async_drain()
+    executor = RoomLightingHaExecutor(manual_light_authority=authority)
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=True,
+        executor=executor,
+        payload=payload,
+        manual_light_authority=authority,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        entities = [call[2].get("entity_id") for call in hass.services.calls]
+        assert POWER_ENTITY in entities, (
+            "the expired priority must not deny the power preparation"
+        )
+        assert "light.demo_main" in entities
+        assert entities.index(POWER_ENTITY) < entities.index("light.demo_main")
+    finally:
+        await runtime.stop()
+
+
+async def test_active_manual_off_on_sibling_target_still_blocks_autolight() -> None:
+    """The SAME scenario with a STILL-ACTIVE priority: no commands at all
+    (deny-only, fail closed)."""
+    payload = _config_payload(
+        minimum_interval_seconds=600,
+        stable_absence_seconds=30,
+        commands_enabled=True,
+        power_switch_entity=POWER_ENTITY,
+    )
+    payload["devices"]["light_targets"].append({  # type: ignore[index]
+        "id": "light_spots",
+        "name": "Точки",
+        "kind": "switch",
+        "entityId": "switch.demo_spots",
+        "role": "accent",
+        "groupId": None,
+        "brightness": False,
+        "color_temperature": False,
+        "autoAdoptOverride": None,
+    })
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    hass.states.set(POWER_ENTITY, "off", last_changed=_NOW_DT)
+    hass.states.set("switch.demo_spots", "off", last_changed=_NOW_DT)
+
+    class _AuthorityStore(_MemoryOwnershipStore):
+        recovered_previous = False
+
+    from custom_components.hausman_hub.application.manual_light_authority import (
+        ManualLightAuthority,
+    )
+    authority = ManualLightAuthority(_AuthorityStore())
+    await authority.async_load()
+    # The person switched the spots off five minutes ago: priority active.
+    authority.capture(
+        "switch.demo_spots", "off", "state", "spots-off",
+        observed_at_ms=int(datetime.now(timezone.utc).timestamp() * 1000)
+        - 5 * 60_000,
+    )
+    await authority.async_drain()
+    executor = RoomLightingHaExecutor(manual_light_authority=authority)
+    runtime = _make_runtime(
+        hass,
+        commands_enabled=True,
+        executor=executor,
+        payload=payload,
+        manual_light_authority=authority,
+    )
+    await runtime.start(hass, "entry")
+    try:
+        entities = [call[2].get("entity_id") for call in hass.services.calls]
+        assert POWER_ENTITY not in entities
+        assert "light.demo_main" not in entities
     finally:
         await runtime.stop()
 
@@ -4442,7 +4675,7 @@ async def test_away_home_transition_releases_manual_protections() -> None:
         )
         authority.capture(
             "light.demo_main", "off", "device_trigger", "common-off",
-            observed_at_ms=clock.value,
+            observed_at_ms=_now_ms(),
         )
         await authority.async_drain()
         priority.records["light.demo_main"] = {"confirmedAt": clock.value}
@@ -4652,7 +4885,7 @@ async def test_manual_action_after_return_survives_away_release() -> None:
         )
         authority.capture(
             "light.demo_main", "off", "device_trigger", "fresh-off",
-            observed_at_ms=clock.value,
+            observed_at_ms=_now_ms(),
         )
         await authority.async_drain()
         priority.records["light.demo_main"] = {"confirmedAt": clock.value}
@@ -4707,7 +4940,7 @@ async def test_away_authority_release_paused_save_keeps_fresh_capture() -> None:
     await authority.async_load()
     assert authority.capture(
         "light.demo_main", "off", "device_trigger", "pre-return",
-        observed_at_ms=_NOW_MS,
+        observed_at_ms=_now_ms(),
     )
     boundary = authority.current_generation()
     authority._store.paused = True  # type: ignore[attr-defined]
@@ -4718,7 +4951,7 @@ async def test_away_authority_release_paused_save_keeps_fresh_capture() -> None:
     # A fresh manual action replaces the pending record mid-save.
     assert authority.capture(
         "light.demo_main", "off", "device_trigger", "fresh-after-return",
-        observed_at_ms=_NOW_MS + 1,
+        observed_at_ms=_now_ms() + 1,
     )
     authority._store.gate.set()  # type: ignore[attr-defined]
     released = await task
@@ -7246,3 +7479,1315 @@ async def test_mirror_night_turn_on_gated_by_unreliable_presence() -> None:
         )
     finally:
         await runtime.stop()
+
+
+class TestPowerSourceDeliveryEpisode:
+    """One confirmed presence opens ONE bounded, spaced delivery episode
+    for an unconfirmed power-on (live test 2026-10-12: a single lost
+    Zigbee packet must not lock the scenario until a manual
+    intervention). Each attempt still needs its own confirmation; the
+    spacing counts from the ORIGINAL failed attempt (AUD-POWER-02)."""
+
+    POWER = "switch.demo_power"
+    ROOM = "room_demo_entry"
+
+    def _runtime(self, clock: dict[str, int]):
+        hass = _FakeHass()
+        hass.states.set(self.POWER, "off", last_changed=_dt(_NOW_MS))
+
+        class _RetryExecutor(_SpyExecutor):
+            async def async_power_on(
+                self, hass: object, entity_id: str
+            ) -> dict[str, object]:
+                del hass, entity_id
+                return {"confirmed": True, "sent": True, "sendOutcome": "sent"}
+
+        runtime = _make_runtime(
+            hass,
+            commands_enabled=True,
+            executor=_RetryExecutor(),
+            now_ms=lambda: clock["value"],
+        )
+        config = config_from_payload(_config_payload())
+        runtime._configs = {config.room_id: config}
+        hass.states.set("binary_sensor.demo_presence", "on", last_changed=_dt(_NOW_MS))
+        return runtime, hass
+
+
+    def _simulated_retry_blocked(
+        self, runtime, entity_id, *, room_id=None, command_action="turn_on"
+    ):
+        """Unit policy driver: explicitly account for a simulated unconfirmed send.
+
+        Production admission is now read-only. Full executor/storage paths
+        are exercised separately by the lifecycle matrix below.
+        """
+        revision = runtime._power_evidence_revision(entity_id)
+        runtime._release_power_failure_on_fresh_evidence(entity_id, revision)
+        plan = runtime._plan_power_attempt(
+            entity_id, room_id=room_id, command_action=command_action
+        )
+        if plan is None:
+            return True
+        if plan.retry_episode is not None:
+            runtime._commit_power_attempt(entity_id, plan, runtime._now_ms())
+        return False
+
+    @staticmethod
+    async def _cancel_when_started(task, started):
+        try:
+            await asyncio.wait_for(started.wait(), timeout=2)
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    def _confirmed_presence(self, runtime, since: int) -> None:
+        runtime._curve_presence[self.ROOM] = {
+            "since": since,
+            "last_seen": since,
+            "absence": 0,
+        }
+
+    def _latch(self, runtime, failed_at: int) -> None:
+        """Simulate the ORIGINAL unconfirmed attempt at ``failed_at``."""
+        revision = runtime._power_evidence_revision(self.POWER)
+        runtime._power_failures[self.POWER] = ("turn_on", revision)
+        runtime._power_failure_at[self.POWER] = failed_at
+
+    def test_episode_opens_and_is_spaced_from_the_original(self) -> None:
+        clock = {"value": _NOW_MS}
+        runtime, _hass = self._runtime(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        self._latch(runtime, _NOW_MS)
+        # Inside the spacing window from the ORIGINAL attempt: suppressed,
+        # and NO episode is opened yet (nothing to count).
+        clock["value"] = _NOW_MS + POWER_RETRY_INTERVAL_MS - 1_000
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is True
+        assert self.POWER not in runtime._power_delivery
+        # After the spacing: the episode opens with retry 1.
+        clock["value"] = _NOW_MS + POWER_RETRY_INTERVAL_MS + 1_000
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is False
+        assert runtime._power_delivery[self.POWER].attempts == 1
+        # Spacing from the last attempt: suppressed, then retry 2.
+        clock["value"] = _NOW_MS + 2 * POWER_RETRY_INTERVAL_MS
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is True
+        clock["value"] = _NOW_MS + 2 * POWER_RETRY_INTERVAL_MS + 1_000
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is False
+        assert runtime._power_delivery[self.POWER].attempts == 2
+
+    def test_episode_is_capped(self) -> None:
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, _hass = self._runtime(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        self._latch(runtime, _NOW_MS)
+        for attempt in range(POWER_RETRY_LIMIT_PER_REVISION):
+            clock["value"] = _NOW_MS + (attempt + 1) * (
+                POWER_RETRY_INTERVAL_MS + 1_000
+            )
+            assert (
+                self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM)
+                is False
+            ), attempt
+        # The episode is exhausted: suppressed until a new episode opens.
+        clock["value"] = _NOW_MS + 5 * (POWER_RETRY_INTERVAL_MS + 1_000)
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is True
+
+    def test_new_presence_episode_never_refreshes_the_budget(self) -> None:
+        """AUD-POWER-03/06: the delivery episode BELONGS TO THE RELAY. A
+        new confirmed-presence episode (even a genuine return) does not
+        refresh an exhausted budget — only fresh trusted relay evidence
+        does."""
+        clock = {"value": _NOW_MS}
+        runtime, _hass = self._runtime(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        self._latch(runtime, _NOW_MS)
+        for attempt in range(POWER_RETRY_LIMIT_PER_REVISION):
+            clock["value"] = _NOW_MS + (attempt + 1) * (
+                POWER_RETRY_INTERVAL_MS + 1_000
+            )
+            self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM)
+        # The episode is exhausted.
+        clock["value"] = _NOW_MS + 5 * (POWER_RETRY_INTERVAL_MS + 1_000)
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is True
+        # The occupant leaves and returns: a NEW confirmed-presence
+        # episode must NOT refresh the exhausted budget.
+        new_since = _NOW_MS + 6 * (POWER_RETRY_INTERVAL_MS + 1_000)
+        clock["value"] = new_since + CURVE_PRESENCE_CONFIRM_MS + 1_000
+        self._confirmed_presence(runtime, new_since)
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is True
+
+    def test_shared_relay_budget_is_not_refreshed_by_another_room(self) -> None:
+        """AUD-POWER-06: two rooms share one relay. Room A exhausts the
+        episode; room B (a different, confirmed presence pointer) must
+        not open a fresh budget for the same relay."""
+        clock = {"value": _NOW_MS}
+        runtime, _hass = self._runtime(clock)
+        # Room A confirms at T-20s, room B confirms at T-10s.
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        runtime._curve_presence["room_other"] = {
+            "since": _NOW_MS - 10_000,
+            "last_seen": _NOW_MS - 10_000,
+            "absence": 0,
+        }
+        self._latch(runtime, _NOW_MS)
+        for attempt in range(POWER_RETRY_LIMIT_PER_REVISION):
+            clock["value"] = _NOW_MS + (attempt + 1) * (
+                POWER_RETRY_INTERVAL_MS + 1_000
+            )
+            self._simulated_retry_blocked(runtime,self.POWER, room_id="room_demo_entry")
+        # Exhausted by room A.
+        clock["value"] = _NOW_MS + 5 * (POWER_RETRY_INTERVAL_MS + 1_000)
+        assert self._simulated_retry_blocked(runtime,
+            self.POWER, room_id="room_demo_entry"
+        ) is True
+        # Room B asks with ITS (different, newer) presence pointer: the
+        # shared relay's budget is still exhausted.
+        assert self._simulated_retry_blocked(runtime,
+            self.POWER, room_id="room_other"
+        ) is True
+
+    def test_two_retries_can_never_run_back_to_back(self) -> None:
+        """AUD-POWER-04: an allowed attempt stamps its OWN moment, so a
+        second attempt epsilon after the first is still spaced out."""
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, _hass = self._runtime(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        # The original attempt happened 9s ago: the spacing has elapsed.
+        self._latch(runtime, _NOW_MS - 9_000)
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is False
+        # Epsilon later: suppressed — the allowed attempt stamped NOW.
+        clock["value"] = clock["value"] + 100
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is True
+        # Only after the full interval from the STAMPED moment: allowed.
+        clock["value"] = clock["value"] + POWER_RETRY_INTERVAL_MS
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is False
+
+    async def test_exact_dispatch_delay_stamps_the_failure_moment(self) -> None:
+        """AUD-POWER-04: if the pre-send bookkeeping (persist, lock wait)
+        takes 9 seconds, the failure is stamped at the ACTUAL send moment
+        — the first retry is still a full interval away from it."""
+        clock = {"value": _NOW_MS}
+        runtime, hass = self._runtime(clock)
+        runtime._electrical_breaker_resolver = lambda _entity: False
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        # The original attempt happened 9s ago: the spacing has elapsed.
+        self._latch(runtime, _NOW_MS - 9_000)
+        # SEC-02: the retry carries the turn_on plan and a LIVE confirmed
+        # presence (the send-boundary re-check requires both).
+        runtime._configs = {  # type: ignore[attr-defined]
+            config_from_payload(_config_payload()).room_id: config_from_payload(
+                _config_payload()
+            )
+        }
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(_NOW_MS)
+        )
+
+        class _UnconfirmedExecutor(_SpyExecutor):
+            async def async_power_on(
+                self, hass: object, entity_id: str, **kwargs: object
+            ) -> dict[str, object]:
+                return {"confirmed": False, "sent": True, "sendOutcome": "sent"}
+
+        runtime._executor = _UnconfirmedExecutor()
+
+        # The pre-send bookkeeping (persist + lock wait) takes 9 seconds.
+        original_persist = runtime._persist_pending_power_dispatch
+
+        async def slow_persist(**kwargs: object) -> bool:
+            persisted = await original_persist(**kwargs)
+            clock["value"] = clock["value"] + 9_000
+            return persisted
+
+        runtime._persist_pending_power_dispatch = slow_persist
+        powered, detail = await runtime._ensure_power_source_locked(
+            DevicePowerDependency(
+                dependent_entity_id="light.demo_main",
+                power_source_entity_id=self.POWER,
+                policy="auto_turn_on",
+                warmup_seconds=0,
+            ),
+            at=clock["value"],
+            room_id=self.ROOM,
+            operation_id="op-delayed",
+            config_version=1,
+            command_action="turn_on",
+        )
+        assert powered is False
+        assert detail["reason"] == "power_source_unconfirmed"
+        assert detail.get("suppressed") is not True
+        # The failure is stamped at the ACTUAL send moment (after the 9s
+        # bookkeeping): an immediate re-ask is still spaced out.
+        stamped_at = runtime._power_failure_at[self.POWER]
+        assert stamped_at == _NOW_MS + 9_000
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is True
+        # After the full interval from the stamped moment: allowed.
+        clock["value"] = stamped_at + POWER_RETRY_INTERVAL_MS + 1_000
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is False
+
+    def test_untrusted_revision_never_refreshes_the_budget(self) -> None:
+        """AUD-POWER-01: an untrusted revision (the relay going
+        unavailable) is the LOSS of evidence — it must not open a new
+        delivery episode or reset the exhausted one."""
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, hass = self._runtime(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        self._latch(runtime, _NOW_MS)
+        for attempt in range(POWER_RETRY_LIMIT_PER_REVISION):
+            clock["value"] = _NOW_MS + (attempt + 1) * (
+                POWER_RETRY_INTERVAL_MS + 1_000
+            )
+            self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM)
+        clock["value"] = _NOW_MS + 5 * (POWER_RETRY_INTERVAL_MS + 1_000)
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is True
+        hass.states.set(self.POWER, "unknown", last_changed=_dt(clock["value"]))
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is True
+
+    def test_untrusted_off_relay_opens_spaced_retries_for_turn_on_plan(self) -> None:
+        """Evening live test 2026-10-12: a relay that LOST the packet keeps
+        reporting ``untrusted:off`` (silent). With an explicit turn_on plan
+        and a currently confirmed presence the SAME bounded episode budget
+        applies: spaced from the ORIGINAL attempt, capped, own
+        confirmation."""
+        clock = {"value": _NOW_MS}
+        runtime, _hass = self._runtime_untrusted(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        self._latch(runtime, _NOW_MS)
+        revision = runtime._power_evidence_revision(self.POWER)
+        assert revision == "untrusted:off"
+        # Inside the spacing window from the ORIGINAL attempt: suppressed.
+        clock["value"] = _NOW_MS + POWER_RETRY_INTERVAL_MS - 1_000
+        assert self._simulated_retry_blocked(runtime,
+            self.POWER, room_id=self.ROOM, command_action="turn_on"
+        ) is True
+        # After the spacing: retry 1 is allowed for the turn_on plan.
+        clock["value"] = _NOW_MS + POWER_RETRY_INTERVAL_MS + 1_000
+        assert self._simulated_retry_blocked(runtime,
+            self.POWER, room_id=self.ROOM, command_action="turn_on"
+        ) is False
+        assert runtime._power_delivery[self.POWER].attempts == 1
+        assert runtime._power_delivery[self.POWER].revision == "untrusted:off"
+
+    def test_untrusted_off_requires_the_turn_on_plan(self) -> None:
+        """The silent-relay exception is ONLY for an explicit turn_on plan:
+        other actions and plan-less callers stay suppressed."""
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, _hass = self._runtime_untrusted(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        self._latch(runtime, _NOW_MS)
+        for action in (None, "turn_off", "set_brightness", "set_color_temperature"):
+            assert self._simulated_retry_blocked(runtime,
+                self.POWER, room_id=self.ROOM, command_action=action
+            ) is True, action
+
+    def test_untrusted_off_rechecks_presence_on_every_retry(self) -> None:
+        """Every untrusted retry re-checks the confirmed presence."""
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, _hass = self._runtime_untrusted(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        self._latch(runtime, _NOW_MS - 9_000)
+        assert self._simulated_retry_blocked(runtime,
+            self.POWER, room_id=self.ROOM, command_action="turn_on"
+        ) is False
+        assert runtime._power_delivery[self.POWER].attempts == 1
+        # The presence pointer faults: the next retry stays suppressed.
+        runtime._curve_presence.pop(self.ROOM)
+        clock["value"] += POWER_RETRY_INTERVAL_MS + 1_000
+        assert self._simulated_retry_blocked(runtime,
+            self.POWER, room_id=self.ROOM, command_action="turn_on"
+        ) is True
+        # Presence is confirmed again: the SAME remaining budget applies.
+        self._confirmed_presence(runtime, clock["value"] - 20_000)
+        clock["value"] += POWER_RETRY_INTERVAL_MS + 1_000
+        assert self._simulated_retry_blocked(runtime,
+            self.POWER, room_id=self.ROOM, command_action="turn_on"
+        ) is False
+        assert runtime._power_delivery[self.POWER].attempts == 2
+
+    def test_untrusted_unknown_and_missing_stay_blocked(self) -> None:
+        """Only ``untrusted:off`` is the silent-relay class; unknown and
+        missing evidence never allow a retry."""
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, hass = self._runtime_untrusted(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        self._latch(runtime, _NOW_MS)
+        stale = datetime.now(_TZ) - timedelta(seconds=600)
+        hass.states.set(self.POWER, "unknown", last_changed=stale)
+        assert self._simulated_retry_blocked(runtime,
+            self.POWER, room_id=self.ROOM, command_action="turn_on"
+        ) is True
+        hass.states.pop(self.POWER, None) if hasattr(hass.states, "pop") else None
+        runtime._entity_state = lambda entity_id: None  # type: ignore[method-assign]
+        assert self._simulated_retry_blocked(runtime,
+            self.POWER, room_id=self.ROOM, command_action="turn_on"
+        ) is True
+
+    def test_untrusted_revision_change_never_refreshes_budget(self) -> None:
+        """A change between untrusted labels is not evidence: the budget
+        belongs to the original revision only."""
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, hass = self._runtime_untrusted(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        self._latch(runtime, _NOW_MS)
+        # One retry is spent on the untrusted:off revision.
+        assert self._simulated_retry_blocked(runtime,
+            self.POWER, room_id=self.ROOM, command_action="turn_on"
+        ) is False
+        assert runtime._power_delivery[self.POWER].attempts == 1
+        # The relay reports a DIFFERENT untrusted revision: suppressed.
+        stale = datetime.now(_TZ) - timedelta(seconds=600)
+        hass.states.set(self.POWER, "unknown", last_changed=stale)
+        clock["value"] += POWER_RETRY_INTERVAL_MS + 1_000
+        assert self._simulated_retry_blocked(runtime,
+            self.POWER, room_id=self.ROOM, command_action="turn_on"
+        ) is True
+
+    def test_exhausted_untrusted_budget_stays_exhausted(self) -> None:
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, _hass = self._runtime_untrusted(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        self._latch(runtime, _NOW_MS)
+        for attempt in range(POWER_RETRY_LIMIT_PER_REVISION):
+            clock["value"] = _NOW_MS + (attempt + 1) * (
+                POWER_RETRY_INTERVAL_MS + 1_000
+            )
+            assert self._simulated_retry_blocked(runtime,
+                self.POWER, room_id=self.ROOM, command_action="turn_on"
+            ) is False, attempt
+        clock["value"] = _NOW_MS + 5 * (POWER_RETRY_INTERVAL_MS + 1_000)
+        assert self._simulated_retry_blocked(runtime,
+            self.POWER, room_id=self.ROOM, command_action="turn_on"
+        ) is True
+
+    def test_unknown_original_attempt_boundary_stays_blocked(self) -> None:
+        """A restored latch has no provable original attempt moment: the
+        spacing cannot be honoured, so the retry stays suppressed."""
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, _hass = self._runtime_untrusted(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        revision = runtime._power_evidence_revision(self.POWER)
+        runtime._power_failures[self.POWER] = ("turn_on", revision)
+        # No _power_failure_at entry: the boundary is unknown.
+        assert self._simulated_retry_blocked(runtime,
+            self.POWER, room_id=self.ROOM, command_action="turn_on"
+        ) is True
+
+    def _runtime_untrusted(self, clock: dict[str, int]):
+        """Like _runtime, but the relay's last report is STALE: the evidence
+        revision is genuinely ``untrusted:off`` (silent relay)."""
+        hass = _FakeHass()
+        stale = datetime.now(_TZ) - timedelta(seconds=600)
+        hass.states.values[self.POWER] = SimpleNamespace(
+            state="off", attributes={}, restored=False,
+            last_changed=stale, last_reported=stale, last_updated=stale,
+        )
+        # A live presence sensor: the send-boundary re-check
+        # (_confirmed_presence_live) must find it trusted and on.
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(_NOW_MS)
+        )
+
+        class _RetryExecutor(_SpyExecutor):
+            async def async_power_on(
+                self, hass: object, entity_id: str
+            ) -> dict[str, object]:
+                del hass, entity_id
+                return {"confirmed": True, "sent": True, "sendOutcome": "sent"}
+
+        runtime = _make_runtime(
+            hass,
+            commands_enabled=True,
+            executor=_RetryExecutor(),
+            now_ms=lambda: clock["value"],
+        )
+        config = config_from_payload(_config_payload())
+        runtime._configs = {config.room_id: config}
+        hass.states.set("binary_sensor.demo_presence", "on", last_changed=_dt(_NOW_MS))
+        return runtime, hass
+
+    async def test_legacy_power_retry_honours_the_plan_action(self) -> None:
+        """The untrusted:off retry is bound to the explicit turn_on plan:
+        the same outstanding latch suppresses any other plan entirely."""
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, hass = self._runtime_untrusted(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        self._latch(runtime, _NOW_MS - 9_000)
+        # The send-boundary live re-check reads the room config (sensors):
+        # seed the config WITHOUT starting the room processing, so the
+        # start-time dispatch does not spend the episode budget before the
+        # scenario under test.
+        runtime._configs = {  # type: ignore[attr-defined]
+            config_from_payload(_config_payload()).room_id: config_from_payload(
+                _config_payload()
+            )
+        }
+        powered, detail = await runtime._ensure_legacy_room_power(
+            self.POWER,
+            at=clock["value"],
+            room_id=self.ROOM,
+            operation_id="op-plan-on",
+            config_version=1,
+            command_action="turn_on",
+        )
+        assert powered is True
+        assert detail["reason"] == "power_source_on"
+        # The latch is outstanding again with the SAME untrusted:off
+        # revision, but the plan is NOT a turn_on: suppressed, no attempt.
+        clock["value"] += POWER_RETRY_INTERVAL_MS + 1_000
+        runtime._power_failures[self.POWER] = (
+            "turn_on", runtime._power_evidence_revision(self.POWER),
+        )
+        runtime._power_failure_at[self.POWER] = _NOW_MS
+        runtime._power_delivery.pop(self.POWER, None)
+        powered, detail = await runtime._ensure_legacy_room_power(
+            self.POWER,
+            at=clock["value"],
+            room_id=self.ROOM,
+            operation_id="op-plan-brightness",
+            config_version=1,
+            command_action="set_brightness",
+        )
+        assert powered is False
+        assert detail["reason"] == "power_source_unconfirmed"
+        assert detail.get("suppressed") is True
+
+    def test_fresh_trusted_revision_closes_a_stale_exhausted_episode(self) -> None:
+        """Luna 2026-10-12 (finding 3): fresh TRUSTED evidence of a NEW
+        revision closes the stale episode in the no-failure-record branch
+        too; a later unconfirmed attempt on the NEW revision opens a NEW
+        budget instead of being suppressed by the old exhausted one."""
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, hass = self._runtime(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        self._latch(runtime, _NOW_MS)
+        for attempt in range(POWER_RETRY_LIMIT_PER_REVISION):
+            clock["value"] = _NOW_MS + (attempt + 1) * (
+                POWER_RETRY_INTERVAL_MS + 1_000
+            )
+            self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM)
+        # The failure record was already closed by a not-sent closure: the
+        # episode (old revision) stays in the no-failure-record branch with
+        # its whole budget spent (exhausted, cap reached).
+        runtime._power_failures.pop(self.POWER, None)
+        runtime._power_delivery[self.POWER] = replace(
+            runtime._power_delivery[self.POWER], exhausted=True
+        )
+        # Fresh trusted relay evidence: a NEW revision. The stale episode
+        # must be closed by the fresh TRUSTED revision (AUD-POWER-09, the
+        # no-failure-record branch), NOT suppress the new revision.
+        hass.states.set(self.POWER, "off", last_changed=_dt(clock["value"]))
+        revision = runtime._power_evidence_revision(self.POWER)
+        assert runtime._trusted_evidence_revision(revision)
+        assert self._simulated_retry_blocked(runtime,
+            self.POWER, room_id=self.ROOM, command_action="turn_on"
+        ) is False
+        assert self.POWER not in runtime._power_delivery, (
+            "the stale exhausted episode must be closed by fresh trusted evidence"
+        )
+        # A later unconfirmed attempt on the NEW revision opens a NEW
+        # budget (not blocked by the old exhausted episode).
+        runtime._power_failures[self.POWER] = ("turn_on", revision)
+        runtime._power_failure_at[self.POWER] = clock["value"]
+        clock["value"] += POWER_RETRY_INTERVAL_MS + 1_000
+        assert self._simulated_retry_blocked(runtime,
+            self.POWER, room_id=self.ROOM, command_action="turn_on"
+        ) is False
+        assert runtime._power_delivery[self.POWER].revision == revision
+        assert runtime._power_delivery[self.POWER].attempts == 1
+
+    async def test_not_sent_closure_keeps_the_open_episode_durable(self) -> None:
+        """Luna 2026-10-12 (finding 2): a not-sent closure must NOT wipe the
+        durable latch while the episode is open; a restart restores the
+        budget fail-closed (exhausted) until fresh trusted evidence."""
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, hass = self._runtime_untrusted(clock)
+        shadow_store = runtime._shadow._store  # type: ignore[attr-defined]
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        self._latch(runtime, _NOW_MS)
+        # One retry is spent: the episode is open and still has budget.
+        assert self._simulated_retry_blocked(runtime,
+            self.POWER, room_id=self.ROOM, command_action="turn_on"
+        ) is False
+        closed = await runtime._persist_not_sent_power_dispatch_closure(
+            at=clock["value"],
+            room_id=self.ROOM,
+            source_entity_id=self.POWER,
+            evidence_revision=runtime._power_evidence_revision(self.POWER),
+            reason="away_block",
+            operation_id="op-not-sent",
+            config_version=1,
+        )
+        assert closed is True
+        payload = shadow_store.payload
+        document = payload.get("data", payload) if isinstance(payload, dict) else {}
+        failures = document["dispatchFailures"]
+        assert any(
+            entry.get("kind") == "power" and entry.get("entityId") == self.POWER
+            for entry in failures
+        ), failures
+        # A restart on the SAME shadow store restores the latch
+        # fail-closed (exhausted).
+        from custom_components.hausman_hub.application.room_lighting_shadow import (
+            RoomLightingShadowService,
+        )
+        shadow2 = RoomLightingShadowService(shadow_store)
+        await shadow2.async_load()
+        runtime2 = RoomLightingRuntime(
+            hass,
+            _ConfigService(config_from_payload(_config_payload())),
+            shadow2,
+            executor=_SpyExecutor(),
+            ownership_store=_MemoryOwnershipStore(),
+            now_ms=lambda: clock["value"],
+            track_state_changes=lambda hass, entities, callback: (lambda: None),
+            track_interval=lambda hass, callback, interval: (lambda: None),
+            listen_bus=lambda hass, event_type, callback: (lambda: None),
+        )
+        runtime2._restore_dispatch_failures()
+        assert runtime2._power_attempt_blocked(
+            self.POWER, room_id=self.ROOM, command_action="turn_on"
+        ) is True
+
+    async def test_send_boundary_refusal_rolls_back_the_episode(self) -> None:
+        """Luna third round (AUD-POWER-12): a refusal at the SEND boundary
+        (after the awaited persistence) must leave the budget exactly as it
+        was BEFORE the gate: the attempt is rolled back, the relay is not
+        called."""
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, hass = self._runtime_untrusted(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        self._latch(runtime, _NOW_MS - 9_000)
+        runtime._configs = {  # type: ignore[attr-defined]
+            config_from_payload(_config_payload()).room_id: config_from_payload(
+                _config_payload()
+            )
+        }
+
+        relay_calls: list[str] = []
+
+        class _CountingExecutor(_SpyExecutor):
+            async def async_power_on(self, hass: object, entity_id: str):
+                relay_calls.append(entity_id)
+                return {"confirmed": True, "sent": True, "sendOutcome": "sent"}
+
+        runtime._executor = _CountingExecutor()  # type: ignore[assignment]
+
+        original_persist = runtime._persist_pending_power_dispatch
+
+        async def persist_then_presence_dies(**kwargs: object) -> bool:
+            persisted = await original_persist(**kwargs)
+            # The occupant leaves WHILE the intent write is awaited: the
+            # current sensor state is a fresh OFF — the live presence
+            # re-check must refuse the send.
+            hass.states.set(
+                "binary_sensor.demo_presence",
+                "off",
+                last_changed=_dt(clock["value"]),
+            )
+            return persisted
+
+        runtime._persist_pending_power_dispatch = persist_then_presence_dies  # type: ignore[assignment]
+
+        powered, detail = await runtime._ensure_legacy_room_power(
+            self.POWER,
+            at=clock["value"],
+            room_id=self.ROOM,
+            operation_id="op-boundary-refusal",
+            config_version=1,
+            command_action="turn_on",
+        )
+        assert powered is False
+        assert detail["reason"] == "power_source_unconfirmed"
+        assert relay_calls == [], "the relay must not be called after the refusal"
+        # The budget was NOT spent: the gate's stamp is rolled back to the
+        # pre-gate snapshot (no episode existed before the gate).
+        assert self.POWER not in runtime._power_delivery, (
+            runtime._power_delivery
+        )
+        # The latch (unconfirmed attempt record) is still in place.
+        assert runtime._power_failures.get(self.POWER) is not None
+
+    def test_no_confirmed_presence_opens_no_episode(self) -> None:
+        clock = {"value": _NOW_MS}
+        runtime, _hass = self._runtime(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 1_000)
+        self._latch(runtime, _NOW_MS)
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is True
+        assert self.POWER not in runtime._power_delivery
+        runtime._curve_presence.pop(self.ROOM, None)
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is True
+
+    def test_fresh_relay_evidence_closes_the_episode(self) -> None:
+        clock = {"value": _NOW_MS}
+        runtime, hass = self._runtime(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        old_revision = runtime._power_evidence_revision(self.POWER)
+        runtime._power_failures[self.POWER] = ("turn_on", old_revision)
+        runtime._power_failure_at[self.POWER] = _NOW_MS
+        runtime._power_delivery[self.POWER] = PowerDeliveryEpisode(
+            revision=old_revision,
+            presence_since=_NOW_MS - 20_000,
+            attempts=POWER_RETRY_LIMIT_PER_REVISION,
+            last_attempt_ms=_NOW_MS,
+        )
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is True
+        clock["value"] = _NOW_MS + 30_000
+        hass.states.set(
+            self.POWER,
+            "off",
+            last_changed=datetime.fromtimestamp(
+                clock["value"] / 1000, tz=timezone.utc
+            ),
+        )
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is False
+        assert self.POWER not in runtime._power_failures
+        assert self.POWER not in runtime._power_delivery
+        runtime._power_failures[self.POWER] = (
+            "turn_on",
+            runtime._power_evidence_revision(self.POWER),
+        )
+        runtime._power_failure_at[self.POWER] = clock["value"]
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is True
+        clock["value"] = _NOW_MS + 30_000 + POWER_RETRY_INTERVAL_MS + 1_000
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is False
+        assert runtime._power_delivery[self.POWER].attempts == 1
+
+    async def test_exact_success_clears_the_episode(self) -> None:
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, hass = self._runtime(clock)
+        runtime._electrical_breaker_resolver = lambda _entity: False
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        self._latch(runtime, _NOW_MS - 9_000)
+        power_entity_id = self.POWER
+
+        class _ReadBackExecutor(_SpyExecutor):
+            async def async_power_on(
+                self, hass: object, entity_id: str, **kwargs: object
+            ) -> dict[str, object]:
+                hass.states.set(
+                    power_entity_id,
+                    "on",
+                    last_changed=datetime.fromtimestamp(
+                        clock["value"] / 1000, tz=timezone.utc
+                    ),
+                )
+                return {"confirmed": True, "sent": True, "sendOutcome": "sent"}
+
+        runtime._executor = _ReadBackExecutor()
+        powered, detail = await runtime._ensure_power_source_locked(
+            DevicePowerDependency(
+                dependent_entity_id="light.demo_main",
+                power_source_entity_id=self.POWER,
+                policy="auto_turn_on",
+                warmup_seconds=0,
+            ),
+            at=clock["value"],
+            room_id=self.ROOM,
+            operation_id="op-exact-success",
+            config_version=1,
+            command_action="turn_on",
+        )
+        assert powered is True, detail
+        assert self.POWER not in runtime._power_failures
+        assert self.POWER not in runtime._power_delivery
+
+    async def test_exact_warmup_failure_keeps_the_spacing(self) -> None:
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, hass = self._runtime(clock)
+        runtime._electrical_breaker_resolver = lambda _entity: False
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        self._latch(runtime, _NOW_MS - 9_000)
+        # SEC-02: a retry needs the plan action and a LIVE confirmed
+        # presence — seed the room config (sensors) and the sensor state.
+        runtime._configs = {  # type: ignore[attr-defined]
+            config_from_payload(_config_payload()).room_id: config_from_payload(
+                _config_payload()
+            )
+        }
+        hass.states.set(  # type: ignore[attr-defined]
+            "binary_sensor.demo_presence", "on", last_changed=_dt(_NOW_MS)
+        )
+
+
+        class _NoReadBackExecutor(_SpyExecutor):
+            async def async_power_on(
+                self, hass: object, entity_id: str, **kwargs: object
+            ) -> dict[str, object]:
+                return {"confirmed": True, "sent": True, "sendOutcome": "sent"}
+
+        runtime._executor = _NoReadBackExecutor()
+        powered, detail = await runtime._ensure_power_source_locked(
+            DevicePowerDependency(
+                dependent_entity_id="light.demo_main",
+                power_source_entity_id=self.POWER,
+                policy="auto_turn_on",
+                warmup_seconds=1,
+            ),
+            at=clock["value"],
+            room_id=self.ROOM,
+            operation_id="op-exact-warmup-fail",
+            config_version=1,
+            command_action="turn_on",
+        )
+        assert powered is False
+        assert detail["reason"] == "power_source_unconfirmed"
+        assert self.POWER in runtime._power_failures
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is True
+
+    def test_legacy_confirmed_success_clears_the_episode(self) -> None:
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, hass = self._runtime(clock)
+
+        class _ConfirmExecutor(_SpyExecutor):
+            async def async_power_on(
+                self, hass: object, entity_id: str
+            ) -> dict[str, object]:
+                del hass, entity_id
+                return {"confirmed": True, "sent": True, "sendOutcome": "sent"}
+
+        runtime._executor = _ConfirmExecutor()
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        self._latch(runtime, _NOW_MS - 9_000)
+        # SEC-02: a retry needs the plan action and a LIVE confirmed
+        # presence — seed the room config (sensors) and the sensor state.
+        runtime._configs = {  # type: ignore[attr-defined]
+            config_from_payload(_config_payload()).room_id: config_from_payload(
+                _config_payload()
+            )
+        }
+        hass.states.set(  # type: ignore[attr-defined]
+            "binary_sensor.demo_presence", "on", last_changed=_dt(_NOW_MS)
+        )
+        powered, detail = asyncio.run(
+            runtime._ensure_legacy_room_power_locked(
+                self.POWER,
+                at=clock["value"],
+                room_id=self.ROOM,
+                operation_id="op-success",
+                config_version=1,
+                command_action="turn_on",
+            )
+        )
+        assert powered is True
+        assert self.POWER not in runtime._power_failures
+        assert self.POWER not in runtime._power_delivery
+
+    def test_restored_latch_from_durable_record_arrives_exhausted(self) -> None:
+        from types import SimpleNamespace
+
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, hass = self._runtime(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        evidence_revision = runtime._power_evidence_revision(self.POWER)
+        runtime._shadow = SimpleNamespace(
+            journal_payload=lambda: {
+                "dispatchFailures": [
+                    {
+                        "kind": "power",
+                        "entityId": self.POWER,
+                        "action": "turn_on",
+                        "evidenceRevision": evidence_revision,
+                    }
+                ]
+            }
+        )
+        runtime._restore_dispatch_failures()
+        assert runtime._power_failures[self.POWER] == ("turn_on", evidence_revision)
+        restored_episode = runtime._power_delivery[self.POWER]
+        assert restored_episode.exhausted is True
+        assert restored_episode.attempts == POWER_RETRY_LIMIT_PER_REVISION
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is True
+        assert runtime._power_delivery[self.POWER].exhausted is True
+        clock["value"] = _NOW_MS + 90_000
+        hass.states.set(
+            self.POWER,
+            "off",
+            last_changed=datetime.fromtimestamp(
+                clock["value"] / 1000, tz=timezone.utc
+            ),
+        )
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is False
+        assert self.POWER not in runtime._power_failures
+        assert self.POWER not in runtime._power_delivery
+
+    def test_legacy_journal_migration_arrives_exhausted(self) -> None:
+        from types import SimpleNamespace
+
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, _hass = self._runtime(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        evidence_revision = runtime._power_evidence_revision(self.POWER)
+        runtime._shadow = SimpleNamespace(
+            journal_payload=lambda: {
+                "entries": [
+                    {
+                        "at": _NOW_MS - 5_000,
+                        "roomId": self.ROOM,
+                        "dispatch": [
+                            {
+                                "targetId": "light_demo_main",
+                                "action": "turn_on",
+                                "evidenceRevision": evidence_revision,
+                                "power": {
+                                    "sourceEntityId": self.POWER,
+                                    "evidenceRevision": evidence_revision,
+                                    "dispatchAttempt": True,
+                                    "sendOutcome": "sent",
+                                    "confirmed": False,
+                                    "reason": "power_source_unconfirmed",
+                                },
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+        runtime._restore_dispatch_failures()
+        assert runtime._power_failures[self.POWER] == ("turn_on", evidence_revision)
+        restored_episode = runtime._power_delivery[self.POWER]
+        assert restored_episode.exhausted is True
+        assert restored_episode.attempts == POWER_RETRY_LIMIT_PER_REVISION
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is True
+
+    def test_stale_or_faulted_presence_backing_is_rejected(self) -> None:
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, _hass = self._runtime(clock)
+        runtime._curve_presence[self.ROOM] = {
+            "since": _NOW_MS - 20_000,
+            "last_seen": None,
+            "absence": 0,
+        }
+        assert runtime._confirmed_curve_presence_since(self.ROOM) is None
+        stale_seen = _NOW_MS - CURVE_SENSOR_FRESHNESS_MS - 1_000
+        runtime._curve_presence[self.ROOM] = {
+            "since": _NOW_MS - 20_000,
+            "last_seen": stale_seen,
+            "absence": 0,
+        }
+        assert runtime._confirmed_curve_presence_since(self.ROOM) is None
+
+    async def test_not_sent_closure_with_open_episode_keeps_failure(self) -> None:
+        """AUD-POWER-PERSIST-01 (real closure path): calling the not-sent
+        closure with an open delivery episode does NOT clear the failure
+        record."""
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, _hass = self._runtime(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        revision = runtime._power_evidence_revision(self.POWER)
+        runtime._power_failures[self.POWER] = ("turn_on", revision)
+        runtime._power_delivery[self.POWER] = PowerDeliveryEpisode(
+            revision=revision,
+            presence_since=_NOW_MS - 20_000,
+            attempts=1,
+            last_attempt_ms=clock["value"] - POWER_RETRY_INTERVAL_MS - 1_000,
+        )
+        closed = await runtime._persist_not_sent_power_dispatch_closure(
+            at=clock["value"],
+            room_id=self.ROOM,
+            source_entity_id=self.POWER,
+            evidence_revision=revision,
+            reason="away_mode",
+            operation_id="op-test",
+            config_version=1,
+        )
+        assert closed is True
+        # The failure record SURVIVES the not-sent closure because the
+        # delivery episode is still open.
+        assert self.POWER in runtime._power_failures
+
+    def test_not_sent_closure_keeps_the_episode_limits(self) -> None:
+        """AUD-POWER-08: a not-sent closure of a NEW attempt must not
+        clear the outstanding previous unconfirmed delivery — the live
+        episode keeps limiting (cap and spacing)."""
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, _hass = self._runtime(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        # An open episode from an earlier unconfirmed delivery.
+        revision = runtime._power_evidence_revision(self.POWER)
+        runtime._power_delivery[self.POWER] = PowerDeliveryEpisode(
+            revision=revision,
+            presence_since=_NOW_MS - 20_000,
+            attempts=1,
+            last_attempt_ms=clock["value"] - 1_000,
+        )
+        # A newer attempt was closed as NOT SENT (no failure record).
+        assert self.POWER not in runtime._power_failures
+        # The live episode still limits: spacing from the last allowed
+        # attempt has NOT elapsed.
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is True
+        # After the spacing from the last allowed attempt: a bounded
+        # attempt is allowed (attempt 2 of the episode).
+        clock["value"] = clock["value"] + POWER_RETRY_INTERVAL_MS + 1_000
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is False
+        assert runtime._power_delivery[self.POWER].attempts == 2
+
+    async def test_exact_cancellation_during_send_keeps_the_sent_at_stamp(
+        self,
+    ) -> None:
+        """AUD-POWER-09 (exact path): a task cancelled DURING the
+        executor call keeps the sent_at stamp — the spacing still
+        applies."""
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, hass = self._runtime(clock)
+        runtime._electrical_breaker_resolver = lambda _entity: False
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        self._latch(runtime, _NOW_MS - 9_000)
+        # SEC-02: a retry needs the plan action and a LIVE confirmed
+        # presence — seed the room config (sensors) and the sensor state.
+        runtime._configs = {  # type: ignore[attr-defined]
+            config_from_payload(_config_payload()).room_id: config_from_payload(
+                _config_payload()
+            )
+        }
+        hass.states.set(  # type: ignore[attr-defined]
+            "binary_sensor.demo_presence", "on", last_changed=_dt(_NOW_MS)
+        )
+        started = asyncio.Event()
+
+        class _SlowUnconfirmedExecutor(_SpyExecutor):
+            async def async_power_on(
+                self, hass: object, entity_id: str, **kwargs: object
+            ) -> dict[str, object]:
+                started.set()
+                await asyncio.sleep(5)
+                return {"confirmed": False, "sent": True, "sendOutcome": "sent"}
+
+        runtime._executor = _SlowUnconfirmedExecutor()
+        task = asyncio.ensure_future(
+            runtime._ensure_power_source_locked(
+                DevicePowerDependency(
+                    dependent_entity_id="light.demo_main",
+                    power_source_entity_id=self.POWER,
+                    policy="auto_turn_on",
+                    warmup_seconds=0,
+                ),
+                at=clock["value"],
+                room_id=self.ROOM,
+                operation_id="op-exact-cancelled-send",
+                config_version=1,
+                command_action="turn_on",
+            )
+        )
+        await self._cancel_when_started(task, started)
+        # The sent_at stamp (NOW at cancellation time) is kept.
+        stamped_at = runtime._power_failure_at[self.POWER]
+        assert stamped_at == clock["value"]
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is True
+        # After the spacing from the sent moment: the bounded retry runs.
+        clock["value"] = clock["value"] + POWER_RETRY_INTERVAL_MS + 1_000
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is False
+
+    def test_not_sent_closure_plus_untrusted_revision_blocks(self) -> None:
+        """AUD-POWER-08 (companion): after a not-sent closure the live
+        episode remains; if the relay then goes unavailable (untrusted
+        revision), the attempt stays suppressed — the loss of evidence
+        must not refresh the budget."""
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, hass = self._runtime(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        # An open episode from an earlier unconfirmed delivery.
+        revision = runtime._power_evidence_revision(self.POWER)
+        runtime._power_delivery[self.POWER] = PowerDeliveryEpisode(
+            revision=revision,
+            presence_since=_NOW_MS - 20_000,
+            attempts=1,
+            last_attempt_ms=clock["value"] - POWER_RETRY_INTERVAL_MS - 1_000,
+        )
+        # The not-sent closure popped the failure record (the episode
+        # remains).
+        runtime._power_failures.pop(self.POWER, None)
+        # The relay goes unavailable: the revision turns untrusted.
+        hass.states.set(self.POWER, "unknown", last_changed=_dt(clock["value"]))
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is True
+
+    async def test_exact_warmup_cancellation_keeps_the_sent_at_stamp(
+        self,
+    ) -> None:
+        """AUD-POWER-10: a task cancelled DURING the warm-up wait (after
+        the confirmed receipt) keeps the sent_at stamp — the spacing
+        still applies."""
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, hass = self._runtime(clock)
+        runtime._electrical_breaker_resolver = lambda _entity: False
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        self._latch(runtime, _NOW_MS - 9_000)
+        # SEC-02: a retry needs the plan action and a LIVE confirmed
+        # presence — seed the room config (sensors) and the sensor state.
+        runtime._configs = {  # type: ignore[attr-defined]
+            config_from_payload(_config_payload()).room_id: config_from_payload(
+                _config_payload()
+            )
+        }
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(_NOW_MS)
+        )
+
+        started = asyncio.Event()
+
+        class _ConfirmThenWarmupExecutor(_SpyExecutor):
+            async def async_power_on(
+                self, hass: object, entity_id: str, **kwargs: object
+            ) -> dict[str, object]:
+                started.set()
+                return {"confirmed": True, "sent": True, "sendOutcome": "sent"}
+
+        runtime._executor = _ConfirmThenWarmupExecutor()
+        task = asyncio.ensure_future(
+            runtime._ensure_power_source_locked(
+                DevicePowerDependency(
+                    dependent_entity_id="light.demo_main",
+                    power_source_entity_id=self.POWER,
+                    policy="auto_turn_on",
+                    warmup_seconds=5,
+                ),
+                at=clock["value"],
+                room_id=self.ROOM,
+                operation_id="op-warmup-cancelled",
+                config_version=1,
+                command_action="turn_on",
+            )
+        )
+        await self._cancel_when_started(task, started)
+        # The sent_at stamp (NOW at cancellation time) is kept: the
+        # spacing still applies.
+        stamped_at = runtime._power_failure_at[self.POWER]
+        assert stamped_at == clock["value"]
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is True
+
+    async def test_legacy_cancellation_during_send_keeps_the_sent_at_stamp(
+        self,
+    ) -> None:
+        """AUD-POWER-09 (legacy path): a task cancelled DURING the
+        executor call keeps the sent_at stamp — the spacing still
+        applies."""
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, hass = self._runtime(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        self._latch(runtime, _NOW_MS - 9_000)
+        # SEC-02: a retry needs the plan action and a LIVE confirmed
+        # presence — seed the room config (sensors) and the sensor state.
+        runtime._configs = {  # type: ignore[attr-defined]
+            config_from_payload(_config_payload()).room_id: config_from_payload(
+                _config_payload()
+            )
+        }
+        hass.states.set(
+            "binary_sensor.demo_presence", "on", last_changed=_dt(_NOW_MS)
+        )
+        started = asyncio.Event()
+
+        class _SlowUnconfirmedExecutor(_SpyExecutor):
+            async def async_power_on(
+                self, hass: object, entity_id: str, **kwargs: object
+            ) -> dict[str, object]:
+                started.set()
+                await asyncio.sleep(5)
+                return {"confirmed": False, "sent": True, "sendOutcome": "sent"}
+
+        runtime._executor = _SlowUnconfirmedExecutor()
+        task = asyncio.ensure_future(
+            runtime._ensure_legacy_room_power_locked(
+                self.POWER,
+                at=clock["value"],
+                room_id=self.ROOM,
+                operation_id="op-legacy-cancelled-send",
+                config_version=1,
+                command_action="turn_on",
+            )
+        )
+        await self._cancel_when_started(task, started)
+        # The sent_at stamp (NOW at cancellation time) is kept.
+        stamped_at = runtime._power_failure_at[self.POWER]
+        assert stamped_at == clock["value"]
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is True
+        # After the spacing from the sent moment: the bounded retry runs.
+        clock["value"] = clock["value"] + POWER_RETRY_INTERVAL_MS + 1_000
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is False
+
+    async def test_not_sent_closure_restart_persistence(self) -> None:
+        """AUD-POWER-PERSIST-01 (end-to-end): pending → not_sent closure →
+        shadow store → NEW runtime restore → the latch is properly
+        cleared for a room without a delivery episode (legacy behavior),
+        and the away intent is properly closed."""
+        from custom_components.hausman_hub.application.room_lighting_shadow import (
+            RoomLightingShadowService,
+        )
+
+        shadow_store = _MemoryShadowStore()
+        shadow = RoomLightingShadowService(shadow_store)
+
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, _hass = self._runtime(clock)
+        runtime._shadow = shadow
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+
+        revision = runtime._power_evidence_revision(self.POWER)
+
+        # Step 1: persist the pending dispatch.
+        persisted = await runtime._persist_pending_power_dispatch(
+            at=_NOW_MS,
+            room_id=self.ROOM,
+            source_entity_id=self.POWER,
+            evidence_revision=revision,
+            operation_id="op-persist-test",
+            config_version=1,
+        )
+        assert persisted is True
+
+        # Step 2: not-sent closure — the attempt was blocked (away, etc.)
+        # so no actual send happened. This is a room WITHOUT a delivery
+        # episode, so the latch is cleared (legacy behavior).
+        closed = await runtime._persist_not_sent_power_dispatch_closure(
+            at=_NOW_MS + 1_000,
+            room_id=self.ROOM,
+            source_entity_id=self.POWER,
+            evidence_revision=revision,
+            reason="away_mode",
+            operation_id="op-persist-test",
+            config_version=1,
+        )
+        assert closed is True
+        assert self.POWER not in runtime._power_failures
+
+        # Step 3: create a NEW runtime from the SAME shadow store and
+        # restore — simulating a restart.
+        runtime2 = RoomLightingRuntime(
+            _FakeHass(),
+            _ConfigService(config_from_payload(_config_payload())),
+            shadow,
+            executor=_SpyExecutor(),
+            now_ms=lambda: clock["value"],
+            track_state_changes=lambda hass, entities, callback: (lambda: None),
+            track_interval=lambda hass, callback, interval: (lambda: None),
+            listen_bus=lambda hass, event_type, callback: (lambda: None),
+            away_entity_id=AWAY_ENTITY_ID,
+        )
+        runtime2._restore_dispatch_failures()
+
+        # Step 4: for a room without a delivery episode, the latch is
+        # properly cleared after restart (legacy behavior).
+        assert self.POWER not in runtime2._power_failures
+
+    async def test_shared_not_sent_closure_keeps_open_failure(self) -> None:
+        """AUD-POWER-PERSIST-01 (real closure path): calling the not-sent
+        closure with an open delivery episode does NOT clear the failure
+        record."""
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, _hass = self._runtime(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        revision = runtime._power_evidence_revision(self.POWER)
+        runtime._power_failures[self.POWER] = ("turn_on", revision)
+        runtime._power_delivery[self.POWER] = PowerDeliveryEpisode(
+            revision=revision,
+            presence_since=_NOW_MS - 20_000,
+            attempts=1,
+            last_attempt_ms=clock["value"] - POWER_RETRY_INTERVAL_MS - 1_000,
+        )
+        closed = await runtime._persist_not_sent_power_dispatch_closure(
+            at=clock["value"],
+            room_id=self.ROOM,
+            source_entity_id=self.POWER,
+            evidence_revision=revision,
+            reason="away_mode",
+            operation_id="op-test",
+            config_version=1,
+        )
+        assert closed is True
+        # The failure record SURVIVES the not-sent closure because the
+        # delivery episode is still open.
+        assert self.POWER in runtime._power_failures
+
+    async def test_not_sent_closure_restart_persistence_end_to_end(self) -> None:
+        """A refused retry preserves the original boundary across a fresh load."""
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, hass = self._runtime(clock)
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        self._latch(runtime, _NOW_MS - 9_000)
+        revision = runtime._power_evidence_revision(self.POWER)
+        assert await runtime._persist_pending_power_dispatch(
+            at=clock["value"], room_id=self.ROOM, source_entity_id=self.POWER,
+            evidence_revision=revision, operation_id="op-persist-e2e", config_version=1,
+        )
+        assert await runtime._persist_not_sent_power_dispatch_closure(
+            at=clock["value"], room_id=self.ROOM, source_entity_id=self.POWER,
+            evidence_revision=revision, reason="away_mode",
+            operation_id="op-persist-e2e", config_version=1,
+        )
+        shadow = RoomLightingShadowService(runtime._shadow._store)
+        await shadow.async_load()
+        restored = _make_runtime(hass, commands_enabled=True, now_ms=lambda: clock["value"])
+        restored._shadow = shadow
+        restored._configs = dict(runtime._configs)
+        self._confirmed_presence(restored, _NOW_MS - 20_000)
+        restored._restore_dispatch_failures()
+        assert restored._power_attempt_blocked(
+            self.POWER, room_id=self.ROOM, command_action="turn_on"
+        ) is True
+        assert restored._power_delivery[self.POWER].exhausted
+        assert shadow.journal_payload()["dispatchFailures"][0]["blockedAfterMs"] == _NOW_MS - 9_000
+        hass.states.set(self.POWER, "off", last_changed=_dt(clock["value"] + 1))
+        assert restored._power_attempt_blocked(
+            self.POWER, room_id=self.ROOM, command_action="turn_on"
+        ) is False
+
+    async def test_cancellation_during_warmup_keeps_latch_and_episode(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A task cancelled DURING the warm-up sleep must leave BOTH the
+        latch and the episode intact (luna round 3, MEDIUM): the limits
+        keep applying after the cancellation."""
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, _hass = self._runtime(clock)
+        runtime._electrical_breaker_resolver = lambda _entity: False
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+        self._latch(runtime, _NOW_MS)
+
+        class _InstantConfirmExecutor(_SpyExecutor):
+            async def async_power_on(
+                self, hass: object, entity_id: str, **kwargs: object
+            ) -> dict[str, object]:
+                return {"confirmed": True, "sent": True, "sendOutcome": "sent"}
+
+        runtime._executor = _InstantConfirmExecutor()
+
+        # Track the entry into the ENGINE warm-up sleep (not the executor):
+        # the cancellation must happen inside that specific wait.
+        import custom_components.hausman_hub.application.room_lighting_runtime as runtime_module
+
+        warmup_started = asyncio.Event()
+        real_sleep = asyncio.sleep
+
+        async def tracked_sleep(delay: object, *args: object, **kwargs: object):
+            if delay == 5:
+                warmup_started.set()
+            return await real_sleep(delay, *args, **kwargs)
+
+        monkeypatch.setattr(runtime_module.asyncio, "sleep", tracked_sleep)
+
+        task = asyncio.ensure_future(
+            runtime._ensure_power_source_locked(
+                DevicePowerDependency(
+                    dependent_entity_id="light.demo_main",
+                    power_source_entity_id=self.POWER,
+                    policy="auto_turn_on",
+                    warmup_seconds=5,
+                ),
+                at=clock["value"],
+                room_id=self.ROOM,
+                operation_id="op-cancelled",
+                config_version=1,
+                command_action="turn_on",
+            )
+        )
+        await self._cancel_when_started(task, warmup_started)
+        monkeypatch.undo()
+        # The cleanup line was never reached: the latch AND the episode
+        # survive the cancellation, so the episode limits keep applying.
+        assert self.POWER in runtime._power_failures
+        assert runtime._power_delivery[self.POWER].attempts == 1
+        assert not runtime._power_delivery[self.POWER].exhausted
+        # A later retry is still a normal spaced episode attempt (the
+        # spacing from the original attempt has elapsed by now).
+        clock["value"] = clock["value"] + POWER_RETRY_INTERVAL_MS + 1_000
+        assert self._simulated_retry_blocked(runtime,self.POWER, room_id=self.ROOM) is False
+        assert runtime._power_delivery[self.POWER].attempts == 2

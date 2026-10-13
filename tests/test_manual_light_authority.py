@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -41,6 +42,13 @@ class _Store:
     async def async_save(self, payload): self.payload = payload
 
 
+def _now_ms(offset_ms: int = 0) -> int:
+    # Proved timed priorities are checked against the real clock since the
+    # 2026-10-12 expiry repair: test records must be captured as ACTIVE
+    # (deadline in the future) unless a test explicitly exercises expiry.
+    return int(time.time() * 1000) + offset_ms
+
+
 async def test_capture_is_durable_and_duplicate_is_not_extended() -> None:
     store = _Store()
     authority = ManualLightAuthority(store)
@@ -58,7 +66,7 @@ def test_related_light_sources_extend_deny_without_copying_record() -> None:
     graph = RelatedLightSources.from_configs((config,))
     authority = ManualLightAuthority()
     authority.set_related_sources(graph)
-    authority.capture("light.primary", "on", "service", "related", observed_at_ms=1)
+    authority.capture("light.primary", "on", "service", "related", observed_at_ms=_now_ms())
     assert authority.blocks("switch.alternate")
     assert authority.record("switch.alternate") is None
     assert authority.blocking_evidence("switch.alternate").entity_id == "light.primary"
@@ -97,8 +105,8 @@ def test_related_evidence_prefers_own_then_latest_generation() -> None:
     )))
     authority = ManualLightAuthority()
     authority.set_related_sources(RelatedLightSources.from_configs((config,)))
-    authority.capture("light.a", "on", "service", "a", observed_at_ms=1)
-    authority.capture("switch.b", "off", "service", "b", observed_at_ms=2)
+    authority.capture("light.a", "on", "service", "a", observed_at_ms=_now_ms())
+    authority.capture("switch.b", "off", "service", "b", observed_at_ms=_now_ms())
     assert authority.blocking_evidence("light.a").entity_id == "light.a"
     assert authority.blocking_evidence("light.c").entity_id == "switch.b"
 
@@ -117,7 +125,7 @@ async def test_capture_latches_before_first_await_and_has_hour_deadline() -> Non
     authority = ManualLightAuthority(store)
     await authority.async_load()
     coroutine = authority.async_capture(
-        "light.demo", "on", "service", "ctx-3", observed_at_ms=1_000
+        "light.demo", "on", "service", "ctx-3", observed_at_ms=_now_ms()
     )
     assert not authority.blocks("light.demo")
     # Running the coroutine reaches its first await only after the synchronous
@@ -127,7 +135,8 @@ async def test_capture_latches_before_first_await_and_has_hour_deadline() -> Non
     assert authority.blocks("light.demo")
     await task
     record = authority.record("light.demo")
-    assert record is not None and record.deadline_ms == 3_601_000
+    assert record is not None
+    assert record.deadline_ms == record.observed_at_ms + 3_600_000
 
 
 async def test_event_during_save_drains_new_generation() -> None:
@@ -147,10 +156,10 @@ async def test_event_during_save_drains_new_generation() -> None:
 
     store = _SlowStore()
     authority = ManualLightAuthority(store)
-    assert authority.capture("light.a", "on", "service", "a", observed_at_ms=1)
+    assert authority.capture("light.a", "on", "service", "a", observed_at_ms=_now_ms())
     draining = asyncio.create_task(authority.async_drain())
     await store.started.wait()
-    assert authority.capture("light.b", "off", "state", "b", observed_at_ms=2)
+    assert authority.capture("light.b", "off", "state", "b", observed_at_ms=_now_ms())
     assert authority.blocks("light.b")
     store.release.set()
     await draining
@@ -185,12 +194,14 @@ async def test_restart_recovery_and_partial_legacy_migration_fail_closed() -> No
 async def test_old_duplicate_after_new_action_does_not_extend_deadline() -> None:
     authority = ManualLightAuthority(_Store())
     await authority.async_load()
-    authority.capture("light.demo", "on", "service", "first", observed_at_ms=10)
-    authority.capture("light.demo", "off", "service", "second", observed_at_ms=20)
+    authority.capture("light.demo", "on", "service", "first", observed_at_ms=_now_ms())
+    authority.capture("light.demo", "off", "service", "second", observed_at_ms=_now_ms())
     assert not authority.capture(
-        "light.demo", "on", "service", "first", observed_at_ms=30
+        "light.demo", "on", "service", "first", observed_at_ms=_now_ms()
     )
-    assert authority.record("light.demo").deadline_ms == 3_600_020
+    record = authority.record("light.demo")
+    assert record is not None
+    assert record.deadline_ms == record.observed_at_ms + 3_600_000
 
 
 async def test_explicit_return_requires_full_nonlegacy_manual_on_scope() -> None:
@@ -202,7 +213,7 @@ async def test_explicit_return_requires_full_nonlegacy_manual_on_scope() -> None
         SimpleNamespace(entity_id="switch.alternate"),
     )))
     authority.set_related_sources(RelatedLightSources.from_configs((config,)))
-    authority.capture("light.primary", "on", "service", "on", observed_at_ms=1)
+    authority.capture("light.primary", "on", "service", "on", observed_at_ms=_now_ms())
     await authority.async_drain()
 
     assert await authority.async_begin_explicit_return(("light.primary",)) is None
@@ -236,13 +247,13 @@ async def test_explicit_return_never_erases_manual_event_captured_during_save() 
     store = _SlowStore()
     authority = ManualLightAuthority(store)
     await authority.async_load()
-    authority.capture("light.demo", "on", "service", "old", observed_at_ms=1)
+    authority.capture("light.demo", "on", "service", "old", observed_at_ms=_now_ms())
     await authority.async_drain()
     releasing = asyncio.create_task(
         authority.async_begin_explicit_return(("light.demo",))
     )
     await store.started.wait()
-    assert authority.capture("light.demo", "off", "service", "new", observed_at_ms=2)
+    assert authority.capture("light.demo", "off", "service", "new", observed_at_ms=_now_ms())
     store.release.set()
     token = await releasing
     assert token is not None
@@ -274,16 +285,16 @@ async def test_explicit_return_fence_rejects_event_drained_before_waiting_return
     store = _SlowStore()
     authority = ManualLightAuthority(store)
     await authority.async_load()
-    authority.capture("light.demo", "on", "service", "old", observed_at_ms=1)
+    authority.capture("light.demo", "on", "service", "old", observed_at_ms=_now_ms())
     await authority.async_drain()
-    authority.capture("light.other", "on", "service", "other", observed_at_ms=2)
+    authority.capture("light.other", "on", "service", "other", observed_at_ms=_now_ms())
     draining = asyncio.create_task(authority.async_drain())
     await store.started.wait()
     returning = asyncio.create_task(
         authority.async_begin_explicit_return(("light.demo",))
     )
     await asyncio.sleep(0)
-    assert authority.capture("light.demo", new_action, "service", "new", observed_at_ms=3)
+    assert authority.capture("light.demo", new_action, "service", "new", observed_at_ms=_now_ms())
     store.release.set()
     await draining
 
@@ -315,16 +326,16 @@ async def test_explicit_return_persists_unrelated_pre_writer_fingerprint() -> No
     store = _SlowStore()
     authority = ManualLightAuthority(store)
     await authority.async_load()
-    authority.capture("light.demo", "on", "service", "old", observed_at_ms=1)
+    authority.capture("light.demo", "on", "service", "old", observed_at_ms=_now_ms())
     await authority.async_drain()
-    authority.capture("light.blocker", "on", "service", "blocker", observed_at_ms=2)
+    authority.capture("light.blocker", "on", "service", "blocker", observed_at_ms=_now_ms())
     draining = asyncio.create_task(authority.async_drain())
     await store.started.wait()
     returning = asyncio.create_task(
         authority.async_begin_explicit_return(("light.demo",))
     )
     await asyncio.sleep(0)
-    assert authority.capture("light.other", "off", "service", "other", observed_at_ms=3)
+    assert authority.capture("light.other", "off", "service", "other", observed_at_ms=_now_ms())
     store.release.set()
     await draining
     token = await returning
@@ -337,7 +348,7 @@ async def test_explicit_return_persists_unrelated_pre_writer_fingerprint() -> No
 
     restored = ManualLightAuthority(store)
     await restored.async_load()
-    assert not restored.capture("light.other", "off", "service", "other", observed_at_ms=4)
+    assert not restored.capture("light.other", "off", "service", "other", observed_at_ms=_now_ms())
 
 
 async def test_explicit_return_store_failure_remains_global_deny() -> None:
@@ -354,7 +365,7 @@ async def test_explicit_return_store_failure_remains_global_deny() -> None:
 
     authority = ManualLightAuthority(_FailOnReleaseStore())
     await authority.async_load()
-    authority.capture("light.demo", "on", "service", "on", observed_at_ms=1)
+    authority.capture("light.demo", "on", "service", "on", observed_at_ms=_now_ms())
     await authority.async_drain()
     with pytest.raises(RuntimeError):
         await authority.async_begin_explicit_return(("light.demo",))
@@ -380,7 +391,7 @@ async def test_cancelled_explicit_return_remains_global_deny_and_token_is_scoped
     store = _SlowStore()
     authority = ManualLightAuthority(store)
     await authority.async_load()
-    authority.capture("light.demo", "on", "service", "on", observed_at_ms=1)
+    authority.capture("light.demo", "on", "service", "on", observed_at_ms=_now_ms())
     await authority.async_drain()
     pending = asyncio.create_task(
         authority.async_begin_explicit_return(("light.demo",))
@@ -401,7 +412,7 @@ async def test_cancelled_explicit_return_remains_global_deny_and_token_is_scoped
 async def test_cancelled_room_history_save_remains_global_deny() -> None:
     authority = ManualLightAuthority(_Store())
     await authority.async_load()
-    authority.capture("light.demo", "on", "service", "on", observed_at_ms=1)
+    authority.capture("light.demo", "on", "service", "on", observed_at_ms=_now_ms())
     await authority.async_drain()
     started = asyncio.Event()
     release = asyncio.Event()
@@ -431,13 +442,14 @@ async def test_legacy_import_is_idempotent_and_never_overwrites_newer_evidence()
     store = _Store()
     authority = ManualLightAuthority(store)
     await authority.async_load()
-    authority.capture("light.demo", "on", "service", "newer", observed_at_ms=20)
+    observed = _now_ms()
+    authority.capture("light.demo", "on", "service", "newer", observed_at_ms=observed)
     assert not authority.capture_legacy("light.demo", source="room")
     await authority.async_drain()
     record = authority.record("light.demo")
     assert record is not None
     assert (record.source, record.fingerprint, record.observed_at_ms) == (
-        "service", "newer", 20,
+        "service", "newer", observed,
     )
 
     legacy = ManualLightAuthority(_Store())
@@ -514,7 +526,7 @@ async def test_event_during_legacy_save_drains_while_startup_is_blocked() -> Non
     authority.capture_legacy("light.legacy", source="room")
     draining = asyncio.create_task(authority.async_drain())
     await store.started.wait()
-    authority.capture("light.event", "on", "service", "event", observed_at_ms=1)
+    authority.capture("light.event", "on", "service", "event", observed_at_ms=_now_ms())
     assert not authority.has_durable_import(("light.legacy",))
     store.release.set()
     await draining
@@ -1424,3 +1436,131 @@ def test_stopped_loop_marks_unhealthy_instead_of_wrong_thread() -> None:
 
     result = asyncio.run(scenario())
     assert result["saved"] is None
+
+
+# === 2026-10-12 evening repair: proved manual priority expires (owner rule:
+# one hour). Legacy/unknown evidence never expires by the clock. ===
+
+async def test_expired_timed_priority_releases_block() -> None:
+    authority = ManualLightAuthority(_Store())
+    await authority.async_load()
+    authority.capture(
+        "light.demo", "off", "state", "expired-off",
+        observed_at_ms=_now_ms(-3_600_000 - 60_000),
+    )
+    assert not authority.blocks("light.demo")
+    assert authority.blocking_evidence("light.demo") is None
+
+
+async def test_priority_active_before_deadline_and_expired_at_it(monkeypatch) -> None:
+    import custom_components.hausman_hub.application.manual_light_authority as module
+    authority = ManualLightAuthority(_Store())
+    await authority.async_load()
+    observed = 1_800_000_000_000
+    authority.capture(
+        "light.demo", "off", "state", "timed", observed_at_ms=observed,
+    )
+    record = authority.record("light.demo")
+    assert record is not None
+    fake_now = (record.deadline_ms - 1) / 1000.0
+    monkeypatch.setattr(module.time, "time", lambda: fake_now)
+    assert authority.blocks("light.demo")
+    assert authority.blocking_evidence("light.demo") is record
+    monkeypatch.setattr(module.time, "time", lambda: record.deadline_ms / 1000.0)
+    assert not authority.blocks("light.demo")
+    assert authority.blocking_evidence("light.demo") is None
+
+
+async def test_expired_own_record_does_not_hide_active_related() -> None:
+    config = SimpleNamespace(room_id="room", devices=SimpleNamespace(light_targets=(
+        SimpleNamespace(entity_id="light.primary"),
+        SimpleNamespace(entity_id="switch.alternate"),
+    )))
+    authority = ManualLightAuthority()
+    authority.set_related_sources(RelatedLightSources.from_configs((config,)))
+    # Own record lapsed an hour ago; the linked one is still active.
+    authority.capture(
+        "light.primary", "off", "state", "lapsed",
+        observed_at_ms=_now_ms(-3_600_000 - 60_000),
+    )
+    authority.capture(
+        "switch.alternate", "on", "service", "active", observed_at_ms=_now_ms(),
+    )
+    assert authority.blocks("light.primary")
+    evidence = authority.blocking_evidence("light.primary")
+    assert evidence is not None and evidence.entity_id == "switch.alternate"
+
+
+async def test_legacy_and_unknown_records_never_expire(monkeypatch) -> None:
+    import custom_components.hausman_hub.application.manual_light_authority as module
+    authority = ManualLightAuthority(_Store())
+    await authority.async_load()
+    authority.capture(
+        "light.demo", "off", "state", "ancient-off",
+        observed_at_ms=_now_ms(-24 * 3_600_000),
+    )
+    authority.capture_legacy("light.legacy", source="startup_unobserved")
+    authority.capture(
+        "light.unknown", "unknown", "state", "ancient-unknown",
+        observed_at_ms=_now_ms(-24 * 3_600_000),
+    )
+    monkeypatch.setattr(module.time, "time", lambda: 2_000_000_000.0)
+    assert authority.blocks("light.demo") is False
+    assert authority.blocks("light.legacy")
+    assert authority.blocks("light.unknown")
+
+
+async def test_drain_keeps_expired_evidence_without_extending_priority() -> None:
+    store = _Store()
+    authority = ManualLightAuthority(store)
+    await authority.async_load()
+    authority.capture(
+        "light.old", "off", "state", "lapsed-fp",
+        observed_at_ms=_now_ms(-3_600_000 - 60_000),
+    )
+    await authority.async_drain()
+    authority.capture("light.fresh", "on", "service", "fresh-fp", observed_at_ms=_now_ms())
+    await authority.async_drain()
+    assert {r["entityId"] for r in store.payload["records"]} == {"light.old", "light.fresh"}
+    assert not authority.blocks("light.old")
+    assert authority.blocking_evidence("light.old") is None
+    assert "lapsed-fp" in store.payload["recentFingerprints"]
+    assert "fresh-fp" in store.payload["recentFingerprints"]
+
+
+async def test_duplicate_fingerprint_after_expiry_is_still_rejected() -> None:
+    store = _Store()
+    authority = ManualLightAuthority(store)
+    await authority.async_load()
+    fingerprint = "same-gesture"
+    authority.capture(
+        "light.demo", "off", "state", fingerprint,
+        observed_at_ms=_now_ms(-3_600_000 - 60_000),
+    )
+    await authority.async_drain()
+    original = authority.record("light.demo")
+    assert original is not None and not authority.blocks("light.demo")
+    # The same physical gesture must never restart the clock.
+    assert not authority.capture(
+        "light.demo", "off", "state", fingerprint, observed_at_ms=_now_ms(),
+    )
+    assert authority.record("light.demo") == original
+    # A genuinely new action does start a fresh priority window.
+    assert authority.capture(
+        "light.demo", "on", "service", "new-gesture", observed_at_ms=_now_ms(),
+    )
+    assert authority.blocks("light.demo")
+
+
+async def test_expired_storage_failure_barriers_still_deny(monkeypatch) -> None:
+    class _FailingStore(_Store):
+        async def async_save(self, payload): raise RuntimeError("disk")
+    import custom_components.hausman_hub.application.manual_light_authority as module
+    authority = ManualLightAuthority(_FailingStore())
+    with pytest.raises(RuntimeError):
+        await authority.async_capture(
+            "light.demo", "off", "state", "ctx-fail", observed_at_ms=_now_ms(),
+        )
+    monkeypatch.setattr(module.time, "time", lambda: 2_000_000_000.0)
+    assert authority.blocks("light.demo")
+    assert authority.barrier_reason == "storage_unavailable"

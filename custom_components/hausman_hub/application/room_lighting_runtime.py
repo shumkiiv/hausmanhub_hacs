@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 import logging
 import math
@@ -58,6 +58,7 @@ from ..domain.room_lighting_engine import (
     ProtectionSnapshot,
     RoomLightingDecision,
     RoomLightingContext,
+    SensorSnapshot,
     bathroom_auxiliary_inputs,
     curve_profile_block_reason,
     evaluate_curve_room,
@@ -79,7 +80,7 @@ from .power_evidence import (
 )
 from .room_lighting_ha_executor import RoomLightingHaExecutor
 from .manual_light_auto_return import ManualLightAutoReturn
-from .room_lighting_ha_state import RoomLightingHaStateProvider, _resolve_timezone
+from .room_lighting_ha_state import RoomLightingHaStateProvider, _last_changed_ms, _resolve_timezone
 from .room_power_migration import (
     EXACT_POWER_TARGET_MANIFEST,
     ExactPowerDecision,
@@ -102,7 +103,53 @@ _LOGGER = logging.getLogger(__name__)
 
 EVENT_CALL_SERVICE = "call_service"
 CURVE_PRESENCE_CONFIRM_MS = 15_000
+# Delivery episodes of an unconfirmed power-on (see _power_attempt_blocked):
+# a confirmed presence opens ONE bounded, spaced delivery episode.
+POWER_RETRY_LIMIT_PER_REVISION = 3
+POWER_RETRY_INTERVAL_MS = 8_000
 CURVE_MOTION_CONFIRM_WINDOW_MS = 20_000
+
+
+@dataclass(frozen=True, slots=True)
+class PowerDeliveryEpisode:
+    """One bounded delivery episode of an unconfirmed power-on.
+
+    Opened by a confirmed presence after the previous attempt went
+    unconfirmed; counts spaced attempts over the same evidence revision.
+    A fresh relay report (a new evidence revision) replaces it; an
+    EXHAUSTED episode is replaced only by that fresh evidence — a
+    restart or a stale-untrusted revision never refreshes the budget."""
+
+    revision: str
+    presence_since: int
+    attempts: int
+    last_attempt_ms: int
+    exhausted: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class PowerAttemptPlan:
+    """Read-only admission result; a retry is committed only at send completion."""
+
+    revision: str
+    retry_episode: PowerDeliveryEpisode | None = None
+
+
+@dataclass(slots=True)
+class PowerAttempt:
+    """Transient execution state, owned by the existing source lock."""
+
+    source: str
+    revision: str
+    room_id: str
+    detail: dict[str, object]
+    plan: PowerAttemptPlan | None = None
+    pending: bool = False
+    entered_at: int | None = None
+    previous_grace: tuple[str, int] | None = None
+
+
+
 ENTRY_WAKEUP_GRACE_MS = 5_000
 # Default manual priority (owner rule): an active legacy light-priority
 # claim transfers to the shadow branch as a hold of at most this length.
@@ -1171,6 +1218,11 @@ class RoomLightingRuntime:
         # отправляется повторно, пока прибор не отчитается новым значением.
         self._last_untrusted_adjustment: dict[str, tuple[int | None, int | None]] = {}
         self._power_failures: dict[str, tuple[str, str]] = {}
+        # Delivery episodes of an unconfirmed power-on (see
+        # _power_attempt_blocked): bounded, spaced attempts over an
+        # unreliable transport while a confirmed presence is active.
+        self._power_delivery: dict[str, PowerDeliveryEpisode] = {}
+        self._power_failure_at: dict[str, int] = {}
         self._dispatch_overflow_latch = False
         self._dispatch_overflow_blocked_after_ms: int | None = None
         self._dispatch_overflow_boundary_unknown = False
@@ -1918,36 +1970,6 @@ class RoomLightingRuntime:
                 entity_id = target.entity_id
                 if not isinstance(entity_id, str):
                     continue
-                record = (
-                    authority.record(entity_id)
-                    if authority is not None
-                    else None
-                )
-                if record is not None:
-                    now_ms = self._now_ms()
-                    holds[entity_id] = ManualHoldView(
-                        entity_id=entity_id,
-                        action=record.action,
-                        source=record.source,
-                        proven_at_utc_ms=record.observed_at_ms,
-                        # The shared authority is the release source of
-                        # truth: while its record exists the view re-arms
-                        # (never shorter than the recorded deadline), so
-                        # the shadow branch never unlocks earlier than
-                        # the authority's own barrier.
-                        priority_until_utc_ms=max(
-                            record.deadline_ms,
-                            now_ms + MANUAL_PRIORITY_TRANSFER_MS,
-                        ),
-                        # Opaque: real authority fingerprints embed HA
-                        # entity names and must not cross the adapter
-                        # (SEC-C6-R2-01).
-                        evidence_id=(
-                            f"auth.hold."
-                            f"{_opaque_entity_tag(record.fingerprint)}"
-                        ),
-                    )
-                    continue
                 if authority is not None:
                     # The FULL prohibition of the authority transfers, not
                     # only its own record: barriers (uncertain selector,
@@ -1960,6 +1982,11 @@ class RoomLightingRuntime:
                         return None
                     if blocked:
                         try:
+                            # AUD-HOLD-03 (luna, second round 2026-10-12):
+                            # the projection uses ONLY ACTIVE evidence — a
+                            # lapsed own record must never mask an active
+                            # related one or a barrier (blocking_evidence()
+                            # applies the same expiry as blocks()).
                             evidence = authority.blocking_evidence(entity_id)
                         except Exception:  # noqa: BLE001 - fail closed
                             return None
@@ -1981,13 +2008,18 @@ class RoomLightingRuntime:
                                 if evidence is not None
                                 else now_ms
                             ),
-                            priority_until_utc_ms=max(
-                                (
-                                    evidence.deadline_ms
-                                    if evidence is not None
-                                    else 0
-                                ),
-                                now_ms + MANUAL_PRIORITY_TRANSFER_MS,
+                            priority_until_utc_ms=(
+                                # AUD-HOLD-02 (luna 2026-10-12): a concrete
+                                # ACTIVE timed record holds exactly to its
+                                # recorded deadline (the clock never re-arms
+                                # it here). Barrier-only or untimeable
+                                # evidence (legacy/unknown) keeps the
+                                # conservative sliding transfer.
+                                evidence.deadline_ms
+                                if evidence is not None
+                                and evidence.action != "unknown"
+                                and not evidence.legacy
+                                else now_ms + MANUAL_PRIORITY_TRANSFER_MS
                             ),
                             evidence_id=(
                                 f"auth.hold."
@@ -2785,6 +2817,7 @@ class RoomLightingRuntime:
         # A single broken room must never crash setup or stop the other rooms.
         try:
             context = await self._build_context(config, moment)
+            await self._reconcile_manual_restart(config)
             morning_waiting = False
             if config.profile == "day_curve":
                 morning = config.morning
@@ -3016,7 +3049,6 @@ class RoomLightingRuntime:
         except Exception:  # noqa: BLE001 - no durable marker, no power command
             _LOGGER.warning("room lighting pending power dispatch write failed")
             return False
-        self._power_failures[source_entity_id] = ("turn_on", evidence_revision)
         return True
 
     async def _persist_not_sent_dispatch_closure(
@@ -3062,33 +3094,23 @@ class RoomLightingRuntime:
         operation_id: str | None,
         config_version: int | None,
     ) -> bool:
-        """Close a saved power intent before its executor boundary.
-
-        The shadow service already knows how to clear a pending power marker
-        from a not-sent dispatch receipt. Keep the in-memory retry guard until
-        that durable closure succeeds, so a storage failure remains fail-closed.
-        """
-
-        receipt: dict[str, object] = {
-            "power": {
-                "sourceEntityId": source_entity_id,
-                "evidenceRevision": evidence_revision,
-                "dispatchAttempt": False,
-                "sent": False,
-                "sendOutcome": "not_sent",
-                "reason": reason,
-            }
+        """Compatibility entry point for closing only a proven unsent intent."""
+        detail: dict[str, object] = {
+            "sourceEntityId": source_entity_id,
+            "evidenceRevision": evidence_revision,
+            "dispatchAttempt": False,
+            "sent": False,
+            "sendOutcome": "not_sent",
+            "reason": reason,
         }
-        closed = await self._persist_not_sent_dispatch_closure(
-            at=at,
-            room_id=room_id,
-            receipt=receipt,
-            operation_id=operation_id,
-            config_version=config_version,
+        previous = self._preserved_power_failure(source_entity_id)
+        if previous is not None:
+            detail["_preservedFailure"] = previous
+            detail["deliveryEpisodeOpen"] = True
+        return await self._persist_power_result(
+            at=at, room_id=room_id, detail=detail,
+            operation_id=operation_id, config_version=config_version,
         )
-        if closed:
-            self._power_failures.pop(source_entity_id, None)
-        return closed
 
     @staticmethod
     def _dispatch_permission_token(
@@ -3758,6 +3780,7 @@ class RoomLightingRuntime:
                     room_id=config.room_id,
                     operation_id=operation_id,
                     config_version=config_version,
+                    command_action=command.action.value,
                 )
                 receipt["power"] = power_detail
                 if not powered:
@@ -3832,6 +3855,7 @@ class RoomLightingRuntime:
                     room_id=config.room_id,
                     operation_id=operation_id,
                     config_version=config_version,
+                    command_action=command.action.value,
                 )
                 receipt["power"] = power_detail
                 if not powered:
@@ -4614,6 +4638,7 @@ class RoomLightingRuntime:
         room_id: str,
         operation_id: str | None,
         config_version: int | None,
+        command_action: str | None = None,
     ) -> tuple[bool, dict[str, object]]:
         async with self._power_source_lock(dependency.power_source_entity_id):
             return await self._ensure_power_source_locked(
@@ -4622,6 +4647,7 @@ class RoomLightingRuntime:
                 room_id=room_id,
                 operation_id=operation_id,
                 config_version=config_version,
+                command_action=command_action,
             )
 
     async def _ensure_power_source_locked(
@@ -4632,187 +4658,17 @@ class RoomLightingRuntime:
         room_id: str,
         operation_id: str | None,
         config_version: int | None,
+        command_action: str | None = None,
     ) -> tuple[bool, dict[str, object]]:
-        """Prepare the one source a dependent target needs, or refuse.
-
-        The exact graph is the source of truth: a ``requires_on`` source is
-        never switched on automatically, while ``auto_turn_on`` follows the
-        shared policy, a confirmed read-back and the configured warm-up. After
-        the wait the caller re-checks manual protection and reservations.
-        """
-
-        source_entity_id = dependency.power_source_entity_id
-        detail: dict[str, object] = {
-            "sourceEntityId": source_entity_id,
-            "policy": dependency.policy,
-            "warmupSeconds": dependency.warmup_seconds,
-            "sourceTurnedOn": False,
-            "waitedSeconds": 0.0,
-            "dispatchAttempt": False,
-            "sent": False,
-            "sendOutcome": "not_sent",
-        }
-        if self._is_reserved_target_or_entity(None, source_entity_id):
-            detail["reason"] = "power_source_reserved"
-            return False, detail
-        away_block = self._automatic_away_block_reason()
-        if away_block is not None:
-            detail["reason"] = away_block
-            return False, detail
-        evidence_revision = self._power_evidence_revision(source_entity_id)
-        detail["evidenceRevision"] = evidence_revision
-        if self._power_attempt_blocked(source_entity_id):
-            # An unconfirmed power preparation is never repeated until the
-            # source publishes new physical evidence.
-            detail["reason"] = "power_source_unconfirmed"
-            detail["suppressed"] = True
-            return False, detail
-        state = self._entity_state_object(source_entity_id)
-        if trusted_power_state(state, same_state_confirmation=True) == "on":
-            detail["reason"] = "power_source_on"
-            return True, detail
-        if dependency.policy != AUTO_TURN_ON_POLICY:
-            detail["reason"] = (
-                "power_source_off"
-                if state is not None
-                and str(getattr(state, "state", "unknown")) == "off"
-                else "power_source_unavailable"
-            )
-            return False, detail
-        resolver = self._electrical_breaker_resolver
-        if resolver is None:
-            detail["reason"] = "automatic_power_source_safety_unavailable"
-            return False, detail
-        try:
-            breaker = resolver(source_entity_id)
-        except Exception:  # noqa: BLE001 - an unknown breaker must fail closed
-            detail["reason"] = "automatic_power_source_safety_unavailable"
-            return False, detail
-        if breaker:
-            detail["reason"] = "automatic_breaker_power_on_forbidden"
-            return False, detail
-        ensure_power = getattr(self._executor, "async_power_on", None)
-        if not callable(ensure_power) or self._hass is None:
-            detail["reason"] = "power_source_unavailable"
-            return False, detail
-        if not await self._persist_pending_power_dispatch(
-            at=at,
+        """Use the shared delivery lifecycle with exact dependency policy."""
+        return await self._run_power_attempt(
+            dependency.power_source_entity_id,
             room_id=room_id,
-            source_entity_id=source_entity_id,
-            evidence_revision=evidence_revision,
             operation_id=operation_id,
             config_version=config_version,
-        ):
-            detail["reason"] = "power_pending_persistence_failed"
-            return False, detail
-        away_block = self._automatic_away_block_reason()
-        if away_block is not None:
-            detail["reason"] = away_block
-            await self._persist_not_sent_power_dispatch_closure(
-                at=at,
-                room_id=room_id,
-                source_entity_id=source_entity_id,
-                evidence_revision=evidence_revision,
-                reason=away_block,
-                operation_id=operation_id,
-                config_version=config_version,
-            )
-            return False, detail
-        if self._is_reserved_target_or_entity(None, source_entity_id):
-            detail["reason"] = "power_source_reserved"
-            await self._persist_not_sent_power_dispatch_closure(
-                at=at,
-                room_id=room_id,
-                source_entity_id=source_entity_id,
-                evidence_revision=evidence_revision,
-                reason="power_source_reserved",
-                operation_id=operation_id,
-                config_version=config_version,
-            )
-            return False, detail
-        self._executing_actions[source_entity_id] = "turn_on"
-        self._command_grace[source_entity_id] = ("turn_on", self._now_ms())
-        detail["dispatchAttempt"] = True
-        try:
-            kwargs = (
-                {"protected_entities": self._power_protected_entities(room_id)}
-                if isinstance(self._executor, RoomLightingHaExecutor) else {}
-            )
-            receipt = await ensure_power(self._hass, source_entity_id, **kwargs)
-        except Exception:  # noqa: BLE001 - keep the room isolated
-            # The command may have reached the relay before the exception, so
-            # the outcome is unknown, not a confirmed failure or a success.
-            self._power_failures[source_entity_id] = (
-                "turn_on",
-                evidence_revision,
-            )
-            detail["reason"] = "power_source_uncertain"
-            detail["sent"] = False
-            detail["sendOutcome"] = "uncertain"
-            return False, detail
-        finally:
-            self._executing_actions.pop(source_entity_id, None)
-        if isinstance(receipt, Mapping):
-            confirmed = bool(receipt.get("confirmed"))
-            sent = bool(receipt.get("sent"))
-            send_outcome = str(receipt.get("sendOutcome") or ("sent" if sent else "not_sent"))
-            turned_on = sent
-            detail["powerPreparation"] = dict(receipt)
-        else:
-            if isinstance(receipt, bool):
-                confirmed = receipt
-                sent = receipt
-                send_outcome = "sent" if receipt else "uncertain"
-            elif receipt is None:
-                confirmed = False
-                sent = False
-                send_outcome = "uncertain"
-            else:
-                confirmed = bool(getattr(receipt, "confirmed", False))
-                sent = bool(getattr(receipt, "sent", False))
-                send_outcome = str(
-                    getattr(receipt, "send_outcome", "sent" if sent else "uncertain")
-                )
-            turned_on = sent
-        if send_outcome not in {"not_sent", "sent", "uncertain"}:
-            send_outcome = "sent" if sent else "not_sent"
-        detail["dispatchAttempt"] = send_outcome in {"sent", "uncertain"}
-        detail["sent"] = sent
-        detail["sendOutcome"] = send_outcome
-        if not confirmed:
-            if detail["dispatchAttempt"]:
-                self._power_failures[source_entity_id] = (
-                    "turn_on",
-                    evidence_revision,
-                )
-            if isinstance(receipt, Mapping) and send_outcome == "not_sent":
-                reason = receipt.get("reason")
-                detail["reason"] = str(reason or "power_source_unavailable")
-            elif send_outcome == "uncertain":
-                detail["reason"] = "power_source_uncertain"
-            else:
-                detail["reason"] = "power_source_unconfirmed"
-            if not detail["dispatchAttempt"]:
-                self._power_failures.pop(source_entity_id, None)
-            return False, detail
-        self._power_failures.pop(source_entity_id, None)
-        detail["sourceTurnedOn"] = turned_on
-        if turned_on and dependency.warmup_seconds > 0:
-            await asyncio.sleep(dependency.warmup_seconds)
-            detail["waitedSeconds"] = dependency.warmup_seconds
-            state = self._entity_state_object(source_entity_id)
-            if (
-                trusted_power_state(state, same_state_confirmation=True) != "on"
-                or state_is_restored_or_cached(state)
-            ):
-                self._power_failures[source_entity_id] = (
-                    "turn_on",
-                    evidence_revision,
-                )
-                detail["reason"] = "power_source_unconfirmed"
-                return False, detail
-        detail["reason"] = "power_source_on"
-        return True, detail
+            command_action=command_action,
+            dependency=dependency,
+        )
 
     async def _ensure_legacy_room_power(
         self,
@@ -4822,6 +4678,7 @@ class RoomLightingRuntime:
         room_id: str,
         operation_id: str | None,
         config_version: int | None,
+        command_action: str | None = None,
     ) -> tuple[bool, dict[str, object]]:
         async with self._power_source_lock(power_entity):
             return await self._ensure_legacy_room_power_locked(
@@ -4830,6 +4687,7 @@ class RoomLightingRuntime:
                 room_id=room_id,
                 operation_id=operation_id,
                 config_version=config_version,
+                command_action=command_action,
             )
 
     async def _ensure_legacy_room_power_locked(
@@ -4840,126 +4698,349 @@ class RoomLightingRuntime:
         room_id: str,
         operation_id: str | None,
         config_version: int | None,
+        command_action: str | None = None,
     ) -> tuple[bool, dict[str, object]]:
-        """The legacy whole-room power path for rooms without an exact claim."""
+        """Legacy mapping, using the same source-scoped delivery lifecycle."""
+        return await self._run_power_attempt(
+            power_entity,
+            room_id=room_id,
+            operation_id=operation_id,
+            config_version=config_version,
+            command_action=command_action,
+        )
 
+    async def _run_power_attempt(
+        self,
+        source: str,
+        *,
+        room_id: str,
+        operation_id: str | None,
+        config_version: int | None,
+        command_action: str | None,
+        dependency: DevicePowerDependency | None = None,
+    ) -> tuple[bool, dict[str, object]]:
+        """Own one complete transition while the source lock is held.
+
+        Admission is read-only. Only a possible physical send consumes a
+        retry. The power result is persisted here, before another room can
+        use the source; the later room receipt must not apply it again.
+        """
+        revision = self._power_evidence_revision(source)
+        self._release_power_failure_on_fresh_evidence(source, revision)
         detail: dict[str, object] = {
-            "sourceEntityId": power_entity,
+            "sourceEntityId": source,
+            "evidenceRevision": revision,
             "reason": "power_source_unavailable",
             "dispatchAttempt": False,
             "sent": False,
             "sendOutcome": "not_sent",
         }
-        ensure_power = getattr(self._executor, "async_power_on", None)
-        if not callable(ensure_power) or self._hass is None:
-            return False, detail
-        away_block = self._automatic_away_block_reason()
-        if away_block is not None:
-            detail["reason"] = away_block
-            return False, detail
-        evidence_revision = self._power_evidence_revision(power_entity)
-        detail["evidenceRevision"] = evidence_revision
-        if self._power_attempt_blocked(power_entity):
-            detail["reason"] = "power_source_unconfirmed"
-            detail["suppressed"] = True
-            return False, detail
-        state = self._entity_state_object(power_entity)
+        if dependency is not None:
+            detail.update(
+                policy=dependency.policy,
+                warmupSeconds=dependency.warmup_seconds,
+                sourceTurnedOn=False,
+                waitedSeconds=0.0,
+            )
+        attempt = PowerAttempt(source, revision, room_id, detail)
+        powered = False
+        try:
+            powered = await self._execute_power_attempt(
+                attempt,
+                operation_id=operation_id,
+                config_version=config_version,
+                command_action=command_action,
+                dependency=dependency,
+            )
+        finally:
+            saved = await self._finish_power_attempt(
+                attempt,
+                powered=powered,
+                operation_id=operation_id,
+                config_version=config_version,
+            )
+        return powered and saved, detail
+
+    async def _execute_power_attempt(
+        self,
+        attempt: PowerAttempt,
+        *,
+        operation_id: str | None,
+        config_version: int | None,
+        command_action: str | None,
+        dependency: DevicePowerDependency | None,
+    ) -> bool:
+        source, detail = attempt.source, attempt.detail
+        refusal = self._power_send_guard(source)
+        if refusal is not None:
+            detail["reason"] = refusal
+            return False
+        attempt.plan = self._plan_power_attempt(
+            source, room_id=attempt.room_id, command_action=command_action
+        )
+        if attempt.plan is None:
+            detail.update(reason="power_source_unconfirmed", suppressed=True)
+            return False
+        state = self._entity_state_object(source)
         if trusted_power_state(state, same_state_confirmation=True) == "on":
             detail["reason"] = "power_source_on"
-            return True, detail
-        if not await self._persist_pending_power_dispatch(
-            at=at,
-            room_id=room_id,
-            source_entity_id=power_entity,
-            evidence_revision=evidence_revision,
+            return True
+        if dependency is not None:
+            if dependency.policy != AUTO_TURN_ON_POLICY:
+                detail["reason"] = (
+                    "power_source_off"
+                    if state is not None and getattr(state, "state", None) == "off"
+                    else "power_source_unavailable"
+                )
+                return False
+            resolver = self._electrical_breaker_resolver
+            try:
+                breaker = resolver(source) if resolver is not None else None
+            except Exception:  # noqa: BLE001 - unknown safety state refuses power
+                breaker = None
+            if breaker is None:
+                detail["reason"] = "automatic_power_source_safety_unavailable"
+                return False
+            if breaker:
+                detail["reason"] = "automatic_breaker_power_on_forbidden"
+                return False
+        ensure_power = getattr(self._executor, "async_power_on", None)
+        if not callable(ensure_power) or self._hass is None:
+            return False
+        attempt.pending = await self._persist_pending_power_dispatch(
+            at=self._now_ms(),
+            room_id=attempt.room_id,
+            source_entity_id=source,
+            evidence_revision=attempt.revision,
             operation_id=operation_id,
             config_version=config_version,
-        ):
+        )
+        if not attempt.pending:
             detail["reason"] = "power_pending_persistence_failed"
-            return False, detail
-        away_block = self._automatic_away_block_reason()
-        if away_block is not None:
-            detail["reason"] = away_block
-            await self._persist_not_sent_power_dispatch_closure(
-                at=at,
-                room_id=room_id,
-                source_entity_id=power_entity,
-                evidence_revision=evidence_revision,
-                reason=away_block,
-                operation_id=operation_id,
-                config_version=config_version,
-            )
-            return False, detail
-        if self._is_reserved_target_or_entity(None, power_entity):
-            detail["reason"] = "power_source_reserved"
-            await self._persist_not_sent_power_dispatch_closure(
-                at=at,
-                room_id=room_id,
-                source_entity_id=power_entity,
-                evidence_revision=evidence_revision,
-                reason="power_source_reserved",
-                operation_id=operation_id,
-                config_version=config_version,
-            )
-            return False, detail
-        self._executing_actions[power_entity] = "turn_on"
-        self._command_grace[power_entity] = ("turn_on", self._now_ms())
-        detail["dispatchAttempt"] = True
+            return False
+
+        # Every awaited step can invalidate admission. Re-plan without
+        # spending anything, using both current sensor evidence and intent.
+        refusal = self._power_send_guard(source)
+        if refusal is not None:
+            detail["reason"] = refusal
+            return False
+        if (
+            self._power_evidence_revision(source) != attempt.revision
+            or self._plan_power_attempt(
+                source, room_id=attempt.room_id, command_action=command_action
+            ) is None
+        ):
+            detail["reason"] = "power_source_unconfirmed"
+            return False
+
+        attempt.entered_at = self._now_ms()
+        detail.update(dispatchAttempt=True, sendOutcome="uncertain")
+        self._executing_actions[source] = "turn_on"
+        attempt.previous_grace = self._command_grace.get(source)
+        self._command_grace[source] = ("turn_on", attempt.entered_at)
         try:
             kwargs = (
-                {"protected_entities": self._power_protected_entities(room_id)}
+                {"protected_entities": self._power_protected_entities(attempt.room_id)}
                 if isinstance(self._executor, RoomLightingHaExecutor) else {}
             )
-            receipt = await ensure_power(self._hass, power_entity, **kwargs)
-        except Exception:  # noqa: BLE001 - keep the room isolated
-            self._power_failures[power_entity] = ("turn_on", evidence_revision)
+            receipt = await ensure_power(self._hass, source, **kwargs)
+        except asyncio.CancelledError:
             detail["reason"] = "power_source_uncertain"
-            detail["sent"] = False
-            detail["sendOutcome"] = "uncertain"
-            return False, detail
+            raise
+        except Exception:  # noqa: BLE001 - the relay may have received the command
+            detail["reason"] = "power_source_uncertain"
+            return False
         finally:
-            self._executing_actions.pop(power_entity, None)
+            self._executing_actions.pop(source, None)
+
+        confirmed, sent, outcome = self._power_receipt_outcome(receipt)
+        detail.update(
+            sent=sent,
+            sendOutcome=outcome,
+            dispatchAttempt=outcome in {"sent", "uncertain"},
+        )
         if isinstance(receipt, Mapping):
-            powered = bool(receipt.get("confirmed"))
-            sent = bool(receipt.get("sent"))
-            send_outcome = str(receipt.get("sendOutcome") or ("sent" if sent else "not_sent"))
             detail["powerPreparation"] = dict(receipt)
+        if not confirmed:
+            detail["reason"] = (
+                str(receipt.get("reason") or "power_source_unavailable")
+                if isinstance(receipt, Mapping) and outcome == "not_sent"
+                else "power_source_uncertain" if outcome == "uncertain"
+                else "power_source_unconfirmed"
+            )
+            return False
+        if dependency is not None:
+            detail["sourceTurnedOn"] = sent
+            if sent and dependency.warmup_seconds > 0:
+                # Cancellation remains an attempted, unresolved delivery.
+                await asyncio.sleep(dependency.warmup_seconds)
+                detail["waitedSeconds"] = dependency.warmup_seconds
+                state = self._entity_state_object(source)
+                if (
+                    trusted_power_state(state, same_state_confirmation=True) != "on"
+                    or state_is_restored_or_cached(state)
+                ):
+                    detail["reason"] = "power_source_unconfirmed"
+                    return False
+        detail["reason"] = "power_source_on"
+        return True
+
+    def _power_send_guard(self, source: str) -> str | None:
+        if self._is_reserved_target_or_entity(None, source):
+            return "power_source_reserved"
+        return self._automatic_away_block_reason()
+
+    @staticmethod
+    def _power_receipt_outcome(receipt: object) -> tuple[bool, bool, str]:
+        """Normalize the executor result without turning uncertainty into refusal."""
+        if isinstance(receipt, Mapping):
+            confirmed = receipt.get("confirmed") is True
+            sent = receipt.get("sent") is True
+            outcome = receipt.get("sendOutcome")
+        elif isinstance(receipt, bool):
+            return receipt, receipt, "sent" if receipt else "uncertain"
         else:
-            if isinstance(receipt, bool):
-                powered = receipt
-                sent = receipt
-                send_outcome = "sent" if receipt else "uncertain"
-            elif receipt is None:
-                powered = False
-                sent = False
-                send_outcome = "uncertain"
+            confirmed = getattr(receipt, "confirmed", False) is True
+            sent = getattr(receipt, "sent", False) is True
+            outcome = getattr(receipt, "send_outcome", None)
+        if not isinstance(outcome, str) or outcome not in {"sent", "not_sent", "uncertain"}:
+            return False, sent, "sent" if sent else "uncertain"
+        if (sent and outcome != "sent") or (outcome == "sent" and not sent):
+            return False, sent, "sent" if sent else "uncertain"
+        if outcome == "uncertain":
+            confirmed = False
+        return confirmed, sent, str(outcome)
+
+    async def _finish_power_attempt(
+        self,
+        attempt: PowerAttempt,
+        *,
+        powered: bool,
+        operation_id: str | None,
+        config_version: int | None,
+    ) -> bool:
+        """Commit memory and the durable power result once for every exit."""
+        source, detail = attempt.source, attempt.detail
+        possible_send = (
+            attempt.entered_at is not None
+            and detail.get("sendOutcome") in {"sent", "uncertain"}
+        )
+        if (
+            attempt.entered_at is not None
+            and detail.get("sendOutcome") == "not_sent"
+            and self._command_grace.get(source) == ("turn_on", attempt.entered_at)
+        ):
+            if attempt.previous_grace is None:
+                self._command_grace.pop(source, None)
             else:
-                powered = bool(getattr(receipt, "confirmed", False))
-                sent = bool(getattr(receipt, "sent", False))
-                send_outcome = str(
-                    getattr(receipt, "send_outcome", "sent" if sent else "uncertain")
-                )
-        if send_outcome not in {"not_sent", "sent", "uncertain"}:
-            send_outcome = "sent" if sent else "not_sent"
-        detail["dispatchAttempt"] = send_outcome in {"sent", "uncertain"}
-        detail["sent"] = sent
-        detail["sendOutcome"] = send_outcome
-        if powered:
-            self._power_failures.pop(power_entity, None)
-            detail["reason"] = "power_source_on"
-            return True, detail
-        if detail["dispatchAttempt"]:
-            self._power_failures[power_entity] = ("turn_on", evidence_revision)
-        else:
-            self._power_failures.pop(power_entity, None)
-        if isinstance(receipt, Mapping) and send_outcome == "not_sent":
-            reason = receipt.get("reason")
-            detail["reason"] = str(reason or "power_source_unavailable")
-        elif send_outcome == "uncertain":
-            detail["reason"] = "power_source_uncertain"
-        else:
-            detail["reason"] = "power_source_unconfirmed"
-        return False, detail
+                self._command_grace[source] = attempt.previous_grace
+        if possible_send:
+            self._commit_power_attempt(source, attempt.plan, attempt.entered_at)
+            detail["_attemptAt"] = attempt.entered_at
+        elif not powered:
+            previous = self._preserved_power_failure(source)
+            if previous is not None:
+                detail["_preservedFailure"] = previous
+                detail["deliveryEpisodeOpen"] = True
+
+        saved = await self._persist_power_result(
+            at=self._now_ms(),
+            room_id=attempt.room_id,
+            detail=detail,
+            operation_id=operation_id,
+            config_version=config_version,
+        )
+        if saved:
+            if powered:
+                self._clear_power_delivery(source)
+            return True
+        # The store still has its pending marker or the preceding failure.
+        # Do not grant a retry on the strength of an uncommitted completion.
+        if attempt.pending or possible_send:
+            self._power_failures.setdefault(source, ("turn_on", attempt.revision))
+            previous = self._power_delivery.get(source)
+            self._power_delivery[source] = PowerDeliveryEpisode(
+                revision=previous.revision if previous else attempt.revision,
+                presence_since=previous.presence_since if previous else 0,
+                attempts=previous.attempts if previous else 0,
+                last_attempt_ms=previous.last_attempt_ms if previous else 0,
+                exhausted=True,
+            )
+        detail["reason"] = "power_result_persistence_failed"
+        detail["deliveryEpisodeOpen"] = source in self._power_failures
+        return False
+
+    def _commit_power_attempt(
+        self, source: str, plan: PowerAttemptPlan | None, at: int
+    ) -> None:
+        """Account for one actual or uncertain send, never for admission."""
+        revision = plan.revision if plan is not None else self._power_evidence_revision(source)
+        self._record_power_failure(source, revision, at)
+        if plan is not None and plan.retry_episode is not None:
+            episode = plan.retry_episode
+            self._power_delivery[source] = replace(
+                episode, attempts=episode.attempts + 1, last_attempt_ms=at
+            )
+
+    def _clear_power_delivery(self, source: str) -> None:
+        self._power_failures.pop(source, None)
+        self._power_failure_at.pop(source, None)
+        self._power_delivery.pop(source, None)
+
+    def _release_power_failure_on_fresh_evidence(self, source: str, revision: str) -> None:
+        """An explicit evidence transition, separate from the read-only gate."""
+        failure = self._power_failures.get(source)
+        episode = self._power_delivery.get(source)
+        previous = failure[1] if failure is not None else episode.revision if episode else None
+        if (
+            previous is not None
+            and previous != revision
+            and self._trusted_evidence_revision(revision)
+        ):
+            self._clear_power_delivery(source)
+
+    def _preserved_power_failure(self, source: str) -> dict[str, object] | None:
+        failure = self._power_failures.get(source)
+        episode = self._power_delivery.get(source)
+        if failure is None and episode is None:
+            return None
+        revision = failure[1] if failure is not None else episode.revision
+        record: dict[str, object] = {
+            "key": f"power:{source}", "kind": "power", "entityId": source,
+            "action": "turn_on", "evidenceRevision": revision,
+        }
+        at = self._power_failure_at.get(source)
+        if at is None and episode is not None:
+            at = episode.last_attempt_ms
+        if isinstance(at, int) and not isinstance(at, bool) and at > 0:
+            record["blockedAfterMs"] = at
+        return record
+
+    async def _persist_power_result(
+        self,
+        *,
+        at: int,
+        room_id: str,
+        detail: dict[str, object],
+        operation_id: str | None,
+        config_version: int | None,
+    ) -> bool:
+        recorder = getattr(self._shadow, "async_record_dispatch", None)
+        if not callable(recorder):
+            return False
+        try:
+            await recorder(
+                at=at, room_id=room_id, receipts=({"power": detail},),
+                operation_id=operation_id, config_version=config_version,
+            )
+        except Exception:  # noqa: BLE001 - keep the pending marker fail-closed
+            _LOGGER.warning("room lighting final power result write failed")
+            return False
+        # Only the nested power part is complete; the target still needs
+        # its own receipt. This flag is stripped before journal storage.
+        detail["_durable_recorded"] = True
+        return True
 
     # -- helpers -----------------------------------------------------------
 
@@ -5046,6 +5127,88 @@ class RoomLightingRuntime:
             return False
         state = self._hass.states.get(entity_id)
         return state is not None and str(getattr(state, "state", "")).lower() == "on"
+
+    async def _reconcile_manual_restart(self, config: RoomLightingConfig) -> bool:
+        """Provide live group evidence to the shared deny-only recovery owner."""
+        authority = self._manual_light_authority
+        reconcile = getattr(authority, "async_reconcile_restart", None)
+        if not callable(reconcile):
+            return False
+        entities = tuple(target.entity_id for target in config.devices.light_targets)
+        sensor_proof: tuple[tuple[object, ...], ...] | None = None
+
+        def observe_off() -> Mapping[str, int] | None:
+            nonlocal sensor_proof
+            if not self._running or self._configs.get(config.room_id) is not config:
+                return None
+            relevant = [sensor for sensor in config.devices.sensors
+                        if sensor.kind in _PRESENCE_KINDS]
+            if relevant:
+                now = self._now_ms()
+                snapshots: list[SensorSnapshot] = []
+                evidence: list[tuple[object, ...]] = []
+                for sensor in relevant:
+                    value = self._entity_trusted_state(sensor.entity_id)
+                    if value == "unknown":
+                        return None
+                    state = self._entity_state_object(sensor.entity_id)
+                    changed = _last_changed_ms(state, now=now)
+                    snapshots.append(SensorSnapshot(
+                        sensor_id=sensor.id, kind=sensor.kind,
+                        state=SensorState(value), last_changed=changed,
+                    ))
+                    evidence.append((sensor.entity_id, value, changed,
+                                     self._state_observed_ms(state)))
+                current_proof = tuple(evidence)
+                if sensor_proof is not None and current_proof != sensor_proof:
+                    return None
+                # Use the ordinary absence transition, including the exact
+                # return moment and new-OFF start. The room snapshot may lag
+                # a live event while this room is awaiting durable storage.
+                self._observe_absence_sensors(config, tuple(snapshots), now)
+                absence = self._absence.get(config.room_id)
+                if absence is None or not absence[0] or absence[1] is None:
+                    return None
+                end = absence[2] if absence[2] is not None else now
+                if (self._started_at is None or absence[1] < self._started_at
+                        or end - absence[1]
+                        < config.manual_off_protection.stable_absence_seconds * 1000):
+                    return None
+                sensor_proof = current_proof
+            elif config.manual_off_protection.release_mode.value != "timer_only":
+                return None
+            result: dict[str, int] = {}
+            dependencies = self._power_dependencies()
+            decision = self._exact_power_decision(config, dependencies)
+            for target in config.devices.light_targets:
+                entity = target.entity_id
+                if entity is None or target.id in decision.unproven_target_ids:
+                    return None
+                observed_entity = entity
+                # Reuse only the already-proven physical edge. Alternative
+                # lights are never presumed off because the chandelier is off.
+                dependency = (decision.projection or {}).get(entity)
+                if dependency is not None:
+                    source = dependency.power_source_entity_id
+                    if self._entity_trusted_state(source) == "off":
+                        observed_entity = source
+                elif (not decision.active and target.id == self._pair_main_target_id(config)
+                      and self._proven_power_pair_off(config)):
+                    observed_entity = config.devices.power_switch.entity_id
+                if self._entity_trusted_state(observed_entity) != "off":
+                    return None
+                stamp = self._target_evidence_observed_ms(observed_entity)
+                if stamp is None:
+                    return None
+                result[entity] = stamp
+            return result
+
+        recovered = await reconcile(
+            entities, version=config.version, observe_off=observe_off, now_ms=self._now_ms,
+        )
+        if recovered:
+            _LOGGER.info("room lighting restart recovery verified for %s", config.room_id)
+        return recovered
 
     def _entity_state(self, entity_id: str) -> str:
         if self._hass is None:
@@ -5447,6 +5610,11 @@ class RoomLightingRuntime:
         authority = self._manual_light_authority
         if authority is not None:
             authority.set_related_sources(RelatedLightSources.from_configs(self._configs.values()))
+            register = getattr(authority, "register_recovery_scope", None)
+            if callable(register):
+                for config in self._configs.values():
+                    register((target.entity_id for target in config.devices.light_targets),
+                             config.version)
         rooms_by_entity: EntityRooms = {}
         entry_by_entity: EntityRooms = {}
         targets_by_entity: dict[str, tuple[str, str]] = {}
@@ -5649,26 +5817,137 @@ class RoomLightingRuntime:
             return None
         return observed
 
-    def _power_attempt_blocked(self, entity_id: str) -> bool:
-        """Whether the same unconfirmed power-on lacks new evidence."""
+    def _confirmed_curve_presence_since(self, room_id: str) -> int | None:
+        """Start of the CURRENT confirmed presence episode, or ``None``.
 
-        recorded = self._power_failures.get(entity_id)
-        current_revision = self._power_evidence_revision(entity_id)
-        if recorded is None:
-            if not self._dispatch_overflow_latch:
-                return False
-            boundary = self._dispatch_overflow_blocked_after_ms
-            if boundary is None or not self._trusted_evidence_revision(current_revision):
-                return True
-            observed = self._power_evidence_observed_ms(entity_id)
-            return observed is None or observed <= boundary
-        if (
-            not self._trusted_evidence_revision(current_revision)
-            or recorded == ("turn_on", current_revision)
+        The day-curve tracker confirms an episode after
+        ``CURVE_PRESENCE_CONFIRM_MS`` of proven continuity; the confirmed
+        occupant is physical evidence that the room's light is wanted.
+        """
+
+        tracker = self._curve_presence.get(room_id)
+        if not tracker:
+            return None
+        since = tracker.get("since")
+        if since is None:
+            return None
+        if self._now_ms() - int(since) < CURVE_PRESENCE_CONFIRM_MS:
+            return None
+        # The confirmation must still be BACKED by a fresh observation:
+        # after the sensor faulted (last_seen reset to None) or went stale
+        # the pointer alone proves nothing (AUD-POWER-07).
+        last_seen = tracker.get("last_seen")
+        if last_seen is None:
+            return None
+        if self._now_ms() - int(last_seen) > CURVE_SENSOR_FRESHNESS_MS:
+            return None
+        return int(since)
+
+    def _record_power_failure(
+        self, entity_id: str, revision: str, at: int
+    ) -> None:
+        """Record one unconfirmed power-on attempt of ``revision``.
+
+        The attempt moment is kept so the FIRST retry of a delivery
+        episode honours the spacing from the ORIGINAL attempt, not from
+        the moment the episode happens to be opened (AUD-POWER-02)."""
+
+        self._power_failures[entity_id] = ("turn_on", revision)
+        self._power_failure_at[entity_id] = at
+
+    def _power_attempt_blocked(
+        self,
+        entity_id: str,
+        room_id: str | None = None,
+        command_action: str | None = None,
+    ) -> bool:
+        """Read-only admission query; asking never spends the delivery budget."""
+        return self._plan_power_attempt(
+            entity_id, room_id=room_id, command_action=command_action
+        ) is None
+
+    def _plan_power_attempt(
+        self,
+        entity_id: str,
+        *,
+        room_id: str | None,
+        command_action: str | None,
+    ) -> PowerAttemptPlan | None:
+        revision = self._power_evidence_revision(entity_id)
+        failure = self._power_failures.get(entity_id)
+        episode = self._power_delivery.get(entity_id)
+        previous = failure[1] if failure is not None else episode.revision if episode else None
+        fresh_revision = (
+            previous is not None and previous != revision
+            and self._trusted_evidence_revision(revision)
+        )
+        if fresh_revision:
+            failure, episode = None, None
+        if failure is None and episode is None:
+            if not self._trusted_evidence_revision(revision):
+                return None
+            if self._dispatch_overflow_latch:
+                boundary = self._dispatch_overflow_blocked_after_ms
+                observed = self._power_evidence_observed_ms(entity_id)
+                if (
+                    boundary is None or not self._trusted_evidence_revision(revision)
+                    or observed is None or observed <= boundary
+                ):
+                    return None
+            return PowerAttemptPlan(revision=revision)
+
+        if episode is not None and (
+            episode.exhausted or episode.attempts >= POWER_RETRY_LIMIT_PER_REVISION
         ):
-            return True
-        self._power_failures.pop(entity_id, None)
-        return False
+            return None
+        if previous != revision:
+            return None
+        if not self._trusted_evidence_revision(revision) and revision != "untrusted:off":
+            return None
+        presence_since = (
+            self._confirmed_curve_presence_since(room_id) if room_id is not None else None
+        )
+        if (
+            command_action != LightAction.TURN_ON.value
+            or presence_since is None
+            or not self._confirmed_presence_live(room_id)
+        ):
+            return None
+        failed_at = self._power_failure_at.get(entity_id)
+        if failed_at is None and episode is not None:
+            failed_at = episode.last_attempt_ms
+        if failed_at is None or failed_at <= 0:
+            return None
+        last_attempt = max(failed_at, episode.last_attempt_ms if episode else failed_at)
+        if self._now_ms() - last_attempt < POWER_RETRY_INTERVAL_MS:
+            return None
+        if episode is None:
+            episode = PowerDeliveryEpisode(
+                revision=revision, presence_since=presence_since,
+                attempts=0, last_attempt_ms=failed_at,
+            )
+        return PowerAttemptPlan(revision=revision, retry_episode=episode)
+
+    def _confirmed_presence_live(self, room_id: str | None) -> bool:
+        """AUD-POWER-11 (luna 2026-10-12): the in-room snapshot can lag the
+        physical sensor while the room lock is held; the send boundary must
+        confirm the CURRENT trusted sensor state, not only the snapshot."""
+
+        if room_id is None:
+            return False
+        config = self._configs.get(room_id)
+        if config is None:
+            return False
+        live = False
+        for sensor in config.devices.sensors:
+            if sensor.kind != "presence":
+                continue
+            entity_id = sensor.entity_id
+            if not isinstance(entity_id, str):
+                continue
+            if self._entity_trusted_state(entity_id) == "on":
+                live = True
+        return live
 
     def _refresh_exact_power_index(self) -> None:
         """Re-read the durable map and keep the event index in sync with it."""
@@ -5741,6 +6020,8 @@ class RoomLightingRuntime:
 
         self._dispatch_failures = {}
         self._power_failures = {}
+        self._power_failure_at = {}
+        self._power_delivery = {}
         self._dispatch_overflow_latch = False
         self._dispatch_overflow_blocked_after_ms = None
         self._dispatch_overflow_boundary_unknown = False
@@ -5814,6 +6095,19 @@ class RoomLightingRuntime:
                         self._power_failures[source] = (
                             action or "turn_on",
                             evidence_revision,
+                        )
+                        # A restored latch arrives WITHOUT a delivery
+                        # episode: create it EXHAUSTED so a restart cannot
+                        # refresh the retry budget on the same evidence
+                        # (AUD-POWER-03). Only fresh trusted relay
+                        # evidence (a new revision) clears the latch and
+                        # the exhausted episode together.
+                        self._power_delivery[source] = PowerDeliveryEpisode(
+                            revision=evidence_revision,
+                            presence_since=0,
+                            attempts=POWER_RETRY_LIMIT_PER_REVISION,
+                            last_attempt_ms=0,
+                            exhausted=True,
                         )
                     else:
                         durable_failures_malformed = True
@@ -5909,6 +6203,17 @@ class RoomLightingRuntime:
                 )
                 if attempted:
                     self._power_failures[source] = ("turn_on", power_revision)
+                    # AUD-POWER-05: a latch migrated from the legacy
+                    # journal arrives EXHAUSTED too — a restart on an old
+                    # journal must not refresh the retry budget; only
+                    # fresh trusted relay evidence clears it.
+                    self._power_delivery[source] = PowerDeliveryEpisode(
+                        revision=power_revision,
+                        presence_since=0,
+                        attempts=POWER_RETRY_LIMIT_PER_REVISION,
+                        last_attempt_ms=0,
+                        exhausted=True,
+                    )
 
     def _merge_dispatch_overflow_boundary(self, value: object) -> None:
         """Merge an overflow boundary while preserving legacy unknown latches."""
@@ -5980,9 +6285,16 @@ class RoomLightingRuntime:
     ) -> None:
         """Track a completed absence so a returned presence can release."""
 
+        self._observe_absence_sensors(config, context.sensors, context.now)
+
+    def _observe_absence_sensors(
+        self, config: RoomLightingConfig, sensors: tuple[SensorSnapshot, ...], now: int
+    ) -> None:
+        """Use the same absence transition for room snapshots and live fences."""
+
         relevant = [
             sensor
-            for sensor in context.sensors
+            for sensor in sensors
             if sensor.kind in _PRESENCE_KINDS
         ]
         if not relevant:
@@ -5992,7 +6304,7 @@ class RoomLightingRuntime:
         off_times: list[int] = []
         if any(sensor.state in {SensorState.UNKNOWN, SensorState.UNAVAILABLE}
                or (sensor.state is SensorState.OFF
-                   and context.now - sensor.last_changed > EnginePolicy.from_config(config).staleness_seconds * 1000)
+                   and now - sensor.last_changed > EnginePolicy.from_config(config).staleness_seconds * 1000)
                for sensor in relevant):
             self._absence.pop(config.room_id, None)
             # Sensor uncertainty invalidates the ongoing WINDOW (fail-closed
@@ -6002,7 +6314,7 @@ class RoomLightingRuntime:
             return
         if any(
             sensor.state is SensorState.ON
-            and context.now - sensor.last_changed > EnginePolicy.from_config(config).sensor_freshness_seconds * 1000
+            and now - sensor.last_changed > EnginePolicy.from_config(config).sensor_freshness_seconds * 1000
             for sensor in relevant
         ):
             self._absence.pop(config.room_id, None)
@@ -6070,7 +6382,7 @@ class RoomLightingRuntime:
         if (
             config.manual_off_protection.enabled
             and config.manual_off_protection.stable_absence_seconds > 0
-            and context.now - since
+            and now - since
             >= config.manual_off_protection.stable_absence_seconds * 1000
         ):
             self._absence_release_latch.add(config.room_id)
