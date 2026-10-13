@@ -40,6 +40,12 @@ class _Store:
     def __init__(self) -> None: self.payload = None
     async def async_load(self): return self.payload
     async def async_save(self, payload): self.payload = payload
+    async def async_save_if(self, payload, is_current):
+        await asyncio.sleep(0)
+        if not is_current():
+            return False
+        self.payload = payload
+        return True
 
 
 def _now_ms(offset_ms: int = 0) -> int:
@@ -223,7 +229,7 @@ async def test_explicit_return_requires_full_nonlegacy_manual_on_scope() -> None
     assert token is not None
     assert authority.blocks("light.primary")
     assert authority.barrier_reason == "return_pending"
-    authority.async_finish_explicit_return(token, persisted=True)
+    await authority.async_finish_explicit_return(token, persisted=True)
     assert not authority.blocks("light.primary")
     assert authority.record("light.primary") is None
     assert store.payload["records"] == []
@@ -257,7 +263,7 @@ async def test_explicit_return_never_erases_manual_event_captured_during_save() 
     store.release.set()
     token = await releasing
     assert token is not None
-    authority.async_finish_explicit_return(token, persisted=True)
+    await authority.async_finish_explicit_return(token, persisted=True)
     assert authority.record("light.demo").action == "off"
     assert authority.blocks("light.demo")
     await authority.async_drain()
@@ -340,7 +346,7 @@ async def test_explicit_return_persists_unrelated_pre_writer_fingerprint() -> No
     await draining
     token = await returning
     assert token is not None
-    authority.async_finish_explicit_return(token, persisted=True)
+    await authority.async_finish_explicit_return(token, persisted=True)
     assert {item["entityId"] for item in store.payload["records"]} == {
         "light.blocker", "light.other"
     }
@@ -403,7 +409,7 @@ async def test_cancelled_explicit_return_remains_global_deny_and_token_is_scoped
     assert authority.blocks("light.other")
     assert authority.barrier_reason == "storage_unavailable"
     with pytest.raises(RuntimeError):
-        authority.async_finish_explicit_return(
+        await authority.async_finish_explicit_return(
             ManualLightReturnToken(frozenset(("light.demo",)), 1, 1),
             persisted=True,
         )

@@ -318,6 +318,14 @@ class _MemoryOwnershipStore:
         self.payload = payload
         self.saves += 1
 
+    async def async_save_if(self, payload, is_current):
+        await asyncio.sleep(0)
+        if not is_current():
+            return False
+        self.payload = copy.deepcopy(payload)
+        self.saves += 1
+        return True
+
 
 class _ConfigService:
     def __init__(self, *configs: object) -> None:
@@ -2147,13 +2155,15 @@ async def test_return_to_auto_noop_skips_evaluation_and_write_for_two_targets() 
         await runtime.stop()
 
 
-async def test_explicit_return_removes_old_auto_history_without_evaluation() -> None:
+async def test_explicit_return_removes_old_auto_history_before_evaluation() -> None:
     class _AuthorityStore(_MemoryOwnershipStore):
         recovered_previous = False
 
     hass = _FakeHass()
     hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
     hass.states.set("light.demo_main", "on", last_changed=_NOW_DT)
+    from tests.test_room_lighting_force_auto import seed_participants
+    priority, _off_protection = await seed_participants(hass)
     authority_store = _AuthorityStore()
     authority = ManualLightAuthority(authority_store)
     await authority.async_load()
@@ -2165,6 +2175,7 @@ async def test_explicit_return_removes_old_auto_history_without_evaluation() -> 
         payload=_trigger_config_payload(action="return_to_auto"),
         ownership_store=ownership_store, manual_light_authority=authority,
         device_automation_api=api,
+        light_priority=priority,
     )
     await runtime.start(hass, "entry")
     try:
@@ -2175,6 +2186,8 @@ async def test_explicit_return_removes_old_auto_history_without_evaluation() -> 
         processed: list[object] = []
 
         async def unexpected_process(*_args, **_kwargs):
+            assert authority.record("light.demo_main") is None
+            assert ownership_store.payload["records"] == []
             processed.append(True)
 
         runtime.async_process = unexpected_process  # type: ignore[method-assign]
@@ -2186,7 +2199,7 @@ async def test_explicit_return_removes_old_auto_history_without_evaluation() -> 
         assert authority.record("light.demo_main") is None
         assert not authority.blocks("light.demo_main")
         assert ownership_store.saves == 1
-        assert processed == []
+        assert processed == [True]
         assert executor.calls == []
     finally:
         await runtime.stop()

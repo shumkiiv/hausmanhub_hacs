@@ -42,6 +42,12 @@ DEFAULT_POWER_READBACK_WINDOW_SECONDS = 8.0
 DEFAULT_POWER_READBACK_INTERVAL_SECONDS = 0.25
 
 
+def room_manual_off_protection(hass: object) -> object | None:
+    """Resolve the already-running HA participant, never construct a second one."""
+    data = getattr(hass, "data", {}).get("hausman_hub", {})
+    return data.get("manual_light_off_protection")
+
+
 @dataclass(frozen=True, slots=True)
 class RoomLightingReceipt:
     """Confirmed or unconfirmed result of one physical command."""

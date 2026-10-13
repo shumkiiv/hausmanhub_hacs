@@ -620,6 +620,56 @@ class ManualLightOffProtectionCoordinator:
 
         self.unhealthy = True
 
+    def explicit_return_snapshot(
+        self, room_id: str, entity_ids: frozenset[str],
+    ) -> dict[str, dict[str, object]]:
+        """Preflight every intersecting profile before any other store changes."""
+        self._require_healthy()
+        selected = {}
+        for key, record in self._protections.items():
+            lights = frozenset(record["lightIds"])
+            if not lights.intersection(entity_ids):
+                continue
+            if record["roomId"] != room_id or not lights <= entity_ids:
+                raise ManualLightOffProtectionPolicyConflict("shared_manual_off_scope")
+            if not record["effectivePolicy"]["allowManualRelease"]:
+                raise ManualLightOffProtectionPolicyConflict("manual_release_disabled")
+            selected[key] = record
+        return selected
+
+    async def async_release_explicit_return(
+        self, snapshot: Mapping[str, dict[str, object]],
+    ) -> bool:
+        """Release only preflighted objects and keep replacements protected."""
+        async with self._lock:
+            self._require_healthy()
+            doomed = {key: record for key, record in snapshot.items()
+                      if self._protections.get(key) is record}
+            if not doomed:
+                return True
+            completed = [dict(record, state=ProtectionState.RELEASED.value,
+                              revision=int(record["revision"]) + 1)
+                         for record in doomed.values()]
+            payload = copy.deepcopy(self._payload())
+            payload["protections"] = [record for key, record in self._protections.items()
+                                      if key not in doomed]
+            payload["frozenSensors"] = [item for item in payload["frozenSensors"]
+                                       if item["protectionId"] not in doomed]
+            payload["completed"] = (self._completed + completed)[-MAX_COMPLETED_PROTECTIONS:]
+            payload["stateRevision"] = self._state_revision + len(doomed)
+            try:
+                await self._store.async_save(copy.deepcopy(payload))
+            except BaseException:
+                self.unhealthy = True
+                raise
+            for key in doomed:
+                self._protections.pop(key, None)
+                self._frozen_sensor_ids.pop(key, None)
+            self._completed = payload["completed"]
+            self._state_revision = payload["stateRevision"]
+            self._notify_event_entity_listeners()
+            return not self.unhealthy
+
     async def _activate(self, profile, entity_id: str, now: datetime, attribution) -> None:
         current_item = next(
             ((key, record) for key, record in self._protections.items()

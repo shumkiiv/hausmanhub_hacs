@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import tempfile
@@ -103,9 +104,78 @@ class VerifiedSafetyStore:
                 f"safety store {self._backend.key} write verification failed"
             )
 
+    async def async_save_if(
+        self, payload: dict[str, object], is_current: Callable[[], bool],
+    ) -> bool:
+        """Stage off-loop, then check and atomically publish without yielding.
+
+        Opt-in for the authority writer only. Every ordinary save of that
+        authority is serialized by the same writer. There is deliberately no
+        await after commit: an event after it is a new independent action.
+        """
+        if not self._payload_validator(payload):
+            raise RuntimeError("conditional safety payload is invalid")
+        task = asyncio.ensure_future(self._run_sync(
+            _prepare_conditional_document, self._backend.path, self._previous_path,
+            self._backend.version, self._backend.key, payload,
+        ))
+        try:
+            temporary = await asyncio.shield(task)
+        except BaseException:
+            # An executor job cannot be cancelled mid-write. Reap its one
+            # private staged file; the published pending document is untouched.
+            try:
+                temporary = await task
+                os.unlink(temporary)
+            except Exception:
+                pass
+            raise
+        try:
+            if not is_current():
+                return False
+            # One bounded rename on the HA loop is the linearization point.
+            # Serialization, fsync and read-back were done in the executor.
+            os.replace(temporary, self._backend.path)
+            return True
+        finally:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
+
 
 def _is_file(path: str) -> bool:
     return Path(path).is_file()
+
+
+def _prepare_conditional_document(
+    path: str, previous_path: str, version: int, key: str, payload: dict[str, object],
+) -> str:
+    current = _read_document(path)
+    prior = _document_payload(current, version=version, key=key)
+    if prior is None or prior.get("version") != 3 or "returnOperation" not in prior:
+        raise RuntimeError("conditional safety commit requires durable pending return")
+    # Keep all HA envelope metadata, including minor_version. The previous
+    # generation remains pending as well, so an older loader fails closed.
+    _write_document_atomic(previous_path, current)
+    document = {**current, "data": payload}
+    target = Path(path)
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{target.name}.return.", dir=target.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as destination:
+            json.dump(document, destination, ensure_ascii=False, separators=(",", ":"))
+            destination.flush()
+            os.fsync(destination.fileno())
+        os.chmod(temporary, 0o600)
+        if _read_document(temporary) != document:
+            raise RuntimeError("conditional safety preparation verification failed")
+        return temporary
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def _read_document(path: str) -> object:

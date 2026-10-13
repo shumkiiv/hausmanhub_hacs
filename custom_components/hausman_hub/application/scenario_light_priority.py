@@ -983,6 +983,31 @@ class LightAutomationPriority:
 
         return frozenset(entity_ids & self.manual_entity_ids())
 
+    def explicit_return_snapshot(self, entity_ids: frozenset[str]) -> dict[str, object]:
+        """Freeze exact manual objects, not a time-based global selection."""
+        return {entity: record for entity, record in self._manual_records.items()
+                if entity in entity_ids}
+
+    async def async_release_explicit_return(self, snapshot: Mapping[str, object]) -> bool:
+        """Persist scoped removal first, then remove only the frozen objects."""
+        async with self._authority_lock:
+            if self._store is None:
+                return False
+            doomed = {entity: record for entity, record in snapshot.items()
+                      if self._manual_records.get(entity) is record}
+            if not doomed:
+                return True
+            payload = self._payload(manual_records=[record for entity, record
+                                    in self._manual_records.items() if entity not in doomed])
+            await self._store.async_save(payload)
+            for entity, record in doomed.items():
+                if self._manual_records.get(entity) is record:
+                    self._manual_records.pop(entity, None)
+            if self._dirty or self._payload() != payload:
+                self._dirty = True
+                await self._async_save_if_dirty()
+            return True
+
     async def async_release_manual_claims_before(
         self, boundary_ms: int
     ) -> frozenset[str]:

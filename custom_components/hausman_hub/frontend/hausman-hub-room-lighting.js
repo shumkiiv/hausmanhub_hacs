@@ -107,14 +107,51 @@ async function forceAutoRoom(panel, roomId) {
   const store = lightingState(panel, roomId);
   if (store.saving) return;
   store.saving = true;
+  store.notice = "";
+  store.error = "";
   rerender(panel, roomId);
   try {
-    await panel._hass.callApi("POST", lightingApi(roomId, "/force-auto"), {});
-    store.notice = "Переведено в авто: ручные удержания и защиты сняты, светом управляет сценарий текущего времени.";
+    const result = await panel._hass.callApi("POST", lightingApi(roomId, "/force-auto"), {});
+    if (result?.contract?.name !== "hausman-hub-room-lighting-force-auto"
+        || result.contract.version !== 1 || result.room !== roomId || result.known !== true
+        || !["returned", "blocked", "incomplete"].includes(result.outcome)) {
+      store.error = "Сервер не подтвердил возврат в автоматику. Обновите состояние и повторите проверку.";
+    } else if (result.outcome === "returned") {
+      store.notice = "Возврат в автоматику принят. Свет изменится только при выполнении условий профиля; включение этим ответом не подтверждено.";
+    } else {
+      const reasons = {
+        manual_release_disabled: "Настройки запрещают ручное снятие защиты.",
+        shared_manual_off_scope: "Защита затрагивает другую комнату.",
+        observations_unavailable: "Нет свежего состояния всех приборов или датчиков.",
+        restart_uncertain: "Нужны свежие состояния после перезапуска.",
+        selector_uncertain: "Не удалось точно определить источник ручного действия.",
+        new_manual_action: "Во время возврата появилось новое ручное действие.",
+        manual_action_or_observation_changed: "Во время возврата изменилось состояние или появилось новое ручное действие.",
+        return_pending: "Возврат прерван, защита сохранена. Для нового возврата нажмите кнопку ещё раз.",
+        return_busy: "Возврат уже выполняется. Дождитесь его результата.",
+        return_scope_changed: "После незавершённого возврата изменился состав или версия профиля. Нужна проверка настроек.",
+        return_persistence_failed: "Не удалось сохранить возврат. Защита сохранена.",
+        storage_unavailable: "Хранилище защиты недоступно.",
+        return_participant_unavailable: "Не все службы защиты готовы к возврату.",
+      };
+      const details = (Array.isArray(result.blockers) ? result.blockers : [])
+        .map((code) => reasons[code]).filter(Boolean).join(" ");
+      store.error = `Возврат в автоматику не подтверждён. ${details || "Защита остаётся активной. Проверьте состояние комнаты."}`;
+    }
   } catch (error) {
     store.error = lightingErrorMessage(error);
   } finally {
     store.saving = false;
+    // Refresh only observations. Never replace an unsaved settings draft.
+    try {
+      store.status = await panel._hass.callApi("GET", lightingApi(roomId, "/status"));
+      store.preview = null;
+      await runPreview(panel, roomId);
+    } catch (_error) {
+      store.status = null;
+      store.preview = null;
+      store.error = store.error || "Возврат обработан, но свежее состояние получить не удалось.";
+    }
     rerender(panel, roomId);
   }
 }
@@ -1372,7 +1409,7 @@ function renderSaveBar(panel, roomId, store, deps) {
   // подтверждения: сразу после перевода сценарий может изменить свет
   // (например, приглушить вечером или включить по присутствию).
   const forceAuto = button(deps, "Перевести в авто", () => {
-    const message = "Перевести свет комнаты в авто? Ручные удержания и защиты будут сняты, и свет сразу изменится по текущему сценарию (вечером — приглушённый тёплый). Отменить можно будет только вручную.";
+    const message = "Перевести свет комнаты в авто? Прежние разрешённые ручные ограничения будут сняты. Профиль проверит текущие условия и может изменить свет. Остальные защиты сохраняются.";
     if (typeof deps.confirm === "function" && !deps.confirm(message)) return;
     void forceAutoRoom(panel, roomId);
   }, "is-secondary");

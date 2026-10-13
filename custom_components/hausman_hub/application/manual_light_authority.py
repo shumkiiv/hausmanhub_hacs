@@ -20,6 +20,7 @@ MANAGED_LIGHT_DOMAINS = ("light.", "switch.")
 class ManualLightAuthorityStore(Protocol):
     async def async_load(self) -> object | None: ...
     async def async_save(self, payload: dict[str, object]) -> None: ...
+    async def async_save_if(self, payload: dict[str, object], is_current: Callable[[], bool]) -> bool: ...
     @property
     def recovered_previous(self) -> bool: ...
 
@@ -43,6 +44,8 @@ class ManualLightReturnToken:
     entity_ids: frozenset[str]
     fence_generation: int
     operation_id: int
+    scope_generation: int = 0
+    config_version: int = 1
 
 
 class ManualLightAuthority:
@@ -75,6 +78,7 @@ class ManualLightAuthority:
         self._explicit_return_pending = False
         self._explicit_return_operation_id = 0
         self._active_return_operation_id: int | None = None
+        self._return_operation: dict[str, object] | None = None
         self._seeded_empty_store = False
         self._writer = asyncio.Lock()
         self._related_sources = RelatedLightSources(True, {})
@@ -268,12 +272,7 @@ class ManualLightAuthority:
                 <= stamp <= now_ms()
             ) for stamp in observed.values()):
                 return False
-            payload = {
-                "version": 2,
-                "records": [_record_payload(record) for record in sorted(
-                    self._records.values(), key=lambda item: item.entity_id)],
-                "recentFingerprints": list(self._recent),
-            }
+            payload = self._payload(self._records, self._generation)
             try:
                 await self._store.async_save(copy.deepcopy(payload))
             except BaseException:
@@ -357,8 +356,14 @@ class ManualLightAuthority:
                 self._restart_uncertain = True
             loaded: dict[str, ManualLightRecord] = {}
             if payload is not None:
-                if not isinstance(payload, Mapping) or payload.get("version") != 2:
+                if not valid_manual_light_authority_payload(payload):
                     raise ValueError("manual light authority version is invalid")
+                if payload.get("version") == 3:
+                    self._return_operation = copy.deepcopy(payload["returnOperation"])
+                    self._explicit_return_operation_id = self._return_operation["operationId"]
+                    self._explicit_return_pending = True
+                    # A restart never resumes a partial return with a new fence.
+                    self._active_return_operation_id = None
                 raw_records = payload.get("records")
                 if not isinstance(raw_records, list) or len(raw_records) > MAX_RECORDS:
                     raise ValueError("manual light authority records are invalid")
@@ -460,15 +465,7 @@ class ManualLightAuthority:
                 # action back into unknown legacy protection, or fail its
                 # durable-import check after saving another entity.
                 snapshot = {**self._records, **self._pending}
-                payload = {
-                    "version": 2,
-                    "records": [_record_payload(r) for r in
-                                sorted(snapshot.values(), key=lambda item: item.entity_id)],
-                    "recentFingerprints": [
-                        fingerprint for fingerprint, seen_generation in self._recent.items()
-                        if seen_generation <= generation
-                    ],
-                }
+                payload = self._payload(snapshot, generation)
                 try:
                     if self._store is not None:
                         await self._store.async_save(copy.deepcopy(payload))
@@ -483,10 +480,39 @@ class ManualLightAuthority:
                     if r.generation > generation
                 }
 
+    def explicit_return_blocker(
+        self, entity_ids: Iterable[str], *, config_version: int, all_manual: bool = False,
+    ) -> str | None:
+        """A new explicit intent may replace only an idle, identical pending scope."""
+        scope = frozenset(entity_ids)
+        reason = self.barrier_reason
+        if reason not in {None, "return_pending"}:
+            return reason
+        if self._active_return_operation_id is not None:
+            return "return_busy"
+        if self._explicit_return_pending:
+            if not all_manual:
+                return "return_pending"
+            operation = self._return_operation
+            if (operation is None or frozenset(operation["entityIds"]) != scope
+                    or operation["configVersion"] != config_version):
+                return "return_scope_changed"
+        if (not scope or not self.persistence_ready or not self._related_sources.ready
+                or any(self._related_sources.related(entity) != scope for entity in scope)):
+            return "attribution_uncertain"
+        if any(entity.startswith(f"{domain}.") for entity in scope
+               for domain in self._selector_uncertain_domains):
+            return "selector_uncertain"
+        if not all_manual and self._restart_uncertain and not scope <= self._reconciled_entities:
+            return "restart_uncertain"
+        return None
+
     async def async_begin_explicit_return(
-        self, entity_ids: Iterable[str]
+        self, entity_ids: Iterable[str], *, all_manual: bool = False,
+        config_version: int = 1,
+        observations_current: Callable[[], bool] | None = None,
     ) -> ManualLightReturnToken | None:
-        """Durably remove only a complete, current, manual-ON component.
+        """Persist a transaction fence before changing any participant.
 
         The caller must finish the matching room-journal write with
         :meth:`async_finish_explicit_return`.  A new manual event can arrive
@@ -501,15 +527,18 @@ class ManualLightAuthority:
             for entity_id in scope
         ):
             return None
-        if (self.barrier_reason is not None or self._explicit_return_pending
-                or any(self.barrier_reason_for(item) is not None for item in scope)):
+        if (self.explicit_return_blocker(scope, config_version=config_version, all_manual=all_manual)
+                or not callable(getattr(self._store, "async_save_if", None))
+                or (all_manual and (observations_current is None or not observations_current()))):
             return None
         # This fence belongs to the physical gesture, not to the moment this
         # coroutine eventually acquires the writer.  A later manual event must
         # win even if its drain reaches durable storage before us.
         fence_generation = self._generation
+        scope_generation = self._scope_generation
         # Close every dispatch path before waiting for the writer.  Until the
         # old record is durably removed it blocks its own component too.
+        was_pending = self._explicit_return_pending
         self._explicit_return_pending = True
         self._explicit_return_operation_id += 1
         operation_id = self._explicit_return_operation_id
@@ -518,6 +547,8 @@ class ManualLightAuthority:
             async with self._writer:
                 if (
                     not self.persistence_ready
+                    or self._dispatch_failed or self._recovery or self._startup_observation_pending
+                    or self._scope_generation != scope_generation
                     or self._pending
                     or not self._related_sources.ready
                     or any(
@@ -535,15 +566,15 @@ class ManualLightAuthority:
                         for record in (self._records.get(entity_id) for entity_id in scope)
                     )
                 ):
-                    self._explicit_return_pending = False
+                    self._explicit_return_pending = was_pending
                     self._active_return_operation_id = None
                     return None
                 records = [self._records.get(entity_id) for entity_id in scope]
                 present = [record for record in records if record is not None]
-                if not present or any(
+                if not all_manual and (not present or any(
                     record.legacy or record.action != "on" for record in present
-                ):
-                    self._explicit_return_pending = False
+                )):
+                    self._explicit_return_pending = was_pending
                     self._active_return_operation_id = None
                     return None
                 # The snapshot can contain unrelated evidence that drained
@@ -551,52 +582,131 @@ class ManualLightAuthority:
                 # fingerprint history through the same generation, otherwise
                 # a restart could accept that already-observed event again.
                 payload_generation = self._generation
-                snapshot = {
-                    entity_id: record
-                    for entity_id, record in self._records.items()
-                    if entity_id not in scope
+                self._return_operation = {
+                    "operationId": operation_id,
+                    "entityIds": sorted(scope),
+                    "fenceGeneration": fence_generation,
+                    "configVersion": config_version,
                 }
-                payload = {
-                    "version": 2,
-                    "records": [_record_payload(record) for record in
-                                sorted(snapshot.values(), key=lambda item: item.entity_id)],
-                    "recentFingerprints": [
-                        fingerprint for fingerprint, seen_generation in self._recent.items()
-                        if seen_generation <= payload_generation
-                    ],
-                }
+                payload = self._payload(self._records, payload_generation)
                 if self._store is None:
                     raise RuntimeError("manual light authority store is unavailable")
                 await self._store.async_save(copy.deepcopy(payload))
-                # Do not erase a replacement evidence record captured while the
-                # common-store write was in flight.
-                for entity_id in scope:
-                    record = self._records.get(entity_id)
-                    if record is not None and record.generation <= fence_generation:
-                        self._records.pop(entity_id, None)
-                return ManualLightReturnToken(scope, fence_generation, operation_id)
+                return ManualLightReturnToken(
+                    scope, fence_generation, operation_id, scope_generation, config_version,
+                )
         except BaseException:
             self._storage_failed = True
-            self._explicit_return_pending = False
             self._active_return_operation_id = None
             raise
 
-    def async_finish_explicit_return(
-        self, token: ManualLightReturnToken, *, persisted: bool
-    ) -> None:
-        """Open the temporary global barrier only after both stores agree."""
+    async def async_finish_explicit_return(
+        self, token: ManualLightReturnToken, *, persisted: bool,
+        observations_current: Callable[[], bool] | None = None,
+    ) -> bool:
+        """Commit only after all participants; preserve every newer event."""
 
         if (
             not self._explicit_return_pending
             or token.operation_id != self._active_return_operation_id
         ):
             raise RuntimeError("manual light return is not pending")
+        try:
+            return await self._async_commit_explicit_return(
+                token, persisted=persisted, observations_current=observations_current,
+            )
+        finally:
+            # Finishing a call is not finishing the durable transaction. A
+            # later explicit click may retry; background recovery never does.
+            if token.operation_id == self._active_return_operation_id:
+                self._active_return_operation_id = None
+
+    async def _async_commit_explicit_return(
+        self, token: ManualLightReturnToken, *, persisted: bool,
+        observations_current: Callable[[], bool] | None,
+    ) -> bool:
         if not persisted:
-            # The common record was already removed.  A permanent deny is the
-            # only honest outcome until a later recovery can reconcile stores.
+            # The durable v3 fence survives a crash and is rejected by older
+            # v2 loaders as well. A code rollback cannot silently open it.
             self._storage_failed = True
-        self._explicit_return_pending = False
-        self._active_return_operation_id = None
+            self._active_return_operation_id = None
+            return False
+        async with self._writer:
+            if (not self._explicit_return_is_current(token)
+                    or observations_current is not None and not observations_current()):
+                return False
+            try:
+                generation = self._generation
+                snapshot = {entity: record for entity, record in self._records.items()
+                            if entity not in token.entity_ids}
+
+                def can_commit() -> bool:
+                    return (
+                        self._explicit_return_is_current(token)
+                        and self._generation == generation and not self._pending
+                        and not any((record := self.record(entity)) is not None
+                                    and record.generation > token.fence_generation
+                                    for entity in token.entity_ids)
+                        and (observations_current is None or observations_current())
+                    )
+
+                if not can_commit():
+                    return False
+                committed = await self._store.async_save_if(
+                    self._payload(snapshot, generation, include_return=False), can_commit,
+                )
+                if not committed:
+                    return False
+                # The adapter does not yield after its final check and rename.
+                # Complete memory in this same event-loop turn.
+                self._records = snapshot
+                if observations_current is not None:
+                    # Only this new explicit intent closes this group's old
+                    # observation gap. This is not an AUTO ownership record.
+                    self._reconciled_entities.update(token.entity_ids)
+                self._return_operation = None
+                self._explicit_return_pending = False
+                self._active_return_operation_id = None
+                return True
+            except BaseException:
+                self._storage_failed = True
+                raise
+
+    def _explicit_return_is_current(self, token: ManualLightReturnToken) -> bool:
+        """Recheck every independent deny while ignoring only our own fence."""
+        scope = token.entity_ids
+        return (
+            self.persistence_ready and not self._dispatch_failed and not self._recovery
+            and not self._startup_observation_pending and self._related_sources.ready
+            and self._scope_generation == token.scope_generation
+            and all(self._related_sources.related(entity) == scope for entity in scope)
+            and not any(entity.startswith(f"{domain}.") for entity in scope
+                        for domain in self._selector_uncertain_domains)
+            and (not self._restart_uncertain or scope <= self._reconciled_entities
+                 or (self._restart_scope_registered and scope <= self._observed_scope
+                     and self._recovery_scopes.get(scope) == token.config_version))
+        )
+
+    def explicit_return_observation_floor(self, entity_ids: Iterable[str]) -> int | None:
+        """A scoped restart requires observations after subscription/registration."""
+        scope = frozenset(entity_ids)
+        if not self._restart_uncertain or scope <= self._reconciled_entities:
+            return None
+        return max(self._observation_started_ms or 0, self._recovery_scope_floors.get(scope, 0))
+
+    def _payload(
+        self, records: Mapping[str, ManualLightRecord], generation: int, *,
+        include_return: bool = True,
+    ) -> dict[str, object]:
+        pending = self._return_operation if include_return else None
+        return {
+            "version": 3 if pending is not None else 2,
+            "records": [_record_payload(record) for record in
+                        sorted(records.values(), key=lambda item: item.entity_id)],
+            "recentFingerprints": [key for key, seen in self._recent.items()
+                                   if seen <= generation],
+            **({"returnOperation": copy.deepcopy(pending)} if pending is not None else {}),
+        }
 
     async def async_release_manual_claims_through(
         self, boundary_generation: int
@@ -616,7 +726,7 @@ class ManualLightAuthority:
         if type(boundary_generation) is not int or boundary_generation < 0:
             return ()
         async with self._writer:
-            if self._storage_failed:
+            if self._storage_failed or self._explicit_return_pending:
                 return ()
             # Freeze the exact record objects selected for release. A capture
             # that arrives while the save is pending replaces the dict entry
@@ -712,7 +822,22 @@ def _parse_record(raw: object) -> ManualLightRecord:
 
 def valid_manual_light_authority_payload(value: object) -> bool:
     try:
-        if not isinstance(value, Mapping) or value.get("version") != 2:
+        if not isinstance(value, Mapping) or value.get("version") not in {2, 3}:
+            return False
+        if value.get("version") == 3:
+            operation = value.get("returnOperation")
+            if not isinstance(operation, Mapping):
+                return False
+            scope = operation.get("entityIds")
+            if (not isinstance(scope, list) or not scope or len(scope) > MAX_RECORDS
+                    or any(not isinstance(item, str) or not item.startswith(MANAGED_LIGHT_DOMAINS)
+                           for item in scope)
+                    or len(set(scope)) != len(scope)
+                    or any(type(operation.get(key)) is not int or operation[key] < minimum
+                           for key, minimum in (("operationId", 1), ("fenceGeneration", 0),
+                                                ("configVersion", 1)))):
+                return False
+        elif "returnOperation" in value:
             return False
         records = value.get("records")
         if not isinstance(records, list) or len(records) > MAX_RECORDS:

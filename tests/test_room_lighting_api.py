@@ -266,6 +266,55 @@ class RoomLightingApiTest(unittest.TestCase):
     def _config_path(self, room_id: str = "room_demo_entry") -> str:
         return self.api.ROOM_LIGHTING_CONFIG_PATH.format(room_id=room_id)
 
+    def test_force_auto_returns_real_coordinated_receipt(self) -> None:
+        from tests.test_room_lighting_force_auto import make_case, _ROOM_ID
+
+        async def flow() -> None:
+            for mode in ("on", "off", "blocked", "incomplete"):
+                case = await make_case("off" if mode != "on" else "on", protected=True)
+                try:
+                    self.store.configs[_ROOM_ID] = case.runtime._configs[_ROOM_ID]
+                    self.hass.data["hausman_hub"][self.api.DATA_ROOM_LIGHTING_RUNTIME] = case.runtime
+                    if mode == "blocked":
+                        case.hass.states.set("binary_sensor.demo_presence", "unknown")
+                    elif mode == "incomplete":
+                        async def fail_save(_payload):
+                            raise OSError("test save failure")
+                        case.ownership_store.hook = fail_save
+                    path = self.api.ROOM_LIGHTING_FORCE_AUTO_PATH.format(room_id=_ROOM_ID)
+                    request = _json_request(path, {}, room_id=_ROOM_ID)
+                    request.query = {}
+                    response = await self.api.RoomLightingForceAutoView(self.hass).post(request)
+                    self.assertEqual(200, response.status)
+                    body = response.payload
+                    self.assertEqual({"name": "hausman-hub-room-lighting-force-auto", "version": 1}, body["contract"])
+                    self.assertEqual(_ROOM_ID, body["room"])
+                    self.assertTrue(body["known"])
+                    expected = mode if mode in ("blocked", "incomplete") else "returned"
+                    self.assertEqual(expected, body["outcome"])
+                    self.assertEqual(expected != "returned", case.authority.blocks("light.demo_main"))
+                    self.assertFalse(case.executor.calls)
+                finally:
+                    await case.runtime.stop()
+        asyncio.run(flow())
+
+    def test_force_auto_rejects_unauthorized_or_unknown_without_runtime_call(self) -> None:
+        async def flow() -> None:
+            calls = []
+            async def force(*args, **kwargs):
+                calls.append((args, kwargs))
+                raise AssertionError("rejected request reached runtime")
+            self.hass.data["hausman_hub"][self.api.DATA_ROOM_LIGHTING_RUNTIME] = SimpleNamespace(async_force_auto=force)
+            view = self.api.RoomLightingForceAutoView(self.hass)
+            path = self.api.ROOM_LIGHTING_FORCE_AUTO_PATH.format(room_id="room_demo_entry")
+            request = _json_request(path, {}, room_id="room_demo_entry")
+            request.query = {}
+            self.assertEqual(404, (await view.post(request)).status)
+            request["hass_user"] = reader_user("reader", admin=False)
+            self.assertEqual(403, (await view.post(request)).status)
+            self.assertFalse(calls)
+        asyncio.run(flow())
+
     def test_config_round_trip_and_revision_conflict(self) -> None:
         async def flow() -> None:
             room_id = "room_demo_entry"
