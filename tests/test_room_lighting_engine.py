@@ -300,6 +300,32 @@ def _ctx(
     )
 
 
+@pytest.mark.parametrize("ownership, gap, reported, allowed", [
+    ("auto", False, SensorState.ON, True),
+    ("auto", True, SensorState.ON, False),
+    ("manual", False, SensorState.ON, False),
+    ("none", False, SensorState.ON, False),
+    ("auto", False, SensorState.OFF, False),
+    ("auto", False, SensorState.UNKNOWN, False),
+    ("auto", False, SensorState.UNAVAILABLE, False),
+])
+def test_silent_light_adjustment_requires_proven_auto_without_gap(ownership, gap, reported, allowed):
+    from custom_components.hausman_hub.domain.room_lighting_engine import can_adjust_known_auto_on
+    now = _at(10)
+    records = ((_auto if ownership == "auto" else _manual)("light_main", now-3600000),) if ownership != "none" else ()
+    context = _ctx(now, lights=(LightSnapshot("light_main", SensorState.UNKNOWN,
+        now-3600000, brightness=60, color_temperature=4000, reported_state=reported),),
+        ownership=records, unobserved_since=now-1000 if gap else None)
+    assert can_adjust_known_auto_on(context, "light_main") is allowed
+    commands = decision_target(evaluate_room_lighting(_config(), context), "light_main").commands
+    if allowed:
+        assert [c.action for c in commands] == [LightAction.SET_BRIGHTNESS, LightAction.SET_COLOR_TEMPERATURE]
+        unchanged = replace(context, lights=(replace(context.lights[0], brightness=80, color_temperature=3000),))
+        assert not decision_target(evaluate_room_lighting(_config(), unchanged), "light_main").commands
+    else:
+        assert not any(c.action in {LightAction.SET_BRIGHTNESS, LightAction.SET_COLOR_TEMPERATURE} for c in commands)
+
+
 def test_presence_turns_on_schedule_limit() -> None:
     now = _at(10, 0)
     decision = evaluate_room_lighting(_config(), _ctx(now))

@@ -3858,7 +3858,8 @@ async def test_shower_exhaust_full_timer_chain() -> None:
         assert fan_services()[-1] == "turn_on"
 
         # Presence is gone: the owned, dry fan stops only after 300 s.
-        hass.states.set("binary_sensor.demo_presence", "off")
+        hass.states.set("binary_sensor.demo_presence", "off",
+                        last_changed=datetime.fromtimestamp(clock[0] / 1000, _TZ))
         await runtime.async_process()
         clock[0] += 300_000
         await runtime.async_process()

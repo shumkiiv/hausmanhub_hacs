@@ -53,6 +53,7 @@ from ..domain.shower_exhaust import (
 from ..domain.room_lighting_engine import (
     DecisionReason,
     EnginePolicy,
+    sensor_observation_is_fresh,
     LightAction,
     PlannedCommand,
     ProtectionSnapshot,
@@ -1780,6 +1781,27 @@ class RoomLightingRuntime:
         except Exception:  # noqa: BLE001 - shared safety authority is fail closed
             return True
 
+    def _manual_dispatch_boundary(self, config: RoomLightingConfig) -> tuple[object, ...]:
+        """Freeze profile-local manual evidence, including equal-time actions."""
+        targets = config.devices.light_targets
+        room_records = tuple(
+            record for record in self._ownership.snapshots_for(
+                config.room_id, (target.id for target in targets)
+            ) if record.source is OwnershipSource.MANUAL
+        )
+        authority = self._manual_light_authority
+        record_for = getattr(authority, "record", None)
+        linked_for = getattr(authority, "blocking_evidence", None)
+        common_records = tuple(
+            (target.entity_id,
+             record_for(target.entity_id) if callable(record_for) else None,
+             linked_for(target.entity_id) if callable(linked_for) else None)
+            for target in targets
+            if isinstance(target.entity_id, str)
+            and target.entity_id.startswith(("light.", "switch."))
+        )
+        return room_records, common_records
+
     def _power_protected_entities(self, room_id: str) -> tuple[str, ...]:
         config = self._configs.get(room_id)
         if config is None:
@@ -3445,13 +3467,13 @@ class RoomLightingRuntime:
                 has_unknown = True
                 continue
             if sensor.state is SensorState.ON:
-                if context.now - sensor.last_changed <= CURVE_SENSOR_FRESHNESS_MS:
+                if sensor_observation_is_fresh(sensor, context.now, CURVE_SENSOR_FRESHNESS_MS):
                     fresh_on = True
                 else:
                     has_unknown = True
                 continue
             if sensor.state is SensorState.OFF:
-                if context.now - sensor.last_changed > EnginePolicy().staleness_seconds * 1000:
+                if not sensor_observation_is_fresh(sensor, context.now, EnginePolicy().staleness_seconds * 1000):
                     has_unknown = True
                 else:
                     has_off = True
@@ -4277,6 +4299,7 @@ class RoomLightingRuntime:
                 receipts.append(receipt)
                 continue
             result: object | None = None
+            manual_boundary = self._manual_dispatch_boundary(config)
             try:
                 result = await self._executor.execute(  # type: ignore[attr-defined]
                     self._hass, command
@@ -4304,13 +4327,22 @@ class RoomLightingRuntime:
                 receipt["evidenceRevision"] = revision_before
             if confirmed:
                 receipt["confirmed"] = True
-                receipt["reason"] = "confirmed"
-                receipt["ownershipChanged"] = "auto"
                 self._dispatch_failures.pop(failure_key, None)
-                self._ownership.record_auto(
-                    config.room_id, command.target_id, moment, confirmed=True
-                )
-                self._schedule_ownership_save()
+                if (
+                    self._manual_dispatch_boundary(config) != manual_boundary
+                    or self._manual_priority_blocks(config, command)
+                ):
+                    # Delivery is proved, but a newer manual choice owns the
+                    # light. A late own report cannot grant automatic rights.
+                    receipt["reason"] = "manual_superseded"
+                    receipt["ownershipChanged"] = "none"
+                else:
+                    receipt["reason"] = "confirmed"
+                    receipt["ownershipChanged"] = "auto"
+                    self._ownership.record_auto(
+                        config.room_id, command.target_id, moment, confirmed=True
+                    )
+                    self._schedule_ownership_save()
             else:
                 receipt["confirmed"] = False
                 if send_outcome == "sent":
@@ -6423,7 +6455,7 @@ class RoomLightingRuntime:
         off_times: list[int] = []
         if any(sensor.state in {SensorState.UNKNOWN, SensorState.UNAVAILABLE}
                or (sensor.state is SensorState.OFF
-                   and now - sensor.last_changed > EnginePolicy.from_config(config).staleness_seconds * 1000)
+                   and not sensor_observation_is_fresh(sensor, now, EnginePolicy.from_config(config).staleness_seconds * 1000))
                for sensor in relevant):
             self._absence.pop(config.room_id, None)
             # Sensor uncertainty invalidates the ongoing WINDOW (fail-closed
@@ -6433,7 +6465,7 @@ class RoomLightingRuntime:
             return
         if any(
             sensor.state is SensorState.ON
-            and now - sensor.last_changed > EnginePolicy.from_config(config).sensor_freshness_seconds * 1000
+            and not sensor_observation_is_fresh(sensor, now, EnginePolicy.from_config(config).sensor_freshness_seconds * 1000)
             for sensor in relevant
         ):
             self._absence.pop(config.room_id, None)

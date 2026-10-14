@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -51,6 +51,7 @@ class ManualLightOffProtectionEventListener:
         light_priority: LightAutomationPriority | None = None,
         light_safety_obligations: LightSafetyObligations | None = None,
         authority_lock: asyncio.Lock | None = None,
+        automatic_attribution: Callable[[object, str, str], ScenarioCommandAttribution | None] | None = None,
     ) -> None:
         self._coordinator = coordinator
         self._command_contexts = command_contexts
@@ -60,6 +61,7 @@ class ManualLightOffProtectionEventListener:
         self._light_priority = light_priority
         self._light_safety_obligations = light_safety_obligations
         self._authority_lock = authority_lock
+        self._automatic_attribution = automatic_attribution
 
     async def async_handle(self, event: Any) -> None:
         """Persist a relevant transition without issuing physical commands."""
@@ -91,7 +93,11 @@ class ManualLightOffProtectionEventListener:
         ) is not None:
             return
         attribution = None
-        if self._command_contexts is not None:
+        if self._automatic_attribution is not None:
+            attribution = self._automatic_attribution(
+                getattr(event, "context", None), entity_id, getattr(new_state, "state", None),
+            )
+        elif self._command_contexts is not None:
             matched = self._command_contexts.match(
                 getattr(event, "context", None),
                 entity_id,
@@ -195,6 +201,7 @@ class _ManualLightOffProtectionSubscription:
         light_priority: LightAutomationPriority | None,
         light_safety_obligations: LightSafetyObligations | None,
         authority_lock: asyncio.Lock | None,
+        automatic_attribution: Callable[[object, str, str], ScenarioCommandAttribution | None] | None,
     ) -> None:
         self._hass = hass
         self._coordinator = coordinator
@@ -203,6 +210,7 @@ class _ManualLightOffProtectionSubscription:
         self._light_priority = light_priority
         self._light_safety_obligations = light_safety_obligations
         self._authority_lock = authority_lock
+        self._automatic_attribution = automatic_attribution
         self._entity_ids = frozenset()
         self._unsubscribe: Any = None
 
@@ -227,6 +235,7 @@ class _ManualLightOffProtectionSubscription:
             light_priority=self._light_priority,
             light_safety_obligations=self._light_safety_obligations,
             authority_lock=self._authority_lock,
+            automatic_attribution=self._automatic_attribution,
         )
         self._unsubscribe = _async_track_state_change_event(
             self._hass, entity_ids, listener.async_handle
@@ -282,6 +291,8 @@ async def async_start_manual_light_off_protection_events(
     light_priority: LightAutomationPriority | None = None,
     light_safety_obligations: LightSafetyObligations | None = None,
     authority_lock: asyncio.Lock | None = None,
+    *,
+    automatic_attribution: Callable[[object, str, str], ScenarioCommandAttribution | None] | None = None,
 ) -> None:
     """Subscribe exactly configured entities to the state-event adapter."""
 
@@ -293,6 +304,7 @@ async def async_start_manual_light_off_protection_events(
         light_priority,
         light_safety_obligations,
         authority_lock,
+        automatic_attribution,
     )
     await subscription.async_refresh()
     add_listener = getattr(coordinator, "add_event_entity_listener", None)

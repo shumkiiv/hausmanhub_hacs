@@ -10,10 +10,13 @@ import unittest
 from ha_environment import Hass, install_ports, external_clock, Context, Request, isolated_directory
 from fixtures import ROOM, LIGHT, PRESENCE, room_config, off_settings
 from oracle_adapter import v01_expected, compare
-from source_bootstrap import load_installed, verify_source
+from source_bootstrap import load_installed, verify_source, EXPECTED_SOURCE_DIGEST
 
 
 class InstalledPath(unittest.IsolatedAsyncioTestCase):
+    source_digest = EXPECTED_SOURCE_DIGEST
+    verify_repaired_followup = False
+
     async def test_V01_return_preserves_automatic_authority(self):
         with isolated_directory() as root:
             hass = Hass(root)
@@ -21,7 +24,8 @@ class InstalledPath(unittest.IsolatedAsyncioTestCase):
             candidate = os.environ["N1_CANDIDATE"]
             with external_clock(hass):
                 oracle_root = os.environ["N1_ORACLE"]
-                package, digest = load_installed(candidate, temporary_root=root, oracle_root=oracle_root)
+                package, digest = load_installed(candidate, temporary_root=root, oracle_root=oracle_root,
+                                                expected_digest=self.source_digest)
                 expected = v01_expected(oracle_root)
                 print("N1_SOURCE", digest, flush=True)
                 config = importlib.import_module("custom_components.hausman_hub.domain.room_lighting")
@@ -122,6 +126,20 @@ class InstalledPath(unittest.IsolatedAsyncioTestCase):
                             record.callback(hass.now)
                     self.assertEqual(calendar_callbacks, 1)
                     await hass.drain()
+                    if self.verify_repaired_followup:
+                        print("R1_CALENDAR_CALLS", hass.services.calls[before:], flush=True)
+                        print("R1_CALENDAR_JOURNAL", runtime._shadow.journal_payload()["entries"][-8:], flush=True)
+                        self.assertFalse(priority.manual_entity_ids())
+                        self.assertFalse(authority.blocks(LIGHT))
+                        # Existing engine emits separate property adjustments
+                        # for an already owned ON light, not a second initial ON.
+                        self.assertEqual(len(hass.services.calls[before:]), 3)
+                        self.assertEqual([call[2] for call in hass.services.calls[before + 1:]], [
+                            {"entity_id": LIGHT, "brightness_pct": 40},
+                            {"entity_id": LIGHT, "color_temp_kelvin": 3000},
+                        ])
+                        self.assertEqual(hass.states.get(LIGHT).attributes["brightness"], 102)
+                        self.assertEqual(hass.states.get(LIGHT).attributes["color_temp_kelvin"], 3000)
                     print("N1_FOLLOW_UP", json.dumps({"nativeCallsSinceReturn": len(hass.services.calls[before:]),
                         "light": hass.states.get(LIGHT).state, "scenarioManual": sorted(priority.manual_entity_ids()),
                         "calendarCallbacks": calendar_callbacks,
@@ -136,10 +154,41 @@ class InstalledPath(unittest.IsolatedAsyncioTestCase):
                     restarted = hass.data["hausman_hub"]
                     print("N1_RESTART", json.dumps({
                         "authorityBlocked": restarted["manual_light_authority"].blocks(LIGHT),
+                        "authorityBarrier": restarted["manual_light_authority"].barrier_reason_for(LIGHT),
+                        "authorityRecord": repr(restarted["manual_light_authority"].record(LIGHT)),
+                        "blockingEvidence": repr(restarted["manual_light_authority"].blocking_evidence(LIGHT)),
                         "scenarioManual": sorted(restarted["light_automation_priority"].manual_entity_ids()),
                         "roomOwnership": restarted["room_lighting_runtime"]._ownership.to_payload(),
                         "offProtections": len(restarted["manual_light_off_protection"].snapshot()["protections"])}), flush=True)
-                    self.assertEqual(verify_source(candidate)[1], digest)
+                    if self.verify_repaired_followup:
+                        # A reload closes dispatch until fresh recovery proof.
+                        # No false manual record must be confused with that guard.
+                        self.assertEqual(restarted["manual_light_authority"].barrier_reason_for(LIGHT), "restart_uncertain")
+                        self.assertIsNone(restarted["manual_light_authority"].record(LIGHT))
+                        self.assertIsNone(restarted["manual_light_authority"].blocking_evidence(LIGHT))
+                        self.assertFalse(restarted["light_automation_priority"].manual_entity_ids())
+                        self.assertFalse(restarted["manual_light_off_protection"].snapshot()["protections"])
+                        hass.now += timedelta(milliseconds=1)
+                        hass.states.async_set(PRESENCE, "on", force_update=True)
+                        await hass.drain()
+                        after_reload = len(hass.services.calls)
+                        resumed_view = next(view for view in hass.views if view.name == "api:hausman_hub:room_lighting_force_auto")
+                        resumed = await resumed_view.post(Request(ROOM))
+                        await hass.drain()
+                        self.assertEqual(resumed.data["outcome"], "returned")
+                        self.assertFalse(restarted["manual_light_authority"].blocks(LIGHT))
+                        self.assertEqual(len(hass.services.calls), after_reload)
+                        await hass.services.async_call("light", "turn_off", {"entity_id": LIGHT},
+                                                       context=Context(user_id="n1_user"))
+                        await hass.drain()
+                        self.assertTrue(restarted["manual_light_authority"].blocks(LIGHT))
+                        self.assertTrue(restarted["manual_light_off_protection"].snapshot()["protections"])
+                        await hass.services.async_call("light", "turn_on", {"entity_id": LIGHT},
+                                                       context=Context(user_id="n1_user"))
+                        await hass.drain()
+                        self.assertIn(LIGHT, restarted["light_automation_priority"].manual_entity_ids())
+                        self.assertTrue(restarted["manual_light_authority"].blocks(LIGHT))
+                    self.assertEqual(verify_source(candidate, expected_digest=self.source_digest)[1], digest)
                     self.assertFalse(difference, "automatic room report was misclassified as manual")
                 finally:
                     await hass.unload(package)

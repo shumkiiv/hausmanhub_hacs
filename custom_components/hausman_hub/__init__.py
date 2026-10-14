@@ -1162,6 +1162,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         light_priority,
         light_safety_obligations,
         light_priority.authority_lock(),
+        automatic_attribution=manual_light_events.automatic_attribution,
     )
 
     from .error_taxonomy import async_preload_error_policies

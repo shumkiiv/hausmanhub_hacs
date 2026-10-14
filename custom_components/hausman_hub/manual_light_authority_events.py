@@ -6,11 +6,15 @@ import asyncio
 import logging
 import re
 import time
+import math
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from .application.manual_light_authority import ManualLightAuthority
+from .application.power_evidence import state_is_restored_or_cached
+from .domain.manual_light_off_protection import ScenarioCommandAttribution
 from .manual_light_off_protection_events import _is_fresh_light_transition
 
 if TYPE_CHECKING:
@@ -20,6 +24,70 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 MAX_STARTUP_EVENTS = 512
 _EXACT_ENTITY_ID = re.compile(r"^(?:light|switch)\.[a-z0-9_]+$")
+
+
+def _finite_parameter(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    numeric = float(value)
+    return numeric if math.isfinite(numeric) else None
+
+
+def _controlled_parameters(state: object) -> dict[str, object]:
+    """Compare active controls, never diagnostic or derived colour attributes."""
+    attrs = getattr(state, "attributes", None)
+    if not isinstance(attrs, Mapping):
+        return {}
+    result: dict[str, object] = {}
+    brightness = _finite_parameter(attrs.get("brightness"))
+    if brightness is not None and 0 <= brightness <= 255:
+        result["brightness"] = brightness
+    mode = attrs.get("color_mode")
+    if mode is not None and not isinstance(mode, str):
+        return result
+    if mode in {None, "color_temp"}:
+        kelvin = _finite_parameter(attrs.get("color_temp_kelvin"))
+        if kelvin is None:
+            mireds = _finite_parameter(attrs.get("color_temp"))
+            if mireds is not None and mireds > 0:
+                kelvin = 1_000_000 / mireds
+        if kelvin is not None and kelvin > 0:
+            result["color"] = ("color_temp", round(kelvin))
+    elif mode in {"brightness", "onoff", "white"}:
+        result["color"] = (mode, None)
+    else:
+        lengths = {"hs": 2, "xy": 2, "rgb": 3, "rgbw": 4, "rgbww": 5}
+        value = attrs.get(f"{mode}_color")
+        if mode in lengths and isinstance(value, (tuple, list)) and len(value) == lengths[mode]:
+            parts = tuple(_finite_parameter(part) for part in value)
+            if all(part is not None for part in parts):
+                result["color"] = (mode, parts)
+    return result
+
+
+def _parameter_action(old_state: object, new_state: object) -> str | None:
+    old, new = _controlled_parameters(old_state), _controlled_parameters(new_state)
+    if any(name in new and new[name] != value for name, value in old.items()):
+        return "on"
+    if old.keys() - new.keys():
+        return "unknown"  # Lost evidence is not a proved manual turn-on.
+    return None
+
+
+def _fresh_parameter_observation(state: object) -> datetime | None:
+    if state_is_restored_or_cached(state):
+        return None
+    for name in ("last_updated", "last_reported"):
+        observed = getattr(state, name, None)
+        if observed is None:
+            continue
+        if not isinstance(observed, datetime):
+            return None
+        if observed.tzinfo is None:
+            observed = observed.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - observed).total_seconds()
+        return observed if 0 <= age <= 300 else None
+    return None
 
 
 def room_light_entity_ids(configs: Iterable[RoomLightingConfig]) -> frozenset[str]:
@@ -141,12 +209,25 @@ class ManualLightAuthorityEvents:
         self._automatic_contexts = contexts
 
     def _is_automatic(self, context: object, entity_id: str, action: str) -> bool:
+        return self.automatic_attribution(context, entity_id, action) is not None
+
+    def automatic_attribution(
+        self, context: object, entity_id: str, action: str,
+    ) -> ScenarioCommandAttribution | None:
+        """Share exact command provenance with every manual-state consumer."""
         match = getattr(self._automatic_contexts, "match", None)
-        if callable(match) and match(context, entity_id, action) is not None:
-            return True
+        matched = match(context, entity_id, action) if callable(match) else None
+        if matched is not None:
+            return ScenarioCommandAttribution(
+                source=matched.origin, attribution_id=matched.request_id or entity_id,
+            )
         room = self._room_executor()
         owns = getattr(room, "owns_service_context", None)
-        return bool(callable(owns) and owns(context, entity_id, action))
+        if callable(owns) and owns(context, entity_id, action):
+            return ScenarioCommandAttribution(
+                source="automatic", attribution_id=getattr(context, "id", None) or entity_id,
+            )
+        return None
 
     def _capture_evidence(
         self, evidence: _StartupEvidence, *, schedule_drain: bool = True
@@ -333,10 +414,18 @@ class ManualLightAuthorityEvents:
         if old_state is None or new_state is None:
             return
         action = getattr(new_state, "state", None)
+        parameter_action = None
+        parameter_observed = None
+        if action == getattr(old_state, "state", None):
+            if action != "on" or not entity_id.startswith("light."):
+                return
+            parameter_action = _parameter_action(old_state, new_state)
+            parameter_observed = _fresh_parameter_observation(new_state)
+            if parameter_action is None or parameter_observed is None:
+                return
         if (
             action not in {"on", "off"}
-            or action == getattr(old_state, "state", None)
-            or not _is_fresh_light_transition(old_state, new_state)
+            or (parameter_action is None and not _is_fresh_light_transition(old_state, new_state))
         ):
             return
         context = getattr(event, "context", None) or getattr(new_state, "context", None)
@@ -346,10 +435,14 @@ class ManualLightAuthorityEvents:
         ):
             return
         if not self._is_automatic(context, entity_id, action):
+            identity = (
+                f"{parameter_observed}|{_controlled_parameters(new_state)}"
+                if parameter_observed is not None else
+                getattr(new_state, "last_changed", None) or getattr(new_state, "last_updated", None)
+            )
             self._capture_or_buffer(
-                entity_id, action, context, "state",
-                event_identity=getattr(new_state, "last_changed", None)
-                or getattr(new_state, "last_updated", None),
+                entity_id, parameter_action or action, context, "state",
+                event_identity=identity,
             )
 
 

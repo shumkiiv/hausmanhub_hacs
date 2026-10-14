@@ -34,8 +34,9 @@ def isolated_directory():
 
 
 @contextlib.contextmanager
-def external_clock(hass):
+def external_clock(hass, *, virtual_monotonic=False):
     real_datetime = datetime
+    started_wall, started_monotonic = hass.now, time.monotonic()
     class ClockDateTime(real_datetime):
         @classmethod
         def now(cls, tz=None):
@@ -47,7 +48,11 @@ def external_clock(hass):
     hass.now = ClockDateTime.fromtimestamp(hass.now.timestamp(), timezone.utc)
     with patch.object(datetime_module, "datetime", ClockDateTime), \
          patch.object(time, "time", lambda: hass.now.timestamp()), \
-         patch.object(time, "time_ns", lambda: int(hass.now.timestamp()) * 1_000_000_000 + hass.now.microsecond * 1000):
+         patch.object(time, "time_ns", lambda: int(hass.now.timestamp()) * 1_000_000_000 + hass.now.microsecond * 1000), \
+         contextlib.ExitStack() as extra:
+        if virtual_monotonic:
+            extra.enter_context(patch.object(time, "monotonic", lambda:
+                started_monotonic + (hass.now - started_wall).total_seconds()))
         yield
 
 
@@ -77,9 +82,9 @@ class Bus:
         cancel = self.async_listen(kind, once)
         return cancel
 
-    def async_fire(self, kind, data=None, context=None):
+    def async_fire(self, kind, data=None, context=None, *, time_fired=None):
         event = SimpleNamespace(event_type=kind, data=data or {}, context=context or Context(),
-                                time_fired=self.hass.now)
+                                time_fired=time_fired or self.hass.now)
         callbacks = tuple(self.listeners[kind])
         if kind != "*":
             callbacks += tuple(self.listeners["*"])
@@ -142,6 +147,8 @@ class FileStore:
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(staged, path)
+            if self.hass.save_after_hook:
+                await self.hass.save_after_hook(self.key, data)
         finally:
             if os.path.exists(staged):
                 os.unlink(staged)
@@ -227,6 +234,8 @@ class Hass:
         self.tasks = set()
         self.task_errors = []
         self.save_hook = None
+        self.save_after_hook = None
+        self.executor_hook = None
         self.bus = Bus(self)
         self.states = States(self)
         self.services = Services(self)
@@ -246,6 +255,8 @@ class Hass:
         return True
 
     async def async_add_executor_job(self, func, *args):
+        if self.executor_hook:
+            await self.executor_hook(func, args)
         return await asyncio.to_thread(func, *args)
 
     def async_create_task(self, coro, *args, **kwargs):
@@ -282,13 +293,22 @@ class Hass:
 
 
 class Request(dict):
-    def __init__(self, room_id):
+    def __init__(self, room_id, payload=None):
         super().__init__(hass_user=SimpleNamespace(is_admin=True, system_generated=False))
         self.path = f"/api/hausman_hub/v1/rooms/{room_id}/lighting/force-auto"
         self.query_string = ""
         self.query = {}
         self.remote = "127.0.0.1"
         self.match_info = {"room_id": room_id}
+        self.payload = payload
+        self.content_type = "application/json"
+        self.content_length = len(json.dumps(payload).encode("utf-8"))
+
+    async def json(self):
+        return self.payload
+
+    async def read(self):
+        return json.dumps(self.payload).encode("utf-8")
 
 
 def install_ports(hass):
@@ -336,7 +356,8 @@ def install_ports(hass):
         hass.schedules.append(record)
         return lambda: setattr(record, "active", False)
     def interval(hass, callback, period):
-        record = SimpleNamespace(kind="interval", callback=callback, period=period, active=True)
+        record = SimpleNamespace(kind="interval", callback=callback, period=period, active=True,
+                                 due=hass.now + period)
         hass.schedules.append(record)
         return lambda: setattr(record, "active", False)
     def later(hass, delay, callback):

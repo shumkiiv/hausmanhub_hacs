@@ -152,6 +152,30 @@ def _as_float(value: object) -> float | None:
     return None
 
 
+def _sensor_timestamp_ms(value: object, *, now: int) -> int | None:
+    if isinstance(value, datetime):
+        value = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+        numeric = value.timestamp() * 1000
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        numeric = float(value)
+        if numeric <= 1_000_000_000_000:
+            numeric *= 1000
+    else:
+        return None
+    if not math.isfinite(numeric) or numeric < 0 or numeric > now:
+        return None
+    return int(numeric)
+
+
+def _sensor_observed_ms(state: object, *, now: int) -> int | None:
+    """Read the newest available HA observation without hiding bad evidence."""
+    for name in ("last_reported", "last_updated", "last_changed"):
+        value = getattr(state, name, None)
+        if value is not None:
+            return _sensor_timestamp_ms(value, now=now)
+    return None
+
+
 def _brightness_percent(value: object) -> int | None:
     numeric = _as_float(value)
     if numeric is None:
@@ -375,16 +399,19 @@ class RoomLightingHaStateProvider:
         self, hass: HomeAssistant, sensor: RoomSensor, now: int
     ) -> SensorSnapshot:
         state = hass.states.get(sensor.entity_id) if sensor.entity_id else None
-        if state is None:
+        observed = _sensor_observed_ms(state, now=now) if state is not None else None
+        changed = _sensor_timestamp_ms(getattr(state, "last_changed", None), now=now)
+        raw = getattr(state, "state", None)
+        if (state is None or observed is None or changed is None or changed > observed
+                or state_is_restored_or_cached(state)):
             return SensorSnapshot(
                 sensor_id=sensor.id,
                 kind=sensor.kind,
-                state=SensorState.UNKNOWN,
+                state=SensorState.UNAVAILABLE if _state_of(raw) is SensorState.UNAVAILABLE else SensorState.UNKNOWN,
                 last_changed=now,
                 lux_healthy=False,
             )
-        raw = getattr(state, "state", None)
-        last_changed = _last_changed_ms(state, now=now)
+        last_changed = changed
         if sensor.kind is SensorKind.ILLUMINANCE:
             lux = _as_float(raw)
             if lux is None:
@@ -395,6 +422,7 @@ class RoomLightingHaStateProvider:
                     last_changed=last_changed,
                     lux=None,
                     lux_healthy=False,
+                    observed_at_ms=observed,
                 )
             return SensorSnapshot(
                 sensor_id=sensor.id,
@@ -403,12 +431,14 @@ class RoomLightingHaStateProvider:
                 last_changed=last_changed,
                 lux=lux,
                 lux_healthy=True,
+                observed_at_ms=observed,
             )
         return SensorSnapshot(
             sensor_id=sensor.id,
             kind=sensor.kind,
             state=_state_of(raw),
             last_changed=last_changed,
+            observed_at_ms=observed,
         )
 
     def _light_snapshot(
@@ -450,11 +480,14 @@ class RoomLightingHaStateProvider:
                 last_changed=now,
             )
         if trusted_target is SensorState.UNKNOWN:
+            brightness, color_temperature = self._light_parameters(target, state, reported_target)
             return LightSnapshot(
                 target_id=target.id,
                 state=SensorState.UNKNOWN,
                 last_changed=now if state is None else _last_changed_ms(state, now=now),
                 reported_state=reported_target,
+                brightness=brightness,
+                color_temperature=color_temperature,
             )
         if dependencies is None and not power_on:
             # Legacy whole-room association: an unpowered target cannot be on,
@@ -474,6 +507,18 @@ class RoomLightingHaStateProvider:
         else:
             light_state = trusted_target
         last_changed = _last_changed_ms(state, now=now)
+        brightness, color_temperature = self._light_parameters(target, state, light_state)
+        return LightSnapshot(
+            target_id=target.id,
+            state=light_state,
+            last_changed=last_changed,
+            brightness=brightness,
+            color_temperature=color_temperature,
+            reported_state=reported_target,
+        )
+
+    @staticmethod
+    def _light_parameters(target: LightTarget, state: object, light_state: SensorState) -> tuple[int | None, int | None]:
         brightness: int | None = None
         color_temperature: int | None = None
         if target.kind is LightKind.LIGHT and light_state is SensorState.ON:
@@ -485,14 +530,7 @@ class RoomLightingHaStateProvider:
                     color_temperature = reflect_inverted_kelvin(
                         color_temperature, *device_kelvin_bounds(attributes)
                     )
-        return LightSnapshot(
-            target_id=target.id,
-            state=light_state,
-            last_changed=last_changed,
-            brightness=brightness,
-            color_temperature=color_temperature,
-            reported_state=reported_target,
-        )
+        return brightness, color_temperature
 
     @staticmethod
     def _effective_state(

@@ -114,6 +114,7 @@ class SensorSnapshot:
     lux: float | None = None
     lux_healthy: bool = True
     continuous_absence_since: int | None = None
+    observed_at_ms: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.sensor_id, str) or not self.sensor_id:
@@ -124,6 +125,10 @@ class SensorSnapshot:
             raise RoomLightingEngineViolation("sensor state is invalid")
         if type(self.last_changed) is not int or self.last_changed < 0:
             raise RoomLightingEngineViolation("sensor timestamp is invalid")
+        if self.observed_at_ms is not None and (
+            type(self.observed_at_ms) is not int or self.observed_at_ms < 0
+        ):
+            raise RoomLightingEngineViolation("sensor observation timestamp is invalid")
         if (
             self.continuous_absence_since is not None
             and (type(self.continuous_absence_since) is not int
@@ -1445,6 +1450,18 @@ def decision_target(
     return None
 
 
+def can_adjust_known_auto_on(context: RoomLightingContext, target_id: str) -> bool:
+    """Planning permission only; a new command still needs fresh confirmation."""
+    light = context.light(target_id)
+    return (
+        light is not None
+        and light.state is SensorState.UNKNOWN
+        and light.reported_state is SensorState.ON
+        and context.unobserved_since is None
+        and has_proven_auto_ownership(context.ownership, target_id)
+    )
+
+
 def _evaluate_target(
     target: object,
     *,
@@ -1614,7 +1631,7 @@ def _evaluate_target(
                 Skip(target_id, SkipReason.MANUAL_PROTECTION),
                 extra_skips=skips,
             )
-        if light_on:
+        if light_on or can_adjust_known_auto_on(context, target_id):
             if context.unobserved_since is not None and not restored_auto:
                 return _unchanged(
                     target_id,
@@ -1863,7 +1880,9 @@ def _presence_state(context: RoomLightingContext, policy: EnginePolicy) -> Senso
     if any(
         sensor.state in {SensorState.UNKNOWN, SensorState.UNAVAILABLE}
         or (sensor.state is SensorState.ON and not _is_fresh(sensor, context, policy))
-        or (sensor.state is SensorState.OFF and context.now - sensor.last_changed > policy.staleness_seconds * 1000)
+        or (sensor.state is SensorState.OFF and not sensor_observation_is_fresh(
+            sensor, context.now, policy.staleness_seconds * 1000
+        ))
         for sensor in relevant
     ):
         return SensorState.UNKNOWN
@@ -1900,7 +1919,7 @@ def _absence_evidence(
             if _is_fresh(sensor, context, policy):
                 return (False, None, False)
             return (False, None, True)
-        if context.now - sensor.last_changed > policy.staleness_seconds * 1000:
+        if not sensor_observation_is_fresh(sensor, context.now, policy.staleness_seconds * 1000):
             return (False, None, True)
         off_times.append(
             sensor.continuous_absence_since
@@ -1918,9 +1937,19 @@ def _absence_evidence(
 
 
 def _is_fresh(sensor: SensorSnapshot, context: RoomLightingContext, policy: EnginePolicy) -> bool:
-    if sensor.state in {SensorState.UNKNOWN, SensorState.UNAVAILABLE}:
-        return False
-    return context.now - sensor.last_changed <= policy.sensor_freshness_seconds * 1000
+    return sensor_observation_is_fresh(sensor, context.now, policy.sensor_freshness_seconds * 1000)
+
+
+def sensor_observation_is_fresh(sensor: SensorSnapshot, now: int, freshness_ms: int) -> bool:
+    """Fresh reports prove observation, not a new state transition."""
+    observed = sensor.observed_at_ms
+    if observed is None:
+        observed = sensor.last_changed  # Preserve existing snapshot callers.
+    return (
+        sensor.state not in {SensorState.UNKNOWN, SensorState.UNAVAILABLE}
+        and sensor.last_changed <= observed <= now
+        and now - observed <= freshness_ms
+    )
 
 
 def _lux_value(

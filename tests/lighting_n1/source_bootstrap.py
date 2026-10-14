@@ -10,7 +10,7 @@ import sys
 
 EXPECTED_SOURCE_DIGEST = "2800211a415719a8ca2f21f9e1370578a42fefbdc7e3592788a8ca73e296bd59"
 
-def verify_source(candidate):
+def verify_source(candidate, *, expected_digest=EXPECTED_SOURCE_DIGEST):
     candidate = Path(candidate).resolve(strict=True)
     document = json.loads((candidate / "verification.json").read_text())
     root = candidate / "files"
@@ -23,7 +23,7 @@ def verify_source(candidate):
         if path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != expected["sha256"]:
             raise AssertionError(f"installed snapshot changed: {relative}")
     digest = hashlib.sha256(json.dumps(declared, sort_keys=True).encode()).hexdigest()
-    if digest != EXPECTED_SOURCE_DIGEST:
+    if digest != expected_digest:
         raise AssertionError("not the declared installed N1 basis")
     return root, digest
 
@@ -61,8 +61,8 @@ def close_network(*, read_roots=(), write_root=None):
     sys.addaudithook(audit)
 
 
-def load_installed(candidate, *, temporary_root, oracle_root):
-    root, digest = verify_source(candidate)
+def load_installed(candidate, *, temporary_root, oracle_root, expected_digest=EXPECTED_SOURCE_DIGEST):
+    root, digest = verify_source(candidate, expected_digest=expected_digest)
     if any(name.startswith("custom_components.hausman_hub") for name in sys.modules):
         raise AssertionError("SUT already imported; use a fresh process")
     if os.environ.get("HASSIO") or os.environ.get("HAUSMAN_HUB_CLIMATE_LEDGER_KEYRING_PATH"):
