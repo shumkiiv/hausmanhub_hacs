@@ -22,6 +22,7 @@ from custom_components.hausman_hub.domain.room_lighting_engine import (
     evaluate_room_lighting,
 )
 from custom_components.hausman_hub.domain.room_lighting_ownership import (
+    ExplicitHandoffProof,
     OwnershipSnapshot,
     OwnershipSource,
     SensorState,
@@ -338,6 +339,108 @@ def test_presence_turns_on_schedule_limit() -> None:
     assert main.commands[0].reason is DecisionReason.PRESENCE
     assert main.commands[0].brightness == 80
     assert main.commands[0].color_temperature == 3000
+
+
+@pytest.mark.parametrize("case, allowed", [
+    ("current", True), ("at_barrier", True), ("outside_entry", True),
+    ("no_barrier", False), ("future_barrier", False), ("old_auto", False),
+    ("future_auto", False), ("unconfirmed", False), ("manual_tie", False),
+    ("manual_later", False), ("none", False), ("unknown", False),
+    ("handoff", False), ("gap", False), ("sensor_unknown", False),
+    ("sensor_unavailable", False), ("reported_off", False),
+    ("reported_unknown", False), ("manual_peer", False),
+])
+def test_silent_absence_off_requires_current_session_auto(case, allowed):
+    now = _at(10)
+    started = now - 900_000
+    record = OwnershipSnapshot("light_main", OwnershipSource.AUTO, True, now - 600_000)
+    records = (record,)
+    context = replace(_ctx(
+        now, presence=SensorState.OFF, presence_at=now - 600_000,
+        lights=(LightSnapshot("light_main", SensorState.UNKNOWN, now - 600_000,
+            reported_state=SensorState.ON),),
+        ownership=records,
+    ), observation_started_at=started)
+    config = _config()
+    if case == "at_barrier":
+        records = (replace(record, at=started),)
+    elif case == "outside_entry":
+        config = _config(schedule=[_schedule_night()])
+    elif case == "no_barrier":
+        context = replace(context, observation_started_at=None)
+    elif case == "future_barrier":
+        context = replace(context, observation_started_at=now + 1)
+    elif case == "old_auto":
+        records = (replace(record, at=started - 1),)
+    elif case == "future_auto":
+        records = (replace(record, at=now + 1),)
+    elif case == "unconfirmed":
+        records = (replace(record, confirmed=False),)
+    elif case in {"manual_tie", "manual_later"}:
+        records += (OwnershipSnapshot("light_main", OwnershipSource.MANUAL, True,
+            record.at + (case == "manual_later")),)
+    elif case in {"none", "unknown", "handoff"}:
+        # Even a legal confirmed handoff is not a current-session AUTO command.
+        records = (replace(record, source={"none": OwnershipSource.NONE,
+            "unknown": OwnershipSource.UNKNOWN,
+            "handoff": OwnershipSource.EXPLICIT_HANDOFF}[case],
+            handoff=ExplicitHandoffProof("switch.demo_main", config.version,
+                1, 0, record.at, "current-session") if case == "handoff" else None),)
+    elif case == "gap":
+        context = replace(context, unobserved_since=started)
+    elif case in {"sensor_unknown", "sensor_unavailable"}:
+        context = replace(context, sensors=(_presence(
+            SensorState.UNKNOWN if case == "sensor_unknown" else SensorState.UNAVAILABLE,
+            now),))
+    elif case in {"reported_off", "reported_unknown"}:
+        context = replace(context, lights=(replace(context.lights[0], reported_state=
+            SensorState.OFF if case == "reported_off" else SensorState.UNKNOWN),))
+    elif case == "manual_peer":
+        config = _peer_config()
+        records += (OwnershipSnapshot("light_main_2", OwnershipSource.MANUAL, True, now),)
+        context = replace(context, lights=context.lights + (
+            LightSnapshot("light_main_2", SensorState.ON, now),))
+    payload = config.to_dict()
+    main = next(target for target in payload["devices"]["light_targets"]
+        if target["id"] == "light_main")
+    main.update(kind="switch", entityId="switch.demo_main",
+        brightness=False, color_temperature=False)
+    for entry in payload["schedule"]:
+        if "light_main" in entry["targets"]["lightTargets"]:
+            entry["how"]["brightness"] = None
+            entry["how"]["colorTemperature"] = None
+    config = config_from_payload(payload)
+    context = replace(context, ownership=records)
+    commands = decision_target(evaluate_room_lighting(config, context), "light_main").commands
+    assert bool(commands) is allowed
+    if allowed:
+        assert [command.action for command in commands] == [LightAction.TURN_OFF]
+        assert commands[0].reason is DecisionReason.DIMMING
+
+
+@pytest.mark.parametrize("started", [True, False, -1, 1.0, "1"])
+def test_observation_barrier_rejects_non_integer_or_negative(started):
+    with pytest.raises(ValueError):
+        replace(_ctx(_at(10)), observation_started_at=started)
+
+
+@pytest.mark.parametrize("state", [SensorState.UNKNOWN, SensorState.ON])
+def test_silent_absence_does_not_expand_brightness_permission(state):
+    now = _at(10)
+    context = replace(_ctx(
+        now, presence=SensorState.OFF, presence_at=now - 600_000,
+        lights=(LightSnapshot("light_main", state, now - 600_000,
+            brightness=80, reported_state=SensorState.ON),),
+        ownership=(_auto("light_main", now - 600_000),),
+    ), observation_started_at=now - 900_000)
+    commands = decision_target(evaluate_room_lighting(_config(), context), "light_main").commands
+    if state is SensorState.UNKNOWN:
+        assert not commands
+    else:
+        assert len(commands) == 1
+        assert commands[0].action is LightAction.SET_BRIGHTNESS
+        assert commands[0].brightness == 0
+        assert commands[0].fade_seconds == 20
 
 
 def test_manual_on_before_sensor_event_skips_auto_branch() -> None:
@@ -1338,7 +1441,7 @@ def test_absence_off_without_ownership_is_still_blocked() -> None:
     }
 
 
-def test_curve_room_turns_mirror_on_and_chandelier_off_at_night() -> None:
+def test_curve_room_turns_chandelier_off_without_lighting_mirror_at_night() -> None:
     now = _at(23, 30)
     decision = evaluate_curve_room(
         _config(profile="day_curve"),
@@ -1357,8 +1460,7 @@ def test_curve_room_turns_mirror_on_and_chandelier_off_at_night() -> None:
     mirror = decision_target(decision, "light_mirror")
     assert main is not None and main.commands
     assert main.commands[0].action is LightAction.TURN_OFF
-    assert mirror is not None and mirror.commands
-    assert mirror.commands[0].action is LightAction.TURN_ON
+    assert mirror is not None and not mirror.commands
 
 
 def test_curve_room_morning_ramp_sets_brightness_and_warm_colour() -> None:
@@ -1388,10 +1490,14 @@ def test_curve_room_morning_ramp_sets_brightness_and_warm_colour() -> None:
     )
 
 
-def test_curve_room_absence_fades_to_five_percent() -> None:
+@pytest.mark.parametrize('absence,expected', [(450, None), (599, None), (600, 5), (620, 5)])
+def test_curve_room_absence_uses_saved_goal_after_confirmed_window(absence, expected) -> None:
+    from dataclasses import replace
     now = _at(14, 0)
+    config = _config(profile="day_curve")
+    config = replace(config, dimming=replace(config.dimming, target_percent=5))
     decision = evaluate_curve_room(
-        _config(profile="day_curve"),
+        config,
         _ctx(
             now,
             lights=(
@@ -1400,12 +1506,17 @@ def test_curve_room_absence_fades_to_five_percent() -> None:
             ownership=(_auto("light_main", now - 2000),),
         ),
         presence_confirmed=False,
-        absence_seconds=450,
+        absence_seconds=absence,
+        presence=SensorState.OFF,
     )
     main = decision_target(decision, "light_main")
     assert main is not None and main.commands
-    assert main.commands[0].action is LightAction.SET_BRIGHTNESS
-    assert main.commands[0].brightness == 58
+    brightness = [command for command in main.commands if command.action is LightAction.SET_BRIGHTNESS]
+    if expected is None:
+        assert not brightness
+    else:
+        assert len(brightness) == 1
+        assert (brightness[0].brightness, brightness[0].fade_seconds) == (expected, 20)
 
 
 def test_curve_room_requires_the_profile() -> None:
@@ -1565,10 +1676,10 @@ def test_generic_stale_reported_on_releases_and_fresh_holds() -> None:
 
 def test_curve_mirror_stale_reported_on_voids_gate_and_suppression() -> None:
     """The mirror reads the same light-state rule (SEC-RP10-03): a stale
-    reported ``on`` neither suppresses the night light nor skips the
-    presence gate — with a confirmed presence the night light is planned,
+    reported ``on`` neither suppresses the morning light nor skips the
+    presence gate: with a confirmed presence the morning light is planned,
     without it the gate waits (SEC-RP10-03 fix distinguishes here)."""
-    now = _at(23, 30)
+    now = _at(7, 30)
     lights = (_unknown_stale_on_light("light_mirror", now, stale=True),)
     held = (_manual("light_mirror", now - 7_200_000),)
 
@@ -1591,7 +1702,7 @@ def test_curve_mirror_stale_reported_on_voids_gate_and_suppression() -> None:
     assert any(
         command.action is LightAction.TURN_ON for command in confirmed.commands
     ), (
-        "the stale reported on must not suppress the night mirror light "
+        "the stale reported on must not suppress the morning mirror light "
         f"(skips={[skip.reason.value for skip in confirmed.skips]})"
     )
 
@@ -1700,18 +1811,18 @@ def test_auto_belief_never_overrides_explicit_off_main_and_mirror() -> None:
         f"must be planned (skips={[s.reason.value for s in main.skips]})"
     )
 
-    night = _at(23, 30)
+    morning = _at(7, 30)
     mirror = decision_target(
         evaluate_curve_room(
             _config(profile="day_curve"),
             _ctx(
-                night,
+                morning,
                 presence=SensorState.ON,
                 lights=(
-                    _light("light_main", SensorState.OFF, night - 1000),
-                    _light("light_mirror", SensorState.OFF, night - 1000),
+                    _light("light_main", SensorState.OFF, morning - 1000),
+                    _light("light_mirror", SensorState.OFF, morning - 1000),
                 ),
-                ownership=(_auto("light_mirror", night - 3_600_000),),
+                ownership=(_auto("light_mirror", morning - 3_600_000),),
             ),
             presence_confirmed=True,
             absence_seconds=None,
@@ -1722,7 +1833,7 @@ def test_auto_belief_never_overrides_explicit_off_main_and_mirror() -> None:
     assert any(
         command.action is LightAction.TURN_ON for command in mirror.commands
     ), (
-        "the mirror night light must not be suppressed by the auto record "
+        "the mirror morning light must not be suppressed by the auto record "
         f"of an earlier command (skips={[s.reason.value for s in mirror.skips]})"
     )
 
@@ -1783,7 +1894,7 @@ def test_auto_belief_does_not_cross_unobserved_period() -> None:
 def test_curve_mirror_gate_ignores_synthetic_flag_and_preview() -> None:
     """The mirror waits for the same proven presence: neither a synthetic
     flag nor a motion preview lights it while the hold exists."""
-    now = _at(23, 30)
+    now = _at(7, 30)
     lights = (
         _light("light_main", SensorState.OFF, now - 1000),
         _light("light_mirror", SensorState.OFF, now - 1000),

@@ -18,6 +18,7 @@ class OwnershipViolation(ValueError):
 class OwnershipSource(StrEnum):
     MANUAL = "manual"
     AUTO = "auto"
+    EXPLICIT_HANDOFF = "explicit_handoff"
     NONE = "none"
     UNKNOWN = "unknown"
 
@@ -27,6 +28,28 @@ class SensorState(StrEnum):
     OFF = "off"
     UNKNOWN = "unknown"
     UNAVAILABLE = "unavailable"
+
+
+@dataclass(frozen=True, slots=True)
+class ExplicitHandoffProof:
+    """Owner intent and its observed scope, never a device ON receipt."""
+
+    entity_id: str
+    config_version: int
+    operation_id: int
+    manual_boundary: int
+    observed_at: int
+    observer_session: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.entity_id, str) or not self.entity_id:
+            raise OwnershipViolation("handoff entity is required")
+        if self.observer_session is not None and (not isinstance(self.observer_session, str) or not self.observer_session):
+            raise OwnershipViolation("handoff observer session is invalid")
+        for value, minimum in ((self.config_version, 1), (self.operation_id, 1),
+                               (self.manual_boundary, 0), (self.observed_at, 0)):
+            if type(value) is not int or value < minimum:
+                raise OwnershipViolation("handoff evidence is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +68,7 @@ class OwnershipSnapshot:
     at: int
     turned_off: bool = False
     generation: int = 0
+    handoff: ExplicitHandoffProof | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.target_id, str) or not self.target_id:
@@ -59,6 +83,11 @@ class OwnershipSnapshot:
             raise OwnershipViolation("ownership turn-off flag is invalid")
         if type(self.generation) is not int or self.generation < 0:
             raise OwnershipViolation("ownership generation is invalid")
+        if self.source is OwnershipSource.EXPLICIT_HANDOFF:
+            if not isinstance(self.handoff, ExplicitHandoffProof):
+                raise OwnershipViolation("explicit handoff proof is required")
+        elif self.handoff is not None:
+            raise OwnershipViolation("handoff proof does not match its source")
 
 
 def latest_ownership(
@@ -107,6 +136,23 @@ def has_proven_auto_ownership(
     return not manual_intervention_after(records, target_id, latest.at)
 
 
+def has_automatic_control(
+    records: Sequence[OwnershipSnapshot], target_id: str,
+) -> bool:
+    """Confirmed command or active explicit delegation permits control.
+
+    The application projects pending, restored or invalidated delegations as
+    UNKNOWN. The strict AUTO-command predicate remains unchanged.
+    """
+    latest = latest_ownership(records, target_id)
+    return has_proven_auto_ownership(records, target_id) or bool(
+        latest is not None and latest.confirmed
+        and latest.source is OwnershipSource.EXPLICIT_HANDOFF
+        and latest.handoff is not None
+        and not manual_intervention_after(records, target_id, latest.at)
+    )
+
+
 def resolve_manual_ownership(
     records: Sequence[OwnershipSnapshot],
     target_id: str,
@@ -121,6 +167,7 @@ def resolve_manual_ownership(
     if light_on and (
         latest is None
         or latest.source in {OwnershipSource.NONE, OwnershipSource.UNKNOWN}
+        or (latest.source is OwnershipSource.EXPLICIT_HANDOFF and not latest.confirmed)
     ):
         return True
     return False

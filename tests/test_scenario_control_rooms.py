@@ -22,6 +22,7 @@ from custom_components.hausman_hub.application.scenario_control_coordinator impo
     OFFICE_LUX_TARGET_ID,
     OFFICE_RELAY_TARGET_ID,
     STORAGE_LIGHT_TARGET_ID,
+    STORAGE_MOTION_TARGET_ID,
     SHOWER_SCENARIO_ID,
     SHOWER_CABINET_TARGET_ID,
     SHOWER_EXTRA_TARGET_ID,
@@ -85,6 +86,69 @@ ROOM_SOURCES = {
     BATHROOM_SCENARIO_ID: "bathroom_controller.js",
     OFFICE_SCENARIO_ID: "cabinet_controller.js",
 }
+
+
+# Only roles represented in these fixtures may resolve to their test targets.
+ROOM_ROLE_TARGETS = {
+    target: target
+    for target in (
+        SHOWER_PRESENCE_TARGET_ID, SHOWER_HUMIDITY_TARGET_ID,
+        SHOWER_MAIN_TARGET_ID, SHOWER_EXTRA_TARGET_ID, SHOWER_CABINET_TARGET_ID,
+        SHOWER_FAN_TARGET_ID, *TOILET_MOTION_TARGET_IDS, TOILET_MAIN_TARGET_ID,
+        TOILET_NIGHT_TARGET_ID, TOILET_FAN_TARGET_ID, TOILET_AWAY_TARGET_ID,
+        *BATHROOM_LIGHT_TARGET_IDS, BATHROOM_HUMIDITY_TARGET_ID,
+        BATHROOM_FAN_TARGET_ID, OFFICE_LIGHT_TARGET_ID, OFFICE_RELAY_TARGET_ID,
+        OFFICE_LUX_TARGET_ID, SUN_TARGET_ID,
+    )
+}
+
+
+def _room_topology(role: str) -> str | None:
+    return ROOM_ROLE_TARGETS.get(role)
+
+
+DIRECT_ROLE_TARGETS = {
+    **ROOM_ROLE_TARGETS,
+    **{target: target for target in (
+        STORAGE_LIGHT_TARGET_ID, STORAGE_MOTION_TARGET_ID,
+        TAMBUR_CHANDELIER_TARGET_ID, TAMBUR_POINTS_TARGET_ID,
+        TAMBUR_MIRROR_TARGET_ID, TAMBUR_POWER_TARGET_ID,
+    )},
+}
+
+
+def _direct_coordinator() -> ScenarioControlCoordinator:
+    coordinator = object.__new__(ScenarioControlCoordinator)
+    coordinator._topology_resolver = DIRECT_ROLE_TARGETS.get
+    coordinator._catalog_resolver = lambda _target: None
+    return coordinator
+
+
+def _source_roles(scenario_id: str, action_target: str) -> dict[str, str]:
+    roles = {
+        SHOWER_SCENARIO_ID: {
+            "presence": SHOWER_PRESENCE_TARGET_ID, "humidity": SHOWER_HUMIDITY_TARGET_ID,
+            "main": action_target, "extra": SHOWER_EXTRA_TARGET_ID,
+            "fan": SHOWER_FAN_TARGET_ID, "cabinet": SHOWER_CABINET_TARGET_ID,
+        },
+        TOILET_SCENARIO_ID: {
+            "motionPrimary": TOILET_MOTION_TARGET_IDS[0],
+            "motionSecondary": TOILET_MOTION_TARGET_IDS[1],
+            "main": action_target, "night": TOILET_NIGHT_TARGET_ID,
+            "fan": TOILET_FAN_TARGET_ID, "away": TOILET_AWAY_TARGET_ID,
+            "sun": SUN_TARGET_ID,
+        },
+        BATHROOM_SCENARIO_ID: {
+            "lightPrimary": BATHROOM_LIGHT_TARGET_IDS[0],
+            "lightSecondary": BATHROOM_LIGHT_TARGET_IDS[1],
+            "humidity": BATHROOM_HUMIDITY_TARGET_ID, "fan": action_target,
+        },
+        OFFICE_SCENARIO_ID: {
+            "light": action_target, "relay": OFFICE_RELAY_TARGET_ID,
+            "lux": OFFICE_LUX_TARGET_ID, "sun": SUN_TARGET_ID,
+        },
+    }
+    return roles[scenario_id]
 
 
 class MemoryStore:
@@ -232,6 +296,7 @@ async def make_room_coordinator(
         catalog_resolver=lambda target: (
             SimpleNamespace(entity_id=entities[target]) if target in entities else None
         ),
+        topology_resolver=_room_topology,
         now_ms=lambda: clock[0],
         now=lambda: now[0],
         schedule_tasks=False,
@@ -239,6 +304,31 @@ async def make_room_coordinator(
     await coordinator.async_load()
     service.coordinator = coordinator
     return coordinator, service, states, priority, store
+
+
+@pytest.mark.asyncio
+async def test_topology_maps_bathroom_and_shower_roles_to_distinct_targets() -> None:
+    now = [datetime(2026, 9, 7, 12, tzinfo=ZoneInfo("Asia/Omsk"))]
+    coordinator, *_ = await make_room_coordinator(now=now, clock=[0])
+
+    bathroom = coordinator._resolve_target_id(BATHROOM_LIGHT_TARGET_IDS[0])
+    shower = coordinator._resolve_target_id(SHOWER_MAIN_TARGET_ID)
+    assert bathroom == BATHROOM_LIGHT_TARGET_IDS[0]
+    assert shower == SHOWER_MAIN_TARGET_ID
+    assert bathroom != shower
+    assert coordinator._target_entity_id(BATHROOM_LIGHT_TARGET_IDS[0]) != (
+        coordinator._target_entity_id(SHOWER_MAIN_TARGET_ID)
+    )
+
+
+@pytest.mark.asyncio
+async def test_unknown_managed_and_voice_roles_stay_unresolved() -> None:
+    now = [datetime(2026, 9, 7, 12, tzinfo=ZoneInfo("Asia/Omsk"))]
+    coordinator, *_ = await make_room_coordinator(now=now, clock=[0])
+
+    for role in ("managed.unknown_fixture_role", "voice.unknown_fixture_role"):
+        assert coordinator._resolve_target_id(role) is None
+        assert coordinator._target_state(role) == "unknown"
 
 
 def _run_source(scenario_id: str, payload: dict[str, object]) -> dict[str, object]:
@@ -284,7 +374,8 @@ def test_room_sources_execute_only_the_exact_durable_server_action(
             "context": {
                 "trigger": {"source": "scenario_control"},
                 "controls": {
-                    "state": {"ready": True, "action": action},
+                    "state": {"ready": True, "action": action,
+                              "topology": {"roles": _source_roles(scenario_id, action["targetId"])}},
                 },
             },
             "inputs": {},
@@ -303,6 +394,45 @@ def test_room_sources_execute_only_the_exact_durable_server_action(
             **({"value": action["value"]} if action["value"] is not None else {}),
         }
     ]
+
+
+@pytest.mark.parametrize("scenario_id", tuple(ROOM_SOURCES))
+@pytest.mark.parametrize("topology_case", ("missing", "mismatched"))
+def test_room_sources_reject_missing_or_mismatched_topology(
+    scenario_id: str, topology_case: str
+) -> None:
+    action = {
+        "targetId": {
+            SHOWER_SCENARIO_ID: "entity_afef5df0e0cae309",
+            TOILET_SCENARIO_ID: "entity_5d95de599d2b5cec",
+            BATHROOM_SCENARIO_ID: "entity_c15f5df5382ee180",
+            OFFICE_SCENARIO_ID: "entity_aeaf7c250c68e8c2",
+        }[scenario_id],
+        "actionId": "set_brightness_percent" if scenario_id == OFFICE_SCENARIO_ID else "turn_on",
+        "value": 65 if scenario_id == OFFICE_SCENARIO_ID else None,
+    }
+    state: dict[str, object] = {"ready": True, "action": action}
+    if topology_case == "mismatched":
+        state["topology"] = {"roles": _source_roles(scenario_id, "entity_0000000000000000")}
+    payload = {
+        "correlationId": "topology-negative", "scenarioId": scenario_id,
+        "context": {"trigger": {"source": "scenario_control"}, "controls": {"state": state}},
+        "inputs": {},
+    }
+    result = _run_source(scenario_id, payload)
+    assert result["status"] == "skipped"
+    assert result["actions"] == []
+
+    if topology_case == "missing":
+        state["topology"] = {"roles": _source_roles(scenario_id, action["targetId"])}
+        control = _run_source(scenario_id, payload)
+        assert control["status"] == "completed"
+        assert control["actions"] == [{
+            "id": "server_action", "type": "device_action",
+            "targetId": action["targetId"], "targetName": "Управляемое устройство",
+            "actionId": action["actionId"], "actionTitle": "Серверное действие",
+            **({"value": action["value"]} if action["value"] is not None else {}),
+        }]
 
 
 def test_room_sources_skip_stale_or_malformed_server_actions() -> None:
@@ -348,7 +478,7 @@ def test_coordinator_owns_all_seven_completed_runtime_controllers() -> None:
 
 
 def test_coordinator_command_inventory_includes_lights_relays_and_room_power() -> None:
-    coordinator = object.__new__(ScenarioControlCoordinator)
+    coordinator = _direct_coordinator()
 
     assert {
         STORAGE_LIGHT_TARGET_ID,
@@ -360,7 +490,7 @@ def test_coordinator_command_inventory_includes_lights_relays_and_room_power() -
 
 
 def test_transferred_tambur_is_neither_coordinator_owner_nor_reserved() -> None:
-    coordinator = object.__new__(ScenarioControlCoordinator)
+    coordinator = _direct_coordinator()
     coordinator.set_externally_managed_scenarios(frozenset({TAMBUR_SCENARIO_ID}))
 
     assert TAMBUR_SCENARIO_ID not in coordinator.owned_scenario_ids
@@ -398,7 +528,7 @@ async def test_transferred_room_due_timer_never_dispatches() -> None:
 
 
 def test_transferred_shower_is_neither_coordinator_owner_nor_reserved() -> None:
-    coordinator = object.__new__(ScenarioControlCoordinator)
+    coordinator = _direct_coordinator()
     coordinator.set_externally_managed_scenarios(frozenset({SHOWER_SCENARIO_ID}))
 
     assert SHOWER_SCENARIO_ID not in coordinator.owned_scenario_ids
@@ -650,6 +780,9 @@ async def make_actual_room_runtime(
         MemoryStore(),
         priority,
         catalog_resolver=catalog.device,
+        topology_resolver=lambda role: (
+            _room_topology(role) if _room_topology(role) in devices else None
+        ),
         now_ms=lambda: clock[0],
         now=lambda: now[0],
         schedule_tasks=False,

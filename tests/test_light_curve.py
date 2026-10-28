@@ -41,11 +41,11 @@ def _ctx(
     )
 
 
-def test_night_turns_chandelier_off_and_mirror_on() -> None:
+def test_night_turns_chandelier_and_mirror_off() -> None:
     decision = evaluate_light_curve(PROFILE, _ctx(23, 30))
     assert decision.reason is CurveReason.NIGHT
     assert decision.chandelier_on is False
-    assert decision.mirror_on is True
+    assert decision.mirror_on is False
 
     after = evaluate_light_curve(PROFILE, _ctx(0, 15))
     assert after.mirror_on is False
@@ -207,7 +207,7 @@ def test_decision_payload_is_stable() -> None:
         "brightnessPercent": None,
         "colorTemperature": None,
         "fadeSeconds": PROFILE.mode_fade_seconds,
-        "mirrorOn": True,
+        "mirrorOn": False,
         "hold": False,
     }
 

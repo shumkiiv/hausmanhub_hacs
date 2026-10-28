@@ -20,7 +20,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Mapping
 
 from ..domain.core.models import LightStateTarget, Quality
-from ..manual_light_authority_events import _EXACT_ENTITY_ID
 from .core.command_service import (
     CapacityExceeded,
     CoreServiceError,
@@ -44,7 +43,7 @@ from .room_lighting_core import (
 )
 
 if TYPE_CHECKING:
-    from .core.command_service import ClosedRegistration, ResourceView
+    from .core.command_service import ResourceView
 
 REASON_CORE_MANUAL_ADMITTED = "core_manual_admitted"
 SUPPORTED_MANUAL_ACTIONS = ("turn_on", "turn_off")
@@ -148,87 +147,6 @@ class CoreManualInput:
         self._mono_now = mono_now or (
             lambda: time.monotonic_ns() // 1_000_000
         )
-        self._unavailable = False
-        # A durable registration is admitted per room.  ``None`` preserves
-        # the old process-wide fail-closed marker used by existing callers.
-        # ``None`` means the durable scope is not knowable and closes all
-        # legacy routing. A known scope reserves only its exact entities.
-        self._unresolved_registration_scopes: dict[
-            str | None, frozenset[str] | None
-        ] = {}
-        self._closed_projection_by_room: dict[str, "ClosedRegistration"] = {}
-
-    def mark_closed_registration_unavailable(
-        self, *, branch_id: str | None = None
-    ) -> None:
-        """Close routing while an expected durable projection is unresolved."""
-
-        self._unresolved_registration_scopes[branch_id] = None
-        self._unavailable = True
-
-    def mark_closed_registration_scope_unavailable(
-        self, *, branch_id: str, entity_ids: frozenset[str]
-    ) -> None:
-        """Keep a decoded scope reserved after a later startup failure."""
-
-        if not entity_ids or not all(isinstance(entity_id, str) and entity_id for entity_id in entity_ids):
-            self.mark_closed_registration_unavailable(branch_id=branch_id)
-            return
-        previous = self._unresolved_registration_scopes.get(branch_id)
-        if previous is None and branch_id in self._unresolved_registration_scopes:
-            self._unresolved_registration_scopes[branch_id] = entity_ids
-        elif previous is None:
-            self._unresolved_registration_scopes[branch_id] = entity_ids
-        else:
-            self._unresolved_registration_scopes[branch_id] = previous | entity_ids
-        self._unavailable = bool(self._unresolved_registration_scopes)
-
-    def resolve_closed_registration_scope(
-        self, *, branch_id: str, entity_ids: frozenset[str]
-    ) -> None:
-        """Resolve one proved temporary unknown into an exact scope.
-
-        Only a caller that proved a valid matching room configuration may
-        call this (HH-014.b B06-02R1): the exact scope may keep only the
-        already projected old entities plus the proved new ones, so a known
-        empty or unbound room closes its own scope without denying an
-        unrelated neighbour. An unproved caller must keep the global marker
-        through ``mark_closed_registration_unavailable`` instead.
-        """
-
-        if not all(
-            isinstance(entity_id, str) and entity_id for entity_id in entity_ids
-        ):
-            self.mark_closed_registration_unavailable(branch_id=branch_id)
-            return
-        resolved = frozenset(entity_ids)
-        previous = self._unresolved_registration_scopes.get(branch_id)
-        if previous is not None:
-            resolved = previous | resolved
-        self._unresolved_registration_scopes[branch_id] = resolved
-        self._unavailable = bool(self._unresolved_registration_scopes)
-
-    def _globally_unresolved(self) -> bool:
-        return any(scope is None for scope in self._unresolved_registration_scopes.values())
-
-    def _entity_is_unresolved(self, entity_id: str) -> bool:
-        return any(
-            scope is not None and entity_id in scope
-            for scope in self._unresolved_registration_scopes.values()
-        )
-
-    def registration_ready(self, target_id: object) -> bool:
-        """Only a known, decoded target may select the legacy route."""
-
-        if self._globally_unresolved():
-            return False
-        binding = self._bindings.get(target_id) if isinstance(target_id, str) else None
-        if binding is None:
-            return True
-        if self._entity_is_unresolved(binding.entity_id):
-            return False
-        branch = self._branches.get(binding.room_id)
-        return branch is not None and not branch.input_closed
 
     # ------------------------------------------------------------------
     # stand wiring
@@ -251,157 +169,13 @@ class CoreManualInput:
         self._bindings[binding.target_id] = binding
         self._branches[binding.room_id] = branch
 
-    def install_closed_registration(self, branch: RoomLightingCoreBranch) -> None:
-        """Install only the registration decoded from the branch's image.
-
-        The service/store accepted the complete scope before this projection
-        exists.  Consequently a process restart cannot turn an empty local
-        cache into permission for the legacy executor.
-        """
-
-        matching = [
-            registration
-            for registration in branch.core_service.closed_registrations()
-            if registration.branch_id == branch.room_id
-        ]
-        if len(matching) != 1:
-            raise CoreManualInputError(
-                "core_closed_registration_unavailable",
-                "closed registration is missing or ambiguous",
-                http_status=503,
-                api_code="unavailable",
-            )
-        self.install_closed_registration_projection(matching[0], branch=branch)
-
-    def install_closed_registration_projection(
-        self,
-        registration: "ClosedRegistration",
-        *,
-        branch: RoomLightingCoreBranch | None = None,
-    ) -> None:
-        """Publish one complete decoded registration atomically.
-
-        A projection without a live branch deliberately retains its entity
-        reservation: a failed restart must not reopen the legacy writer.
-        """
-        if branch is not None and branch.room_id != registration.branch_id:
-            raise CoreManualInputError(
-                "core_closed_registration_unavailable",
-                "closed registration belongs to another branch",
-                http_status=503,
-                api_code="unavailable",
-            )
-        existing = self._closed_projection_by_room.get(registration.branch_id)
-        if existing is not None and existing != registration:
-            raise CoreManualInputError(
-                "core_target_already_registered",
-                "closed registration changed for the same branch",
-                http_status=409,
-                api_code="conflict",
-            )
-        projected: dict[str, CoreManualTargetBinding] = {}
-        for target in registration.targets:
-            binding = CoreManualTargetBinding(
-                target_id=target.target_id,
-                resource_id=target.resource_id,
-                entity_id=target.entity_id,
-                room_id=registration.branch_id,
-                property_name=target.property_name,
-                allowed_actions=target.allowed_actions,
-            )
-            prior = self._bindings.get(binding.target_id)
-            if (
-                binding.target_id in projected
-                or (prior is not None and prior != binding)
-            ):
-                raise CoreManualInputError(
-                    "core_target_already_registered",
-                    f"target {binding.target_id} is already transferred",
-                    http_status=409,
-                    api_code="conflict",
-                )
-            projected[binding.target_id] = binding
-        # Publish a complete scope only after every target is validated.
-        self._bindings.update(projected)
-        self._closed_projection_by_room[registration.branch_id] = registration
-        if branch is None:
-            self._branches.pop(registration.branch_id, None)
-        else:
-            self._branches[registration.branch_id] = branch
-        self._unresolved_registration_scopes.pop(registration.branch_id, None)
-        self._unavailable = bool(self._unresolved_registration_scopes)
-
-    def resolve_closed_registration_as_legacy(self, *, branch_id: str) -> None:
-        """Resolve a proved old/explicit-first-create image without erasing a transfer."""
-        if branch_id in self._closed_projection_by_room:
-            raise CoreManualInputError(
-                "core_target_already_registered",
-                "accepted closed registration cannot become legacy",
-                http_status=409,
-                api_code="conflict",
-            )
-        if any(binding.room_id == branch_id for binding in self._bindings.values()):
-            raise CoreManualInputError(
-                "core_target_already_registered",
-                "transferred targets cannot become legacy",
-                http_status=409,
-                api_code="conflict",
-            )
-        self._unresolved_registration_scopes.pop(branch_id, None)
-        self._unavailable = bool(self._unresolved_registration_scopes)
-
     def is_transferred(self, target_id: object) -> bool:
         return isinstance(target_id, str) and target_id in self._bindings
 
     def transferred_target_ids(self) -> tuple[str, ...]:
         return tuple(sorted(self._bindings))
 
-    def command_entity_ids(self) -> frozenset[str]:
-        """Current legacy-writer reservations of transferred targets.
-
-        This is a read-only projection of the registered server bindings.
-        A broken binding is an unsafe unknown, never an empty reservation:
-        the runtime's existing fail-closed guard will keep the legacy writer
-        closed when this exception reaches it.
-        """
-
-        if self._globally_unresolved():
-            raise CoreManualInputError(
-                "core_closed_registration_unavailable",
-                "closed registration is unresolved",
-                http_status=503,
-                api_code="unavailable",
-            )
-        entity_ids: set[str] = set()
-        for target_id, binding in self._bindings.items():
-            entity_id = binding.entity_id
-            if (
-                not isinstance(entity_id, str)
-                or _EXACT_ENTITY_ID.fullmatch(entity_id) is None
-            ):
-                raise CoreManualInputError(
-                    "core_target_binding_invalid",
-                    f"target {target_id} has no valid command entity",
-                    http_status=500,
-                    api_code="unavailable",
-                )
-            entity_ids.add(entity_id)
-        for scope in self._unresolved_registration_scopes.values():
-            if scope is not None:
-                entity_ids.update(scope)
-        return frozenset(entity_ids)
-
     def resolve_target(self, target_id: str) -> CoreManualTargetBinding:
-        # A process-wide/scoped unresolved durable image is distinct from an
-        # already registered branch which later stopped.  The latter keeps its
-        # established ``core_unavailable`` compatibility through _branch_for.
-        if self._globally_unresolved():
-            raise CoreManualInputError(
-                "core_closed_registration_unavailable",
-                "closed core registration is unavailable",
-                http_status=503,
-                api_code="unavailable",
-            )
         binding = self._bindings.get(target_id)
         if binding is None:
             raise CoreManualInputError(
@@ -409,13 +183,6 @@ class CoreManualInput:
                 f"target {target_id} is not transferred to the core",
                 http_status=404,
                 api_code="not_found",
-            )
-        if self._entity_is_unresolved(binding.entity_id):
-            raise CoreManualInputError(
-                "core_closed_registration_unavailable",
-                "closed core registration is unavailable",
-                http_status=503,
-                api_code="unavailable",
             )
         return binding
 

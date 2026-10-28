@@ -308,6 +308,22 @@ class ManualLightAuthority:
             for related in self._related_sources.related(entity_id)
         )
 
+    def blocks_departure_off(self, entity_id: str) -> bool:
+        """Explicit departure may supersede known choices, never an evidence gap.
+
+        This is only an OFF decision. It does not release manual records or
+        grant automatic ownership, and linked uncertain evidence still denies.
+        """
+        if self.barrier_reason_for(entity_id) is not None:
+            return True
+        now_ms = int(time.time() * 1000)
+        return any(
+            (record := self.record(related)) is not None
+            and self._priority_active(record, now_ms)
+            and (record.legacy or record.action not in {"on", "off"})
+            for related in self._related_sources.related(entity_id)
+        )
+
     @staticmethod
     def _priority_active(record: ManualLightRecord, now_ms: int) -> bool:
         # ``deadline_ms > now_ms`` means still active; equality is expired.
@@ -549,6 +565,7 @@ class ManualLightAuthority:
                     not self.persistence_ready
                     or self._dispatch_failed or self._recovery or self._startup_observation_pending
                     or self._scope_generation != scope_generation
+                    or (observations_current is not None and not observations_current())
                     or self._pending
                     or not self._related_sources.ready
                     or any(
@@ -599,6 +616,19 @@ class ManualLightAuthority:
             self._storage_failed = True
             self._active_return_operation_id = None
             raise
+
+    async def async_abort_explicit_return(self, token: ManualLightReturnToken) -> None:
+        """Keep the durable deny, but let healthy storage retain newer gestures."""
+        if (not self._explicit_return_pending
+                or token.operation_id != self._active_return_operation_id):
+            raise RuntimeError("manual light return is not pending")
+        try:
+            # No bypass or reset of storage health. A genuine failed drain
+            # still marks the authority unhealthy through its ordinary path.
+            await self.async_drain()
+        finally:
+            if token.operation_id == self._active_return_operation_id:
+                self._active_return_operation_id = None
 
     async def async_finish_explicit_return(
         self, token: ManualLightReturnToken, *, persisted: bool,

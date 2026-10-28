@@ -57,6 +57,22 @@ def make_state(control_revision: int, commit_revision: int) -> dict:
     }
 
 
+def make_closed_state() -> dict:
+    state = make_state(control_revision=12, commit_revision=0)
+    state["closed_registrations"] = {
+        "shadow.room": ClosedRegistration(
+            branch_id="shadow.room", import_id="init", source_identity="legacy",
+            source_revision=1, source_payload_digest="0" * 64,
+            targets=(ClosedTargetRegistration(
+                target_id="main", resource_id=MAIN_RESOURCE, entity_id="light.main",
+                property_name="on", allowed_actions=("turn_on", "turn_off"),
+                binding_revision=3, config_revision=2,
+            ),),
+        )
+    }
+    return state
+
+
 def test_roundtrip_of_a_typed_image(tmp_path):
     store = FileControlStore(tmp_path / STORE_FILE)
     assert store.load() is None
@@ -196,7 +212,7 @@ def test_b07_closed_export_keeps_the_latest_durable_manual_action(tmp_path):
 
 def test_b07_interrupted_initialization_before_or_between_pair_stays_closed(tmp_path, monkeypatch):
     path = tmp_path / STORE_FILE
-    state = make_state(control_revision=12, commit_revision=0)
+    state = make_closed_state()
     before_marker = FileControlStore(path)
     monkeypatch.setattr(before_marker, "_write_json_atomic", lambda *args: (_ for _ in ()).throw(OSError("marker")))
     with pytest.raises(Exception):
@@ -216,7 +232,7 @@ def test_b07_interrupted_initialization_before_or_between_pair_stays_closed(tmp_
 def test_b07_crash_after_image_before_ack_recovers_from_the_verified_pair(tmp_path, monkeypatch):
     path = tmp_path / STORE_FILE
     store = FileControlStore(path)
-    state = make_state(control_revision=12, commit_revision=0)
+    state = make_closed_state()
     real_read_marker = store._read_sentinel
     reads = 0
 
@@ -414,3 +430,160 @@ def test_storage_failure_is_reported_as_unavailable(tmp_path):
 
     assert isinstance(info.value, StorageUnavailable)
     assert store.load() is None
+
+
+@pytest.mark.parametrize("part", ("image", "marker"))
+def test_closed_pair_rejects_duplicate_json_keys(tmp_path, part):
+    path = tmp_path / STORE_FILE
+    store = FileControlStore(path)
+    store.initialize_shadow("shadow.room", make_closed_state())
+    damaged = path if part == "image" else path.with_suffix(".json.expected")
+    original = damaged.read_text()
+    key = "commit_revision" if part == "image" else "image_required"
+    value = "1" if part == "image" else "true"
+    damaged.write_text('{"' + key + '":' + value + ',' + original[1:])
+    with pytest.raises(StoreImageError):
+        FileControlStore(path)
+
+
+@pytest.mark.parametrize("damage", ("bool_version", "other_room", "missing_marker", "corrupt_image"))
+def test_closed_pair_rejects_invalid_identity(tmp_path, damage):
+    path = tmp_path / STORE_FILE
+    FileControlStore(path).initialize_shadow("shadow.room", make_closed_state())
+    marker_path = path.with_suffix(".json.expected")
+    marker = json.loads(marker_path.read_text())
+    if damage == "bool_version":
+        marker["format_version"] = True
+        marker_path.write_text(json.dumps(marker))
+    elif damage == "other_room":
+        marker["room_id"] = "other.room"
+        marker_path.write_text(json.dumps(marker))
+    elif damage == "missing_marker":
+        marker_path.unlink()
+    else:
+        path.write_text("{")
+    with pytest.raises(StoreImageError):
+        FileControlStore(path)
+
+
+@pytest.mark.parametrize("damage", ("section_type", "branch_key", "target", "resource", "entity", "cross_branch_target", "cross_branch_entity", "cross_branch_resource"))
+def test_closed_codec_refuses_ambiguous_disk_registrations(tmp_path, damage):
+    import copy
+
+    path = tmp_path / STORE_FILE
+    FileControlStore(path).commit(0, make_closed_state())
+    raw = json.loads(path.read_text())
+    registration = raw["closed_registrations"]["shadow.room"]
+    if damage == "section_type":
+        raw["closed_registrations"] = []
+    elif damage == "branch_key":
+        registration["branch_id"] = "other.room"
+    elif damage.startswith("cross_branch"):
+        other = copy.deepcopy(registration)
+        other["branch_id"] = "other.room"
+        other["targets"][0]["resource_id"] = "other.resource"
+        if damage == "cross_branch_target":
+            other["targets"][0]["entity_id"] = "light.other"
+        elif damage == "cross_branch_entity":
+            other["targets"][0]["target_id"] = "other"
+        else:
+            other["targets"][0].update(target_id="other", entity_id="light.other", resource_id=MAIN_RESOURCE)
+        raw["closed_registrations"]["other.room"] = other
+    else:
+        target = copy.deepcopy(registration["targets"][0])
+        target.update(target_id="other", resource_id="other.resource", entity_id="light.other")
+        field = {"target": "target_id", "resource": "resource_id", "entity": "entity_id"}[damage]
+        target[field] = registration["targets"][0][field]
+        registration["targets"].append(target)
+    path.write_text(json.dumps(raw))
+    with pytest.raises(StoreImageError):
+        FileControlStore(path)
+
+
+@pytest.mark.parametrize("operation", ("commit", "initialize"))
+@pytest.mark.parametrize("damage", ("boolean_revision", "bad_actions", "branch_key", "wrong_room", "duplicate_target"))
+def test_invalid_closed_dto_is_refused_before_any_write(tmp_path, operation, damage):
+    path = tmp_path / STORE_FILE
+    store = FileControlStore(path)
+    if operation == "commit":
+        store.commit(0, make_state(10, 0))
+    before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
+    state = make_closed_state()
+    registration = state["closed_registrations"]["shadow.room"]
+    if damage == "boolean_revision":
+        registration = replace(registration, source_revision=True)
+    elif damage == "bad_actions":
+        registration = replace(registration, targets=(replace(registration.targets[0], allowed_actions=[]),))
+    elif damage == "branch_key":
+        registration = replace(registration, branch_id="other.room")
+    elif damage == "duplicate_target":
+        registration = replace(registration, targets=registration.targets * 2)
+    elif operation == "commit":
+        # A mismatched branch key is invalid even without a schema-2 marker.
+        registration = replace(registration, branch_id="other.room")
+    state["closed_registrations"]["shadow.room"] = registration
+    with pytest.raises(StoreImageError):
+        if operation == "initialize":
+            store.initialize_shadow("other.room" if damage == "wrong_room" else "shadow.room", state)
+        else:
+            store.commit(store.commit_revision, state)
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
+    assert store.healthy()
+
+
+def test_commit_does_not_recreate_a_lost_marker(tmp_path):
+    from custom_components.hausman_hub.application.core.command_service import StorageUnavailable
+
+    path = tmp_path / STORE_FILE
+    store = FileControlStore(path)
+    store.initialize_shadow("shadow.room", make_closed_state())
+    before = path.read_bytes()
+    path.with_suffix(".json.expected").unlink()
+    with pytest.raises(StorageUnavailable):
+        store.commit(store.commit_revision, make_closed_state())
+    assert path.read_bytes() == before
+    assert not store.healthy()
+
+
+@pytest.mark.parametrize("section", ("records", "commit_revision"))
+def test_initialization_refuses_incomplete_state_before_marker(tmp_path, section):
+    path = tmp_path / STORE_FILE
+    store = FileControlStore(path)
+    state = make_closed_state()
+    del state[section]
+    with pytest.raises(StoreImageError):
+        store.initialize_shadow("shadow.room", state)
+    assert list(tmp_path.iterdir()) == []
+    assert store.healthy()
+
+
+@pytest.mark.parametrize("conflict", (True, False))
+def test_crossbranch_resource_is_checked_before_commit_preserving_manual_history(tmp_path, conflict):
+    path = tmp_path / STORE_FILE
+    store = FileControlStore(path)
+    original = make_closed_state()
+    original["records"][MAIN_RESOURCE] = replace(
+        original["records"][MAIN_RESOURCE],
+        manual=ManualHold("latest-manual", "off", "tablet", 20, 30, 40, 1),
+    )
+    store.commit(0, original)
+    before = path.read_bytes()
+    revision = store.commit_revision
+    state = store.load()
+    first = state["closed_registrations"]["shadow.room"]
+    other_resource = MAIN_RESOURCE if conflict else "other.resource"
+    other_target = replace(first.targets[0], target_id="other", entity_id="light.other", resource_id=other_resource)
+    state["closed_registrations"]["other.room"] = replace(first, branch_id="other.room", targets=(other_target,))
+    if conflict:
+        with pytest.raises(StoreImageError):
+            store.commit(revision, state)
+        assert path.read_bytes() == before
+        assert store.commit_revision == revision
+    else:
+        state["records"][other_resource] = replace(state["records"][MAIN_RESOURCE], resource_id=other_resource)
+        state["config_revisions"][other_resource] = 2
+        store.commit(revision, state)
+        assert store.commit_revision == revision + 1
+    reloaded = FileControlStore(path).load()
+    assert reloaded["records"][MAIN_RESOURCE].manual.action_id == "latest-manual"
+    assert store.healthy()

@@ -227,7 +227,7 @@ def test_no_op_admission_when_already_in_target_state(tmp_path):
 
 def test_raw_state_snapshot_is_fresh_for_manual_no_op_but_not_auto_proof(tmp_path):
     branch = build_stand_branch(tmp_path)
-    branch.handle_runtime_event(ENTITY_ID, None, make_state("on"))
+    branch.handle_runtime_event(ENTITY_ID, make_state("off"), make_state("on"))
     fact = branch.resource_view(RESOURCE_ID).facts[0]
     assert fact.quality.name == "FRESH"
     assert fact.evidence.name == "ADAPTER_STATE"

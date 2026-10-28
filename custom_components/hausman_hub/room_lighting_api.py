@@ -58,7 +58,7 @@ from .domain.room_lighting_engine import (
 )
 from .domain.room_lighting_ownership import (
     SensorState,
-    has_proven_auto_ownership,
+    has_automatic_control,
     resolve_manual_ownership,
 )
 from .error_taxonomy import api_error_payload, api_error_status
@@ -72,6 +72,8 @@ ROOM_LIGHTING_BASE = "/api/hausman_hub/v1/rooms/{room_id}/lighting"
 ROOM_LIGHTING_CONFIG_PATH = f"{ROOM_LIGHTING_BASE}/config"
 ROOM_LIGHTING_STATUS_PATH = f"{ROOM_LIGHTING_BASE}/status"
 ROOM_LIGHTING_FORCE_AUTO_PATH = f"{ROOM_LIGHTING_BASE}/force-auto"
+ROOM_LIGHTING_RETURN_INTENT_PATH = f"{ROOM_LIGHTING_FORCE_AUTO_PATH}/intent"
+ROOM_LIGHTING_GUARDED_RETURN_PATH = f"{ROOM_LIGHTING_FORCE_AUTO_PATH}/guarded"
 ROOM_LIGHTING_TEMPLATES_PATH = f"{ROOM_LIGHTING_BASE}/templates"
 ROOM_LIGHTING_TEMPLATE_APPLY_PATH = f"{ROOM_LIGHTING_TEMPLATES_PATH}/apply"
 ROOM_LIGHTING_LIVE_TESTS_PATH = f"{ROOM_LIGHTING_BASE}/live-tests"
@@ -111,6 +113,8 @@ def register_room_lighting_api(hass: HomeAssistant, entry_id: str) -> None:
     views = (
         RoomLightingConfigView(hass),
         RoomLightingForceAutoView(hass),
+        RoomLightingReturnIntentView(hass),
+        RoomLightingGuardedReturnView(hass),
         RoomLightingStatusView(hass),
         RoomLightingTemplatesView(hass),
         RoomLightingTemplateApplyView(hass),
@@ -234,7 +238,20 @@ class RoomLightingConfigView(_RoomLightingView):
         if payload.get("roomId") != room_id:
             return self._invalid("roomId не совпадает с путём")
         try:
-            config = config_from_payload(payload)
+            config_payload = payload
+            curve_payload = payload.get("curveParams")
+            if isinstance(curve_payload, Mapping):
+                # An older client may know only one colour endpoint. Validate
+                # the effective pair; the subsequent locked CAS rejects races.
+                existing = await service.async_get_config(room_id)
+                if existing is not None and existing.curve is not None:
+                    saved_curve = existing.curve.to_payload()
+                    merged_curve = dict(curve_payload)
+                    for key in ("neutralKelvin", "eveningWarmKelvin", "presenceConfirmSeconds"):
+                        if key not in merged_curve and key in saved_curve:
+                            merged_curve[key] = saved_curve[key]
+                    config_payload = {**payload, "curveParams": merged_curve}
+            config = config_from_payload(config_payload)
         except RoomLightingViolation as error:
             return self._invalid(error)
         try:
@@ -247,7 +264,20 @@ class RoomLightingConfigView(_RoomLightingView):
                 config,
                 expected_version=config.version,
                 preserve_manual_control_return="manualControlReturn" not in payload,
+                preserve_quiet_hours="quietHours" not in payload,
                 preserve_curve_params="curveParams" not in payload,
+                preserve_curve_neutral_kelvin=not (
+                    isinstance(payload.get("curveParams"), Mapping)
+                    and "neutralKelvin" in payload["curveParams"]
+                ),
+                preserve_curve_evening_warm_kelvin=not (
+                    isinstance(payload.get("curveParams"), Mapping)
+                    and "eveningWarmKelvin" in payload["curveParams"]
+                ),
+                preserve_curve_presence_confirm_seconds=not (
+                    isinstance(payload.get("curveParams"), Mapping)
+                    and "presenceConfirmSeconds" in payload["curveParams"]
+                ),
                 dimming_target_omitted=dimming_target_omitted,
             )
         except RoomLightingRevisionConflictError as error:
@@ -264,6 +294,13 @@ class RoomLightingConfigView(_RoomLightingView):
             return self._unavailable()
         except Exception:
             return self._error("internal_error")
+        runtime = self._data().get(DATA_ROOM_LIGHTING_RUNTIME)
+        apply = getattr(runtime, "apply_config", None)
+        if callable(apply):
+            # The durable CAS result becomes the active version before the
+            # response is visible.  This is deliberately synchronous: no
+            # stale automatic command may pass an await between save and fence.
+            apply(saved)
         return self.json(saved.to_dict(), headers=NO_STORE_HEADERS)
 
 
@@ -315,6 +352,70 @@ class RoomLightingForceAutoView(_RoomLightingView):
             },
             headers=NO_STORE_HEADERS,
         )
+
+
+class _GuardedReturnView(_RoomLightingView):
+    """The new automated route is local-admin-only, without legacy fallback."""
+
+    def _actor(self, request: Any) -> str | None:
+        if not _is_local_admin_request(request):
+            return None
+        actor = getattr(request.get("hass_user"), "id", None)
+        return actor if isinstance(actor, str) and actor else None
+
+
+class RoomLightingReturnIntentView(_GuardedReturnView):
+    url = ROOM_LIGHTING_RETURN_INTENT_PATH
+    name = "api:hausman_hub:room_lighting_return_intent"
+
+    async def get(self, request: Any, room_id: str | None = None) -> Any:
+        """No await: intent precedes all subsequent network and storage waits."""
+        del room_id
+        room_id = self._room_id(request)
+        if room_id is None:
+            return _not_found(self)
+        actor = self._actor(request)
+        if actor is None:
+            return _forbidden(self)
+        runtime = self._data().get(DATA_ROOM_LIGHTING_RUNTIME)
+        issue = getattr(runtime, "issue_force_auto_intent", None)
+        if not callable(issue):
+            return self._unavailable()
+        result = issue(room_id, actor_id=actor)
+        if result is None:
+            return self._unavailable()
+        return self.json({"contract": {"name": "hausman-hub-room-lighting-return-intent",
+                                      "version": 1}, **result}, headers=NO_STORE_HEADERS)
+
+
+class RoomLightingGuardedReturnView(_GuardedReturnView):
+    url = ROOM_LIGHTING_GUARDED_RETURN_PATH
+    name = "api:hausman_hub:room_lighting_guarded_return"
+
+    async def post(self, request: Any, room_id: str | None = None) -> Any:
+        del room_id
+        room_id = self._room_id(request)
+        if room_id is None:
+            return _not_found(self)
+        actor = self._actor(request)
+        if actor is None:
+            return _forbidden(self)
+        try:
+            payload = await _request_json(request, maximum_bytes=1024)
+        except ValueError:
+            return self._invalid("ожидается одноразовое намерение возврата")
+        if (not isinstance(payload, dict) or set(payload) != {"intentToken"}
+                or not isinstance(payload["intentToken"], str)
+                or re.fullmatch(r"[a-f0-9]{64}", payload["intentToken"]) is None):
+            return self._invalid("ожидается одноразовое намерение возврата")
+        runtime = self._data().get(DATA_ROOM_LIGHTING_RUNTIME)
+        force = getattr(runtime, "async_force_auto_guarded", None)
+        if not callable(force):
+            return self._unavailable()
+        result = await force(room_id, actor_id=actor, intent_token=payload["intentToken"],
+                             reason="guarded return")
+        return self.json({"contract": {"name": "hausman-hub-room-lighting-guarded-return",
+                                      "version": 1}, **result}, headers=NO_STORE_HEADERS)
 
 
 class RoomLightingStatusView(_RoomLightingView):
@@ -568,8 +669,13 @@ class RoomLightingLiveTestView(_RoomLightingView):
         entry = registry.get(correlation_id)
         return entry if isinstance(entry, dict) else None
 
-    async def get(self, request: Any, correlation_id: str | None = None) -> Any:
-        del correlation_id
+    async def get(
+        self,
+        request: Any,
+        correlation_id: str | None = None,
+        room_id: str | None = None,
+    ) -> Any:
+        del correlation_id, room_id
         correlation_id = self._correlation_id(request)
         if correlation_id is None:
             return _not_found(self)
@@ -593,8 +699,13 @@ class RoomLightingLiveTestView(_RoomLightingView):
             headers=NO_STORE_HEADERS,
         )
 
-    async def post(self, request: Any, correlation_id: str | None = None) -> Any:
-        del correlation_id
+    async def post(
+        self,
+        request: Any,
+        correlation_id: str | None = None,
+        room_id: str | None = None,
+    ) -> Any:
+        del correlation_id, room_id
         correlation_id = self._correlation_id(request)
         if correlation_id is None:
             return _not_found(self)
@@ -740,7 +851,7 @@ def _status_payload(
                     )
                     else (
                         "auto"
-                        if has_proven_auto_ownership(context.ownership, light_target.id)
+                        if has_automatic_control(context.ownership, light_target.id)
                         else "none"
                     )
                 ),
@@ -959,6 +1070,8 @@ def room_lighting_api_views(hass: HomeAssistant) -> tuple[HomeAssistantView, ...
     return (
         RoomLightingConfigView(hass),
         RoomLightingForceAutoView(hass),
+        RoomLightingReturnIntentView(hass),
+        RoomLightingGuardedReturnView(hass),
         RoomLightingStatusView(hass),
         RoomLightingTemplatesView(hass),
         RoomLightingTemplateApplyView(hass),
@@ -971,6 +1084,8 @@ __all__ = [
     "ROOM_LIGHTING_CONFIG_PATH",
     "ROOM_LIGHTING_STATUS_PATH",
     "ROOM_LIGHTING_FORCE_AUTO_PATH",
+    "ROOM_LIGHTING_RETURN_INTENT_PATH",
+    "ROOM_LIGHTING_GUARDED_RETURN_PATH",
     "ROOM_LIGHTING_TEMPLATES_PATH",
     "ROOM_LIGHTING_TEMPLATE_APPLY_PATH",
     "ROOM_LIGHTING_LIVE_TESTS_PATH",

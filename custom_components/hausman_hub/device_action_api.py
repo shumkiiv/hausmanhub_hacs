@@ -720,7 +720,6 @@ class DeviceActionView(HomeAssistantView):
         )
         if isinstance(core_manual_input, CoreManualInput) and (
             core_manual_input.is_transferred(target_id)
-            or not core_manual_input.registration_ready(target_id)
         ):
             # A transferred resource is answered by the common core
             # admission before any legacy side record is prepared
@@ -1658,9 +1657,6 @@ class DeviceActionBatchView(HomeAssistantView):
         ):
             batch_touches_transferred = any(
                 core_input_for_batch.is_transferred(str(item["targetId"]))
-                or not core_input_for_batch.registration_ready(
-                    str(item["targetId"])
-                )
                 for item in normalized
             )
             if batch_touches_transferred:

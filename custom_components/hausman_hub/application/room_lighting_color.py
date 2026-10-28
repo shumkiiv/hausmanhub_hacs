@@ -1,17 +1,16 @@
 """Shared colour-temperature inversion helpers for room lighting.
 
 Some Tuya ``TS0502B`` lamps mirror their CCT scale: a higher raw command
-kelvin is physically warmer. The logical value and the raw command are then
-reflections of each other around the shared neutral point, and the same
-formula converts in both directions. The executor (logical -> raw command) and
-the state provider (raw observation -> logical) must use these exact
-constants so they can never drift apart.
+kelvin is physically warmer. Zigbee CCT is measured in reciprocal megakelvin
+(mired), not linear Kelvin. Reflect that scale between the device endpoints.
+The same formula converts logical -> raw and raw -> logical, independently
+of the policy's preferred daytime or evening colour.
 """
 
 from __future__ import annotations
 
-# The shared default neutral point of the warmth policy.
-INVERTED_NEUTRAL_KELVIN = 3000
+import math
+
 # Used only when the device does not expose its own kelvin bounds; it mirrors
 # the clamp of the legacy tambur controller.
 FALLBACK_MIN_KELVIN = 1500
@@ -23,15 +22,20 @@ def reflect_inverted_kelvin(
     minimum: int = FALLBACK_MIN_KELVIN,
     maximum: int = FALLBACK_MAX_KELVIN,
 ) -> int:
-    """Reflect a kelvin value around the neutral point.
+    """Reverse the device's mired scale, returning integer Kelvin.
 
     The reflection is its own inverse, so the same call converts a logical
     value into the raw command and a raw observation back into the logical
-    value. The result is clamped to the supplied device bounds.
+    value (apart from integer rounding). Clamp before taking reciprocals,
+    preserving both endpoints instead of saturating an entire half-range.
     """
 
-    reflected = 2 * INVERTED_NEUTRAL_KELVIN - int(kelvin)
-    return max(int(minimum), min(int(maximum), reflected))
+    lower, upper = int(minimum), int(maximum)
+    if lower <= 0 or lower >= upper:
+        raise ValueError("invalid colour-temperature bounds")
+    bounded = max(lower, min(upper, int(kelvin)))
+    reflected = round(1.0 / (1.0 / lower + 1.0 / upper - 1.0 / bounded))
+    return max(lower, min(upper, reflected))
 
 
 def device_kelvin_bounds(attributes: object) -> tuple[int, int]:
@@ -49,11 +53,12 @@ def device_kelvin_bounds(attributes: object) -> tuple[int, int]:
 def _kelvin_bound(value: object) -> int | None:
     if type(value) not in {int, float} or isinstance(value, bool):
         return None
+    if not math.isfinite(value) or value < 1:
+        return None
     return int(value)
 
 
 __all__ = [
-    "INVERTED_NEUTRAL_KELVIN",
     "FALLBACK_MIN_KELVIN",
     "FALLBACK_MAX_KELVIN",
     "reflect_inverted_kelvin",

@@ -9,8 +9,6 @@ permission check, queue, arbitration and lifecycle are production code.
 
 from __future__ import annotations
 
-from copy import deepcopy
-import hashlib
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from enum import Enum
@@ -71,20 +69,6 @@ FALLBACK_MAX_AGE_MS = 60_000
 FALLBACK_CONFIRMATION_TIMEOUT_MS = 10_000
 
 
-def resolve_observation_max_age_ms(
-    resource_id: str,
-    property_name: str,
-    capability_provider: Callable[[str], "CapabilityProfile"],
-) -> int:
-    """Return the passport freshness window, preserving the old fallback."""
-    try:
-        profile = capability_provider(resource_id)
-    except Exception:
-        return FALLBACK_MAX_AGE_MS
-    rule = profile.properties.get(property_name)
-    return rule.max_age_ms if rule is not None else FALLBACK_MAX_AGE_MS
-
-
 class CoreServiceError(Exception):
     """Base error of the core command service."""
 
@@ -116,10 +100,6 @@ class CommitConflict(CoreServiceError):
 class CapacityExceeded(CoreServiceError):
     """Store capacity is exhausted; the request is refused before
     acceptance instead of silently dropping protected records (S-05)."""
-
-
-class ClosedRegistrationConflict(CoreServiceError):
-    """A closed import cannot be applied to a different durable image."""
 
 
 RECEIPT_WINDOW_MS = 24 * 60 * 60 * 1000
@@ -266,20 +246,10 @@ class CapabilityProfile:
     version: int
     source: str
     properties: Mapping[str, PropertyRule]
-    # Internal passport metadata.  A non-zero value makes every configured
-    # upstream power dependency a final dispatch precondition; old profiles
-    # deliberately retain their historical behaviour.
-    power_warmup_ms: int = 0
 
     def __post_init__(self) -> None:
         if isinstance(self.version, bool) or not isinstance(self.version, int):
             raise CoreServiceError("CapabilityProfile.version must be int")
-        if (
-            isinstance(self.power_warmup_ms, bool)
-            or not isinstance(self.power_warmup_ms, int)
-            or self.power_warmup_ms < 0
-        ):
-            raise CoreServiceError("CapabilityProfile.power_warmup_ms must be non-negative int")
 
 
 class ManualStatus(Enum):
@@ -325,49 +295,6 @@ class ModuleEntry:
 
     manifest: ModuleManifest
     instance: object
-    memory_type: type | None = None
-    revalidate_automatic_off_before_dispatch: bool = False
-    revalidate_automatic_on_before_dispatch: bool = False
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.revalidate_automatic_off_before_dispatch, bool):
-            raise CoreServiceError(
-                "revalidate_automatic_off_before_dispatch must be bool"
-            )
-        if not isinstance(self.revalidate_automatic_on_before_dispatch, bool):
-            raise CoreServiceError(
-                "revalidate_automatic_on_before_dispatch must be bool"
-            )
-
-
-@dataclass(frozen=True)
-class ClosedTargetRegistration:
-    """One exact server binding accepted by a closed synthetic import.
-
-    This is deliberately an application DTO.  It contains no HA objects and
-    is persisted with the control image, so an in-memory routing cache never
-    becomes an authority for a transferred resource.
-    """
-
-    target_id: str
-    resource_id: str
-    entity_id: str
-    property_name: str
-    allowed_actions: tuple[str, ...]
-    binding_revision: int
-    config_revision: int
-
-
-@dataclass(frozen=True)
-class ClosedRegistration:
-    """Atomic, complete registration of one closed branch image."""
-
-    branch_id: str
-    import_id: str
-    source_identity: str
-    source_revision: int
-    targets: tuple[ClosedTargetRegistration, ...]
-    source_payload_digest: str = ""
 
 
 class CoreCommandService:
@@ -407,10 +334,6 @@ class CoreCommandService:
 
         self._records: dict[str, ControlRecord] = dict(initial_records or {})
         self._needs: dict[str, tuple[Proposal, ...]] = {}
-        # K-04 module-local immutable state is deliberately ephemeral: mono
-        # deadlines and transition evidence never survive a restore.
-        self._module_memory: dict[str, object] = {}
-        self._module_wakeups: dict[str, int] = {}
         self._operations: dict[str, Operation] = {}
         self._resource_ops: dict[str, list[str]] = {
             resource_id: [] for resource_id in self._specs
@@ -427,11 +350,6 @@ class CoreCommandService:
             resource_id: {} for resource_id in self._specs
         }
         self._report_groups: dict[tuple, list[Observation]] = {}
-        # These cursors are intentionally only process-local snapshots for
-        # retained operations.  The durable report history remains the
-        # authority for ingress ordering; a restored operation cannot use a
-        # boundary from a previous process.
-        self._dispatch_cursors: dict[str, dict[tuple[str, str, int, str], int]] = {}
         self._confirm_keys: dict[str, tuple] = {}
         self._dispatching: dict[str, str] = {}
         self._receipt_times: dict[str, int] = {}
@@ -446,21 +364,6 @@ class CoreCommandService:
             resource_id: None for resource_id in self._specs
         }
         self._consumed_permits: set[str] = set()
-        # This instance may be retired while its durable image is kept for a
-        # closed SHADOW restore.  It is deliberately in-memory: the restored
-        # service receives SHADOW mode, while this old instance must never
-        # reopen its own dispatch path after the barrier is lifted by a
-        # later manual admission.
-        self._dispatch_closed_for_restore = False
-        # Closing physical dispatch is irreversible for this instance, but a
-        # failed file commit is not evidence that the retirement image became
-        # durable.  Keep immutable snapshots of that one transition so a
-        # later lifecycle callback can verify or finish it without rebuilding
-        # a second generation from changed live memory.
-        self._close_restore_complete = False
-        self._closed_registrations: dict[str, ClosedRegistration] = {}
-        self._close_restore_base: dict | None = None
-        self._close_restore_intended: dict | None = None
 
     # ------------------------------------------------------------------
     # lookups
@@ -563,12 +466,7 @@ class CoreCommandService:
         return record.manual.active_at_utc(self._clock.now_utc_ms())
 
     def _fact_matches(self, resource_id: str, target: Target) -> bool:
-        try:
-            profile = self._adapter.capabilities(resource_id)
-        except Exception:
-            # A profile-less shadow branch cannot establish a no-op from
-            # untyped facts; final dispatch remains fail-closed.
-            return False
+        profile = self._adapter.capabilities(resource_id)
         for name, expected in requested_properties(target).items():
             fact = self._facts[resource_id].get(name)
             if fact is None:
@@ -601,6 +499,7 @@ class CoreCommandService:
                 ["on"] if "on" in requested_properties(target) else []
             )
         for name in names:
+            rule = profile.properties.get(name)
             fact = self._facts[resource_id].get(name)
             if fact is None:
                 return False
@@ -608,114 +507,10 @@ class CoreCommandService:
                 return False
             if fact.evidence_kind in (Evidence.OPTIMISTIC, Evidence.RESTORED):
                 return False
-            max_age = resolve_observation_max_age_ms(
-                resource_id, name, lambda _resource_id: profile
-            )
+            max_age = rule.max_age_ms if rule else FALLBACK_MAX_AGE_MS
             if self._clock.now_mono_ms() - fact.received_at_mono_ms > max_age:
                 return False
         return True
-
-    def _module_frame(self, module_id: str, event_id: str) -> InputFrame:
-        """Build one current, fail-closed module view.
-
-        A fact may have entered as FRESH but may not outlive its passport
-        window.  The frame therefore projects an expired fact as STALE;
-        it does not rewrite retained evidence or control history.
-        """
-        entry = self._modules[module_id]
-        subscribed = tuple(
-            self.resolve_resource_id(name)
-            for name in entry.manifest.observation_subscriptions
-        )
-        now = self._clock.now_mono_ms()
-        observations = []
-        for resource_id in subscribed:
-            for observation in self._facts[resource_id].values():
-                max_age = resolve_observation_max_age_ms(
-                    resource_id, observation.property, self._adapter.capabilities
-                )
-                if (
-                    observation.quality is Quality.FRESH
-                    and now - observation.received_at_mono_ms > max_age
-                ):
-                    observation = replace(observation, quality=Quality.STALE)
-                observations.append(observation)
-        controls = tuple(
-            self._project_current_auto_proof(resource_id)
-            for resource_id in subscribed
-        )
-        return InputFrame(
-            now_utc_ms=self._clock.now_utc_ms(),
-            now_mono_ms=now,
-            boot_id=self._clock.boot_id(),
-            event_id=event_id,
-            config_revision=self._config_revisions.get(
-                subscribed[0] if subscribed else "", 0
-            ),
-            observations=tuple(observations),
-            resource_controls=controls,
-            related_scope_revisions=dict(self._scope_revisions),
-            inbound_needs=self._needs.get(module_id, ()),
-        )
-
-    def _project_current_auto_proof(self, resource_id: str) -> ControlRecord:
-        """Expose automatic ownership to modules only while current facts
-        still satisfy the originally confirmed target under its passport.
-
-        The durable proof remains historical evidence in the control record.
-        This projection only closes a module's present dispatch permission
-        when fresh, bound device facts no longer support it.
-        """
-        record = self._records[resource_id]
-        proof = record.auto_proof
-        if proof is None:
-            return record
-        target = proof.confirmed_target
-        if not self._fact_matches(resource_id, target):
-            return replace(record, auto_proof=None)
-        if not self._facts_fresh(resource_id, target, require_all=True):
-            return replace(record, auto_proof=None)
-        for name in requested_properties(target):
-            fact = self._facts[resource_id].get(name)
-            if (
-                fact is None
-                or fact.evidence_kind is not Evidence.DEVICE_REPORT
-                or fact.boot_id != self._clock.boot_id()
-                or fact.binding_revision != record.binding_revision
-                or fact.source_sequence is None
-            ):
-                return replace(record, auto_proof=None)
-        return record
-
-    def _module_still_permits(self, operation: Operation) -> bool:
-        """Re-evaluate an automatic intent immediately before dispatch.
-
-        Operations deliberately do not carry a second copy of a module's
-        conditions.  Instead the existing K-04 contract is evaluated against
-        current facts and the original target must still be proposed.
-        """
-        if not operation.origin_automation or operation.module_id is None:
-            return True
-        entry = self._modules.get(operation.module_id)
-        if entry is None:
-            return False
-        target_on = getattr(operation.target, "on", None)
-        if (
-            (target_on is False and not entry.revalidate_automatic_off_before_dispatch)
-            or (target_on is True and not entry.revalidate_automatic_on_before_dispatch)
-            or target_on not in (True, False)
-        ):
-            return True
-        evaluation = entry.instance.evaluate(
-            self._module_frame(operation.module_id, "dispatch_recheck"),
-            self._module_memory.get(operation.module_id),
-        )
-        return any(
-            proposal.resource_id == operation.resource_id
-            and proposal.target == operation.target
-            and proposal.config_revision == operation.config_revision
-            for proposal in evaluation.proposals
-        )
 
     def _unresolved_sent_exists(self, resource_id: str) -> bool:
         """A dispatch with an undetermined outcome exists (K-08 no_op)."""
@@ -786,413 +581,11 @@ class CoreCommandService:
             },
             "scope_revisions": dict(self._scope_revisions),
             "config_revisions": dict(self._config_revisions),
-            "closed_registrations": dict(self._closed_registrations),
         }
-
-    def closed_registrations(self) -> tuple[ClosedRegistration, ...]:
-        """Read-only durable registration projection, ordered by branch."""
-
-        return tuple(
-            self._closed_registrations[key]
-            for key in sorted(self._closed_registrations)
-        )
-
-    def is_closed_registered_resource(self, resource_id: str) -> bool:
-        """Whether this resource's manual state belongs to the image import."""
-
-        return any(
-            target.resource_id == resource_id
-            for registration in self._closed_registrations.values()
-            for target in registration.targets
-        )
-
-    def import_closed_registration(
-        self,
-        registration: ClosedRegistration,
-        *,
-        expected_commit_revision: int,
-    ) -> None:
-        """Persist one complete closed registration with this whole image.
-
-        The branch remains closed; this operation only records the exact
-        routing ownership after checking the current service configuration.
-        A same import is an idempotent no-op, while any changed payload under
-        the same branch/import identity is refused before a write.
-        """
-
-        _validate_closed_registration_codec_compatible(registration)
-        if expected_commit_revision != self._store.commit_revision:
-            raise ClosedRegistrationConflict("stale closed import revision")
-        if not registration.branch_id or not registration.import_id:
-            raise ClosedRegistrationConflict("closed import identity is empty")
-        if not registration.targets:
-            raise ClosedRegistrationConflict("closed import has no targets")
-        seen_targets: set[str] = set()
-        seen_resources: set[str] = set()
-        seen_entities: set[str] = set()
-        for target in registration.targets:
-            if (
-                not target.target_id
-                or not target.resource_id
-                or not target.entity_id
-                or not target.property_name
-                or not target.allowed_actions
-                or target.target_id in seen_targets
-                or target.resource_id in seen_resources
-                or target.entity_id in seen_entities
-            ):
-                raise ClosedRegistrationConflict("closed import target scope invalid")
-            seen_targets.add(target.target_id)
-            seen_resources.add(target.resource_id)
-            seen_entities.add(target.entity_id)
-            spec = self._specs.get(target.resource_id)
-            if spec is None or self._bindings.get(target.resource_id) != target.entity_id:
-                raise ClosedRegistrationConflict("closed import binding is unknown")
-            if (
-                spec.binding_revision != target.binding_revision
-                or self._config_revisions.get(target.resource_id) != target.config_revision
-            ):
-                raise ClosedRegistrationConflict("closed import binding revision moved")
-        existing = self._closed_registrations.get(registration.branch_id)
-        if existing is not None:
-            if existing == registration:
-                return
-            raise ClosedRegistrationConflict("closed branch is already registered")
-        # A first closed import has no ordering proof against an existing
-        # destination history.  Do not overwrite a person's newer manual
-        # choice (or any unresolved history) merely because both stores have
-        # valid local revisions.
-        if (
-            any(record.manual is not None for record in self._records.values())
-            or self._operations
-            or self._receipts
-            or self._receipt_fingerprints
-            or self._confirm_keys
-            or self._episode_locks
-        ):
-            raise ClosedRegistrationConflict(
-                "first closed import destination is not pristine"
-            )
-        target_ids = {
-            target.target_id
-            for imported in self._closed_registrations.values()
-            for target in imported.targets
-        }
-        entity_ids = {
-            target.entity_id
-            for imported in self._closed_registrations.values()
-            for target in imported.targets
-        }
-        if target_ids.intersection(seen_targets) or entity_ids.intersection(seen_entities):
-            raise ClosedRegistrationConflict("closed import collides with registered target")
-        self._closed_registrations[registration.branch_id] = registration
-        try:
-            self._commit_state()
-        except Exception:
-            self._closed_registrations.pop(registration.branch_id, None)
-            raise
-
-    def import_closed_registration_from(
-        self,
-        source: "CoreCommandService",
-        registration: ClosedRegistration,
-        *,
-        expected_commit_revision: int,
-        expected_source_revision: int,
-        controlled_resource_ids: frozenset[str] | None = None,
-    ) -> None:
-        """Atomically copy a complete real Core image and its registration.
-
-        The caller supplies another ``CoreCommandService`` backed by a real
-        ControlStore, never a reduced legacy hold view.  This deliberately
-        accepts only a whole matching resource scope: records, unresolved
-        operations, receipts and their fingerprints cross the boundary
-        together, or no destination state is changed.
-        """
-
-        _validate_closed_registration_codec_compatible(registration)
-        if (
-            source is self
-            or not source._close_restore_complete
-            or not self._close_restore_complete
-            or source._store.commit_revision != expected_source_revision
-            or registration.source_revision != expected_source_revision
-        ):
-            raise ClosedRegistrationConflict("closed import source or destination is not closed or revision moved")
-        durable_source = source._store.load()
-        if (
-            durable_source is None
-            or _canonical_source_image(durable_source)
-            != _canonical_source_image(source._build_image())
-            or not _valid_payload_digest(registration.source_payload_digest)
-            or registration.source_payload_digest
-            != _payload_digest(durable_source)
-        ):
-            raise ClosedRegistrationConflict("closed import source payload changed")
-        registration_scope = {
-            target.resource_id for target in registration.targets
-        }
-        full_scope = set(source._specs)
-        if full_scope != set(self._specs):
-            raise ClosedRegistrationConflict("closed import source scope is incomplete")
-        if controlled_resource_ids is None:
-            controlled_scope = full_scope
-        else:
-            controlled_scope = set(controlled_resource_ids)
-            if not controlled_scope or not controlled_scope.issubset(full_scope):
-                raise ClosedRegistrationConflict("closed import controlled scope is invalid")
-        if registration_scope != controlled_scope:
-            raise ClosedRegistrationConflict("closed import registration is incomplete")
-        if set(source._records) != full_scope:
-            raise ClosedRegistrationConflict("closed import source records are incomplete")
-        for operation in source._operations.values():
-            if operation.resource_id not in full_scope:
-                raise ClosedRegistrationConflict("closed import operation escapes scope")
-        for receipt in source._receipts.values():
-            if receipt.operation_id is not None and receipt.operation_id not in source._operations:
-                raise ClosedRegistrationConflict("closed import receipt is incomplete")
-        if expected_commit_revision != self._store.commit_revision:
-            raise ClosedRegistrationConflict("stale closed import revision")
-        existing = self._closed_registrations.get(registration.branch_id)
-        if existing is not None:
-            if existing == registration:
-                return
-            raise ClosedRegistrationConflict("closed branch is already registered")
-        if (
-            any(record.manual is not None for record in self._records.values())
-            or self._operations
-            or self._receipts
-            or self._receipt_fingerprints
-            or self._confirm_keys
-            or self._episode_locks
-        ):
-            raise ClosedRegistrationConflict(
-                "first closed import destination is not pristine"
-            )
-        for target in registration.targets:
-            spec = self._specs.get(target.resource_id)
-            if (
-                spec is None
-                or self._bindings.get(target.resource_id) != target.entity_id
-                or spec.binding_revision != target.binding_revision
-                or self._config_revisions.get(target.resource_id) != target.config_revision
-            ):
-                raise ClosedRegistrationConflict("closed import binding revision moved")
-        occupied = {
-            target.target_id
-            for imported in self._closed_registrations.values()
-            for target in imported.targets
-        }
-        if occupied.intersection(target.target_id for target in registration.targets):
-            raise ClosedRegistrationConflict("closed import collides with registered target")
-        previous = (
-            self._records, self._operations, self._resource_ops, self._receipts,
-            self._receipt_times, self._receipt_fingerprints,
-            self._confirm_keys, self._episode_locks, self._closed_registrations,
-            self._scope_revisions, self._config_revisions,
-            self._restored_operation_ids, self._id_floor,
-        )
-        self._records = deepcopy(source._records)
-        self._operations = deepcopy(source._operations)
-        self._resource_ops = {resource_id: [] for resource_id in self._specs}
-        for operation_id, operation in self._operations.items():
-            self._resource_ops[operation.resource_id].append(operation_id)
-        self._receipts = deepcopy(source._receipts)
-        self._receipt_times = deepcopy(source._receipt_times)
-        self._receipt_fingerprints = deepcopy(source._receipt_fingerprints)
-        self._confirm_keys = deepcopy(source._confirm_keys)
-        self._episode_locks = deepcopy(source._episode_locks)
-        self._scope_revisions = deepcopy(source._scope_revisions)
-        self._config_revisions = deepcopy(source._config_revisions)
-        self._restored_operation_ids = set(source._restored_operation_ids) | set(
-            self._operations
-        )
-        self._id_floor = max(self._id_floor, source._id_floor)
-        self._closed_registrations = dict(self._closed_registrations)
-        self._closed_registrations[registration.branch_id] = registration
-        try:
-            self._commit_state()
-        except Exception:
-            (
-                self._records, self._operations, self._resource_ops, self._receipts,
-                self._receipt_times, self._receipt_fingerprints,
-                self._confirm_keys, self._episode_locks, self._closed_registrations,
-                self._scope_revisions, self._config_revisions,
-                self._restored_operation_ids, self._id_floor,
-            ) = previous
-            raise
 
     def _commit_state(self) -> None:
-        if (
-            self._dispatch_closed_for_restore
-            and not self._close_restore_complete
-        ):
-            raise StorageUnavailable("durable close is unresolved")
         self._prune_history()
         self._store.commit(self._store.commit_revision, self._build_image())
-
-    def close_dispatch_for_restore(self) -> None:
-        """Durably retire this instance before a closed restore.
-
-        The in-memory gate is closed first, so a failed CAS or file commit
-        cannot leave the old instance able to send.  The one succeeding
-        whole-image commit advances every affected control/scope version,
-        preserves manual and receipt history, and makes unfinished work
-        either explicitly cancelled (never sent) or unknown (may have
-        crossed the transport boundary).  Old automatic proof is history,
-        never proof for the next generation.
-        """
-
-        if self._close_restore_complete:
-            return
-
-        new_close = not self._dispatch_closed_for_restore
-        if new_close:
-            # The deny-only gate is intentionally set before any disk I/O.
-            # It must survive every uncertain write outcome.
-            self._dispatch_closed_for_restore = True
-            base = deepcopy(self._build_image())
-            intended = deepcopy(base)
-            next_records: dict[str, ControlRecord] = {}
-            for resource_id, record in self._records.items():
-                next_records[resource_id] = replace(
-                    record,
-                    control_revision=record.control_revision + 1,
-                    generation=record.generation + 1,
-                    authority=(
-                        record.authority
-                        if record.manual is not None
-                        else Authority.UNCERTAIN
-                    ),
-                    automatic_scope=(
-                        record.automatic_scope
-                        if record.manual is not None
-                        else AutomaticScope.NONE
-                    ),
-                    auto_proof=None,
-                    uncertainty_reason=(
-                        record.uncertainty_reason
-                        or "closed_restore_requires_fresh_observation"
-                    ),
-                )
-            next_operations: dict[str, Operation] = {}
-            for operation_id, operation in self._operations.items():
-                next_operation = replace(operation)
-                if operation.phase in (OperationPhase.QUEUED, OperationPhase.TAKEN):
-                    next_operation.phase = OperationPhase.CANCELLED
-                    next_operation.reason_code = "closed_for_restore"
-                elif operation.phase in (
-                    OperationPhase.DISPATCHING,
-                    OperationPhase.OBSERVING,
-                ):
-                    # A durable dispatching image does not prove the physical
-                    # call was absent.  Keep that uncertainty for recovery.
-                    next_operation.phase = OperationPhase.UNKNOWN
-                    next_operation.reason_code = "closed_for_restore_unknown"
-                next_operations[operation_id] = next_operation
-            next_scopes = dict(self._scope_revisions)
-            for spec in self._specs.values():
-                for group in spec.manual_scopes:
-                    next_scopes[group] = next_scopes.get(group, 0) + 1
-            intended["records"] = next_records
-            intended["operations"] = next_operations
-            intended["scope_revisions"] = next_scopes
-            self._close_restore_base = base
-            self._close_restore_intended = intended
-
-        assert self._close_restore_base is not None
-        assert self._close_restore_intended is not None
-        base = self._close_restore_base
-        intended = self._close_restore_intended
-        try:
-            if new_close:
-                # Only the first attempt may advance the captured base to the
-                # intended image without a preceding durable comparison.
-                self._store.commit(self._store.commit_revision, intended)
-                durable = intended
-            else:
-                # A failed atomic write can have replaced the target before
-                # directory fsync or re-read failed.  Reload is required to
-                # reopen FileControlStore and compare the full typed image;
-                # revision equality alone cannot distinguish a later manual.
-                durable = self._store.load()
-                if durable is None:
-                    raise StorageUnavailable("durable close image disappeared")
-                if self._same_close_payload(durable, base):
-                    self._store.commit(self._store.commit_revision, intended)
-                    durable = intended
-                elif self._same_close_payload(durable, intended):
-                    # The rights transition is already present.  Repeat the
-                    # identical current payload only to obtain a verified
-                    # file+directory commit; never increment generation again.
-                    # ``load`` returns typed codec values (including tuple
-                    # episode-lock keys), while this captured image is the
-                    # known encodable wire-boundary representation of the
-                    # same complete transition.  Recommit the latter, not
-                    # the decoded mapping, then publish that exact image.
-                    self._store.commit(self._store.commit_revision, intended)
-                    durable = intended
-                else:
-                    raise StorageUnavailable(
-                        "durable close conflicts with a newer image"
-                    )
-        except Exception:
-            # The gate remains closed and the captured images stay available
-            # for an explicit subsequent lifecycle retry.  Publishing either
-            # image here would make memory disagree with durable truth.
-            raise
-        self._publish_closed_restore(durable)
-
-    @staticmethod
-    def _same_close_payload(actual: Mapping, expected: Mapping) -> bool:
-        """Compare complete typed images while ignoring store-local commit id.
-
-        ``FileControlStore`` deliberately decodes a few wire collections
-        (sets, tuple keys and tuples) back into their typed forms.  Normalize
-        only those codec representations before comparing the authoritative
-        payload; this is not a partial generation/revision comparison.
-        """
-
-        actual_payload = deepcopy(dict(actual))
-        expected_payload = deepcopy(dict(expected))
-        for payload in (actual_payload, expected_payload):
-            payload.pop("commit_revision", None)
-            payload["restored_operation_ids"] = set(
-                payload.get("restored_operation_ids", ())
-            )
-            payload["receipt_fingerprints"] = {
-                key: tuple(value)
-                for key, value in payload.get(
-                    "receipt_fingerprints", {}
-                ).items()
-            }
-            payload["confirm_keys"] = {
-                key: tuple(value)
-                for key, value in payload.get("confirm_keys", {}).items()
-            }
-            payload["episode_locks"] = {
-                (
-                    key
-                    if isinstance(key, str)
-                    else f"{key[0]}|{key[1]}"
-                ): value
-                for key, value in payload.get("episode_locks", {}).items()
-            }
-        return actual_payload == expected_payload
-
-    def _publish_closed_restore(self, image: Mapping) -> None:
-        """Publish only an image whose commit has returned successfully."""
-
-        self._records = dict(image["records"])
-        self._operations = dict(image["operations"])
-        self._scope_revisions.clear()
-        self._scope_revisions.update(image["scope_revisions"])
-        self._close_restore_complete = True
-        self._close_restore_base = None
-        self._close_restore_intended = None
-        self._taken.clear()
-        self._dispatching.clear()
-        self._deny_barrier.update(self._specs)
 
     def _prune_history(self) -> None:
         """Bounded retention of resolved history (AUD-LP-ISO01 cycle 6).
@@ -1229,7 +622,6 @@ class CoreCommandService:
             for operation_id in evictable[:evict_count]:
                 operation = self._operations.pop(operation_id, None)
                 self._confirm_keys.pop(operation_id, None)
-                self._dispatch_cursors.pop(operation_id, None)
                 # Every index must forget the evicted id together with the
                 # operation itself, or the next read crashes (LP-C6-R1).
                 if operation is not None:
@@ -1262,27 +654,36 @@ class CoreCommandService:
         if entry is None:
             raise UnknownModule(module_id)
         manifest = entry.manifest
-        frame = self._module_frame(module_id, event_id)
-        evaluation = entry.instance.evaluate(frame, self._module_memory.get(module_id))
+        subscribed = tuple(
+            self.resolve_resource_id(name)
+            for name in manifest.observation_subscriptions
+        )
+        frame = InputFrame(
+            now_utc_ms=self._clock.now_utc_ms(),
+            now_mono_ms=self._clock.now_mono_ms(),
+            boot_id=self._clock.boot_id(),
+            event_id=event_id,
+            config_revision=self._config_revisions.get(
+                subscribed[0] if subscribed else "", 0
+            ),
+            observations=tuple(
+                observation
+                for resource_id in subscribed
+                for observation in self._facts[resource_id].values()
+            ),
+            resource_controls=tuple(
+                self._records[resource_id] for resource_id in subscribed
+            ),
+            related_scope_revisions=dict(self._scope_revisions),
+            inbound_needs=self._needs.get(module_id, ()),
+        )
+        evaluation = entry.instance.evaluate(frame, None)
         if evaluation.module_id != module_id:
             raise CoreServiceError("evaluation module mismatch")
         if evaluation.constraints:
             # Constraint arbitration is outside the FIRST scope; non-empty
             # sets are rejected instead of being silently ignored (K-05).
             raise CoreServiceError("constraints_are_out_of_first_scope")
-        if entry.memory_type is None:
-            if evaluation.next_memory is not None:
-                raise CoreServiceError("module memory is not registered")
-        elif evaluation.next_memory is not None and not isinstance(
-            evaluation.next_memory, entry.memory_type
-        ):
-            raise CoreServiceError("module memory type is invalid")
-        wakeup = evaluation.next_wakeup_mono_ms
-        if wakeup is not None and (
-            isinstance(wakeup, bool) or not isinstance(wakeup, int)
-            or wakeup <= frame.now_mono_ms
-        ):
-            raise CoreServiceError("module wakeup must be a future int")
         previous = self._needs.get(module_id, ())
         canonical: list[Proposal] = []
         for proposal in evaluation.proposals:
@@ -1305,11 +706,6 @@ class CoreCommandService:
             if count > manifest.max_proposals_per_resource:
                 raise CoreServiceError("too many proposals for resource")
         self._needs[module_id] = tuple(canonical)
-        self._module_memory[module_id] = evaluation.next_memory
-        if wakeup is None:
-            self._module_wakeups.pop(module_id, None)
-        else:
-            self._module_wakeups[module_id] = wakeup
         previous_by_id = {
             proposal.proposal_id: proposal for proposal in previous
         }
@@ -1565,8 +961,6 @@ class CoreCommandService:
             self._commit_state()
 
     def take_ready(self) -> None:
-        if self._dispatch_closed_for_restore:
-            return
         for resource_id in sorted(self._specs):
             if resource_id in self._taken or self._resource_busy(resource_id):
                 continue
@@ -1609,42 +1003,14 @@ class CoreCommandService:
         dispatching record, transport call."""
 
         self.advance_timeouts()
-        self._run_due_module_wakeups()
         self.take_ready()
         self.run_taken()
         self.run_dispatching()
 
-    def _run_due_module_wakeups(self) -> None:
-        now = self._clock.now_mono_ms()
-        due = sorted(
-            (deadline, module_id)
-            for module_id, deadline in self._module_wakeups.items()
-            if deadline <= now
-        )
-        for deadline, module_id in due:
-            if self._module_wakeups.get(module_id) != deadline:
-                continue
-            self.process_module_event(module_id, f"wakeup.{module_id}.{deadline}")
-
     def _final_permit(
         self, operation: Operation
     ) -> DispatchPermit | PermitDenial:
-        if self._dispatch_closed_for_restore:
-            return PermitDenial(
-                operation_id=operation.operation_id,
-                resource_id=operation.resource_id,
-                reason_code="dispatch_closed_for_restore",
-            )
         record = self.record(operation.resource_id)
-        if not self._module_still_permits(operation):
-            return PermitDenial(
-                operation_id=operation.operation_id,
-                resource_id=operation.resource_id,
-                reason_code="module_condition_changed",
-            )
-        power_denial = self._power_dependency_denial(operation)
-        if power_denial is not None:
-            return power_denial
         permit = issue_dispatch_permit(
             operation=operation,
             record=record,
@@ -1678,57 +1044,6 @@ class CoreCommandService:
             )
         self._consumed_permits.add(permit.permit_id)
         return permit
-
-    def _power_dependency_denial(
-        self, operation: Operation
-    ) -> PermitDenial | None:
-        """Fail closed immediately before transport for opted-in profiles.
-
-        The relationship is intentionally read from the immutable resource
-        passport.  A queued operation cannot cross this boundary after an
-        upstream OFF, stale report, binding move, reboot, or incomplete
-        warm-up window.
-        """
-        if not operation.target_requires_on:
-            return None
-        profile = self._adapter.capabilities(operation.resource_id)
-        if profile.power_warmup_ms == 0:
-            return None
-        spec = self.spec(operation.resource_id)
-        now = self._clock.now_mono_ms()
-        for source_id in spec.power_dependencies:
-            source_spec = self._specs.get(source_id)
-            source_on = self._facts.get(source_id, {}).get("on")
-            if source_spec is None or source_on is None:
-                return self._power_denial(operation)
-            try:
-                source_profile = self._adapter.capabilities(source_id)
-                source_rule = source_profile.properties.get("on")
-            except Exception:
-                return self._power_denial(operation)
-            age = now - source_on.received_at_mono_ms
-            if (
-                source_rule is None
-                or age < 0
-                or age > source_rule.max_age_ms
-                or source_on.value is not True
-                or source_on.quality is not Quality.FRESH
-                or source_on.evidence_kind is not Evidence.DEVICE_REPORT
-                or source_on.boot_id != self._clock.boot_id()
-                or source_on.binding_revision != source_spec.binding_revision
-                or source_on.source_sequence is None
-                or age < profile.power_warmup_ms
-            ):
-                return self._power_denial(operation)
-        return None
-
-    @staticmethod
-    def _power_denial(operation: Operation) -> PermitDenial:
-        return PermitDenial(
-            operation_id=operation.operation_id,
-            resource_id=operation.resource_id,
-            reason_code="power_dependency_unready",
-        )
 
     def _apply_permit_denial(
         self, operation: Operation, denial: PermitDenial
@@ -1797,8 +1112,6 @@ class CoreCommandService:
         here, after the durable dispatching record and directly before the
         physical call (S-04; D-15)."""
 
-        if self._dispatch_closed_for_restore:
-            return
         if not self._store.healthy():
             # The store closed after an undefined write: prepared calls
             # are withdrawn until an explicit reload and verification
@@ -1843,7 +1156,7 @@ class CoreCommandService:
             started = self._clock.now_mono_ms()
             operation.dispatch_started_at_mono_ms = started
             operation.confirmation_deadline_mono_ms = started + timeout
-            operation.pre_dispatch_sequence = None
+            operation.pre_dispatch_sequence = self._max_sequence(resource_id)
             prepared = self._adapter.prepare(
                 operation.target,
                 self._bindings[resource_id],
@@ -1856,17 +1169,6 @@ class CoreCommandService:
                     operation, OperationPhase.REJECTED, "invalid_profile"
                 )
                 continue
-            # Capture trusted device-report cursors at the last physical
-            # boundary.  Facts can be replaced by raw adapter state, so they
-            # cannot establish this replay floor.
-            self._dispatch_cursors[operation.operation_id] = dict(
-                self._trusted_report_group_maxima(
-                    resource_id, operation.binding_revision
-                )
-            )
-            # Kept for the persisted operation ABI only; it is no longer a
-            # cross-producer confirmation authority.
-            operation.pre_dispatch_sequence = None
             outcome = self._adapter.dispatch_once(prepared, self._transport)
             if outcome.status is TransportStatus.ACCEPTED:
                 operation.phase = OperationPhase.OBSERVING
@@ -1881,105 +1183,20 @@ class CoreCommandService:
                     ] = "transport_error_unknown_outcome"
         self._commit_state()
 
+    def _max_sequence(self, resource_id: str) -> int | None:
+        sequences = [
+            fact.source_sequence
+            for fact in self._facts[resource_id].values()
+            if fact.source_sequence is not None
+        ]
+        return max(sequences) if sequences else None
+
     # ------------------------------------------------------------------
     # observations
 
     def ingest_observation(self, observation: Observation) -> str:
         resource_id = self.resolve_resource_id(observation.resource_id)
-        previous = self._facts[resource_id].get(observation.property)
-        confirmation_key = (
-            resource_id,
-            observation.source_sequence,
-            observation.source_id,
-            observation.source_epoch,
-            observation.evidence_kind.value,
-        )
-        incoming_sequence = observation.source_sequence
-        accepted_sequence = None
-        if (
-            observation.evidence_kind is Evidence.DEVICE_REPORT
-            and incoming_sequence is not None
-        ):
-            namespace = (
-                observation.source_id,
-                observation.source_epoch,
-                observation.binding_revision,
-                observation.boot_id,
-            )
-            accepted_sequence = self._trusted_report_group_maxima(
-                resource_id, observation.binding_revision
-            ).get(namespace)
-        if (
-            incoming_sequence is not None
-            and accepted_sequence is not None
-            and incoming_sequence < accepted_sequence
-        ):
-            return "ignored_stale_report"
-        report_sequence_group = (
-            observation.evidence_kind is Evidence.DEVICE_REPORT
-            and incoming_sequence is not None
-        )
-        group = self._report_groups.get(confirmation_key, [])
-        same_property = [
-            item for item in group
-            if item.property == observation.property
-        ] if report_sequence_group else []
-
-        def same_report_fact(item: Observation) -> bool:
-            return (
-                item.value == observation.value
-                and item.quality == observation.quality
-                and item.evidence_kind == observation.evidence_kind
-                and item.binding_revision == observation.binding_revision
-                and item.attribution == observation.attribution
-            )
-
-        # A complete device report legitimately has several properties with
-        # one sequence.  A second observation for one of those properties is
-        # only a replay when its fact is identical.  A conflicting replay
-        # poisons that property's current fact and cannot re-open rights
-        # established by an older, valid report.
-        conflicting_replay = bool(same_property) and any(
-            not same_report_fact(item) for item in same_property
-        )
-        # Once a same-sequence property is poisoned, both payloads are
-        # retained as its history.  Replaying either already known payload
-        # must leave the INVALID current fact, its timestamp and the durable
-        # revision untouched; only a strictly newer report can recover it.
-        known_poisoned_replay = conflicting_replay and any(
-            same_report_fact(item) for item in same_property
-        )
-        exact_replay = bool(same_property) and all(
-            same_report_fact(item) for item in same_property
-        )
-        if exact_replay or known_poisoned_replay:
-            return "recorded"
-        if conflicting_replay:
-            self._facts[resource_id][observation.property] = replace(
-                observation, quality=Quality.INVALID
-            )
-            self._report_groups.setdefault(confirmation_key, []).append(
-                observation
-            )
-            if observation.attribution is ObservationAttribution.MANUAL:
-                self._apply_manual_evidence(resource_id)
-            self._revalidate_confirm_group(confirmation_key)
-            self._commit_state()
-            return (
-                "manual_evidence"
-                if observation.attribution is ObservationAttribution.MANUAL
-                else "recorded"
-            )
-        previous_is_exact_replay = (
-            previous is not None
-            and incoming_sequence is not None
-            and previous.source_sequence == incoming_sequence
-            and previous.source_id == observation.source_id
-            and previous.source_epoch == observation.source_epoch
-            and same_report_fact(previous)
-        )
-        if not previous_is_exact_replay:
-            self._facts[resource_id][observation.property] = observation
+        self._facts[resource_id][observation.property] = observation
         if observation.attribution is ObservationAttribution.MANUAL:
             # Proven manual intervention is processed before any
             # confirmation correlation: it closes the automatic rights
@@ -1987,6 +1204,13 @@ class CoreCommandService:
             # (SEC-FIRST-OWN-02-R1); a manual-origin operation may then
             # still be confirmed by its own report.
             self._apply_manual_evidence(resource_id)
+        confirmation_key = (
+            resource_id,
+            observation.source_sequence,
+            observation.received_at_mono_ms,
+            observation.source_id,
+            observation.source_epoch,
+        )
         self._report_groups.setdefault(confirmation_key, []).append(
             observation
         )
@@ -2019,40 +1243,6 @@ class CoreCommandService:
         self._revalidate_confirm_group(confirmation_key)
         self._commit_state()
         return result
-
-    def _trusted_report_group_maxima(
-        self, resource_id: str, binding_revision: int
-    ) -> dict[tuple[str, str, int, str], int]:
-        """Return trusted report cursors from retained report members.
-
-        Current facts are deliberately excluded: adapter-state reports may
-        replace them, while INVALID device reports must still close replay.
-        The cursor is scoped to the whole producer/binding/boot namespace;
-        properties merely share a device report sequence.
-        """
-
-        maxima: dict[tuple[str, str, int, str], int] = {}
-        current_boot = self._clock.boot_id()
-        for group in self._report_groups.values():
-            for observation in group:
-                if (
-                    observation.resource_id != resource_id
-                    or observation.evidence_kind is not Evidence.DEVICE_REPORT
-                    or observation.binding_revision != binding_revision
-                    or observation.boot_id != current_boot
-                    or observation.source_sequence is None
-                ):
-                    continue
-                namespace = (
-                    observation.source_id,
-                    observation.source_epoch,
-                    observation.binding_revision,
-                    observation.boot_id,
-                )
-                previous = maxima.get(namespace)
-                if previous is None or observation.source_sequence > previous:
-                    maxima[namespace] = observation.source_sequence
-        return maxima
 
     def _apply_manual_evidence(self, resource_id: str) -> None:
         """A manually attributed device report voids automatic ownership:
@@ -2200,9 +1390,6 @@ class CoreCommandService:
             # comparable with new observations; a restored operation is
             # never confirmed across a restart.
             return False
-        snapshot = self._dispatch_cursors.get(operation.operation_id)
-        if snapshot is None:
-            return False
         if operation.origin_automation:
             for observation in group:
                 if (
@@ -2235,14 +1422,11 @@ class CoreCommandService:
                 return False
             if observation.source_sequence is None:
                 return False
-            namespace = (
-                observation.source_id,
-                observation.source_epoch,
-                observation.binding_revision,
-                observation.boot_id,
-            )
-            floor = snapshot.get(namespace)
-            if floor is not None and observation.source_sequence <= floor:
+            if (
+                operation.pre_dispatch_sequence is not None
+                and observation.source_sequence
+                <= operation.pre_dispatch_sequence
+            ):
                 return False
             if observation.property in seen and (
                 seen[observation.property] != observation.value
@@ -2255,14 +1439,12 @@ class CoreCommandService:
 
     def _revalidate_confirm_group(self, confirmation_key: tuple) -> None:
         """If a confirmed result was issued from a report group that later
-        becomes contradictory or invalid, the result is revoked for a
-        confirmed operation issued in the current process — automatic ON
-        with proof, automatic OFF, manual or late confirmation
-        (SEC-FIRST-CONF-02-R3).  A restored confirmation is retained
-        history: the new process has no dispatch boundary with which to
-        revalidate that historical group.  The proof is cleared only when
-        it belongs to the revoked operation; a later ambiguous outcome
-        blocks the operation's episode."""
+        becomes contradictory or invalid, the result is revoked for **any**
+        confirmed operation of that group — automatic ON with proof,
+        automatic OFF, manual or late confirmation (SEC-FIRST-CONF-02-R3).
+        The proof is cleared only when it belongs to the revoked
+        operation; a later ambiguous outcome blocks the operation's
+        episode."""
 
         for operation_id, key in list(self._confirm_keys.items()):
             if key != confirmation_key:
@@ -2272,11 +1454,6 @@ class CoreCommandService:
                 OperationPhase.CONFIRMED,
                 OperationPhase.CONFIRMED_LATE,
             ):
-                continue
-            if operation_id in self._restored_operation_ids:
-                # The retained confirmed outcome belongs to the prior
-                # process.  A new report group cannot revalidate it because
-                # its dispatch boundary was not restored.
                 continue
             group = self._report_groups.get(confirmation_key, [])
             if self._group_members_valid(operation, group):
@@ -2324,15 +1501,6 @@ class CoreCommandService:
         foreign replay. The public ``request_id`` fields of the receipt
         and the operation keep the caller's id; an empty scope keeps the
         legacy unscoped key (and replays legacy unscoped receipts)."""
-
-        if (
-            self._dispatch_closed_for_restore
-            and not self._close_restore_complete
-        ):
-            # The last close write has an unknown outcome.  Accepting a new
-            # manual intent from stale memory could overwrite its durable
-            # successor, so the caller must retry the close lifecycle first.
-            raise StorageUnavailable("durable close is unresolved")
 
         resource_id = self.resolve_resource_id(resource_ref)
         receipt_key = (
@@ -2659,19 +1827,13 @@ class CoreCommandService:
         id_factory: Callable[[], str],
         clock_trust: ClockTrust,
         core_mode: ModuleMode = ModuleMode.ACTIVE,
-        _loaded_image: Mapping | None = None,
     ) -> "CoreCommandService":
         """Build a fresh service from the durable image of the store and
         apply the K-10 recovery: pending work is cancelled, dispatched
         work without a durable outcome becomes unknown. An untrusted
         clock never extends rights (S-05)."""
 
-        if _loaded_image is not None:
-            if _loaded_image.get("commit_revision") != store.commit_revision:
-                raise StorageUnavailable("closed control image revision moved")
-            loaded = deepcopy(dict(_loaded_image))
-        else:
-            loaded = store.load() or {}
+        loaded = store.load() or {}
         service = cls(
             clock=clock,
             store=store,
@@ -2691,9 +1853,6 @@ class CoreCommandService:
             core_mode=core_mode,
         )
         if loaded:
-            service._closed_registrations = dict(
-                loaded.get("closed_registrations", {})
-            )
             service._operations = dict(loaded.get("operations", {}))
             # Provenance: every operation of the loaded image originates
             # from the previous process, plus the persisted restored
@@ -2813,126 +1972,6 @@ class CoreCommandService:
             control_revision=record.control_revision,
             generation=record.generation,
         )
-
-
-def _validate_closed_registration_codec_compatible(
-    registration: ClosedRegistration,
-) -> None:
-    """Refuse DTOs the durable codec would later reject, before commit."""
-
-    if not isinstance(registration, ClosedRegistration):
-        raise ClosedRegistrationConflict("closed import registration is invalid")
-    identities = (
-        registration.branch_id,
-        registration.import_id,
-        registration.source_identity,
-        registration.source_payload_digest,
-    )
-    if not all(isinstance(value, str) and value for value in identities):
-        raise ClosedRegistrationConflict("closed import identity is invalid")
-    if type(registration.source_revision) is not int:
-        raise ClosedRegistrationConflict("closed import source revision is invalid")
-    if not isinstance(registration.targets, tuple) or not registration.targets:
-        raise ClosedRegistrationConflict("closed import targets are invalid")
-    for target in registration.targets:
-        if not isinstance(target, ClosedTargetRegistration):
-            raise ClosedRegistrationConflict("closed import target is invalid")
-        identities = (
-            target.target_id, target.resource_id, target.entity_id,
-            target.property_name,
-        )
-        if not all(isinstance(value, str) and value for value in identities):
-            raise ClosedRegistrationConflict("closed import target identity is invalid")
-        if (
-            not isinstance(target.allowed_actions, tuple)
-            or not target.allowed_actions
-            or not all(isinstance(action, str) and action for action in target.allowed_actions)
-            or type(target.binding_revision) is not int
-            or type(target.config_revision) is not int
-        ):
-            raise ClosedRegistrationConflict("closed import target shape is invalid")
-
-
-def _payload_digest(image: Mapping) -> str:
-    """Stable private identity of one typed durable source image."""
-
-    def frame(tag: bytes, payload: bytes) -> bytes:
-        return tag + str(len(payload)).encode("ascii") + b":" + payload
-
-    def encode(value: object) -> bytes:
-        # Tagged lengths prevent delimiter collisions and preserve scalar
-        # types. Lists and tuples intentionally share a sequence form because
-        # the durable codec reconstructs a few wire lists as tuples.
-        if value is None:
-            return b"n"
-        if isinstance(value, bool):
-            return b"b1" if value else b"b0"
-        if isinstance(value, int):
-            return frame(b"i", str(value).encode("ascii"))
-        if isinstance(value, float):
-            return frame(b"f", repr(value).encode("ascii"))
-        if isinstance(value, Decimal):
-            return frame(b"d", str(value).encode("ascii"))
-        if isinstance(value, str):
-            return frame(b"s", value.encode("utf-8"))
-        if isinstance(value, bytes):
-            return frame(b"y", value)
-        if isinstance(value, Enum):
-            return frame(b"e", encode(value.value))
-        if isinstance(value, Mapping):
-            entries = sorted((encode(key), encode(item)) for key, item in value.items())
-            return frame(
-                b"m", b"".join(
-                    frame(b"k", key) + frame(b"v", item)
-                    for key, item in entries
-                ),
-            )
-        if isinstance(value, (tuple, list)):
-            return frame(
-                b"q", b"".join(frame(b"v", encode(item)) for item in value)
-            )
-        if isinstance(value, (set, frozenset)):
-            items = sorted(encode(item) for item in value)
-            return frame(b"q", b"".join(frame(b"v", item) for item in items))
-        if hasattr(value, "__dataclass_fields__"):
-            fields = getattr(value, "__dataclass_fields__")
-            return encode({name: getattr(value, name) for name in fields})
-        raise ClosedRegistrationConflict("closed import source payload is unsupported")
-
-    return hashlib.sha256(encode(image)).hexdigest()
-
-
-def _canonical_source_image(image: Mapping) -> dict:
-    """Compare a loaded image with its in-memory representation.
-
-    The file codec restores episode-lock keys as tuples while _build_image()
-    uses their canonical durable string form.  This local conversion preserves
-    every lock and lets the closed-import proof reject an actual divergence.
-    """
-    canonical = dict(image)
-    restored = image.get("restored_operation_ids", ())
-    if isinstance(restored, (set, frozenset, tuple, list)):
-        canonical["restored_operation_ids"] = sorted(restored)
-    for name in ("receipt_fingerprints", "confirm_keys"):
-        values = image.get(name, {})
-        if isinstance(values, Mapping):
-            canonical[name] = {
-                key: list(value) if isinstance(value, tuple) else value
-                for key, value in values.items()
-            }
-    locks = image.get("episode_locks", {})
-    if isinstance(locks, Mapping):
-        canonical["episode_locks"] = {
-            f"{key[0]}|{key[1]}" if isinstance(key, tuple) and len(key) == 2 else key: value
-            for key, value in locks.items()
-        }
-    return canonical
-
-
-def _valid_payload_digest(value: object) -> bool:
-    return isinstance(value, str) and len(value) == 64 and all(
-        character in "0123456789abcdef" for character in value
-    )
 
 
 def _manual_fingerprints_match(

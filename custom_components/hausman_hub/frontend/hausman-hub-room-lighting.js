@@ -105,7 +105,7 @@ function lightingApi(roomId, suffix = "") {
    изменить свет (сценарий текущего часа вступает в силу немедленно). */
 async function forceAutoRoom(panel, roomId) {
   const store = lightingState(panel, roomId);
-  if (store.saving) return;
+  if (store.saving || liveTestBusy(panel, roomId, store)) return;
   store.saving = true;
   store.notice = "";
   store.error = "";
@@ -139,7 +139,7 @@ async function forceAutoRoom(panel, roomId) {
       store.error = `Возврат в автоматику не подтверждён. ${details || "Защита остаётся активной. Проверьте состояние комнаты."}`;
     }
   } catch (error) {
-    store.error = lightingErrorMessage(error);
+    operationError(store, "Не удалось перевести свет в авто", error, "force-auto");
   } finally {
     store.saving = false;
     // Refresh only observations. Never replace an unsaved settings draft.
@@ -152,6 +152,7 @@ async function forceAutoRoom(panel, roomId) {
       store.preview = null;
       store.error = store.error || "Возврат обработан, но свежее состояние получить не удалось.";
     }
+    if (store.error && !store.operationError) operationError(store, "Не удалось перевести свет в авто", store.error, "force-auto");
     rerender(panel, roomId);
   }
 }
@@ -192,6 +193,8 @@ function lightingState(panel, roomId) {
       preview: null,
       previewing: false,
       previewTimer: null,
+      draftRevision: 0,
+      previewRequest: 0,
       section: "overview",
       live: null,
       rerender: null,
@@ -204,6 +207,62 @@ function lightingErrorMessage(error) {
   const body = error && typeof error === "object" ? error.body : null;
   if (body && typeof body.message === "string" && body.message) return body.message;
   return apiErrorMessage(error);
+}
+
+// Keep the exact server explanation available without making it the primary
+// user message. This is presentation state only, never a retry instruction.
+function operationError(store, title, error, focus = "save", message = null) {
+  const detail = typeof error === "string" ? error : lightingErrorMessage(error);
+  store.error = message || (detail.startsWith("Конфигурация освещения отклонена")
+    ? "Сервер отклонил изменения. Проверьте выбранные светильники и настройки."
+    : typeof error === "string" ? error : apiErrorMessage(error));
+  store.operationError = { title, message: store.error, detail, focus };
+  store.lastOperationError = store.operationError;
+}
+
+function savedNumber(deps, label, value) {
+  const input = textInput(deps, value, () => {});
+  input.disabled = true;
+  const wrap = field(deps, label, input);
+  wrap.appendChild(deps.el("span", "rle-hint", "Не используется этой версией. Сохранённое значение не меняется."));
+  return wrap;
+}
+
+function suggestedScheduleTitle(entry) {
+  const time = entry.when?.anchor?.time;
+  if (entry.how?.mode !== "off" || entry.when?.anchor?.kind !== "fixed") return null;
+  const known = { "Зеркало off 00:00": ["00:00", "Выключить зеркало в 00:00"], "Люстра off 23:00": ["23:00", "Выключить люстру в 23:00"] };
+  const match = known[entry.title];
+  return match && match[0] === time ? match[1] : null;
+}
+
+// Keep connection/functions outside the serializable room state.
+const liveTestOwners = new WeakMap();
+
+function ownsLiveTest(panel, roomId, store, live) {
+  const owner = live && liveTestOwners.get(live);
+  return Boolean(owner && owner.store === store && owner.roomId === roomId
+    && panel._roomLighting?.byRoom?.[roomId] === store && store.live === live
+    && panel._hass && panel._hass.connection === owner.connection
+    && (panel._coreSessionId || 0) === owner.sessionId);
+}
+
+function liveTestBusy(panel, roomId, store) {
+  return ownsLiveTest(panel, roomId, store, store.live)
+    && (store.live.status === "running" || store.live.cancelling === true || store.live.unresolved === true);
+}
+
+function terminalLiveStatus(document) {
+  const status = document && document.kind === "result" && document.result && document.result.status;
+  return ["passed", "failed", "cancelled"].includes(status) ? status : null;
+}
+
+function canStartLiveTest(panel, roomId, store) {
+  return panel._roomLighting?.byRoom?.[roomId] === store
+    && typeof panel._hass?.callApi === "function" && store.config && store.draft
+    && !store.loading && !store.saving && !store.applying
+    && !liveTestBusy(panel, roomId, store)
+    && changedEditableKeys(store.config, store.draft).length === 0;
 }
 
 function changedEditableKeys(baseline, draft) {
@@ -222,8 +281,54 @@ function markDirty(panel, roomId) {
   const store = lightingState(panel, roomId);
   store.notice = "";
   store.error = "";
+  invalidatePreview(store);
   schedulePreview(panel, roomId);
   rerender(panel, roomId);
+}
+
+function invalidatePreview(store) {
+  store.draftRevision += 1;
+  store.previewRequest += 1;
+  store.preview = null;
+  store.previewing = false;
+}
+
+function mergeChangedValue(serverValue, beforeValue, afterValue) {
+  if (JSON.stringify(beforeValue) === JSON.stringify(afterValue)) return clone(serverValue);
+  if (Array.isArray(afterValue) || !afterValue || typeof afterValue !== "object") return clone(afterValue);
+  const merged = serverValue && typeof serverValue === "object" && !Array.isArray(serverValue)
+    ? clone(serverValue) : {};
+  const keys = new Set([
+    ...Object.keys(beforeValue && typeof beforeValue === "object" ? beforeValue : {}),
+    ...Object.keys(afterValue),
+  ]);
+  keys.forEach((key) => {
+    const hadBefore = Object.prototype.hasOwnProperty.call(beforeValue && typeof beforeValue === "object" ? beforeValue : {}, key);
+    const hadAfter = Object.prototype.hasOwnProperty.call(afterValue, key);
+    if (hadBefore && hadAfter && JSON.stringify(beforeValue[key]) === JSON.stringify(afterValue[key])) return;
+    if (!hadAfter) {
+      delete merged[key];
+    } else {
+      merged[key] = mergeChangedValue(
+        serverValue && typeof serverValue === "object" ? serverValue[key] : undefined,
+        beforeValue && typeof beforeValue === "object" ? beforeValue[key] : undefined,
+        afterValue[key],
+      );
+    }
+  });
+  return merged;
+}
+
+function carryChangedEditableValues(baseline, before, after) {
+  const carried = clone(baseline);
+  changedEditableKeys(before, after).forEach((key) => {
+    if (Object.prototype.hasOwnProperty.call(after, key)) {
+      carried[key] = mergeChangedValue(baseline ? baseline[key] : undefined, before ? before[key] : undefined, after[key]);
+    } else {
+      delete carried[key];
+    }
+  });
+  return carried;
 }
 
 function schedulePreview(panel, roomId) {
@@ -243,20 +348,26 @@ async function runPreview(panel, roomId) {
   // The preview route validates a stored room; a draft without a stored
   // baseline cannot be previewed yet and must not produce a fake result.
   if (!store.draft || !store.config || store.saving) return;
+  const revision = store.draftRevision;
+  const request = ++store.previewRequest;
+  const snapshot = clone(store.draft);
   store.previewing = true;
   rerender(panel, roomId);
   try {
-    const result = await panel._hass.callApi("POST", lightingApi(roomId, "/preview"), store.draft);
+    const result = await panel._hass.callApi("POST", lightingApi(roomId, "/preview"), snapshot);
+    if (request !== store.previewRequest || revision !== store.draftRevision) return;
     store.preview = result && typeof result === "object" ? result : null;
   } catch (error) {
+    if (request !== store.previewRequest || revision !== store.draftRevision) return;
     store.preview = null;
     const policy = resolveApiError(error);
     if (policy.code === "revision_conflict") {
       store.error = "Настройки изменились на другом клиенте. Черновик сохранён — загрузите свежую версию и повторите.";
     } else {
-      store.error = lightingErrorMessage(error);
+      operationError(store, "Не удалось проверить черновик", error, "section:review-save");
     }
   } finally {
+    if (request !== store.previewRequest || revision !== store.draftRevision) return;
     store.previewing = false;
     rerender(panel, roomId);
   }
@@ -264,31 +375,40 @@ async function runPreview(panel, roomId) {
 
 export async function refreshRoomLighting(panel, roomId, force = false) {
   const store = lightingState(panel, roomId);
-  if (store.loading || (store.loaded && !force)) return;
+  if (liveTestBusy(panel, roomId, store) || store.loading || store.saving || store.applying || (store.loaded && !force)) return;
+  const discardedDraft = force ? clone(store.draft) : null;
+  const discardedRevision = store.draftRevision;
   store.loading = true;
   store.error = "";
   store.conflict = false;
   store.conflictMessage = "";
-  store.preview = null;
+  invalidatePreview(store);
   rerender(panel, roomId);
   try {
-    const [config, templates, catalog, status] = await Promise.all([
+    const [config, templates, catalogResult, status] = await Promise.all([
       panel._hass.callApi("GET", lightingApi(roomId, "/config")).catch((error) => {
         if (error && (error.status === 404 || error.status_code === 404)) return null;
         throw error;
       }),
       panel._hass.callApi("GET", lightingApi(roomId, "/templates")).catch(() => null),
-      panel._hass.callApi("GET", lightingApi(roomId, "/editor-catalog")).catch(() => null),
+      panel._hass.callApi("GET", lightingApi(roomId, "/editor-catalog"))
+        .then((value) => ({ value, error: null }))
+        .catch((error) => ({ value: null, error })),
       panel._hass.callApi("GET", lightingApi(roomId, "/status")).catch(() => null),
     ]);
     store.config = config && typeof config === "object" ? config : null;
-    store.draft = clone(store.config);
+    const latestDraft = store.draft;
+    store.draft = force && store.draftRevision !== discardedRevision + 1
+      ? carryChangedEditableValues(store.config, discardedDraft, latestDraft)
+      : clone(store.config);
     store.templates = templates && Array.isArray(templates.templates) ? templates.templates : [];
+    const catalog = catalogResult.value;
     store.catalog = catalog && Array.isArray(catalog.devices) ? catalog.devices : [];
+    if (store.config && catalogResult.error) operationError(store, "Не удалось загрузить список устройств", catalogResult.error, "section:lights");
     store.status = status && typeof status === "object" ? status : null;
     store.loaded = true;
   } catch (error) {
-    store.error = lightingErrorMessage(error);
+    operationError(store, "Не удалось загрузить настройки", error, "section:overview");
   } finally {
     store.loading = false;
     rerender(panel, roomId);
@@ -297,7 +417,9 @@ export async function refreshRoomLighting(panel, roomId, force = false) {
 
 async function saveRoomLighting(panel, roomId) {
   const store = lightingState(panel, roomId);
-  if (!store.draft || store.saving) return;
+  if (liveTestBusy(panel, roomId, store) || !store.draft || store.loading || store.saving || store.applying) return;
+  const baseline = clone(store.config);
+  const snapshot = clone(store.draft);
   store.saving = true;
   store.error = "";
   store.notice = "";
@@ -305,20 +427,24 @@ async function saveRoomLighting(panel, roomId) {
   store.conflictMessage = "";
   rerender(panel, roomId);
   try {
-    const saved = await panel._hass.callApi("PUT", lightingApi(roomId, "/config"), store.draft);
+    const saved = await panel._hass.callApi("PUT", lightingApi(roomId, "/config"), snapshot);
     if (!saved || typeof saved !== "object" || typeof saved.version !== "number") {
       throw new Error("сервер не вернул сохранённую версию");
     }
     store.config = saved;
-    store.draft = clone(saved);
-    store.preview = null;
-    store.notice = "Сохранено. Черновик стал текущей версией.";
+    const residualDraft = carryChangedEditableValues(saved, snapshot, store.draft);
+    const residual = changedEditableKeys(saved, residualDraft).length;
+    store.draft = residualDraft;
+    invalidatePreview(store);
+    store.notice = residual
+      ? "Сохранён снимок черновика. Более поздние правки остались несохранёнными."
+      : "Сохранено. Черновик стал текущей версией.";
   } catch (error) {
     const policy = resolveApiError(error);
     if (policy.code === "revision_conflict") {
-      await carryLocalEditsOntoFreshConfig(panel, roomId);
+      await carryLocalEditsOntoFreshConfig(panel, roomId, baseline);
     } else {
-      store.error = lightingErrorMessage(error);
+      operationError(store, "Не удалось сохранить настройки", error);
     }
   } finally {
     store.saving = false;
@@ -329,10 +455,8 @@ async function saveRoomLighting(panel, roomId) {
 /* A 409 must never drop the local draft. Re-read the stored document, carry
    every locally changed editable key onto the fresh baseline (including the
    fresh version/updatedAt) and tell the user honestly that nothing was saved. */
-async function carryLocalEditsOntoFreshConfig(panel, roomId) {
+async function carryLocalEditsOntoFreshConfig(panel, roomId, oldBaseline) {
   const store = lightingState(panel, roomId);
-  const localDraft = clone(store.draft);
-  const changed = changedEditableKeys(store.config, localDraft);
   const fresh = await panel._hass.callApi("GET", lightingApi(roomId, "/config")).catch(() => null);
   store.conflict = true;
   if (!fresh || typeof fresh !== "object") {
@@ -340,18 +464,15 @@ async function carryLocalEditsOntoFreshConfig(panel, roomId) {
     store.error = "";
     return;
   }
-  const carried = clone(fresh);
-  changed.forEach((key) => {
-    if (Object.prototype.hasOwnProperty.call(localDraft, key)) {
-      carried[key] = clone(localDraft[key]);
-    }
-  });
+  const localDraft = clone(store.draft);
+  const changed = changedEditableKeys(oldBaseline, localDraft);
+  const carried = carryChangedEditableValues(fresh, oldBaseline, localDraft);
   carried.roomId = typeof fresh.roomId === "string" && fresh.roomId ? fresh.roomId : roomId;
   carried.version = fresh.version;
   carried.updatedAt = fresh.updatedAt;
   store.config = fresh;
   store.draft = carried;
-  store.preview = null;
+  invalidatePreview(store);
   store.error = "";
   store.notice = "";
   store.conflictMessage = changed.length
@@ -361,6 +482,8 @@ async function carryLocalEditsOntoFreshConfig(panel, roomId) {
 
 async function applyTemplate(panel, roomId, templateId) {
   const store = lightingState(panel, roomId);
+  if (liveTestBusy(panel, roomId, store) || store.loading || store.saving || store.applying) return;
+  const draftAtApplyStart = clone(store.draft);
   store.applying = templateId;
   store.error = "";
   store.notice = "";
@@ -387,13 +510,13 @@ async function applyTemplate(panel, roomId, templateId) {
       if (typeof stored.roomId === "string" && stored.roomId) draft.roomId = stored.roomId;
     }
     store.config = stored && typeof stored === "object" ? stored : null;
-    store.draft = draft;
-    store.preview = null;
+    store.draft = carryChangedEditableValues(draft, draftAtApplyStart, store.draft);
+    invalidatePreview(store);
     store.templateBaseline = clone(applied && typeof applied === "object" ? applied : draft);
     store.loaded = true;
     store.notice = "Шаблон применён сервером. Проверьте черновик и сохраните изменения.";
   } catch (error) {
-    store.error = lightingErrorMessage(error);
+    operationError(store, "Не удалось применить шаблон", error, `template:${templateId}`);
   } finally {
     store.applying = null;
     rerender(panel, roomId);
@@ -405,61 +528,136 @@ function delay(milliseconds) {
 }
 
 async function runLiveTest(panel, roomId, mode) {
+  if (mode !== "safe" && mode !== "real") return;
   const store = lightingState(panel, roomId);
-  store.live = { status: "running", mode, cid: "", trace: null, error: "" };
+  if (!canStartLiveTest(panel, roomId, store)) return;
+  const hass = panel._hass;
+  const connection = hass.connection;
+  const sessionId = panel._coreSessionId || 0;
+  const baseline = store.config;
+  const draft = store.draft;
+  const snapshot = JSON.stringify([baseline, draft]);
+  const revision = store.draftRevision;
+  if (mode === "real" && (typeof window === "undefined" || typeof window.confirm !== "function"
+      || !window.confirm("Запустить реальную проверку? Будут отправлены команды устройствам."))) return;
+  if (!canStartLiveTest(panel, roomId, store) || panel._hass.connection !== connection
+      || (panel._coreSessionId || 0) !== sessionId || store.config !== baseline || store.draft !== draft
+      || store.draftRevision !== revision || JSON.stringify([store.config, store.draft]) !== snapshot) return;
+  const live = { status: "running", mode, cid: "", trace: null, error: "", cancelling: false, unresolved: false };
+  const owner = { store, roomId, connection, sessionId, callApi: hass.callApi.bind(hass) };
+  liveTestOwners.set(live, owner);
+  store.live = live;
   store.error = "";
   rerender(panel, roomId);
   try {
-    const started = await panel._hass.callApi("POST", lightingApi(roomId, "/live-tests"), { mode });
-    store.live.cid = started && started.correlationId ? started.correlationId : "";
-    pollLiveTest(panel, roomId, store.live.cid).catch(() => null);
+    const started = await owner.callApi("POST", lightingApi(roomId, "/live-tests"), { mode });
+    if (!ownsLiveTest(panel, roomId, store, live)) return;
+    live.cid = started && started.correlationId ? started.correlationId : "";
+    if (!live.cid) {
+      live.status = "error";
+      live.unresolved = true;
+      live.error = "Ответ о запуске не содержит идентификатор; результат проверки неизвестен";
+      operationError(store, "Не удалось подтвердить запуск прогона", live.error, "section:review-save");
+      rerender(panel, roomId);
+      return;
+    }
+    const terminal = terminalLiveStatus(started);
+    if (terminal) {
+      live.trace = started;
+      live.status = terminal;
+      live.unresolved = false;
+      rerender(panel, roomId);
+      return;
+    }
+    rerender(panel, roomId);
+    void pollLiveTest(panel, roomId, store, live, live.cid);
   } catch (error) {
-    store.live = { status: "error", mode, cid: "", trace: null, error: lightingErrorMessage(error) };
+    if (!ownsLiveTest(panel, roomId, store, live)) return;
+    live.status = "error";
+    live.unresolved = true;
+    live.error = `Ответ о запуске не получен; результат проверки неизвестен. ${apiErrorMessage(error)}`;
+    live.cancelling = false;
+    operationError(store, "Не удалось получить результат прогона", error, "section:review-save", "Ответ о запуске не получен; результат проверки неизвестен. Настройки остаются заблокированы.");
     rerender(panel, roomId);
   }
 }
 
-async function pollLiveTest(panel, roomId, correlationId) {
-  const store = lightingState(panel, roomId);
+async function pollLiveTest(panel, roomId, store, live, correlationId) {
   if (!correlationId) return;
+  const current = () => ownsLiveTest(panel, roomId, store, live)
+    && live.cid === correlationId && live.status === "running";
+  const owner = liveTestOwners.get(live);
   for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (!current()) return;
     await delay(700);
-    if (!store.live || store.live.cid !== correlationId) return;
+    if (!current()) return;
     try {
-      const document = await panel._hass.callApi(
+      const document = await owner.callApi(
         "GET",
         lightingApi(roomId, `/live-tests/${encodeURIComponent(correlationId)}`),
       );
-      store.live.trace = document;
-      if (document && document.kind === "result") {
-        store.live.status = document.result && document.result.status ? document.result.status : "passed";
+      if (!current()) return;
+      live.trace = document;
+      const terminal = terminalLiveStatus(document);
+      if (terminal) {
+        live.status = terminal;
+        live.unresolved = false;
+        live.cancelling = false;
         rerender(panel, roomId);
         return;
       }
       rerender(panel, roomId);
     } catch (error) {
-      store.live.status = "error";
-      store.live.error = lightingErrorMessage(error);
+      if (!current()) return;
+      live.status = "error";
+      live.unresolved = true;
+      live.error = `Результат проверки неизвестен. ${apiErrorMessage(error)}`;
+      operationError(store, "Не удалось получить результат прогона", error, "section:review-save", "Результат проверки неизвестен. Не запускайте её повторно до подтверждения завершения.");
       rerender(panel, roomId);
       return;
     }
   }
-  store.live.status = "timeout";
+  if (!current()) return;
+  live.status = "timeout";
+  live.unresolved = true;
+  live.error = "Результат проверки неизвестен: ожидание завершено. Можно запросить отмену.";
+  operationError(store, "Ожидание результата завершено", live.error, "section:review-save");
   rerender(panel, roomId);
 }
 
 async function cancelLiveTest(panel, roomId) {
   const store = lightingState(panel, roomId);
-  if (!store.live || !store.live.cid) return;
+  const live = store.live;
+  if (!liveTestBusy(panel, roomId, store) || !live.cid || live.cancelling) return;
+  const cid = live.cid;
+  const owner = liveTestOwners.get(live);
+  const current = () => ownsLiveTest(panel, roomId, store, live) && live.cid === cid && live.cancelling === true;
+  live.cancelling = true;
+  rerender(panel, roomId);
   try {
-    const trace = await panel._hass.callApi(
+    const trace = await owner.callApi(
       "POST",
-      lightingApi(roomId, `/live-tests/${encodeURIComponent(store.live.cid)}`),
+      lightingApi(roomId, `/live-tests/${encodeURIComponent(cid)}`),
     );
-    store.live.trace = trace;
-    store.live.status = "cancelled";
+    if (!current()) return;
+    live.trace = trace;
+    const terminal = terminalLiveStatus(trace);
+    if (terminal) {
+      live.status = terminal;
+      live.unresolved = false;
+      live.error = "";
+    } else {
+      live.unresolved = true;
+      live.error = "Сервер не подтвердил завершение проверки";
+      operationError(store, "Не удалось подтвердить отмену", live.error, "section:review-save");
+    }
+    live.cancelling = false;
   } catch (error) {
-    store.live.error = lightingErrorMessage(error);
+    if (!current()) return;
+    live.cancelling = false;
+    live.unresolved = true;
+    live.error = `Отмена не подтверждена; результат проверки неизвестен. ${apiErrorMessage(error)}`;
+    operationError(store, "Не удалось подтвердить отмену", error, "section:review-save", "Отмена не подтверждена; результат проверки неизвестен. Настройки остаются заблокированы.");
   }
   rerender(panel, roomId);
 }
@@ -487,7 +685,8 @@ function textInput(deps, value, onCommit, options = {}) {
   if (options.max !== undefined) input.max = String(options.max);
   input.placeholder = options.placeholder || "";
   input.value = value === null || value === undefined ? "" : String(value);
-  input.addEventListener("change", () => onCommit(input.value, options));
+  input.disabled = Boolean(deps.canEdit && !deps.canEdit());
+  input.addEventListener("change", () => { if (!deps.canEdit || deps.canEdit()) onCommit(input.value, options); });
   return input;
 }
 
@@ -504,6 +703,7 @@ function numberInput(deps, label, value, onCommit, options = {}) {
     min: options.min,
     max: options.max,
     nullable: options.nullable,
+    placeholder: options.nullable ? "Не изменять" : "",
   }));
 }
 
@@ -515,7 +715,8 @@ function selectInput(deps, label, value, options, onCommit) {
     select.appendChild(option);
   });
   select.value = value === null || value === undefined ? "" : String(value);
-  select.addEventListener("change", () => onCommit(select.value));
+  select.disabled = Boolean(deps.canEdit && !deps.canEdit());
+  select.addEventListener("change", () => { if (!deps.canEdit || deps.canEdit()) onCommit(select.value); });
   return field(deps, label, select);
 }
 
@@ -524,7 +725,8 @@ function checkInput(deps, label, checked, onCommit) {
   const input = deps.el("input");
   input.type = "checkbox";
   input.checked = Boolean(checked);
-  input.addEventListener("change", () => onCommit(input.checked));
+  input.disabled = Boolean(deps.canEdit && !deps.canEdit());
+  input.addEventListener("change", () => { if (!deps.canEdit || deps.canEdit()) onCommit(input.checked); });
   wrap.appendChild(input);
   wrap.appendChild(deps.el("span", null, label));
   return wrap;
@@ -554,7 +756,8 @@ function listInput(deps, label, values, onCommit) {
 function button(deps, label, onClick, className = "") {
   const node = deps.el("button", `rle-button ${className}`.trim(), label);
   node.type = "button";
-  node.addEventListener("click", onClick);
+  node.disabled = Boolean(deps.canEdit && !deps.canEdit());
+  node.addEventListener("click", (event) => { if (!deps.canEdit || deps.canEdit()) onClick(event); });
   return node;
 }
 
@@ -691,7 +894,8 @@ function renderOverviewSection(panel, roomId, store, deps) {
       const apply = button(deps, `Применить: ${template.title || template.id}`, () => {
         void applyTemplate(panel, roomId, template.id);
       });
-      apply.disabled = Boolean(store.applying);
+      setData(deps, apply, "data-testid", `room-lighting:template:${template.id}`);
+      apply.disabled = Boolean(store.loading || store.saving || store.applying);
       list.appendChild(apply);
     });
     block.appendChild(list);
@@ -981,6 +1185,11 @@ function renderSchedule(panel, roomId, store, deps) {
     entry.when = entry.when || { daysOfWeek: "all", holiday: false, anchor: { kind: "fixed", time: "09:00", offsetMinutes: 0 } };
     entry.how = entry.how || { brightness: 50, colorTemperature: 3000, fade: true, mode: "on_presence", minOnSeconds: 0 };
     entry.targets = entry.targets || { lightTargets: [], groupIds: [], roles: [] };
+    const suggestion = suggestedScheduleTitle(entry);
+    if (suggestion) block.appendChild(button(deps, `Переименовать: ${suggestion}`, () => {
+      entry.title = suggestion;
+      markDirty(panel, roomId);
+    }));
     block.appendChild(itemCard(deps, entry.title || entry.id || "Запись расписания", () => {
       draft.schedule.splice(index, 1);
       markDirty(panel, roomId);
@@ -1117,7 +1326,9 @@ function renderSwitchBindings(panel, roomId, store, deps) {
 function renderIllumination(panel, roomId, store, deps) {
   const draft = store.draft;
   const block = deps.el("section", "rle-block");
-  block.appendChild(deps.el("h4", null, "Освещённость (люкс)"));
+  block.appendChild(deps.el("h4", null, "Освещённость снаружи, лк"));
+  block.appendChild(deps.el("p", "rle-hint", "Чем больше люкс, тем светлее. Применяется наибольший порог, который не выше показания датчика. Пустое значение означает «Не изменять»."));
+  if (draft.profile === "day_curve") block.appendChild(deps.el("p", "rle-hint", "Этот блок не влияет на текущий суточный профиль. Сохранённые значения показаны ниже."));
   const hasIllumination = Boolean(draft.illumination);
   block.appendChild(button(deps, hasIllumination ? "Убрать блок люкс" : "Добавить блок люкс", () => {
     draft.illumination = hasIllumination ? null : {
@@ -1140,23 +1351,23 @@ function renderIllumination(panel, roomId, store, deps) {
   const sensorRecord = (draft.devices && Array.isArray(draft.devices.sensors))
     ? draft.devices.sensors.find((item) => item && item.entityId === illumination.sensor)
     : null;
-  const sensorLabel = (sensorRecord && sensorRecord.name) || illumination.sensor || "не выбран";
+  const sensorLabel = (sensorRecord && sensorRecord.name) || (illumination.sensor ? "Выбранный датчик (имя недоступно)" : "не выбран");
   block.appendChild(readonlyField(deps, "Датчик", sensorLabel));
-  block.appendChild(numberInput(deps, "Гистерезис", illumination.hysteresis, (value) => { illumination.hysteresis = value; markDirty(panel, roomId); }));
+  block.appendChild(savedNumber(deps, "Зона нечувствительности, лк", illumination.hysteresis));
   illumination.thresholds.forEach((threshold, index) => {
-    block.appendChild(itemCard(deps, `Порог ${threshold.lux} лк`, () => {
+    block.appendChild(itemCard(deps, `При освещённости от ${threshold.lux} лк`, () => {
       illumination.thresholds.splice(index, 1);
       markDirty(panel, roomId);
     }, [
-      numberInput(deps, "Люкс", threshold.lux, (value) => { threshold.lux = value; markDirty(panel, roomId); }),
+      numberInput(deps, "При освещённости от, лк", threshold.lux, (value) => { threshold.lux = value; markDirty(panel, roomId); }),
       numberInput(deps, "Яркость, %", threshold.brightness, (value) => { threshold.brightness = value; markDirty(panel, roomId); }, { min: 0, max: 100, nullable: true }),
-      numberInput(deps, "Оттенок, K", threshold.colorTemperature, (value) => {
+      numberInput(deps, "Температура света, К", threshold.colorTemperature, (value) => {
         threshold.colorTemperature = value;
         markDirty(panel, roomId);
       }, { min: 2000, max: 6500, nullable: true }),
     ], {
       advanced: [
-        numberInput(deps, "Модификатор", threshold.modifier, (value) => { threshold.modifier = value; markDirty(panel, roomId); }, { nullable: true }),
+        savedNumber(deps, "Коэффициент", threshold.modifier),
       ],
     }));
   });
@@ -1294,18 +1505,13 @@ function renderLiveTest(panel, roomId, store, deps) {
   block.appendChild(deps.el("h4", null, "Реальная проверка (30 секунд)"));
   block.appendChild(deps.el("p", "rle-hint", "Реальная проверка доступна только после сохранения и отдельного подтверждения."));
   const clean = Boolean(store.config) && changedEditableKeys(store.config, store.draft).length === 0;
+  const busy = liveTestBusy(panel, roomId, store);
   const actions = deps.el("div", "rle-bar");
   const safeRun = button(deps, "Прогон: безопасный", () => { void runLiveTest(panel, roomId, "safe"); });
-  safeRun.disabled = !store.config;
+  safeRun.disabled = !canStartLiveTest(panel, roomId, store);
   actions.appendChild(safeRun);
-  const realRun = button(deps, "Прогон: реальный", () => {
-    if (typeof window !== "undefined" && typeof window.confirm === "function"
-        && !window.confirm("Запустить реальную проверку? Будут отправлены команды устройствам.")) {
-      return;
-    }
-    void runLiveTest(panel, roomId, "real");
-  });
-  realRun.disabled = !clean;
+  const realRun = button(deps, "Прогон: реальный", () => { void runLiveTest(panel, roomId, "real"); });
+  realRun.disabled = !canStartLiveTest(panel, roomId, store);
   actions.appendChild(realRun);
   block.appendChild(actions);
   if (!clean) {
@@ -1313,10 +1519,12 @@ function renderLiveTest(panel, roomId, store, deps) {
   }
   const live = store.live;
   if (!live) return block;
-  if (live.status === "running") {
+  if (busy) {
     const cancel = button(deps, "Отменить прогон", () => { void cancelLiveTest(panel, roomId); }, "is-danger");
+    cancel.disabled = !live.cid || live.cancelling;
     const bar = deps.el("div", "rle-bar");
-    bar.appendChild(deps.el("span", "rle-hint", "Прогон выполняется…"));
+    bar.appendChild(deps.el("span", "rle-hint", live.cancelling ? "Ожидаем ответ на отмену…"
+      : live.unresolved ? "Результат проверки неизвестен. Настройки остаются заблокированы." : "Прогон выполняется…"));
     bar.appendChild(cancel);
     block.appendChild(bar);
   }
@@ -1395,13 +1603,14 @@ function renderPeriodsSection(panel, roomId, store, deps) {
 
 function renderSaveBar(panel, roomId, store, deps) {
   const bar = deps.el("footer", "rle-save-bar");
+  const busy = liveTestBusy(panel, roomId, store);
   const dirty = changedEditableKeys(store.config, store.draft).length;
   const state = deps.el("span", "rle-save-state",
     store.saving ? "Сохраняем…" : dirty ? `Не сохранено изменений: ${dirty}` : "Изменений нет");
   setData(deps, state, "data-testid", "room-lighting:save-state");
   bar.appendChild(state);
   const reload = button(deps, "Отменить правки", () => { void refreshRoomLighting(panel, roomId, true); });
-  reload.disabled = !dirty || store.saving;
+  reload.disabled = busy || !dirty || store.loading || store.saving || store.applying;
   setData(deps, reload, "data-testid", "room-lighting:reload");
   bar.appendChild(reload);
   // Перевести комнату в авто: снимает ручные удержания и защиты, дальше
@@ -1409,15 +1618,16 @@ function renderSaveBar(panel, roomId, store, deps) {
   // подтверждения: сразу после перевода сценарий может изменить свет
   // (например, приглушить вечером или включить по присутствию).
   const forceAuto = button(deps, "Перевести в авто", () => {
+    if (liveTestBusy(panel, roomId, store)) return;
     const message = "Перевести свет комнаты в авто? Прежние разрешённые ручные ограничения будут сняты. Профиль проверит текущие условия и может изменить свет. Остальные защиты сохраняются.";
     if (typeof deps.confirm === "function" && !deps.confirm(message)) return;
     void forceAutoRoom(panel, roomId);
   }, "is-secondary");
-  forceAuto.disabled = store.saving;
+  forceAuto.disabled = busy || store.saving;
   setData(deps, forceAuto, "data-testid", "room-lighting:force-auto");
   bar.appendChild(forceAuto);
   const save = button(deps, store.saving ? "Сохранение…" : "Сохранить", () => { void saveRoomLighting(panel, roomId); }, "is-primary");
-  save.disabled = store.saving || !store.draft || !dirty;
+  save.disabled = busy || store.loading || store.saving || store.applying || !store.draft || !dirty;
   setData(deps, save, "data-testid", "room-lighting:save");
   bar.appendChild(save);
   if (store.notice) {
@@ -1426,7 +1636,10 @@ function renderSaveBar(panel, roomId, store, deps) {
     bar.appendChild(notice);
   }
   if (store.error) {
-    const error = deps.el("p", "rle-error", store.error);
+    const error = button(deps, "Открыть сообщение об ошибке", () => {
+      store.operationError = store.lastOperationError || { title: "Не удалось завершить действие", message: "Действие не завершено. Проверьте подробности.", detail: store.error, focus: "save" };
+      rerender(panel, roomId);
+    });
     setData(deps, error, "data-testid", "room-lighting:error");
     bar.appendChild(error);
   }
@@ -1442,7 +1655,7 @@ function renderEmptyState(panel, roomId, store, deps) {
     const apply = button(deps, `Создать: ${template.title || template.id}`, () => {
       void applyTemplate(panel, roomId, template.id);
     }, "is-primary");
-    apply.disabled = Boolean(store.applying);
+    apply.disabled = Boolean(liveTestBusy(panel, roomId, store) || store.loading || store.saving || store.applying);
     list.appendChild(apply);
   });
   if (!store.templates.length) list.appendChild(deps.el("span", "rle-hint", "Шаблоны недоступны."));
@@ -1462,6 +1675,7 @@ function renderUnavailable(roomId, store, deps) {
       const apply = button(deps, `Создать: ${template.title || template.id}`, () => {
         void applyTemplate(panel, roomId, template.id);
       });
+      apply.disabled = Boolean(liveTestBusy(panel, roomId, store) || store.loading || store.saving || store.applying);
       list.appendChild(apply);
     });
     block.appendChild(list);
@@ -1471,9 +1685,11 @@ function renderUnavailable(roomId, store, deps) {
 
 function renderSectionBody(panel, roomId, store, deps) {
   const known = ROOM_LIGHTING_SECTIONS.some(([key]) => key === store.section);
-  const section = known ? store.section : "overview";
+  const busy = liveTestBusy(panel, roomId, store);
+  const section = busy ? "review-save" : known ? store.section : "overview";
   const wrapper = deps.el("div", "rle-section");
   setData(deps, wrapper, "data-section", section);
+  setData(deps, wrapper, "tabindex", "-1");
   const renderers = {
     overview: renderOverviewSection,
     lights: renderLightsSection,
@@ -1483,7 +1699,13 @@ function renderSectionBody(panel, roomId, store, deps) {
     "manual-away": renderManualAwaySection,
     "review-save": renderReviewSection,
   };
-  renderers[section](panel, roomId, store, deps).forEach((node) => wrapper.appendChild(node));
+  const draft = store.draft;
+  const editingDeps = section === "review-save" ? deps : { ...deps, canEdit: () =>
+    panel._roomLighting?.byRoom?.[roomId] === store && store.draft === draft && !liveTestBusy(panel, roomId, store) };
+  if (busy) wrapper.appendChild(deps.el("p", "rle-hint", store.live?.unresolved
+    ? "Редактирование временно недоступно: результат прогона ещё неизвестен. Сохранённые значения не потеряны."
+    : "Редактирование временно недоступно: прогон ещё выполняется. Сохранённые значения не потеряны."));
+  renderers[section](panel, roomId, store, editingDeps).forEach((node) => wrapper.appendChild(node));
   return wrapper;
 }
 
@@ -1493,9 +1715,11 @@ function renderSectionNav(panel, roomId, store, deps) {
   ROOM_LIGHTING_SECTIONS.forEach(([key, label]) => {
     const active = store.section === key;
     const item = button(deps, label, () => {
+      if (panel._roomLighting?.byRoom?.[roomId] !== store || liveTestBusy(panel, roomId, store)) return;
       store.section = key;
       rerender(panel, roomId);
     }, `rle-nav-item${active ? " is-active" : ""}`);
+    item.disabled = liveTestBusy(panel, roomId, store);
     setData(deps, item, "aria-current", active ? "true" : "false");
     setData(deps, item, "data-testid", `room-lighting:section:${key}`);
     nav.appendChild(item);
@@ -1549,6 +1773,44 @@ export function renderRoomLightingEditor(panel, container, room, deps, options =
   }
   const store = lightingState(panel, roomId);
   let mounted = null;
+  let errorDialog = null;
+  let shownError = null;
+  const syncErrorDialog = () => {
+    const record = store.operationError;
+    if (!record || !container.isConnected) return;
+    if (shownError === record && errorDialog?.isConnected) return;
+    if (errorDialog) errorDialog.remove();
+    errorDialog = deps.el("dialog", "rle-operation-dialog");
+    shownError = record;
+    setData(deps, errorDialog, "aria-labelledby", "rle-operation-error-title");
+    setData(deps, errorDialog, "data-testid", "room-lighting:operation-error");
+    const heading = deps.el("h3", null, record.title);
+    heading.id = "rle-operation-error-title";
+    errorDialog.appendChild(heading);
+    errorDialog.appendChild(deps.el("p", null, record.message));
+    errorDialog.appendChild(deps.el("p", "rle-hint", store.draft
+      ? "Черновик сохранён. Закрытие окна не повторяет действие."
+      : "Сохранённые настройки не изменены. Закрытие окна не повторяет действие."));
+    errorDialog.appendChild(detailsBlock(deps, "rle-error-details", "Подробности", [deps.el("pre", null, record.detail)]));
+    const dismiss = () => {
+      store.operationError = null;
+      errorDialog.close();
+      errorDialog.remove();
+      errorDialog = null;
+      shownError = null;
+      const target = [...container.querySelectorAll("[data-testid]")]
+        .find(node => node.getAttribute("data-testid") === `room-lighting:${record.focus}` && !node.disabled)
+        || container.querySelector('[data-section="review-save"]')
+        || container.querySelector('[data-testid="room-lighting:section:overview"]');
+      if (target && !target.disabled) target.focus();
+    };
+    const acknowledge = button(deps, "Понятно", dismiss, "is-primary");
+    errorDialog.appendChild(acknowledge);
+    errorDialog.addEventListener("cancel", (event) => { event.preventDefault(); dismiss(); });
+    container.appendChild(errorDialog);
+    errorDialog.showModal();
+    acknowledge.focus();
+  };
   const render = () => {
     // Держим viewport привязанным к редактору: полная перерисовка не должна
     // уводить прокрутку при переключении галочек и полей.
@@ -1559,6 +1821,7 @@ export function renderRoomLightingEditor(panel, container, room, deps, options =
     if (mounted && typeof mounted.remove === "function") mounted.remove();
     container.appendChild(section);
     mounted = section;
+    syncErrorDialog();
     if (keepContainerScroll) container.scrollTop = keepContainerScroll;
     if (mounted && typeof mounted.getBoundingClientRect === "function") {
       const drift = mounted.getBoundingClientRect().top - beforeTop;

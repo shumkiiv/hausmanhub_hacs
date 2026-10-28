@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 
 from .manual_light_authority import ManualLightAuthority
+from .lighting_return_intent import ManualLightReturnIntentChanged
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +34,8 @@ class ManualLightAutoReturn:
         config_version: int = 1,
         observations_current: Callable[[], bool] | None = None,
         commit_is_current: Callable[[], bool] | None = None,
+        stage_room_handoff: Callable[[int], None] | None = None,
+        release_is_current: Callable[[], bool] | None = None,
     ) -> ManualLightReturnResult:
         """Release a complete room only after every participant has persisted.
 
@@ -49,13 +52,27 @@ class ManualLightAutoReturn:
         )
         if token is None:
             return ManualLightReturnResult("blocked")
+
+        def require_current() -> None:
+            if release_is_current is not None and not release_is_current():
+                raise ManualLightReturnIntentChanged
+
         try:
+            require_current()
             released = release_room_history()
+            if released is not None and stage_room_handoff is not None:
+                stage_room_handoff(token.operation_id)
             persisted = released is not None and await persist_room_history()
             for release in release_other_histories:
                 if not persisted:
                     break
+                require_current()
                 persisted = await release()
+                if persisted:
+                    require_current()
+        except ManualLightReturnIntentChanged:
+            await self._authority.async_abort_explicit_return(token)
+            return ManualLightReturnResult("incomplete", (), token.operation_id)
         except BaseException:
             await self._authority.async_finish_explicit_return(token, persisted=False)
             raise

@@ -12,6 +12,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import datetime, timezone
 
+from .lighting_observation import ObservedLightState, physical_observed_ms
+
 UNAVAILABLE_EVIDENCE = frozenset({"unknown", "unavailable"})
 POWER_EVIDENCE_FRESH_SECONDS = 300
 TARGET_STATE_FRESHNESS_MS = POWER_EVIDENCE_FRESH_SECONDS * 1000
@@ -21,6 +23,7 @@ def trusted_power_state(
     state: object | None,
     *,
     same_state_confirmation: bool = False,
+    now_ms: int | None = None,
 ) -> str | None:
     """Return a power-source state only when its HA evidence is trustworthy.
 
@@ -29,6 +32,11 @@ def trusted_power_state(
     idempotent ``turn_on`` without moving ``last_changed``.
     """
 
+    if isinstance(state, ObservedLightState):
+        return trusted_target_state(
+            state, now_ms=(now_ms if now_ms is not None
+                           else int(datetime.now(timezone.utc).timestamp() * 1000))
+        )
     if (
         state is None
         or not power_state_is_fresh(
@@ -80,6 +88,8 @@ def trusted_target_observed_ms(
 
     if state is None:
         return None
+    if isinstance(state, ObservedLightState):
+        return physical_observed_ms(state, now_ms=now_ms, freshness_ms=freshness_ms)
     for name in ("last_reported", "last_updated", "last_changed"):
         observed = _timestamp_ms(getattr(state, name, None))
         if observed is None:
@@ -120,6 +130,12 @@ def power_state_is_fresh(
 
     if state is None:
         return False
+    if isinstance(state, ObservedLightState):
+        return physical_observed_ms(
+            state,
+            now_ms=int(datetime.now(timezone.utc).timestamp() * 1000),
+            freshness_ms=TARGET_STATE_FRESHNESS_MS,
+        ) is not None
     observed = (
         getattr(state, "last_reported", None)
         or getattr(state, "last_updated", None)

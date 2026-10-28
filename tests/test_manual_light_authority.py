@@ -1192,12 +1192,15 @@ def _assert_startup_source_order(source: str) -> None:
     functions = {node.name: node for node in ast.parse(source).body
                  if isinstance(node, ast.AsyncFunctionDef)}
     setup = ast.get_source_segment(source, functions["async_setup_entry"])
-    starter = ast.get_source_segment(source, functions["_async_start_room_lighting_with_core"])
-    assert "await room_lighting_runtime.start(hass, entry.entry_id)" in starter
+    start_call = "await room_lighting_runtime.start(hass, entry.entry_id)"
+    if "_async_start_room_lighting_with_core" in functions:
+        starter = ast.get_source_segment(source, functions["_async_start_room_lighting_with_core"])
+        assert start_call in starter
+        start_call = "await _async_start_room_lighting_with_core("
     assert setup.index("manual_light_events.start(buffer_startup=True)") < setup.index(
         "await manual_light_authority.async_load()"
     ) < setup.index(
-        "await _async_start_room_lighting_with_core("
+        start_call
     ) < setup.index("await manual_light_events.async_complete_startup()") < setup.index(
         "activation_latch.open()"
     )
@@ -1212,21 +1215,24 @@ def test_startup_wiring_drains_room_events_before_activation() -> None:
     _assert_startup_source_order(source)
 
 
+@pytest.mark.parametrize("inline", [False, True])
 @pytest.mark.parametrize("swapped", [(1, 4), (5, 6), (2, 3)])
-def test_startup_source_order_still_rejects_unsafe_activation(swapped) -> None:
+def test_startup_source_order_still_rejects_unsafe_activation(swapped, inline) -> None:
     calls = [
         "manual_light_events.start(buffer_startup=True)",
         "await manual_light_authority.async_load()",
         "await room_lighting_service.async_list_configs()",
         "await manual_light_authority.async_capture_initial_room_scope()",
-        "await _async_start_room_lighting_with_core()",
+        ("await room_lighting_runtime.start(hass, entry.entry_id)" if inline
+         else "await _async_start_room_lighting_with_core()"),
         "await manual_light_events.async_complete_startup()",
         "activation_latch.open()",
     ]
     first, second = swapped
     calls[first], calls[second] = calls[second], calls[first]
-    source = ("async def _async_start_room_lighting_with_core():\n"
-              "    await room_lighting_runtime.start(hass, entry.entry_id)\n"
+    source = (("" if inline else
+               "async def _async_start_room_lighting_with_core():\n"
+               "    await room_lighting_runtime.start(hass, entry.entry_id)\n") +
               "async def async_setup_entry():\n" +
               "\n".join("    " + call for call in calls) + "\n")
     with pytest.raises(AssertionError):

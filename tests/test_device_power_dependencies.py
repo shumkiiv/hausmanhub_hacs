@@ -133,6 +133,20 @@ class DevicePowerDependencyDomainTest(unittest.TestCase):
 
 
 class DevicePowerDependencyServiceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_revision_is_loaded_and_monotonic_across_graph_aba(self) -> None:
+        service = DevicePowerDependencyService(_Store())
+        with self.assertRaises(DevicePowerDependencyServiceViolation):
+            _ = service.revision
+        await service.async_load()
+        self.assertEqual(0, service.revision)
+        await service.async_replace(0, [_dependency()])
+        self.assertEqual(1, service.revision)
+        await service.async_replace(1, [_dependency(source="switch.other")])
+        self.assertEqual(2, service.revision)
+        await service.async_replace(2, [_dependency()])
+        self.assertEqual(3, service.revision)
+        self.assertEqual({"light.ceiling": _link()}, service.mapping)
+
     async def test_exact_source_migration_rejects_a_direct_cycle_before_save(self) -> None:
         dependent = "light.0xa4c138d69d102803"
         old_source = "switch.0x603d61fffe75c334_1"

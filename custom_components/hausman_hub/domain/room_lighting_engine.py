@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from datetime import datetime, time as dt_time, timedelta, tzinfo
 from enum import StrEnum
+import math
 
 from .light_curve import (
     LightCurveContext,
@@ -18,10 +19,12 @@ from .light_curve import (
     LightCurveProfile,
     CurveReason,
     evaluate_light_curve,
+    evening_mirror_window,
 )
 from .room_lighting import (
     AwayMode,
     LightRole,
+    LightTarget,
     RoomLightingConfig,
     ScheduleEntry,
     ScheduleMode,
@@ -33,7 +36,7 @@ from .room_lighting_ownership import (
     OwnershipSnapshot,
     OwnershipSource,
     SensorState,
-    has_proven_auto_ownership,
+    has_automatic_control,
     latest_ownership,
     release_expired_manual,
     resolve_manual_ownership,
@@ -48,6 +51,10 @@ from .tambur_curve import (
 )
 
 MODE_SHADOW = "shadow"
+
+# Saved dimming settings apply to legacy day-curve rooms too. This is the
+# approved stable-absence window, not the separate manual-off protection.
+LEGACY_CONFIGURED_ABSENCE_SECONDS = 600
 
 _DAY_CODES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 # Remaining hardcoded boundary: before 23:00 the absence threshold is the
@@ -79,6 +86,7 @@ class DecisionReason(StrEnum):
 
 
 class SkipReason(StrEnum):
+    QUIET_HOURS = "quiet_hours"
     MANUAL_OWNERSHIP = "manual_ownership"
     MANUAL_MODE = "manual_mode"
     MANUAL_PEER = "manual_peer"
@@ -233,6 +241,9 @@ class RoomLightingContext:
     # The default True keeps every legacy context unchanged; the parameterized
     # curve treats an unhealthy sun as no sunrise/sunset proof (L-06/L-07).
     sun_healthy: bool = True
+    evening_handover_complete: bool = False
+    # Runtime-local observation barrier, deliberately absent from saved state.
+    observation_started_at: int | None = None
 
     def __post_init__(self) -> None:
         if type(self.now) is not int or self.now < 0:
@@ -243,6 +254,13 @@ class RoomLightingContext:
             raise RoomLightingEngineViolation("context away flag is invalid")
         if type(self.sun_healthy) is not bool:
             raise RoomLightingEngineViolation("context sun health is invalid")
+        if type(self.evening_handover_complete) is not bool:
+            raise RoomLightingEngineViolation("context evening handover flag is invalid")
+        if self.observation_started_at is not None and (
+            type(self.observation_started_at) is not int
+            or self.observation_started_at < 0
+        ):
+            raise RoomLightingEngineViolation("context observation start is invalid")
 
     def light(self, target_id: str) -> LightSnapshot | None:
         for item in self.lights:
@@ -492,17 +510,29 @@ def curve_profile_from_config(config: RoomLightingConfig) -> LightCurveProfile:
     """Day-curve profile for a room: engine defaults plus configured params.
 
     Rooms without a ``curveParams`` block keep the supplied document
-    unchanged; configured values overlay only the parameters a room may
-    deviate (HH-016.c evening maximum). A legacy block without the ceiling
-    keeps the engine default (100).
+    unchanged; configured values overlay only the evening ceiling and the
+    room-local colour endpoints. Missing values keep their engine defaults.
     """
 
     if config.curve is None:
         return LightCurveProfile()
-    ceiling = config.curve.evening_max_percent
-    if ceiling is None:
-        return LightCurveProfile()
-    return LightCurveProfile(evening_max_percent=ceiling)
+    defaults = LightCurveProfile()
+    return LightCurveProfile(
+        evening_max_percent=(
+            config.curve.evening_max_percent
+            if config.curve.evening_max_percent is not None
+            else defaults.evening_max_percent
+        ),
+        neutral_kelvin=(
+            config.curve.neutral_kelvin
+            if config.curve.neutral_kelvin is not None
+            else defaults.neutral_kelvin
+        ),
+        evening_warm_kelvin=config.curve.evening_warm_kelvin,
+        presence_confirm_seconds=(config.curve.presence_confirm_seconds
+                                  if config.curve.presence_confirm_seconds is not None
+                                  else defaults.presence_confirm_seconds),
+    )
 
 
 def curve_params_block(config: RoomLightingConfig) -> TamburCurveParams | None:
@@ -578,19 +608,18 @@ _TAMBUR_REASON_TO_CURVE = {
 
 
 def _tambur_kelvin(
-    params: TamburCurveParams, now_minutes: int, sunset_minutes: int | None
+    params: TamburCurveParams, now_minutes: int, sunset_minutes: int | None,
+    profile: LightCurveProfile,
 ) -> int:
     """The agreed colour rule: neutral day, gentle evening warmth.
 
-    The owner-approved colour plan (4000K neutral day, 3400K warm evening)
-    stays the same for the parameterized curve: the morning ramp and the
-    evening decline interpolate between the two profile constants, the day
-    holds neutral, the mirror holds warm. The curve's §12.4 open question
+    The room profile supplies the neutral day (4000K by default), the
+    unchanged morning endpoint (3400K), and an independent evening endpoint
+    (3400K by default). The day holds neutral. The curve's §12.4 open question
     (the shape between the boundaries) stays untouched: the same smooth
     interpolation as the legacy curve is reused, not a new form.
     """
 
-    profile = LightCurveProfile()
     full_by = params.morning_full_by.hour * 60 + params.morning_full_by.minute
     day_start = params.day_start.hour * 60 + params.day_start.minute
     target_by = params.evening_target_by.hour * 60 + params.evening_target_by.minute
@@ -602,7 +631,7 @@ def _tambur_kelvin(
         start = decline_start if now_minutes >= decline_start else now_minutes
         ratio = _ratio_value(now_minutes, start, target_by)
         kelvin = profile.neutral_kelvin + (
-            profile.warm_kelvin - profile.neutral_kelvin
+            profile.evening_kelvin - profile.neutral_kelvin
         ) * ratio
         return round(kelvin)
     if now_minutes >= full_by:
@@ -690,7 +719,7 @@ def tambur_curve_light_decision(
     )
     base = evaluate_tambur_curve(params, snapshot)
     reason = _TAMBUR_REASON_TO_CURVE[base.reason.value]
-    kelvin = _tambur_kelvin(params, now_minutes, sunset_minutes)
+    kelvin = _tambur_kelvin(params, now_minutes, sunset_minutes, curve_profile)
     dimming = config.dimming
     mode_fade = curve_profile.mode_fade_seconds
     if not base.chandelier_on:
@@ -851,7 +880,86 @@ def tambur_curve_light_decision(
     )
 
 
+def corridor_outdoor_motion_gate(config: RoomLightingConfig, context: RoomLightingContext) -> bool:
+    """Require fresh outdoor darkness and motion for corridor auto-on."""
+    if config.room_id != "malyi_koridor":
+        return True
+    if config.behaviors is None or not config.behaviors.only_when_dark:
+        return False
+    if config.illumination is None or config.illumination.sensor != "sensor.0x00124b003571fd85_illuminance":
+        return False
+    configured_motion = {
+        sensor.id for sensor in config.devices.sensors if sensor.kind is SensorKind.MOTION
+    }
+    configured_entities = {
+        sensor.entity_id for sensor in config.devices.sensors if sensor.kind is SensorKind.MOTION
+    }
+    if len(configured_motion) != 2 or configured_entities != {
+        "binary_sensor.0xf044d3fffebaf11b_occupancy",
+        "binary_sensor.0xf044d3fffe11964d_occupancy",
+    }:
+        return False
+    lux, failed = _lux_value(context, config, EnginePolicy())
+    if failed or lux is None or not math.isfinite(lux) or not 0 <= lux < 400:
+        return False
+    return any(
+        sensor.sensor_id in configured_motion and sensor.kind is SensorKind.MOTION
+        and sensor.state is SensorState.ON
+        and _is_fresh(sensor, context, EnginePolicy())
+        for sensor in context.sensors
+    )
+
+
 def evaluate_curve_room(
+    config: RoomLightingConfig,
+    context: RoomLightingContext,
+    *,
+    presence_confirmed: bool,
+    absence_seconds: int | None,
+    presence: SensorState | None = None,
+    motion_preview: bool = False,
+    motion_rejected: bool = False,
+    profile: LightCurveProfile | None = None,
+) -> RoomLightingDecision:
+    now_time = datetime.fromtimestamp(context.now / 1000, context.timezone).time()
+    if config.room_id == "malyi_koridor" and (now_time >= dt_time(23, 30) or now_time < dt_time(9, 0)):
+        off = LightCurveDecision(reason=CurveReason.NIGHT, chandelier_on=False)
+        targets = tuple(
+            _curve_main_decision(target, off, context)
+            if has_automatic_control(context.ownership, target.id)
+            else _unchanged(target.id, Skip(target.id, SkipReason.MANUAL_OWNERSHIP))
+            for target in config.devices.light_targets
+        )
+        return RoomLightingDecision(room_id=config.room_id, evaluated_at=context.now,
+                                    mode=MODE_SHADOW, targets=targets)
+    decision = _evaluate_curve_room(
+        config, context, presence_confirmed=presence_confirmed,
+        absence_seconds=absence_seconds, presence=presence,
+        motion_preview=motion_preview, motion_rejected=motion_rejected,
+        profile=profile,
+    )
+    if corridor_outdoor_motion_gate(config, context):
+        return decision
+    def gated_target(target: TargetDecision) -> TargetDecision:
+        light = context.light(target.target_id)
+        current = light.brightness if light is not None else None
+        commands = tuple(command for command in target.commands if not (
+            command.action is LightAction.TURN_ON or (
+                command.action is LightAction.SET_BRIGHTNESS
+                and (current is None or command.brightness is None or command.brightness > current)
+            )
+        ))
+        if commands == target.commands:
+            return target
+        skip = Skip(target.target_id, SkipReason.LUX_FAIL_CLOSED,
+                    "Ожидается движение и свежая наружная освещённость ниже 400 лк")
+        return replace(target, commands=commands, skips=target.skips + (skip,))
+
+    targets = tuple(gated_target(target) for target in decision.targets)
+    return replace(decision, targets=targets)
+
+
+def _evaluate_curve_room(
     config: RoomLightingConfig,
     context: RoomLightingContext,
     *,
@@ -875,6 +983,12 @@ def evaluate_curve_room(
         raise RoomLightingEngineViolation("validated room lighting context is required")
     if config.profile != "day_curve":
         raise RoomLightingEngineViolation("room does not use the day curve profile")
+
+    # Explicit room-off on a confirmed departure is shared by every profile.
+    # Delegate before the curve's manual hold, including accent/manual-only
+    # lights. Dispatch still validates the departure and its manual boundary.
+    if context.away and config.away_behavior.mode is AwayMode.ROOM_OFF:
+        return evaluate_room_lighting(config, context)
 
     now_time = datetime.fromtimestamp(context.now / 1000, context.timezone).time()
     if presence is None:
@@ -947,10 +1061,70 @@ def evaluate_curve_room(
                 absence_seconds=absence_seconds,
                 motion_preview=motion_preview,
                 motion_rejected=motion_rejected,
+                evening_handover_complete=context.evening_handover_complete,
+            ),
+            apply_absence_dimming=False,
+        )
+        # Keep every legacy time/source/colour decision. Only the absence
+        # reduction uses the already saved settings, without migrating the
+        # room to the parameterized profile. Send the final device goal once
+        # with its transition, not intermediate goals with long transitions.
+        absence_ready = (
+            absence_seconds is not None
+            and absence_seconds >= LEGACY_CONFIGURED_ABSENCE_SECONDS
+            and config.dimming.enabled and config.dimming.on_absence
+            and not motion_preview and not motion_rejected
+            and curve.chandelier_on and not curve.hold
+        )
+        if absence_ready and presence is SensorState.ON and not presence_confirmed:
+            curve = replace(curve, brightness_percent=None)
+        elif (absence_ready and presence is SensorState.OFF
+                and curve.brightness_percent is not None):
+            curve = replace(
+                curve, reason=CurveReason.ABSENCE,
+                brightness_percent=min(config.dimming.target_percent, curve.brightness_percent),
+                fade_seconds=config.dimming.fade_seconds,
+            )
+
+    if curve.hold and curve_params is None and evening_mirror_window(now_time):
+        return RoomLightingDecision(
+            room_id=config.room_id, evaluated_at=context.now, mode=MODE_SHADOW,
+            targets=tuple(_unchanged(item.id, Skip(item.id, SkipReason.ABSENCE_UNPROVEN,
+                          "Переход ожидает достоверное состояние света и датчиков"))
+                          for item in config.devices.light_targets),
+        )
+
+    # A legacy all-off mode covers every configured light, not only the
+    # first main/mirror pair. Keep the ordinary ownership/manual/unknown
+    # gates and the mirror's existing no-fade OFF semantics. Parameterized
+    # curves keep their own policy; this does not migrate their settings.
+    if (curve_params is None and not curve.hold
+            and not curve.chandelier_on and not curve.mirror_on):
+        return RoomLightingDecision(
+            room_id=config.room_id, evaluated_at=context.now, mode=MODE_SHADOW,
+            targets=tuple(
+                _curve_mirror_decision(item, curve, context)
+                if item.role is LightRole.MIRROR
+                else _curve_main_decision(item, curve, context)
+                for item in config.devices.light_targets
             ),
         )
 
     targets: list[TargetDecision] = []
+    early_mirror = (
+        curve_params is None and evening_mirror_window(now_time)
+        and curve.reason is CurveReason.NIGHT and curve.mirror_on
+        and not curve.chandelier_on
+    )
+    if early_mirror:
+        return _early_mirror_handover(
+            config, context, curve, mirror_target,
+            absence_proven=(
+                presence is SensorState.OFF and absence_seconds is not None
+                and not motion_preview
+            ),
+        )
+
     main_decision = None
     # When a manual hold exists for the room (a restored or fresh manual
     # record), the auto-on requires proven presence: a latched release
@@ -992,7 +1166,7 @@ def evaluate_curve_room(
                     and (chandelier is None or chandelier.brightness is None
                          or chandelier.brightness <= 0)
                 )
-                or not has_proven_auto_ownership(context.ownership, main_target.id)
+                or not has_automatic_control(context.ownership, main_target.id)
                 or main_decision is None or bool(main_decision.commands)
                 or any(skip.reason is not SkipReason.IDEMPOTENT for skip in main_decision.skips)
             )
@@ -1010,6 +1184,45 @@ def evaluate_curve_room(
         evaluated_at=context.now,
         mode=MODE_SHADOW,
         targets=tuple(targets),
+    )
+
+
+def _early_mirror_handover(
+    config: RoomLightingConfig, context: RoomLightingContext,
+    curve: LightCurveDecision, mirror_target: LightTarget | None,
+    *, absence_proven: bool,
+) -> RoomLightingDecision:
+    """Confirm the replacement before removing any automatic main/accent."""
+    mirror_ready = (
+        mirror_target is not None and mirror_target.auto_control
+        and _light_on(context, mirror_target.id)
+        and has_automatic_control(context.ownership, mirror_target.id)
+    )
+    # Expiry or an absence latch alone must not relight a manual-OFF room.
+    # This is a scheduled handover, not the confirmed-presence return path.
+    manual_hold = any(
+        _proven_manual_ownership(context.ownership, item.id)
+        for item in config.devices.light_targets
+    )
+    targets: list[TargetDecision] = []
+    for target in config.devices.light_targets:
+        if target.role is LightRole.MIRROR:
+            targets.append(_curve_mirror_decision(
+                target, curve, context, presence_gate=manual_hold,
+            ))
+        elif target.role in (LightRole.MAIN, LightRole.ACCENT):
+            targets.append(
+                _curve_main_decision(target, curve, context) if mirror_ready and absence_proven
+                else _unchanged(target.id, Skip(
+                    target.id,
+                    SkipReason.UNOBSERVED if not mirror_ready else SkipReason.ABSENCE_UNPROVEN,
+                    "Ожидается подтверждение зеркала перед вечерним переключением"
+                    if not mirror_ready else "Переключение ожидает подтверждённое отсутствие",
+                ))
+            )
+    return RoomLightingDecision(
+        room_id=config.room_id, evaluated_at=context.now,
+        mode=MODE_SHADOW, targets=tuple(targets),
     )
 
 
@@ -1066,7 +1279,7 @@ def _curve_manual_blocked(context: RoomLightingContext, target_id: str) -> bool:
 
     light = context.light(target_id)
     if light is not None and light.state is SensorState.ON:
-        return not has_proven_auto_ownership(context.ownership, target_id)
+        return not has_automatic_control(context.ownership, target_id)
     latest = latest_ownership(context.ownership, target_id)
     if latest is None or latest.source is not OwnershipSource.MANUAL:
         return False
@@ -1145,7 +1358,7 @@ def _curve_main_decision(
         light is not None
         and latest_record is not None
         and latest_record.confirmed
-        and latest_record.source is OwnershipSource.AUTO
+        and has_automatic_control(context.ownership, target_id)
         and light.state is not SensorState.OFF
         and light.reported_state is not SensorState.OFF
         and not (
@@ -1302,7 +1515,7 @@ def _curve_mirror_decision(
         light is not None
         and latest_record is not None
         and latest_record.confirmed
-        and latest_record.source is OwnershipSource.AUTO
+        and has_automatic_control(context.ownership, target_id)
         and light.state is not SensorState.OFF
         and light.reported_state is not SensorState.OFF
         and not (
@@ -1458,7 +1671,29 @@ def can_adjust_known_auto_on(context: RoomLightingContext, target_id: str) -> bo
         and light.state is SensorState.UNKNOWN
         and light.reported_state is SensorState.ON
         and context.unobserved_since is None
-        and has_proven_auto_ownership(context.ownership, target_id)
+        and has_automatic_control(context.ownership, target_id)
+    )
+
+
+def _can_turn_off_silent_session_auto(
+    context: RoomLightingContext, target_id: str
+) -> bool:
+    """Absence-only permission for an ON confirmed in this observation session."""
+    light = context.light(target_id)
+    record = latest_ownership(context.ownership, target_id)
+    started = context.observation_started_at
+    return (
+        light is not None
+        and light.state is SensorState.UNKNOWN
+        and light.reported_state is SensorState.ON
+        and context.unobserved_since is None
+        and started is not None
+        and started <= context.now
+        and record is not None
+        and record.source is OwnershipSource.AUTO
+        and record.confirmed
+        and started <= record.at <= context.now
+        and has_automatic_control(context.ownership, target_id)
     )
 
 
@@ -1528,6 +1763,13 @@ def _evaluate_target(
     # below. Absence-based switch-off and automatic turn-on stay strict.
     schedule_off_entry = (
         schedule_entry is not None and schedule_entry.how.mode is ScheduleMode.OFF
+    )
+    silent_absence_off = (
+        not schedule_off_entry
+        and _can_turn_off_silent_session_auto(context, target_id)
+        and _turn_off_command(
+            config, target, target_id, light_brightness, DecisionReason.DIMMING
+        ).action is LightAction.TURN_OFF
     )
     # Absence that releases manual protection is historical: it is proven by a
     # completed stable absence, not by the presence event that starts a new
@@ -1604,7 +1846,7 @@ def _evaluate_target(
 
     # This target is outside the active schedule entry: the schedule must not
     # command it, but absence may still dim an already auto-owned light.
-    if not has_auto_source and not light_on:
+    if not has_auto_source and not light_on and not silent_absence_off:
         return _unchanged(
             target_id,
             Skip(target_id, SkipReason.NO_SCHEDULE),
@@ -1619,6 +1861,10 @@ def _evaluate_target(
         )
 
     if want_on:
+        if config.quiet_hours is not None and config.quiet_hours.contains(now_time):
+            return _unchanged(target_id, Skip(target_id, SkipReason.QUIET_HOURS,
+                              "Тихие часы: автоматическое включение приостановлено"),
+                              extra_skips=skips)
         if context.protection.blocks_auto_on(
             now=context.now,
             absence_proven=effective_absence,
@@ -1638,7 +1884,7 @@ def _evaluate_target(
                     Skip(target_id, SkipReason.UNOBSERVED),
                     extra_skips=skips,
                 )
-            if not has_proven_auto_ownership(context.ownership, target_id):
+            if not has_automatic_control(context.ownership, target_id):
                 return _unchanged(
                     target_id,
                     Skip(target_id, SkipReason.MANUAL_OWNERSHIP),
@@ -1681,7 +1927,7 @@ def _evaluate_target(
         )
 
     # Desired off.
-    if not light_on:
+    if not light_on and not silent_absence_off:
         return _unchanged(
             target_id,
             Skip(target_id, SkipReason.IDEMPOTENT),
@@ -1695,7 +1941,7 @@ def _evaluate_target(
                 Skip(target_id, SkipReason.UNOBSERVED),
                 extra_skips=skips,
             )
-        if not has_proven_auto_ownership(context.ownership, target_id):
+        if not has_automatic_control(context.ownership, target_id):
             return _unchanged(
                 target_id,
                 Skip(target_id, SkipReason.NO_AUTO_OWNERSHIP),

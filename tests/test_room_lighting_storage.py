@@ -15,6 +15,7 @@ from custom_components.hausman_hub.application.room_lighting_service import (
 )
 from custom_components.hausman_hub.domain.room_lighting import (
     ROOM_LIGHTING_STORAGE_VERSION,
+    RoomLightingViolation,
     config_from_payload,
 )
 
@@ -266,6 +267,49 @@ class RoomLightingServiceTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(replaced.auxiliary)
         self.assertEqual((), replaced.devices.auxiliaries)
+
+    async def test_apply_template_keeps_real_devices_and_targets_only_main_role(self) -> None:
+        from custom_components.hausman_hub.domain.room_lighting_engine import (
+            _entry_targets_target,
+        )
+
+        payload = _payload(room_id="room_real_entry")
+        main = payload["devices"]["light_targets"][0]
+        main.update(id="chandelier", kind="light", entityId="light.real_main", brightness=True,
+                    color_temperature=True)
+        payload["devices"]["light_targets"].extend([
+            {**main, "id": "spots", "entityId": "light.real_spots", "role": "accent",
+             "brightness": False, "color_temperature": False},
+            {**main, "id": "mirror", "entityId": "light.real_mirror", "role": "mirror",
+             "brightness": False, "color_temperature": False},
+        ])
+        stored = await self.service.async_put_config(config_from_payload(payload))
+        generation = self.service.configuration_generation
+        draft = await self.service.async_apply_template(
+            DEFAULT_TEMPLATE_ID, room_id=stored.room_id, keep_devices=True,
+        )
+        self.assertEqual(stored.devices, draft.devices)
+        self.assertEqual(3, len(draft.schedule))
+        for entry in draft.schedule:
+            selected = [target.id for target in draft.devices.light_targets
+                        if _entry_targets_target(entry, target)]
+            self.assertEqual(["chandelier"], selected)
+            self.assertNotIn("light_demo_main", entry.targets.light_targets)
+        self.assertEqual(stored, await self.service.async_get_config(stored.room_id))
+        self.assertEqual(generation, self.service.configuration_generation)
+        self.assertFalse(self.hass.services.async_call.called)
+
+    async def test_apply_template_missing_main_role_fails_without_changing_room(self) -> None:
+        payload = _payload(room_id="room_accent_only")
+        payload["devices"]["light_targets"][0].update(id="spots", role="accent")
+        stored = await self.service.async_put_config(config_from_payload(payload))
+        generation = self.service.configuration_generation
+        with self.assertRaisesRegex(RoomLightingViolation, "unused role: main"):
+            await self.service.async_apply_template(
+                DEFAULT_TEMPLATE_ID, room_id=stored.room_id, keep_devices=True,
+            )
+        self.assertEqual(stored, await self.service.async_get_config(stored.room_id))
+        self.assertEqual(generation, self.service.configuration_generation)
 
     async def test_operations_never_call_home_assistant_services(self) -> None:
         config = config_from_payload(_payload(room_id="room_demo_entry"))

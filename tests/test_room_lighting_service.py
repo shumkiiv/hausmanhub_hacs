@@ -39,6 +39,37 @@ class _MemoryStore:
         return self.configs.pop(room_id, None) is not None
 
 
+@pytest.mark.parametrize("operation", ["write", "delete"])
+@pytest.mark.parametrize("failure", [False, True])
+async def test_configuration_generation_fences_before_persistence(operation, failure):
+    store = _MemoryStore()
+    service = RoomLightingService(store)
+    original = config_from_payload(_payload("room"))
+    await service.async_put_config(original)
+    generation = service.configuration_generation
+    calls = []
+
+    async def persist(*_args):
+        calls.append(service.configuration_generation)
+        assert service.configuration_generation == generation + 1
+        await asyncio.sleep(0)
+        if failure:
+            raise OSError("synthetic persistence error")
+        return True
+
+    store.async_upsert = persist
+    store.async_delete = persist
+    action = (service.async_put_config(replace(original, name="Новое имя"))
+              if operation == "write" else service.async_delete_config("room"))
+    if failure:
+        with pytest.raises(OSError):
+            await action
+    else:
+        await action
+    assert calls == [generation + 1]
+    assert service.configuration_generation == generation + 1
+
+
 def _payload(
     room_id: str,
     *,

@@ -11,7 +11,6 @@ strict climate-call executor used by trial, managed ticks, and settings applicat
 from __future__ import annotations
 
 import asyncio
-from functools import partial
 from pathlib import Path
 from collections.abc import Callable, Mapping
 from datetime import timedelta
@@ -23,7 +22,6 @@ from .application.configuration import (
     RELIABLE_SCOPE_EXTERNAL_KEYRING_INITIALIZED_FIELD,
     RELIABLE_SCOPE_INTEGRITY_INITIALIZED_FIELD,
     RELIABLE_SCOPE_INTEGRITY_KEY_FIELD,
-    core_shadow_room_id_from_entry_data,
     effective_configuration,
 )
 
@@ -32,154 +30,6 @@ _LOGGER = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
-
-
-def compose_reserved_entity_ids_provider(*providers: Callable[[], object]):
-    """Join live writer reservations without hiding an unavailable source."""
-
-    def reserved_entity_ids() -> frozenset[str]:
-        entity_ids: set[str] = set()
-        for provider in providers:
-            entity_ids.update(provider())  # type: ignore[arg-type]
-        return frozenset(entity_ids)
-
-    return reserved_entity_ids
-
-
-def _proved_startup_recheck_scope(
-    registration, core_shadow_room_id, current_config
-) -> frozenset[str] | None:
-    """Exact executable scope proved by one valid matching recheck read.
-
-    ``None`` keeps the temporary unknown global (HH-014.b B06-03): only
-    the existing validated immutable ``RoomLightingConfig`` of the
-    configured core room proves a scope. A readable but non-config
-    object (a faked ``light_targets`` tuple included) and a valid
-    configuration of another room are no proof; the room id must match
-    the registered core room. A proved matching or changed room keeps
-    its old registration entities and adds only the bound entity ids of
-    the rechecked configuration, so a known empty or unbound room
-    resolves to the exact old scope instead of a global deny
-    (B06-02R1).
-    """
-
-    from .domain.room_lighting import RoomLightingConfig
-
-    if not isinstance(current_config, RoomLightingConfig):
-        return None
-    if current_config.room_id != core_shadow_room_id:
-        return None
-    entity_ids = {
-        target.entity_id
-        for target in current_config.devices.light_targets
-        if target.entity_id is not None
-    }
-    for target in registration.targets:
-        entity_id = target.entity_id
-        if isinstance(entity_id, str) and entity_id:
-            entity_ids.add(entity_id)
-    return frozenset(entity_ids)
-
-
-async def _async_start_room_lighting_with_core(
-    hass,
-    entry,
-    *,
-    room_lighting_service,
-    room_lighting_runtime,
-    core_manual_input,
-    domain_data,
-    core_shadow_room_id,
-    mutation_lock,
-    power_dependency_resolver,
-    expected_closed_image: bool | None = None,
-):
-    """Start the optional shadow branch without opening a legacy window."""
-    if room_lighting_runtime.running:
-        return domain_data.get("core_lighting_branch")
-    if not isinstance(core_shadow_room_id, str) or not core_shadow_room_id:
-        await room_lighting_runtime.start(hass, entry.entry_id)
-        entry.async_on_unload(room_lighting_runtime.cancel)
-        return None
-
-    from .adapters.core.control_store import FileControlStore
-    from .application.room_lighting_core import CoreBranchConfig, RoomLightingCoreBranch
-
-    async with mutation_lock:
-        core_manual_input.mark_closed_registration_unavailable(
-            branch_id=core_shadow_room_id
-        )
-        branch = None
-        try:
-            config = await room_lighting_service.async_get_config(core_shadow_room_id)
-            if config is None:
-                raise RuntimeError("configured core room is missing")
-            branch_config = CoreBranchConfig(room_id=core_shadow_room_id, config=config)
-            store_path = Path(hass.config.config_dir) / (
-                f"hausman_hub.core_shadow_{core_shadow_room_id}.json"
-            )
-            store = await hass.async_add_executor_job(FileControlStore, store_path)
-            image = await hass.async_add_executor_job(store.load)
-            registration = RoomLightingCoreBranch._validate_startup_image(
-                branch_config, image, expected_closed_image
-            )
-            if registration is not None:
-                core_manual_input.install_closed_registration_projection(registration)
-                # Re-arm the unknown barrier before the awaited recheck: a
-                # failed, missing, unreadable or non-matching second read
-                # must never leave only the old published scope reserved
-                # (HH-014.b B06-03).
-                core_manual_input.mark_closed_registration_unavailable(
-                    branch_id=core_shadow_room_id
-                )
-            else:
-                core_manual_input.resolve_closed_registration_as_legacy(
-                    branch_id=core_shadow_room_id
-                )
-            current_config = await room_lighting_service.async_get_config(core_shadow_room_id)
-            if registration is not None:
-                proved_scope = _proved_startup_recheck_scope(
-                    registration, core_shadow_room_id, current_config
-                )
-                if proved_scope is None:
-                    raise RuntimeError(
-                        "core room configuration recheck is not a valid matching room"
-                    )
-                # Resolve the proved unknown to an exact scope before the
-                # branch/plugin constructor: a later constructor failure keeps
-                # the exact known old scope and never denies a neighbour
-                # (HH-014.b B06-02R1).
-                core_manual_input.resolve_closed_registration_scope(
-                    branch_id=core_shadow_room_id,
-                    entity_ids=proved_scope,
-                )
-            if current_config != config:
-                raise RuntimeError("core room configuration moved during startup")
-            branch = await hass.async_add_executor_job(partial(
-                RoomLightingCoreBranch,
-                branch_config=branch_config,
-                store_path=store_path,
-                manual_holds_provider=room_lighting_runtime.core_manual_holds,
-                expected_closed_image=expected_closed_image,
-                _store=store,
-                _loaded_image=image,
-            ))
-            await hass.async_add_executor_job(branch.activate_shadow)
-            if registration is not None:
-                core_manual_input.install_closed_registration_projection(
-                    registration, branch=branch
-                )
-        except Exception:  # noqa: BLE001 - reservation remains deny-only
-            _LOGGER.exception("core lighting branch failed to start; routing remains protected")
-        else:
-            domain_data["core_lighting_branch"] = branch
-            room_lighting_runtime.set_core_input_port(branch)
-            entry.async_on_unload(room_lighting_runtime._notify_core_stop)
-            entry.async_on_unload(branch.deactivate)
-            entry.async_on_unload(room_lighting_runtime.close_and_drain_core_input)
-        await room_lighting_runtime.start(hass, entry.entry_id)
-        entry.async_on_unload(room_lighting_runtime.cancel)
-    return domain_data.get("core_lighting_branch")
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -643,14 +493,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .application.core_manual_input import CoreManualInput
 
     core_manual_input = CoreManualInput()
-    core_shadow_room_id = core_shadow_room_id_from_entry_data(entry.data)
-    if core_shadow_room_id is not None:
-        # Close before publishing the provider or awaiting another startup
-        # dependency; a missing/corrupt image must never leave a legacy
-        # command window.
-        core_manual_input.mark_closed_registration_unavailable(
-            branch_id=core_shadow_room_id
-        )
     domain_data["core_manual_input"] = core_manual_input
     scenario_service.set_core_manual_input(core_manual_input)
     await scenario_service.async_load()
@@ -935,6 +777,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     scenario_service.set_executor(scenario_executor)
     from .application.scenario_control_coordinator import (
         SHOWER_SCENARIO_ID,
+        SMALL_CORRIDOR_SCENARIO_ID,
         ScenarioControlCoordinator,
         TAMBUR_SCENARIO_ID,
     )
@@ -1121,7 +964,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # excluded as well: a manual trigger would run its managed flow and
     # replay the stale recorded action as a second command source.
     externally_managed_scenarios = frozenset(
-        {TAMBUR_SCENARIO_ID, SHOWER_SCENARIO_ID}
+        {TAMBUR_SCENARIO_ID, SHOWER_SCENARIO_ID, SMALL_CORRIDOR_SCENARIO_ID}
     )
     scenario_control_coordinator.set_externally_managed_scenarios(
         externally_managed_scenarios
@@ -1307,6 +1150,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         else:
             room_power_migration_manifest = stored_power_manifest
         domain_data["room_power_migration_manifest"] = room_power_migration_manifest
+        from .adapters.lighting_mqtt_observations import LightingMqttObservations
+        from .adapters.lighting_mqtt_refresh import LightingMqttRefresh
+        from homeassistant.components import mqtt as lighting_mqtt
+
+        async def publish_lighting_read(topic: str, payload: str) -> None:
+            await lighting_mqtt.async_publish(hass, topic, payload, qos=0, retain=False)
+
+        lighting_observations = LightingMqttObservations(hass.states.get)
+        await lighting_observations.async_start(hass)
+        domain_data["lighting_mqtt_observations"] = lighting_observations
+        entry.async_on_unload(lighting_observations.stop)
         room_lighting_shadow = RoomLightingShadowService(
             HomeAssistantRoomLightingShadowStore(hass, entry.entry_id)
         )
@@ -1314,14 +1168,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass,
             room_lighting_service,
             room_lighting_shadow,
+            state_reader=lighting_observations.read_state,
+            observation_refresher=LightingMqttRefresh(lighting_observations, publish_lighting_read),
             ownership_store=HomeAssistantRoomLightingOwnershipStore(
                 hass, entry.entry_id
             ),
             reserved_target_ids=scenario_control_coordinator.command_target_ids,
-            reserved_entity_ids_provider=compose_reserved_entity_ids_provider(
-                scenario_control_coordinator.command_entity_ids,
-                core_manual_input.command_entity_ids,
-            ),
+            reserved_entity_ids_provider=scenario_control_coordinator.command_entity_ids,
             power_dependency_resolver=(
                 lambda: device_power_dependency_service.mapping
             ),
@@ -1334,20 +1187,56 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             manual_light_authority=manual_light_authority,
         )
         domain_data[DATA_ROOM_LIGHTING_RUNTIME] = room_lighting_runtime
-        await _async_start_room_lighting_with_core(
-            hass,
-            entry,
-            room_lighting_service=room_lighting_service,
-            room_lighting_runtime=room_lighting_runtime,
-            core_manual_input=core_manual_input,
-            domain_data=domain_data,
-            core_shadow_room_id=core_shadow_room_id,
-            mutation_lock=admin_mutation_lock,
-            power_dependency_resolver=(
-                lambda: device_power_dependency_service.mapping
-            ),
-            expected_closed_image=None,
-        )
+        await room_lighting_runtime.start(hass, entry.entry_id)
+        entry.async_on_unload(room_lighting_runtime.cancel)
+        # Optional new-core shadow branch (HH-014.b lighting path): OFF
+        # unless the entry explicitly names a room. The branch never
+        # dispatches; the legacy writer above stays the only author.
+        core_shadow_room_id = entry.data.get("core_shadow_room_id")
+        if isinstance(core_shadow_room_id, str) and core_shadow_room_id:
+            from .application.room_lighting_core import (
+                CoreBranchConfig,
+                RoomLightingCoreBranch,
+            )
+
+            room_config = await room_lighting_service.async_get_config(
+                core_shadow_room_id
+            )
+            if room_config is not None:
+                try:
+                    core_branch = RoomLightingCoreBranch(
+                        branch_config=CoreBranchConfig(
+                            room_id=core_shadow_room_id,
+                            config=room_config,
+                        ),
+                        store_path=Path(hass.config.config_dir)
+                        / f"hausman_hub.core_shadow_{core_shadow_room_id}.json",
+                        # The runtime stays the only attribution authority:
+                        # its manual holds transfer into the shadow frame
+                        # (AUD-LP-ISO01 cycle 6) without dispatch rights.
+                        manual_holds_provider=(
+                            room_lighting_runtime.core_manual_holds
+                        ),
+                    )
+                    core_branch.activate_shadow()
+                except Exception:  # noqa: BLE001 - optional branch isolation
+                    _LOGGER.exception(
+                        "core lighting branch failed to start; continuing "
+                        "without it"
+                    )
+                else:
+                    domain_data["core_lighting_branch"] = core_branch
+                    room_lighting_runtime.set_core_input_port(core_branch)
+                    entry.async_on_unload(
+                        room_lighting_runtime._notify_core_stop
+                    )
+                    entry.async_on_unload(core_branch.deactivate)
+                    # A plain callable like every other unload hook: new
+                    # dispatches close at once and a drain task awaits the
+                    # in-flight shadow input (AUD-LP-ISO01 cycle 6).
+                    entry.async_on_unload(
+                        room_lighting_runtime.close_and_drain_core_input
+                    )
     # No automatic route may open until room-only light events received while
     # the room catalog loaded have been attributed and durably drained.
     await manual_light_events.async_complete_startup()

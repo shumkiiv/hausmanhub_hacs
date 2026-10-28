@@ -139,6 +139,10 @@ async def make_coordinator(
         store,
         light_priority,
         catalog_resolver=devices.get,
+        topology_resolver=lambda role: (
+            motion_target_id if role == "managed.storage.motion"
+            else role if role in devices else None
+        ),
         storage_motion_target_id=motion_target_id,
         storage_presence_target_id=presence_target_id,
         now_ms=lambda: clock[0],

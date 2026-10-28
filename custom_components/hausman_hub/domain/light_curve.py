@@ -10,8 +10,11 @@ time mode; motion and presence may only return a reduced brightness:
   colour moves to the day-neutral value.
 * ``12:00`` .. ``sunset - 60 min`` - 100% at the neutral colour.
 * ``sunset - 60 min`` .. ``22:00`` - brightness fades to 5%, colour warms.
-* ``22:00`` .. ``23:00`` - 5% warm.
-* ``23:00`` .. ``00:00`` - chandelier off, mirror light on.
+* ``22:00`` .. ``23:00`` - switch to mirror on observed absence, independent
+  of sunset; keep the completed handover until 23:00. While occupied before
+  handover, the existing evening curve continues.
+* ``23:00`` .. ``07:00`` - everything off, manual priority is enforced
+  by the room engine.
 * Motion starts a 20-second preview toward 30%. A dedicated presence sensor
   observed within that window fades to the current time-mode maximum over 10
   seconds. Without confirmation, the preview fades to the applicable minimum.
@@ -77,6 +80,11 @@ class LightCurveProfile:
     motion_rejected_fade_seconds: int = 20
     return_fade_seconds: int = 10
     mode_fade_seconds: int = 20
+    evening_warm_kelvin: int | None = None
+
+    @property
+    def evening_kelvin(self) -> int:
+        return self.warm_kelvin if self.evening_warm_kelvin is None else self.evening_warm_kelvin
 
     def __post_init__(self) -> None:
         for label, value in (
@@ -101,8 +109,13 @@ class LightCurveProfile:
             and 0 <= self.evening_max_percent <= 100
         ):
             raise LightCurveViolation("evening max percent must be 0..100")
-        if not 0 < self.warm_kelvin < self.neutral_kelvin:
+        if not (0 < self.warm_kelvin and 0 < self.neutral_kelvin
+                and (self.evening_warm_kelvin is not None
+                     or self.warm_kelvin < self.neutral_kelvin)):
             raise LightCurveViolation("day curve colour bounds are invalid")
+        if (type(self.evening_kelvin) is not int
+                or not 0 < self.evening_kelvin < self.neutral_kelvin):
+            raise LightCurveViolation("day curve evening colour bounds are invalid")
         for label, value in (
             ("evening lead", self.evening_lead_minutes),
             ("absence start", self.absence_start_seconds),
@@ -138,6 +151,7 @@ class LightCurveContext:
     absence_seconds: int | None = None
     motion_preview: bool = False
     motion_rejected: bool = False
+    evening_handover_complete: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.now, dt_time) or not isinstance(self.sunrise, dt_time):
@@ -152,6 +166,8 @@ class LightCurveContext:
             raise LightCurveViolation("day curve mirror state is invalid")
         if type(self.presence_confirmed) is not bool:
             raise LightCurveViolation("day curve presence confirmation is invalid")
+        if type(self.evening_handover_complete) is not bool:
+            raise LightCurveViolation("evening handover flag is invalid")
         if type(self.motion_preview) is not bool or type(self.motion_rejected) is not bool:
             raise LightCurveViolation("day curve motion phase is invalid")
         if self.motion_preview and self.motion_rejected:
@@ -188,6 +204,11 @@ class LightCurveDecision:
 
 def _minutes(value: dt_time) -> int:
     return value.hour * 60 + value.minute
+
+
+def evening_mirror_window(now: dt_time) -> bool:
+    """The fixed early handover is independent of the solar evening curve."""
+    return dt_time(22, 0) <= now < dt_time(23, 0)
 
 
 def _in_window(now: int, start: int, end: int) -> bool:
@@ -259,16 +280,28 @@ def _mode_at(
         ) * ratio
         kelvin = round(
             profile.neutral_kelvin
-            + (profile.warm_kelvin - profile.neutral_kelvin) * ratio
+            + (profile.evening_kelvin - profile.neutral_kelvin) * ratio
         )
         reason = CurveReason.EVENING if now < sunset else CurveReason.LATE_EVENING
         return reason, True, brightness, kelvin
-    return CurveReason.LATE_EVENING, True, float(profile.evening_min_percent), profile.warm_kelvin
+    return CurveReason.LATE_EVENING, True, float(profile.evening_min_percent), profile.evening_kelvin
+
+
+def time_mode_brightness(
+    profile: LightCurveProfile, now: dt_time, sunrise: dt_time, sunset: dt_time,
+) -> int | None:
+    """Return the time mode's level, without occupancy or ownership policy."""
+    _, enabled, brightness, _ = _mode_at(
+        profile, _minutes(now), _minutes(sunrise), _minutes(sunset),
+    )
+    return round(brightness) if enabled else None
 
 
 def evaluate_light_curve(
     profile: LightCurveProfile,
     context: LightCurveContext,
+    *,
+    apply_absence_dimming: bool = True,
 ) -> LightCurveDecision:
     """Compute the desired tambur state without any side effect."""
 
@@ -276,6 +309,31 @@ def evaluate_light_curve(
         raise LightCurveViolation("valid day curve profile is required")
     if not isinstance(context, LightCurveContext):
         raise LightCurveViolation("valid day curve context is required")
+
+    # Begin only on observed absence. Once the observed handover is complete,
+    # an arrival keeps the mirror instead of replaying the chandelier stage.
+    # The room engine separately enforces manual priority and mirror proof.
+    if evening_mirror_window(context.now) and (
+        context.evening_handover_complete
+        or (context.presence is SensorState.OFF
+         and context.absence_seconds is not None and not context.motion_preview)
+        or (context.mirror is SensorState.ON and context.chandelier is SensorState.OFF)
+    ):
+        return LightCurveDecision(
+            reason=CurveReason.NIGHT, chandelier_on=False, mirror_on=True,
+            fade_seconds=profile.mode_fade_seconds,
+        )
+
+    if evening_mirror_window(context.now) and (
+        context.presence not in (SensorState.ON, SensorState.OFF)
+        or context.chandelier in (SensorState.UNKNOWN, SensorState.UNAVAILABLE)
+        or context.mirror in (SensorState.UNKNOWN, SensorState.UNAVAILABLE)
+    ):
+        # Uncertainty cannot select the opposite source. This is a hold, not
+        # invented absence or a renewed physical ON report.
+        return LightCurveDecision(
+            reason=CurveReason.UNKNOWN, chandelier_on=False, mirror_on=False, hold=True,
+        )
 
     now = _minutes(context.now)
     sunrise = _minutes(context.sunrise)
@@ -289,8 +347,8 @@ def evaluate_light_curve(
     )
     minimum_percent = _minimum_percent(profile, now, sunset)
     morning = max(_minutes(profile.morning_start), sunrise)
-    mirror_on = night or _minutes(profile.mirror_morning_start) <= now < morning
-    if mirror_on and not night:
+    mirror_on = not night and _minutes(profile.mirror_morning_start) <= now < morning
+    if mirror_on:
         reason = CurveReason.MORNING
 
     if not mode_on:
@@ -364,7 +422,8 @@ def evaluate_light_curve(
         )
 
     absence_seconds = context.absence_seconds
-    if absence_seconds is not None and absence_seconds >= profile.absence_start_seconds:
+    if (apply_absence_dimming and absence_seconds is not None
+            and absence_seconds >= profile.absence_start_seconds):
         progress = min(
             1.0,
             (absence_seconds - profile.absence_start_seconds)

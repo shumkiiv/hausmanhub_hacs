@@ -29,6 +29,31 @@ def _service_context_factory(monkeypatch):
         "_new_service_context",
         lambda: SimpleNamespace(id=uuid4().hex),
     )
+    original_init = executor_module.RoomLightingHaExecutor.__init__
+
+    def virtual_executor(self, *args, **kwargs):
+        # These legacy fixtures return reports synchronously. Realistic causal
+        # timestamps/contexts are modelled below; delayed replies have their
+        # own virtual-clock tests in test_light_command_readback.py.
+        kwargs.setdefault("light_readback_window_seconds", 0)
+        kwargs.setdefault("now_ms", lambda: _NOW_MS)
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(executor_module.RoomLightingHaExecutor, "__init__", virtual_executor)
+    original_execute = executor_module.RoomLightingHaExecutor.execute
+
+    async def report_in_command_clock(self, hass, *args, **kwargs):
+        # Only light-command replies acquire this clock. Legacy power fixtures
+        # retain their existing evidence model; do not turn their historical
+        # last_changed into a synthetic last_reported for every state.
+        previous = getattr(hass, "_command_report_clock", None)
+        hass._command_report_clock = self._now_ms
+        try:
+            return await original_execute(self, hass, *args, **kwargs)
+        finally:
+            hass._command_report_clock = previous
+
+    monkeypatch.setattr(executor_module.RoomLightingHaExecutor, "execute", report_in_command_clock)
 
 from custom_components.hausman_hub.application.room_lighting_ha_executor import (
     RoomLightingHaExecutor,
@@ -206,10 +231,12 @@ class _FakeState:
         state: str,
         attributes: dict[str, object] | None = None,
         last_changed: datetime | None = None,
+        context: object | None = None,
     ) -> None:
         self.state = state
         self.attributes = dict(attributes or {})
         self.last_changed = last_changed
+        self.context = context
 
 
 class _FakeStates:
@@ -225,8 +252,9 @@ class _FakeStates:
         state: str,
         attributes: dict[str, object] | None = None,
         last_changed: datetime | None = None,
+        context: object | None = None,
     ) -> None:
-        self.values[entity_id] = _FakeState(state, attributes, last_changed)
+        self.values[entity_id] = _FakeState(state, attributes, last_changed, context)
 
 
 class _FakeServices:
@@ -264,7 +292,10 @@ class _FakeServices:
                 attributes["color_temp_kelvin"] = int(data["color_temp_kelvin"])
         else:
             new_state = getattr(current, "state", "off")
-        self._hass.states.set(entity_id, new_state, attributes)
+        report_clock = getattr(self._hass, "_command_report_clock", None)
+        reported_at = (datetime.fromtimestamp(report_clock() / 1000, _TZ)
+                       if callable(report_clock) else None)
+        self._hass.states.set(entity_id, new_state, attributes, last_changed=reported_at, context=context)
 
 
 class _FakeBus:
@@ -337,16 +368,28 @@ class _ConfigService:
     async def async_get_config(self, room_id: str) -> object | None:
         return self._configs.get(room_id)
 
+    @property
+    def configuration_generation(self):
+        return tuple(self._configs.items())
+
 
 class _SpyExecutor:
     def __init__(self, *, confirmed: bool = True) -> None:
         self.calls: list[object] = []
         self.confirmed = confirmed
 
-    async def execute(self, hass: object, command: object) -> dict[str, object]:
+    async def execute(self, hass: object, command: object, *, automatic=True,
+                      dispatch_guard=None) -> dict[str, object]:
         del hass
+        if dispatch_guard is not None and not dispatch_guard():
+            return {"confirmed": False, "sent": False, "sendOutcome": "not_sent"}
         self.calls.append(command)
         return {"confirmed": self.confirmed, "state_after": {"state": "on"}}
+
+    async def execute_away_off(self, hass, command, *, is_current):
+        if not is_current():
+            return {"confirmed": False, "sent": False, "sendOutcome": "not_sent"}
+        return await self.execute(hass, command)
 
 
 class _FakeDeviceAutomationApi:
@@ -509,6 +552,37 @@ def _bathroom_payload() -> dict[str, object]:
         }
     }
     return payload
+
+
+async def test_saved_config_apply_replaces_active_version_and_cancels_only_room_deadlines() -> None:
+    hass = _FakeHass()
+    _seed_presence_and_light(hass)
+    runtime = _make_runtime(hass)
+    await runtime.start(hass, "entry")
+    try:
+        before = runtime._configs["room_demo_entry"]
+        sleeper = asyncio.create_task(asyncio.sleep(60))
+        runtime._legacy_curve_absence_tasks[before.room_id] = (before, _NOW_MS + 60_000, sleeper)
+        runtime._shower_exhaust[before.room_id] = {
+            "presence_deadline": _NOW_MS + 60_000,
+            "absence_started": None,
+            "absence_deadline": None,
+        }
+        runtime._ownership.record_manual(before.room_id, "light_main", _NOW_MS)
+        manual_before = runtime._ownership.snapshots_for(
+            before.room_id, before.devices.light_target_ids
+        )
+        updated = replace(before, version=before.version + 1, commands_enabled=False)
+        runtime.apply_config(updated)
+        assert runtime._configs[before.room_id] is updated
+        await asyncio.gather(sleeper, return_exceptions=True)
+        assert sleeper.cancelled()
+        assert before.room_id not in runtime._shower_exhaust
+        assert runtime._ownership.snapshots_for(
+            before.room_id, before.devices.light_target_ids
+        ) == manual_before
+    finally:
+        await runtime.stop()
 
 
 async def test_runtime_records_auxiliary_shadow_without_any_command() -> None:
@@ -889,7 +963,7 @@ async def test_manual_switch_binding_stays_available_when_away_is_untrusted() ->
     hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
     hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
     hass.states.set(AWAY_ENTITY_ID, "unavailable", last_changed=_NOW_DT)
-    executor = _SpyExecutor()
+    executor = RoomLightingHaExecutor()
     runtime = _make_runtime(
         hass,
         commands_enabled=True,
@@ -914,7 +988,7 @@ async def test_manual_switch_binding_stays_available_without_away_mapping() -> N
     hass = _FakeHass()
     hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
     hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
-    executor = _SpyExecutor()
+    executor = RoomLightingHaExecutor()
     runtime = _make_runtime(
         hass,
         commands_enabled=True,
@@ -1941,7 +2015,7 @@ async def test_device_trigger_dispatches_manual_action_when_enabled() -> None:
     hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
     hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
     api = _FakeDeviceAutomationApi()
-    executor = _SpyExecutor()
+    executor = RoomLightingHaExecutor()
     runtime = _make_runtime(
         hass,
         commands_enabled=True,
@@ -1973,7 +2047,7 @@ async def test_device_press_manual_record_uses_room_priority_and_preserves_dedup
     hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
     hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
     api = _FakeDeviceAutomationApi()
-    executor = _SpyExecutor()
+    executor = RoomLightingHaExecutor()
     clock = _Clock(_NOW_MS)
     authority = ManualLightAuthority(_AuthorityStore())
     await authority.async_load()
@@ -2008,7 +2082,7 @@ async def test_device_trigger_duplicate_event_does_not_toggle_twice() -> None:
     hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
     hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
     api = _FakeDeviceAutomationApi()
-    executor = _SpyExecutor()
+    executor = RoomLightingHaExecutor()
     clock = _Clock(_NOW_MS)
     runtime = _make_runtime(
         hass,
@@ -2037,7 +2111,7 @@ async def test_device_trigger_sequence_selects_progressive_configured_steps() ->
     hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
     hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
     api = _FakeDeviceAutomationApi()
-    executor = _SpyExecutor()
+    executor = RoomLightingHaExecutor()
     clock = _Clock(_NOW_MS)
     payload = _trigger_config_payload()
     payload["switchBindings"] = [  # type: ignore[index]
@@ -2187,7 +2261,13 @@ async def test_explicit_return_removes_old_auto_history_before_evaluation() -> N
 
         async def unexpected_process(*_args, **_kwargs):
             assert authority.record("light.demo_main") is None
-            assert ownership_store.payload["records"] == []
+            records = ownership_store.payload["records"]
+            assert len(records) == 1
+            assert records[0]["source"] == "explicit_handoff"
+            from custom_components.hausman_hub.domain.room_lighting_ownership import has_automatic_control
+            active = runtime._control_ownership_for(runtime._configs[_ROOM_ID])
+            assert has_automatic_control(active, "light_main")
+            assert not has_proven_auto_ownership(active, "light_main")
             processed.append(True)
 
         runtime.async_process = unexpected_process  # type: ignore[method-assign]
@@ -2195,7 +2275,7 @@ async def test_explicit_return_removes_old_auto_history_before_evaluation() -> N
         returned = await action({}, None)  # type: ignore[operator]
 
         assert returned is None
-        assert runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"}) == ()  # type: ignore[attr-defined]
+        assert not has_proven_auto_ownership(runtime._control_ownership_for(runtime._configs[_ROOM_ID]), "light_main")
         assert authority.record("light.demo_main") is None
         assert not authority.blocks("light.demo_main")
         assert ownership_store.saves == 1
@@ -2316,7 +2396,7 @@ async def test_device_trigger_attaches_after_running() -> None:
     hass.states.set("binary_sensor.demo_presence", "off", last_changed=_NOW_DT)
     hass.states.set("light.demo_main", "off", last_changed=_NOW_DT)
     api = _ImmediateApi()
-    executor = _SpyExecutor()
+    executor = RoomLightingHaExecutor()
     runtime = _make_runtime(
         hass,
         commands_enabled=True,
@@ -2490,7 +2570,7 @@ def _light_executor(hass: _FakeHass, *, inverted: bool) -> RoomLightingHaExecuto
     )
 
 
-async def test_executor_reflects_inverted_kelvin_around_neutral() -> None:
+async def test_executor_reflects_inverted_mired_between_device_endpoints() -> None:
     hass = _FakeHass()
     executor = _light_executor(hass, inverted=True)
 
@@ -2502,7 +2582,7 @@ async def test_executor_reflects_inverted_kelvin_around_neutral() -> None:
             color_temperature=2200,
         ),
     )
-    assert hass.services.calls[-1][2]["color_temp_kelvin"] == 3800
+    assert hass.services.calls[-1][2]["color_temp_kelvin"] == 5038
 
     await executor.execute(
         hass,
@@ -2512,7 +2592,7 @@ async def test_executor_reflects_inverted_kelvin_around_neutral() -> None:
             color_temperature=3000,
         ),
     )
-    assert hass.services.calls[-1][2]["color_temp_kelvin"] == 3000
+    assert hass.services.calls[-1][2]["color_temp_kelvin"] == 3128
 
 
 async def test_executor_clamps_inverted_kelvin_to_device_bounds() -> None:
@@ -2527,8 +2607,9 @@ async def test_executor_clamps_inverted_kelvin_to_device_bounds() -> None:
             color_temperature=6500,
         ),
     )
-    # 2 * 3000 - 6500 = -500, clamped to the device minimum of 2000 K.
-    assert hass.services.calls[-1][2]["color_temp_kelvin"] == 2000
+    # An in-range 6500 K request must not saturate; only the actual endpoint
+    # 6535 K reflects to the exact lower bound of 2000 K.
+    assert hass.services.calls[-1][2]["color_temp_kelvin"] == 2003
 
 
 async def test_executor_keeps_kelvin_for_normal_target() -> None:
@@ -2587,7 +2668,7 @@ async def test_inverted_target_observation_is_logical_and_idempotent() -> None:
         "on",
         {
             "brightness": 153,  # 60 %
-            "color_temp_kelvin": 3800,  # raw command that is physically 2200 K
+            "color_temp_kelvin": 5038,  # raw mired reflection of logical2200
             "min_color_temp_kelvin": 2000,
             "max_color_temp_kelvin": 6535,
         },
@@ -2605,7 +2686,7 @@ async def test_inverted_target_observation_is_logical_and_idempotent() -> None:
     )
     light = context.light("light_main")
     assert light is not None
-    # The provider reflects the raw 3800 K back to the logical 2200 K.
+    # Both consumers use the same reciprocal scale, not a policy pivot.
     assert light.color_temperature == 2200
 
     decision = evaluate_room_lighting(config, context)
@@ -3082,7 +3163,8 @@ async def test_power_switch_state_event_recomputes_the_room() -> None:
         await runtime.stop()
 
 
-async def test_unpowered_target_reads_off_and_engine_plans_turn_on() -> None:
+async def test_fresh_target_on_is_not_overridden_by_contradictory_power_off() -> None:
+    from custom_components.hausman_hub.domain.room_lighting_engine import SkipReason
     config = config_from_payload(
         _config_payload(power_switch_entity=POWER_ENTITY)
     )
@@ -3094,12 +3176,13 @@ async def test_unpowered_target_reads_off_and_engine_plans_turn_on() -> None:
     context = await build_context(hass, config, _NOW_MS)
     light = context.light("light_main")
     assert light is not None
-    assert light.state is SensorState.OFF
+    assert light.state is SensorState.ON
 
     decision = evaluate_room_lighting(config, context)
     main = decision_target(decision, "light_main")
     assert main is not None
-    assert any(command.action is LightAction.TURN_ON for command in main.commands)
+    assert main.commands == ()
+    assert main.skips[0].reason is SkipReason.MANUAL_OWNERSHIP
 
 
 async def test_dispatch_switches_power_on_before_the_target() -> None:
@@ -3553,7 +3636,7 @@ async def test_executor_confirms_colour_only_on_matching_read_back() -> None:
             color_temperature=2200,
         ),
     )
-    assert hass.services.calls[-1][2]["color_temp_kelvin"] == 3800
+    assert hass.services.calls[-1][2]["color_temp_kelvin"] == 5038
     assert receipt.confirmed is True
     # The read-back is reported in the logical space.
     assert receipt.state_after is not None
@@ -3932,9 +4015,9 @@ def _curve_payload(*, commands_enabled: bool) -> dict[str, object]:
     return payload
 
 
-async def test_curve_room_dispatches_mirror_on_at_night() -> None:
+async def test_curve_room_dispatches_mirror_on_in_the_morning() -> None:
     hass = _FakeHass()
-    night_ms = int(datetime(2026, 9, 11, 23, 30, tzinfo=_TZ).timestamp() * 1000)
+    night_ms = int(datetime(2026, 9, 11, 7, 30, tzinfo=_TZ).timestamp() * 1000)
     night_dt = datetime.fromtimestamp(night_ms / 1000, _TZ)
     hass.states.set("light.demo_main", "off", last_changed=night_dt)
     hass.states.set("light.demo_mirror", "off", last_changed=night_dt)
@@ -4556,13 +4639,13 @@ async def test_executor_receipt_requires_every_requested_property(action, invert
     observed = dict(attributes)
     kelvin = observed.get("color_temp_kelvin")
     if inverted and type(kelvin) is int:
-        observed["color_temp_kelvin"] = 6000 - kelvin
+        observed["color_temp_kelvin"] = round(1 / (1 / 2000 + 1 / 6535 - 1 / kelvin))
     observed.update(min_color_temp_kelvin=2000, max_color_temp_kelvin=6535)
 
     class ObservedServices(_FakeServices):
         async def async_call(self, domain, service, data, blocking=True, context=None):
             await super().async_call(domain, service, data, blocking, context)
-            hass.states.set("light.demo_main", "on", observed, last_changed=_NOW_DT)
+            hass.states.set("light.demo_main", "on", observed, last_changed=_NOW_DT, context=context)
 
     hass.services = ObservedServices(hass)
     receipt = await executor.execute(hass, PlannedCommand("light_main", action, brightness=40, color_temperature=3000))
@@ -4589,7 +4672,7 @@ async def test_curve_real_executor_full_main_controls_mirror_handover(full_param
     now = [int(datetime(2026, 10, 7, 7, 0, tzinfo=_TZ).timestamp() * 1000)]
     payload = _curve_payload(commands_enabled=True)
     config = config_from_payload(payload)
-    executor = RoomLightingHaExecutor({target.id: target for target in config.devices.light_targets})
+    executor = RoomLightingHaExecutor({target.id: target for target in config.devices.light_targets}, now_ms=lambda: now[0])
     for entity in ("light.demo_main", "light.demo_mirror"):
         hass.states.set(entity, "off", last_changed=datetime.fromtimestamp(now[0] / 1000, _TZ))
     hass.states.set("binary_sensor.demo_presence", "unknown", last_changed=datetime.fromtimestamp(now[0] / 1000, _TZ))
@@ -4602,7 +4685,7 @@ async def test_curve_real_executor_full_main_controls_mirror_handover(full_param
             attributes = dict(state.attributes)
             if entity == "light.demo_main" and not full_parameters:
                 attributes.update(brightness=255, color_temp_kelvin=6500)
-            hass.states.set(entity, state.state, attributes, last_changed=datetime.fromtimestamp(now[0] / 1000, _TZ))
+            hass.states.set(entity, state.state, attributes, last_changed=datetime.fromtimestamp(now[0] / 1000, _TZ), context=context)
 
     hass.services = ReportServices(hass)
     runtime = _make_runtime(hass, executor=executor, payload=payload, now_ms=lambda: now[0])
@@ -8743,6 +8826,104 @@ class TestPowerSourceDeliveryEpisode:
         assert restored._power_attempt_blocked(
             self.POWER, room_id=self.ROOM, command_action="turn_on"
         ) is False
+
+    @pytest.mark.parametrize("path", ["legacy", "exact"])
+    @pytest.mark.parametrize("terminal_failure", [False, True])
+    async def test_config_fence_preserves_real_previous_power_episode(
+        self, path, terminal_failure
+    ) -> None:
+        """A refused old config closes pending without erasing two real sends."""
+        clock = {"value": _NOW_MS + 60_000}
+        runtime, hass = self._runtime(clock)
+        config = replace(runtime._configs[self.ROOM], commands_enabled=True)
+        runtime._configs[self.ROOM] = config
+        runtime._running = True
+        runtime._electrical_breaker_resolver = lambda _entity: False
+        runtime._executor = RoomLightingHaExecutor(
+            power_readback_window_seconds=0, now_ms=lambda: clock["value"])
+        self._confirmed_presence(runtime, _NOW_MS - 20_000)
+
+        async def transport_without_report(domain, service, data, **kwargs):
+            hass.services.calls.append((domain, service, dict(data)))
+
+        hass.services.async_call = transport_without_report
+
+        async def deliver():
+            kwargs = dict(
+                at=clock["value"], room_id=self.ROOM, operation_id="config-fence-episode",
+                config_version=config.version, command_action="turn_on",
+                permission=runtime._dispatch_permission_token(config),
+            )
+            if path == "exact":
+                return await runtime._ensure_power_source(DevicePowerDependency(
+                    "light.demo_main", self.POWER, "auto_turn_on", 0), **kwargs)
+            return await runtime._ensure_legacy_room_power(self.POWER, **kwargs)
+
+        for _ in range(2):
+            powered, detail = await deliver()
+            assert not powered and detail["sent"] and detail["sendOutcome"] == "sent"
+            clock["value"] += POWER_RETRY_INTERVAL_MS + 1
+        assert len(hass.services.calls) == 2
+        previous = (
+            dict(runtime._power_failures), dict(runtime._power_failure_at),
+            dict(runtime._power_delivery), dict(runtime._command_grace),
+        )
+        assert previous[2][self.POWER].attempts == 1
+        pending = runtime._persist_pending_power_dispatch
+        save = runtime._shadow._store.async_save
+        pending_seen = False
+
+        async def disable_after_pending(**kwargs):
+            nonlocal pending_seen
+            saved = await pending(**kwargs)
+            pending_seen = saved
+            runtime.apply_config(replace(config, version=2, commands_enabled=False))
+            if terminal_failure:
+                async def fail_terminal(_document):
+                    raise OSError("terminal shadow save unavailable")
+                runtime._shadow._store.async_save = fail_terminal
+            return saved
+
+        runtime._persist_pending_power_dispatch = disable_after_pending
+        powered, detail = await deliver()
+        assert pending_seen and not powered
+        assert len(hass.services.calls) == 2
+        assert detail["sent"] is False and detail["dispatchAttempt"] is False
+        assert detail["sendOutcome"] == "not_sent"
+        assert runtime._power_failures == previous[0]
+        assert runtime._power_failure_at == previous[1]
+        assert runtime._command_grace == previous[3]
+        assert self.POWER not in runtime._executing_actions
+        if terminal_failure:
+            assert detail["reason"] == "power_result_persistence_failed"
+            assert runtime._power_delivery[self.POWER].exhausted
+            assert runtime._power_delivery[self.POWER].attempts == 1
+        else:
+            assert detail["reason"] == "dispatch_permission_stale"
+            assert runtime._power_delivery == previous[2]
+            assert detail["_durable_recorded"] is True
+            power_failures = runtime._shadow._store.payload["dispatchFailures"]
+            assert len(power_failures) == 1
+            assert power_failures[0]["blockedAfterMs"] == previous[1][self.POWER]
+            before = copy.deepcopy(power_failures)
+            await runtime._shadow.async_record_dispatch(
+                at=clock["value"], room_id=self.ROOM,
+                receipts=({"targetId": "light_main", "action": "turn_on",
+                           "sent": False, "dispatchAttempt": False, "sendOutcome": "not_sent",
+                           "power": detail},),
+            )
+            assert runtime._shadow._store.payload["dispatchFailures"] == before
+        runtime._shadow._store.async_save = save
+        reloaded = RoomLightingShadowService(runtime._shadow._store)
+        await reloaded.async_load()
+        restored = _make_runtime(hass, commands_enabled=True, now_ms=lambda: clock["value"])
+        restored._configs = dict(runtime._configs)
+        restored._shadow = reloaded
+        restored._restore_dispatch_failures()
+        assert self.POWER in restored._power_failures
+        assert restored._power_delivery[self.POWER].exhausted
+        assert restored._power_attempt_blocked(
+            self.POWER, room_id=self.ROOM, command_action="turn_on")
 
     async def test_cancellation_during_warmup_keeps_latch_and_episode(
         self, monkeypatch: pytest.MonkeyPatch

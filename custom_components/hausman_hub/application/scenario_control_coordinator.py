@@ -458,8 +458,6 @@ class ScenarioControlCoordinator:
 
         roles = {
             STORAGE_LIGHT_TARGET_ID,
-            SMALL_CORRIDOR_RELAY_TARGET_ID,
-            SMALL_CORRIDOR_CHANDELIER_TARGET_ID,
             TOILET_MAIN_TARGET_ID,
             TOILET_NIGHT_TARGET_ID,
             TOILET_FAN_TARGET_ID,
@@ -469,6 +467,8 @@ class ScenarioControlCoordinator:
             OFFICE_LIGHT_TARGET_ID,
             OFFICE_RELAY_TARGET_ID,
         }
+        if not self._scenario_external(SMALL_CORRIDOR_SCENARIO_ID):
+            roles.update({SMALL_CORRIDOR_RELAY_TARGET_ID, SMALL_CORRIDOR_CHANDELIER_TARGET_ID})
         if not self._tambur_external():
             roles.update(
                 {
@@ -599,7 +599,7 @@ class ScenarioControlCoordinator:
                     old_state=data.get("old_state"),
                     new_state=data.get("new_state"),
                 )
-            if entity_id in self._small_corridor_entity_ids():
+            if entity_id in self._small_corridor_entity_ids() and not self._scenario_external(SMALL_CORRIDOR_SCENARIO_ID):
                 await self.async_handle_small_corridor_change()
             if entity_id in self._shower_entity_ids() and not self._shower_external():
                 await self.async_handle_shower_change()
@@ -637,10 +637,11 @@ class ScenarioControlCoordinator:
                     recovery=True,
                     allow_activation=False,
                 )
-            await self.async_handle_small_corridor_change(
-                recovery=True,
-                allow_activation=False,
-            )
+            if not self._scenario_external(SMALL_CORRIDOR_SCENARIO_ID):
+                await self.async_handle_small_corridor_change(
+                    recovery=True,
+                    allow_activation=False,
+                )
             if not self._shower_external():
                 await self.async_handle_shower_change(
                     recovery=True, allow_activation=False
@@ -1277,6 +1278,8 @@ class ScenarioControlCoordinator:
     ) -> None:
         """Derive one bounded small-corridor action from live sensor evidence."""
 
+        if self._scenario_external(SMALL_CORRIDOR_SCENARIO_ID):
+            return
         async with self._decision_lock:
             motion = self._target_state(SMALL_CORRIDOR_MOTION_TARGET_ID)
             chandelier = self._target_state(SMALL_CORRIDOR_CHANDELIER_TARGET_ID)
@@ -2373,6 +2376,8 @@ class ScenarioControlCoordinator:
         self._schedule_zone_due(scenario_id)
 
     async def async_reconcile_zone_due(self, scenario_id: str) -> None:
+        if self._scenario_external(scenario_id):
+            return
         async with self._decision_lock:
             record = self._record_for_scenario(scenario_id)
             if record is None or scenario_id == STORAGE_SCENARIO_ID:
@@ -2543,6 +2548,8 @@ class ScenarioControlCoordinator:
         evidence: Mapping[str, object] | None = None,
         trigger_id: str = "light_action",
     ) -> bool:
+        if self._scenario_external(scenario_id):
+            return False
         resolved_target_id = self._resolve_target_id(target_id)
         if resolved_target_id is None:
             await self._set_zone_transition(
@@ -3057,7 +3064,7 @@ class ScenarioControlCoordinator:
                         TAMBUR_SCENARIO_ID,
                         (TAMBUR_CHANDELIER_TARGET_ID, TAMBUR_POINTS_TARGET_ID),
                     )
-            if clock == policy.small_corridor_main_off:
+            if clock == policy.small_corridor_main_off and not self._scenario_external(SMALL_CORRIDOR_SCENARIO_ID):
                 self._cancel_zone_task(SMALL_CORRIDOR_SCENARIO_ID)
                 if not self._manual_claims(
                     (SMALL_CORRIDOR_RELAY_TARGET_ID, SMALL_CORRIDOR_CHANDELIER_TARGET_ID)
@@ -3502,6 +3509,8 @@ class ScenarioControlCoordinator:
         self._exhaust_task = asyncio.create_task(due())
 
     def _schedule_zone_due(self, scenario_id: str) -> None:
+        if self._scenario_external(scenario_id):
+            return
         if not self._schedule_tasks:
             return
         record = self._record_for_scenario(scenario_id)

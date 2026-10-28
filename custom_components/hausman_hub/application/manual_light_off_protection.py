@@ -639,9 +639,14 @@ class ManualLightOffProtectionCoordinator:
 
     async def async_release_explicit_return(
         self, snapshot: Mapping[str, dict[str, object]],
+        *, intent_current: Callable[[], bool] | None = None,
     ) -> bool:
         """Release only preflighted objects and keep replacements protected."""
+        from .lighting_return_intent import ManualLightReturnIntentChanged
+
         async with self._lock:
+            if intent_current is not None and not intent_current():
+                raise ManualLightReturnIntentChanged
             self._require_healthy()
             doomed = {key: record for key, record in snapshot.items()
                       if self._protections.get(key) is record}
@@ -662,9 +667,12 @@ class ManualLightOffProtectionCoordinator:
             except BaseException:
                 self.unhealthy = True
                 raise
-            for key in doomed:
-                self._protections.pop(key, None)
-                self._frozen_sensor_ids.pop(key, None)
+            if intent_current is not None and not intent_current():
+                raise ManualLightReturnIntentChanged
+            for key, frozen_record in doomed.items():
+                if self._protections.get(key) is frozen_record:
+                    self._protections.pop(key, None)
+                    self._frozen_sensor_ids.pop(key, None)
             self._completed = payload["completed"]
             self._state_revision = payload["stateRevision"]
             self._notify_event_entity_listeners()

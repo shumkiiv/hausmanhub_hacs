@@ -13,14 +13,11 @@ import json
 import os
 import tempfile
 import threading
-import uuid
 from decimal import Decimal
 from pathlib import Path
 from typing import Callable, Mapping
 
 from ...application.core.command_service import (
-    ClosedRegistration,
-    ClosedTargetRegistration,
     CommitConflict,
     ManualReceipt,
     ManualStatus,
@@ -43,9 +40,6 @@ from ...domain.core.models import (
 )
 
 IMAGE_SCHEMA_VERSION = 1
-IMAGE_SCHEMA_VERSION_WITH_ID = 2
-_SENTINEL_FORMAT_VERSION = 1
-_IMAGE_ID = "image_id"
 
 _COMMIT = "commit_revision"
 _RECORDS = "records"
@@ -58,7 +52,6 @@ _EPISODE_LOCKS = "episode_locks"
 _SCOPE_REVISIONS = "scope_revisions"
 _CONFIG_REVISIONS = "config_revisions"
 _BOOT_ID = "boot_id"
-_CLOSED_REGISTRATIONS = "closed_registrations"
 
 # Checkpoints where a test may inject an OSError/TimeoutError to emulate
 # a failing or interrupted file operation (S-T04, D-08, D-12).
@@ -97,9 +90,7 @@ def _strict_int(value: object, name: str) -> int:
     return value
 
 
-def validate_image_shape(
-    raw: Mapping, *, supported_versions: tuple[int, ...] = (1, 2)
-) -> None:
+def validate_image_shape(raw: Mapping) -> None:
     """Strict whole-image validation before writing and after reading
     (SEC-S04-02): exact types, mandatory sections, no unknown sections."""
 
@@ -107,25 +98,18 @@ def validate_image_shape(
         raise StoreImageError("stored image is not an object")
     unknown = set(raw) - {
         "schema_version",
-        _IMAGE_ID,
         *_REQUIRED_SECTIONS,
         _BOOT_ID,
         "restored_operation_ids",
-        _CLOSED_REGISTRATIONS,
     }
     if unknown:
         raise StoreImageError(f"unknown image sections: {sorted(unknown)}")
-    schema_version = raw.get("schema_version")
-    if type(schema_version) is not int or schema_version not in supported_versions:
+    if raw.get("schema_version") != IMAGE_SCHEMA_VERSION or type(
+        raw.get("schema_version")
+    ) is not int:
         raise StoreImageError(
-            f"unsupported schema_version: {schema_version!r}"
+            f"unsupported schema_version: {raw.get('schema_version')!r}"
         )
-    if schema_version == IMAGE_SCHEMA_VERSION_WITH_ID:
-        image_id = raw.get(_IMAGE_ID)
-        if not isinstance(image_id, str) or not image_id:
-            raise StoreImageError("schema 2 image_id is invalid")
-    elif _IMAGE_ID in raw:
-        raise StoreImageError("schema 1 must not contain image_id")
     _strict_int(raw.get(_COMMIT), _COMMIT)
     for section in (
         _RECORDS,
@@ -157,7 +141,6 @@ class FileControlStore:
         self.fail_at_commit_revisions: set[int] = set()
         self._closed = False
         self._commit_revision = 0
-        self._image_id: str | None = None
         # The shadow branch runs its file I/O in worker threads (SEC-LP-ISO01),
         # so two callers may reach commit concurrently. One write at a time
         # keeps the CAS check and the durable replacement indivisible
@@ -186,24 +169,16 @@ class FileControlStore:
         store is empty. A damaged image raises and closes the store."""
 
         try:
-            marker = self._read_sentinel()
             # The existence check is inside the guarded path too: a file
             # system error here closes the store instead of escaping
             # (SEC-S04-02 residual).
             file_missing = not self._path.exists()
-        except StoreImageError:
-            self._closed = True
-            raise
         except OSError as exc:
             self._closed = True
             raise StoreImageError(f"store path unavailable: {exc}") from exc
         if file_missing:
-            if marker is not None:
-                self._closed = True
-                raise StoreImageError("required shadow image is missing")
             self._closed = False
             self._commit_revision = 0
-            self._image_id = None
             return None
         try:
             # The whole load path — read, shape, decode and revision — is
@@ -216,7 +191,6 @@ class FileControlStore:
                 ),
             )
             validate_image_shape(raw)
-            self._validate_marker_pair(raw, marker)
             state = decode_state(raw)
             self._commit_revision = _strict_int(state[_COMMIT], _COMMIT)
         except StoreImageError:
@@ -226,105 +200,7 @@ class FileControlStore:
             self._closed = True
             raise StoreImageError(f"stored image is unreadable: {exc}") from exc
         self._closed = False
-        self._image_id = None if marker is None else marker[_IMAGE_ID]
         return state
-
-    def initialize_shadow(self, room_id: str, initial_state: Mapping) -> None:
-        """Explicitly create a closed shadow pair for one known room.
-
-        This is deliberately a local store operation: startup never calls it.
-        The marker is durable before the schema-2 image, so every interrupted
-        creation remains closed on the next load.
-        """
-        if not isinstance(room_id, str) or not room_id:
-            raise StoreImageError("shadow room_id is invalid")
-        with self._commit_lock:
-            if self._closed:
-                raise StorageUnavailable("store closed after an earlier failure")
-            if self._path.exists() or self._sentinel_path().exists():
-                raise StoreImageError("shadow image already has durable history")
-            image_id = uuid.uuid4().hex
-            marker = {
-                "format_version": _SENTINEL_FORMAT_VERSION,
-                "room_id": room_id,
-                _IMAGE_ID: image_id,
-                "image_required": True,
-            }
-            try:
-                self._write_json_atomic(self._sentinel_path(), marker)
-                encoded = self._encode_next_image(initial_state, 0, image_id)
-                self._write_atomic(encoded)
-                reread_marker = self._read_sentinel()
-                reread = self._read_raw_image()
-                self._validate_marker_pair(reread, reread_marker)
-                if reread != encoded:
-                    raise StoreImageError("initialized shadow image mismatched")
-            except Exception as exc:
-                self._closed = True
-                if isinstance(exc, (StoreImageError, StorageUnavailable)):
-                    raise
-                raise StorageUnavailable(f"shadow initialization failed: {exc}") from exc
-            self._image_id = image_id
-            self._commit_revision = 1
-
-    def migrate_legacy_closed(self, room_id: str) -> None:
-        """Atomically promote a validated schema-1 closed image to schema 2."""
-        if not isinstance(room_id, str) or not room_id:
-            raise StoreImageError("shadow room_id is invalid")
-        with self._commit_lock:
-            if self._closed:
-                raise StorageUnavailable("store closed after an earlier failure")
-            try:
-                if self._sentinel_path().exists():
-                    raise StoreImageError("shadow marker already exists")
-                raw = self._read_raw_image()
-                validate_image_shape(raw, supported_versions=(IMAGE_SCHEMA_VERSION,))
-                state = decode_state(raw)
-                registrations = state.get(_CLOSED_REGISTRATIONS, {})
-                if set(registrations) != {room_id}:
-                    raise StoreImageError("legacy image is not a closed room image")
-                backup = self._backup_path()
-                if backup.exists():
-                    raise StoreImageError("legacy backup already exists")
-                self._write_json_atomic(backup, raw)
-                if self._read_raw_json(backup) != raw:
-                    raise StoreImageError("legacy backup mismatched")
-                image_id = uuid.uuid4().hex
-                marker = {"format_version": _SENTINEL_FORMAT_VERSION, "room_id": room_id,
-                          _IMAGE_ID: image_id, "image_required": True}
-                self._write_json_atomic(self._sentinel_path(), marker)
-                encoded = dict(raw)
-                encoded["schema_version"] = IMAGE_SCHEMA_VERSION_WITH_ID
-                encoded[_IMAGE_ID] = image_id
-                self._write_atomic(encoded)
-                reread = self._read_raw_image()
-                self._validate_marker_pair(reread, self._read_sentinel())
-                if reread != encoded:
-                    raise StoreImageError("migrated shadow image mismatched")
-            except Exception:
-                self._closed = True
-                raise
-            self._image_id = image_id
-            self._commit_revision = _strict_int(state[_COMMIT], _COMMIT)
-            self._closed = False
-
-    def export_closed_schema1(self) -> dict:
-        """Return the current closed image for a schema-1 consumer.
-
-        Export is read-only; it cannot replace a newer durable manual action.
-        """
-        try:
-            raw = self._read_raw_image()
-            marker = self._read_sentinel()
-            self._validate_marker_pair(raw, marker)
-            exported = dict(raw)
-            exported["schema_version"] = IMAGE_SCHEMA_VERSION
-            exported.pop(_IMAGE_ID, None)
-            validate_image_shape(exported, supported_versions=(IMAGE_SCHEMA_VERSION,))
-            return exported
-        except Exception:
-            self._closed = True
-            raise
 
     def commit(self, expected_commit_revision: int, next_state: Mapping) -> None:
         if self._closed:
@@ -370,7 +246,6 @@ class FileControlStore:
             "schema_version",
             _BOOT_ID,
             "restored_operation_ids",
-            _CLOSED_REGISTRATIONS,
         }
         if unknown_sections:
             raise StoreImageError(
@@ -379,9 +254,14 @@ class FileControlStore:
         if "commit_revision" in next_state:
             _strict_int(next_state["commit_revision"], _COMMIT)
         try:
-            encoded = self._encode_next_image(
-                next_state, expected_commit_revision, self._image_id
-            )
+            encoded = encode_state(next_state)
+            if not isinstance(encoded, dict):
+                raise StorageUnavailable(
+                    "image encoding produced a non-object"
+                )
+            encoded[_COMMIT] = expected_commit_revision + 1
+            encoded["schema_version"] = IMAGE_SCHEMA_VERSION
+            validate_image_shape(encoded)
         except StorageUnavailable:
             raise
         except Exception as exc:
@@ -407,9 +287,7 @@ class FileControlStore:
             self._fault_injector(point)
 
     def _write_atomic(self, encoded: Mapping) -> None:
-        self._write_json_atomic(self._path, encoded)
-
-    def _write_json_atomic(self, target: Path, encoded: Mapping) -> None:
+        target = self._path
         target.parent.mkdir(parents=True, exist_ok=True)
         self._inject("tmp_open")
         descriptor, temporary_path = tempfile.mkstemp(
@@ -426,9 +304,9 @@ class FileControlStore:
                     allow_nan=False,
                 )
                 destination.flush()
-                os.chmod(temporary_path, 0o600)
                 self._inject("file_fsync")
                 os.fsync(destination.fileno())
+            os.chmod(temporary_path, 0o600)
             self._inject("replace")
             os.replace(temporary_path, target)
         finally:
@@ -443,71 +321,11 @@ class FileControlStore:
         finally:
             os.close(directory_fd)
         self._inject("reread")
-        reread = self._read_raw_json(target)
+        reread = json.loads(self._path.read_text(encoding="utf-8"))
         if reread != encoded:
             raise StorageUnavailable(
                 "file store verification re-read mismatched the image"
             )
-
-    def _encode_next_image(
-        self, next_state: Mapping, expected_commit_revision: int,
-        image_id: str | None,
-    ) -> dict:
-        encoded = encode_state(next_state)
-        if not isinstance(encoded, dict):
-            raise StorageUnavailable("image encoding produced a non-object")
-        encoded[_COMMIT] = expected_commit_revision + 1
-        if image_id is None:
-            encoded["schema_version"] = IMAGE_SCHEMA_VERSION
-        else:
-            encoded["schema_version"] = IMAGE_SCHEMA_VERSION_WITH_ID
-            encoded[_IMAGE_ID] = image_id
-        validate_image_shape(encoded)
-        return encoded
-
-    def _sentinel_path(self) -> Path:
-        return self._path.with_name(f"{self._path.name}.expected")
-
-    def _backup_path(self) -> Path:
-        return self._path.with_name(f"{self._path.name}.schema1.backup")
-
-    @staticmethod
-    def _read_raw_json(path: Path) -> dict:
-        return json.loads(path.read_text(encoding="utf-8"), parse_constant=lambda name: (
-            _ for _ in ()
-        ).throw(StoreImageError(f"non-finite number: {name}")))
-
-    def _read_raw_image(self) -> dict:
-        return self._read_raw_json(self._path)
-
-    def _read_sentinel(self) -> dict | None:
-        path = self._sentinel_path()
-        if not path.exists():
-            return None
-        try:
-            raw = self._read_raw_json(path)
-        except Exception as exc:
-            raise StoreImageError("shadow sentinel is unreadable") from exc
-        if not isinstance(raw, dict) or set(raw) != {
-            "format_version", "room_id", _IMAGE_ID, "image_required"
-        } or raw.get("format_version") != _SENTINEL_FORMAT_VERSION or (
-            not isinstance(raw.get("room_id"), str) or not raw["room_id"]
-        ) or (not isinstance(raw.get(_IMAGE_ID), str) or not raw[_IMAGE_ID]) or (
-            raw.get("image_required") is not True
-        ):
-            raise StoreImageError("shadow sentinel is invalid")
-        return raw
-
-    @staticmethod
-    def _validate_marker_pair(raw: Mapping, marker: Mapping | None) -> None:
-        if marker is None:
-            if raw.get("schema_version") == IMAGE_SCHEMA_VERSION_WITH_ID:
-                raise StoreImageError("schema 2 image has no shadow sentinel")
-            return
-        if raw.get("schema_version") != IMAGE_SCHEMA_VERSION_WITH_ID or (
-            raw.get(_IMAGE_ID) != marker.get(_IMAGE_ID)
-        ):
-            raise StoreImageError("shadow sentinel and image do not match")
 
 
 # -- typed image encoding -------------------------------------------------
@@ -558,70 +376,6 @@ def _decode_fingerprint_part(part: object) -> object:
     if isinstance(part, Mapping) and "fingerprint_target" in part:
         return _decode_target(part["fingerprint_target"])
     return part
-
-
-def _encode_closed_registration(registration: ClosedRegistration) -> dict:
-    return {
-        "branch_id": registration.branch_id,
-        "import_id": registration.import_id,
-        "source_identity": registration.source_identity,
-        "source_revision": registration.source_revision,
-        "source_payload_digest": registration.source_payload_digest,
-        "targets": [
-            {
-                "target_id": target.target_id,
-                "resource_id": target.resource_id,
-                "entity_id": target.entity_id,
-                "property_name": target.property_name,
-                "allowed_actions": list(target.allowed_actions),
-                "binding_revision": target.binding_revision,
-                "config_revision": target.config_revision,
-            }
-            for target in registration.targets
-        ],
-    }
-
-
-def _decode_closed_registration(raw: Mapping) -> ClosedRegistration:
-    if not isinstance(raw, Mapping) or set(raw) != {
-        "branch_id", "import_id", "source_identity", "source_revision", "source_payload_digest", "targets"
-    }:
-        raise StoreImageError("closed registration has invalid shape")
-    targets = raw["targets"]
-    if not isinstance(targets, list) or not targets:
-        raise StoreImageError("closed registration targets must be a non-empty list")
-    decoded: list[ClosedTargetRegistration] = []
-    for target in targets:
-        if not isinstance(target, Mapping) or set(target) != {
-            "target_id", "resource_id", "entity_id", "property_name",
-            "allowed_actions", "binding_revision", "config_revision",
-        }:
-            raise StoreImageError("closed registration target has invalid shape")
-        actions = target["allowed_actions"]
-        if not isinstance(actions, list) or not actions or not all(
-            isinstance(action, str) and action for action in actions
-        ):
-            raise StoreImageError("closed registration actions are invalid")
-        values = (target["target_id"], target["resource_id"], target["entity_id"], target["property_name"])
-        if not all(isinstance(value, str) and value for value in values):
-            raise StoreImageError("closed registration target identity is invalid")
-        decoded.append(ClosedTargetRegistration(
-            target_id=target["target_id"], resource_id=target["resource_id"],
-            entity_id=target["entity_id"], property_name=target["property_name"],
-            allowed_actions=tuple(actions),
-            binding_revision=_strict_int(target["binding_revision"], "closed binding_revision"),
-            config_revision=_strict_int(target["config_revision"], "closed config_revision"),
-        ))
-    values = (raw["branch_id"], raw["import_id"], raw["source_identity"], raw["source_payload_digest"])
-    if not all(isinstance(value, str) and value for value in values):
-        raise StoreImageError("closed registration identity is invalid")
-    return ClosedRegistration(
-        branch_id=raw["branch_id"], import_id=raw["import_id"],
-        source_identity=raw["source_identity"],
-        source_revision=_strict_int(raw["source_revision"], "closed source_revision"),
-        source_payload_digest=raw["source_payload_digest"],
-        targets=tuple(decoded),
-    )
 
 
 def encode_state(state: Mapping) -> dict:
@@ -752,10 +506,6 @@ def encode_state(state: Mapping) -> dict:
         _RECEIPT_TIMES: {
             key: _strict_int(value, f"receipt_times[{key}]")
             for key, value in state.get(_RECEIPT_TIMES, {}).items()
-        },
-        _CLOSED_REGISTRATIONS: {
-            branch_id: _encode_closed_registration(registration)
-            for branch_id, registration in state.get(_CLOSED_REGISTRATIONS, {}).items()
         },
     }
     return image
@@ -894,12 +644,6 @@ def decode_state(raw: Mapping) -> dict:
             _CONFIG_REVISIONS: {
                 key: _strict_int(value, f"config_revisions[{key}]")
                 for key, value in raw[_CONFIG_REVISIONS].items()
-            },
-            _CLOSED_REGISTRATIONS: {
-                branch_id: _decode_closed_registration(registration)
-                for branch_id, registration in raw.get(
-                    _CLOSED_REGISTRATIONS, {}
-                ).items()
             },
             "restored_operation_ids": set(
                 raw.get("restored_operation_ids", [])

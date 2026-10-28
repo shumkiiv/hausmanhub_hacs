@@ -1365,6 +1365,28 @@ class ScenarioExecutor:
         )
         source = trigger_context.get("source") if trigger_context else "automatic"
         automatic_source = source != "manual"
+        departure_off_action_ids = frozenset(
+            action.id
+            for action in actions
+            if not dry_run
+            and departure_shutdown_authorized
+            and action.action_id == "turn_off"
+            and action.id in light_priority.light_action_ids
+        )
+
+        def require_departure_off_confirmation(
+            checked_receipts: Sequence[dict[str, Any]],
+        ) -> None:
+            # A sent-but-unconfirmed OFF must not become a successful nested
+            # departure or allow a later "everything is off" notification.
+            for receipt in checked_receipts:
+                if (
+                    receipt.get("action_id") in departure_off_action_ids
+                    and receipt.get("status") == "completed"
+                    and receipt.get("confirmed") is not True
+                ):
+                    receipt.update(status="failed", error="state_not_confirmed")
+
         idempotent_actions = bool(
             definition.safety_policy.idempotent_actions
             and not (
@@ -1606,6 +1628,7 @@ class ScenarioExecutor:
             group_receipts = receipts[light_group_receipt_start:]
             try:
                 await self._confirm_deferred_device_receipts(group_receipts)
+                require_departure_off_confirmation(group_receipts)
                 await self._async_resolve_light_off_obligations(
                     group_actions,
                     group_receipts,
@@ -1652,6 +1675,11 @@ class ScenarioExecutor:
                 # boundaries.  The prior group is fully read back and saved
                 # before its lock is released.
                 await finalize_light_group(action_index)
+                if departure_off_action_ids:
+                    await self._confirm_deferred_device_receipts(receipts)
+                    require_departure_off_confirmation(receipts)
+                    if any(receipt.get("status") == "failed" for receipt in receipts):
+                        break
             elif not scenario_authority_lock_held:
                 light_group_start = action_index
                 light_group_receipt_start = len(receipts)
@@ -1951,6 +1979,7 @@ class ScenarioExecutor:
         await finalize_light_group(len(actions))
         if not dry_run:
             await self._confirm_deferred_device_receipts(receipts)
+            require_departure_off_confirmation(receipts)
             for receipt in receipts:
                 await self._async_note_curtain_protection(receipt)
             await self._async_resolve_light_off_obligations(
@@ -3449,10 +3478,23 @@ class ScenarioExecutor:
                     and self._manual_light_authority is not None
                     and self._manual_light_authority.blocks(device.entity_id)
                 ):
-                    return failed_after_power_dispatch({
-                        **base, "status": "failed", "error": "manual_light_priority",
-                        "physicalAttempted": False,
-                    })
+                    departure_off_guard = getattr(
+                        self._manual_light_authority, "blocks_departure_off", None
+                    )
+                    # Departure is explicit OFF authority, not a release of
+                    # manual evidence. Older authorities and uncertain stores
+                    # keep their existing deny behavior.
+                    if not (
+                        automatic_light_off_authorized
+                        and action.action_id == "turn_off"
+                        and dispatch_service == "turn_off"
+                        and callable(departure_off_guard)
+                        and departure_off_guard(device.entity_id) is False
+                    ):
+                        return failed_after_power_dispatch({
+                            **base, "status": "failed", "error": "manual_light_priority",
+                            "physicalAttempted": False,
+                        })
                 mark_physical_dispatch()
                 base["_physical_attempted"] = True
                 await self._call_service(

@@ -506,7 +506,16 @@ async def test_force_auto_releases_real_authority_and_room_history(action):
         result = await runtime.async_force_auto(_ROOM_ID, reason="test")
         assert authority.record("light.demo_main") is None, result
         assert not authority.blocks("light.demo_main"), result
-        assert not runtime._ownership.snapshots_for(_ROOM_ID, {"light_main"})
+        records = runtime._control_ownership_for(runtime._configs[_ROOM_ID])
+        if action == "on":
+            from custom_components.hausman_hub.domain.room_lighting_ownership import (
+                OwnershipSource, has_automatic_control, has_proven_auto_ownership,
+            )
+            assert records[-1].source is OwnershipSource.EXPLICIT_HANDOFF
+            assert has_automatic_control(records, "light_main")
+            assert not has_proven_auto_ownership(records, "light_main")
+        else:
+            assert not records
         assert runtime._ownership.last_manual_off_at(_ROOM_ID, {"light_main"}) is None
         assert executor.calls == []  # commandsEnabled=False remains a separate gate.
         assert result["outcome"] == "returned"

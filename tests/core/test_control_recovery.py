@@ -8,6 +8,8 @@ memory. The transport call counter decides whether a repeat happened.
 from __future__ import annotations
 
 from decimal import Decimal
+from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -51,6 +53,7 @@ def test_payload_digest_is_typed_and_canonical_without_codec_io():
     assert _payload_digest(first) == _payload_digest(reordered)
     assert _payload_digest({"value": "1"}) != _payload_digest({"value": 1})
     assert _payload_digest({"value": False}) != _payload_digest({"value": 0})
+    assert _payload_digest({"v": {"a", "b"}}) != _payload_digest({"v": ["a", "b"]})
 
 from custom_components.hausman_hub.adapters.core.control_store import (
     FAULT_POINTS,
@@ -1484,3 +1487,434 @@ def test_closed_import_fault_keeps_registration_and_rights_as_one_image(
     else:
         assert durable_record == before
     assert destination.transport.calls == []
+
+
+def _closed_import_pair(tmp_path):
+    from custom_components.hausman_hub.domain.core.models import ArbitrationMode
+
+    source = build_file_stand(tmp_path / "source", ArbitrationMode.RANKED_TARGET)
+    destination = build_file_stand(tmp_path / "destination", ArbitrationMode.RANKED_TARGET)
+    source.service.close_dispatch_for_restore()
+    destination.service.close_dispatch_for_restore()
+    registration = ClosedRegistration(
+        "synthetic.room", "negative-import", "source-file",
+        source.store.commit_revision,
+        tuple(ClosedTargetRegistration(target, resource, entity, "on",
+              ("turn_on", "turn_off"), BINDING_REVISION_START, CONFIG_REVISION_START)
+              for target, resource, entity in (("light.main", MAIN_RESOURCE, MAIN_ENTITY),
+                  ("light.other", OTHER_RESOURCE, "light.test_other"))),
+        _payload_digest(source.store.load()),
+    )
+    return source, destination, registration
+
+
+@pytest.mark.parametrize("case", (
+    "destination-revision", "source-revision", "registration-revision", "digest",
+    "source-manual-moved", "partial-scope", "foreign-scope", "empty-scope",
+    "duplicate-target", "duplicate-resource", "duplicate-entity", "binding-revision",
+    "config-revision", "targets-list", "actions-list", "bool-binding",
+    "bool-config", "bool-source", "bool-expected-source", "bool-expected-destination",
+))
+def test_closed_import_invalid_proof_never_changes_destination(tmp_path, case):
+    from custom_components.hausman_hub.application.core.command_service import ClosedRegistrationConflict
+
+    source, destination, registration = _closed_import_pair(tmp_path)
+    source_revision = source.store.commit_revision
+    revision = destination.store.commit_revision
+    scope = None
+    if case == "destination-revision": revision += 1
+    if case == "source-revision": source_revision += 1
+    if case == "registration-revision": registration = replace(registration, source_revision=source_revision + 1)
+    if case == "digest": registration = replace(registration, source_payload_digest="0" * 64)
+    if case == "source-manual-moved":
+        _manual(source, "new-source-manual", expected=13)
+        source_revision = source.store.commit_revision
+        registration = replace(registration, source_revision=source_revision)
+    if case == "partial-scope": scope = frozenset({MAIN_RESOURCE})
+    if case == "foreign-scope": scope = frozenset({"foreign"})
+    if case == "empty-scope": scope = frozenset()
+    if case in {"duplicate-target", "duplicate-resource", "duplicate-entity"}:
+        field = {"duplicate-target": "target_id", "duplicate-resource": "resource_id",
+                 "duplicate-entity": "entity_id"}[case]
+        registration = replace(registration, targets=(registration.targets[0],
+            replace(registration.targets[1], **{field: getattr(registration.targets[0], field)})))
+    if case in {"binding-revision", "config-revision", "bool-binding", "bool-config", "actions-list"}:
+        field, value = {"binding-revision": ("binding_revision", 999),
+            "config-revision": ("config_revision", 999), "bool-binding": ("binding_revision", True),
+            "bool-config": ("config_revision", True), "actions-list": ("allowed_actions", ["turn_on"])}[case]
+        registration = replace(registration, targets=(replace(registration.targets[0], **{field: value}),
+                                                       registration.targets[1]))
+    if case == "targets-list": registration = replace(registration, targets=list(registration.targets))
+    if case == "bool-source": registration = replace(registration, source_revision=True)
+    if case == "bool-expected-source": source_revision = True
+    if case == "bool-expected-destination": revision = True
+    before = Path(destination.store_path).read_bytes()
+    record = destination.service.record(MAIN_RESOURCE)
+    actual_revision = destination.store.commit_revision
+    with pytest.raises(ClosedRegistrationConflict):
+        destination.service.import_closed_registration_from(source.service, registration,
+            expected_commit_revision=revision, expected_source_revision=source_revision,
+            controlled_resource_ids=scope)
+    assert Path(destination.store_path).read_bytes() == before
+    assert destination.store.commit_revision == actual_revision
+    assert destination.service.record(MAIN_RESOURCE) == record
+    assert destination.service.closed_registrations() == ()
+    assert destination.transport.calls == []
+
+
+def test_closed_import_keeps_nonempty_seeded_unknown_history_without_replay(tmp_path):
+    """Synthetic persisted uncertainty, not proof of a physical dispatch."""
+    source, destination, registration = _closed_import_pair(tmp_path)
+    receipt = _manual(source, "seeded-unknown-manual", target=BASE_TARGET_ON40, expected=13)
+    image = source.store.load()
+    operation = image["operations"][receipt.operation_id]
+    image["operations"][receipt.operation_id] = replace(
+        operation, phase=OperationPhase.UNKNOWN, reason_code="synthetic_persisted_unknown")
+    source.store.commit(source.store.commit_revision, image)
+    # Reconstruct memory from the same durable image before any import proof.
+    restored_source, source_transport = _restore_file_stand_closed(source)
+    restored_source.close_dispatch_for_restore()
+    current = FileControlStore(source.store_path).load()
+    unknown_ids = {key for key, value in current["operations"].items()
+                   if value.phase is OperationPhase.UNKNOWN}
+    assert receipt.operation_id in unknown_ids
+    assert current["operations"][receipt.operation_id].reason_code == "synthetic_persisted_unknown"
+    registration = replace(registration, source_revision=current["commit_revision"],
+                           source_payload_digest=_payload_digest(current))
+    destination.service.import_closed_registration_from(restored_source, registration,
+        expected_commit_revision=destination.store.commit_revision,
+        expected_source_revision=current["commit_revision"])
+    imported = FileControlStore(destination.store_path).load()
+    for field in ("records", "operations", "receipts", "receipt_times",
+                  "receipt_fingerprints", "confirm_keys", "episode_locks",
+                  "scope_revisions", "config_revisions"):
+        assert imported[field] == current[field]
+    assert imported["operations"][receipt.operation_id].phase is OperationPhase.UNKNOWN
+    assert imported["receipts"]["seeded-unknown-manual"] == receipt
+    restored_destination, destination_transport = _restore_file_stand_closed(destination)
+    restored_destination.drain()
+    reread = FileControlStore(destination.store_path).load()
+    assert reread["operations"][receipt.operation_id] == current["operations"][receipt.operation_id]
+    assert restored_destination.record(MAIN_RESOURCE).manual == current["records"][MAIN_RESOURCE].manual
+    assert source_transport.calls == destination_transport.calls == []
+    assert source.transport.calls == destination.transport.calls == []
+
+
+def test_closed_import_copies_manual_receipts_and_unknown_without_replay(tmp_path):
+    source, destination, registration = _closed_import_pair(tmp_path)
+    receipt = _manual(source, "source-late-manual", target=BASE_TARGET_ON40, expected=13)
+    durable_operation = source.store.load()["operations"][receipt.operation_id]
+    memory_operation = source.service.operations(MAIN_RESOURCE)[-1]
+    assert durable_operation == memory_operation
+    assert durable_operation.phase is OperationPhase.CANCELLED
+    assert durable_operation.reason_code == "dispatch_closed_for_restore"
+    registration = replace(registration, source_revision=source.store.commit_revision,
+                           source_payload_digest=_payload_digest(source.store.load()))
+    destination.service.import_closed_registration_from(source.service, registration,
+        expected_commit_revision=destination.store.commit_revision,
+        expected_source_revision=source.store.commit_revision)
+    image = destination.store.load()
+    assert image["records"][MAIN_RESOURCE] == source.service.record(MAIN_RESOURCE)
+    assert image["receipts"]["source-late-manual"] == receipt
+    assert image["operations"] == source.store.load()["operations"]
+    restored, transport = _restore_file_stand_closed(destination)
+    restored.drain()
+    assert restored.closed_registrations() == (registration,)
+    assert restored.record(MAIN_RESOURCE).manual == source.service.record(MAIN_RESOURCE).manual
+    assert transport.calls == destination.transport.calls == source.transport.calls == []
+
+
+@pytest.mark.parametrize("fault_point", FAULT_POINTS)
+def test_closed_late_manual_failed_acceptance_never_sends_or_claims_success(tmp_path, fault_point):
+    source, _, _ = _closed_import_pair(tmp_path)
+    source.store.injector.faults[fault_point] = OSError(fault_point)
+    with pytest.raises(StorageUnavailable):
+        _manual(source, "failed-late-manual", target=BASE_TARGET_ON40, expected=13)
+    assert "failed-late-manual" not in source.service._receipts
+    assert source.service._dispatch_closed_for_restore is True
+    source.service.drain()
+    assert source.transport.calls == []
+
+
+@pytest.mark.parametrize("resource", (MAIN_RESOURCE, OTHER_RESOURCE))
+@pytest.mark.parametrize("difference", ("entity", "binding", "config", "manual-scope"))
+def test_closed_import_rejects_consistent_but_incompatible_source(tmp_path, resource, difference):
+    from custom_components.hausman_hub.application.core.command_service import (
+        ClosedRegistrationConflict, _canonical_source_image,
+    )
+    source, destination, registration = _closed_import_pair(tmp_path)
+    service = source.service
+    if difference == "entity": service._bindings[resource] = "light.foreign_source"
+    if difference == "binding":
+        service._specs[resource] = replace(service._specs[resource], binding_revision=99)
+        service._records[resource] = replace(service._records[resource], binding_revision=99)
+    if difference == "config": service._config_revisions[resource] = 99
+    if difference == "manual-scope":
+        service._specs[resource] = replace(service._specs[resource], manual_scopes=("foreign.scope",))
+        service._scope_revisions["foreign.scope"] = 9
+    service._commit_state()
+    durable = source.store.load()
+    assert _canonical_source_image(durable) == _canonical_source_image(service._build_image())
+    # Only MAIN is registered. OTHER still belongs to the transferred image.
+    registration = replace(registration, targets=registration.targets[:1],
+        source_revision=source.store.commit_revision, source_payload_digest=_payload_digest(durable))
+    before = Path(destination.store_path).read_bytes()
+    revision = destination.store.commit_revision
+    record = destination.service.record(MAIN_RESOURCE)
+    with pytest.raises(ClosedRegistrationConflict):
+        destination.service.import_closed_registration_from(service, registration,
+            expected_commit_revision=revision, expected_source_revision=source.store.commit_revision,
+            controlled_resource_ids=frozenset({MAIN_RESOURCE}))
+    assert Path(destination.store_path).read_bytes() == before
+    assert destination.store.commit_revision == revision
+    assert destination.service.record(MAIN_RESOURCE) == record
+    assert destination.service.closed_registrations() == ()
+    assert destination.transport.calls == source.transport.calls == []
+
+
+@pytest.mark.parametrize("difference", ("owner_module", "adapter_id", "capability_profile_id", "power_dependencies"))
+def test_closed_import_rejects_other_source_spec_semantics(tmp_path, difference):
+    from custom_components.hausman_hub.application.core.command_service import (
+        ClosedRegistrationConflict, _canonical_source_image,
+    )
+    source, destination, registration = _closed_import_pair(tmp_path)
+    value = (MAIN_RESOURCE,) if difference == "power_dependencies" else "foreign.value"
+    source.service._specs[OTHER_RESOURCE] = replace(source.service._specs[OTHER_RESOURCE], **{difference: value})
+    durable = source.store.load()
+    assert _canonical_source_image(durable) == _canonical_source_image(source.service._build_image())
+    registration = replace(registration, targets=registration.targets[:1])
+    before = Path(destination.store_path).read_bytes()
+    revision = destination.store.commit_revision
+    with pytest.raises(ClosedRegistrationConflict):
+        destination.service.import_closed_registration_from(source.service, registration,
+            expected_commit_revision=revision, expected_source_revision=source.store.commit_revision,
+            controlled_resource_ids=frozenset({MAIN_RESOURCE}))
+    assert Path(destination.store_path).read_bytes() == before
+    assert destination.store.commit_revision == revision
+    assert destination.transport.calls == source.transport.calls == []
+
+
+@pytest.mark.parametrize("difference", ("record-binding", "record-id", "scope-keys", "missing-declared-scope"))
+def test_closed_import_rejects_inconsistent_source_record_or_scope(tmp_path, difference):
+    from custom_components.hausman_hub.application.core.command_service import (
+        ClosedRegistrationConflict, _canonical_source_image,
+    )
+    source, destination, registration = _closed_import_pair(tmp_path)
+    if difference == "record-binding":
+        source.service._records[OTHER_RESOURCE] = replace(source.service._records[OTHER_RESOURCE], binding_revision=99)
+    if difference == "record-id":
+        source.service._records[OTHER_RESOURCE] = replace(source.service._records[OTHER_RESOURCE], resource_id="foreign.record")
+    if difference == "scope-keys": source.service._scope_revisions["foreign.scope"] = 9
+    if difference == "missing-declared-scope":
+        source.service._scope_revisions.pop(MAIN_SCOPE)
+        destination.service._scope_revisions.pop(MAIN_SCOPE)
+        destination.service._commit_state()
+    source.service._commit_state()
+    durable = source.store.load()
+    assert _canonical_source_image(durable) == _canonical_source_image(source.service._build_image())
+    registration = replace(registration, source_revision=source.store.commit_revision,
+                           source_payload_digest=_payload_digest(durable))
+    before = Path(destination.store_path).read_bytes()
+    revision = destination.store.commit_revision
+    with pytest.raises(ClosedRegistrationConflict):
+        destination.service.import_closed_registration_from(source.service, registration,
+            expected_commit_revision=revision, expected_source_revision=source.store.commit_revision)
+    assert Path(destination.store_path).read_bytes() == before
+    assert destination.store.commit_revision == revision
+    assert destination.transport.calls == source.transport.calls == []
+
+
+@pytest.mark.parametrize("unbound_passive", (False, True))
+def test_closed_import_partial_registration_keeps_complete_new_manual_history(tmp_path, unbound_passive):
+    source, destination, registration = _closed_import_pair(tmp_path)
+    if unbound_passive:
+        source.service._bindings.pop(OTHER_RESOURCE)
+        destination.service._bindings.pop(OTHER_RESOURCE)
+    _manual(source, "subset-late-manual", target=BASE_TARGET_ON40, expected=13)
+    registration = replace(registration, targets=registration.targets[:1],
+        source_revision=source.store.commit_revision, source_payload_digest=_payload_digest(source.store.load()))
+    assert source.service._scope_revisions != destination.service._scope_revisions
+    destination.service.import_closed_registration_from(source.service, registration,
+        expected_commit_revision=destination.store.commit_revision,
+        expected_source_revision=source.store.commit_revision,
+        controlled_resource_ids=frozenset({MAIN_RESOURCE}))
+    assert destination.service.record(MAIN_RESOURCE).manual == source.service.record(MAIN_RESOURCE).manual
+    assert destination.service._scope_revisions == source.service._scope_revisions
+    assert set(destination.store.load()["records"]) == set(source.store.load()["records"])
+    assert destination.transport.calls == source.transport.calls == []
+
+
+def test_closed_import_rejects_revision_advanced_by_second_real_store(tmp_path):
+    from custom_components.hausman_hub.application.core.command_service import (
+        ClosedRegistrationConflict, _canonical_source_image,
+    )
+    source, destination, registration = _closed_import_pair(tmp_path)
+    expected_source = source.store.commit_revision
+    other_store = FileControlStore(source.store_path)
+    same_payload = other_store.load()
+    other_store.commit(expected_source, same_payload)
+    durable = other_store.load()
+    assert durable['commit_revision'] == expected_source + 1
+    assert source.store.commit_revision == expected_source
+    registration = replace(registration, source_payload_digest=_payload_digest(durable))
+    before_bytes = Path(destination.store_path).read_bytes()
+    before_image = _canonical_source_image(destination.store.load())
+    before_memory = _canonical_source_image(destination.service._build_image())
+    before_revision = destination.store.commit_revision
+    with pytest.raises(ClosedRegistrationConflict):
+        destination.service.import_closed_registration_from(source.service, registration,
+            expected_commit_revision=before_revision, expected_source_revision=expected_source)
+    assert Path(destination.store_path).read_bytes() == before_bytes
+    assert destination.store.commit_revision == before_revision
+    assert _canonical_source_image(destination.store.load()) == before_image
+    assert _canonical_source_image(destination.service._build_image()) == before_memory
+    assert destination.service.closed_registrations() == ()
+    assert destination.transport.calls == source.transport.calls == []
+
+
+def _manual_denial_stand(tmp_path):
+    """Real file and closed recovery, with no observation after admission."""
+    from custom_components.hausman_hub.domain.core.models import ArbitrationMode
+
+    stand = build_file_stand(tmp_path, ArbitrationMode.RANKED_TARGET)
+    stand.service, stand.transport = _restore_file_stand_closed(stand)
+    stand.store = stand.service._store
+    stand.clock = stand.service._clock
+    return stand
+
+
+def _submit_denied_manual(stand, request_id="durable-denial"):
+    return _manual(
+        stand, request_id, target=BASE_TARGET_ON40,
+        expected=stand.service.record(MAIN_RESOURCE).control_revision,
+    )
+
+
+def _assert_manual_image_preserved(stand, image):
+    memory = stand.service._build_image()
+    for section in (
+        "records", "receipts", "receipt_times",
+        "scope_revisions",
+    ):
+        assert image[section] == memory[section]
+    assert {key: tuple(value) for key, value in image["receipt_fingerprints"].items()} == {
+        key: tuple(value) for key, value in memory["receipt_fingerprints"].items()
+    }
+    record = image["records"][MAIN_RESOURCE]
+    assert record.authority is Authority.MANUAL
+    assert record.manual is not None
+    assert record.auto_proof is None
+    assert stand.transport.calls == []
+
+
+def test_manual_denial_is_durable_immediately_without_a_later_event(tmp_path):
+    stand = _manual_denial_stand(tmp_path)
+    receipt = _submit_denied_manual(stand)
+    image = FileControlStore(stand.store_path).load()
+    operation = stand.service.operations(MAIN_RESOURCE)[-1]
+    assert operation.operation_id == receipt.operation_id
+    assert operation.phase is OperationPhase.CANCELLED
+    assert operation.reason_code == "core_not_active"
+    assert image["operations"][receipt.operation_id] == operation
+    assert operation.origin is Origin.MANUAL
+    assert operation.target == BASE_TARGET_ON40
+    assert operation.dispatch_started_at_mono_ms is None
+    _assert_manual_image_preserved(stand, image)
+
+
+def test_manual_denial_restart_and_replay_keep_the_same_terminal_operation(tmp_path):
+    stand = _manual_denial_stand(tmp_path)
+    receipt = _submit_denied_manual(stand)
+    before = FileControlStore(stand.store_path).load()
+    restored = restore_file_stand(stand)
+    operation = restored.service.operations(MAIN_RESOURCE)[-1]
+    assert operation.operation_id == receipt.operation_id
+    assert operation.phase is OperationPhase.CANCELLED
+    assert operation.reason_code == "core_not_active"
+    replay = _manual(restored, "durable-denial", target=BASE_TARGET_ON40)
+    assert replay == replace(receipt, idempotent_replay=True)
+    assert len(restored.service.operations(MAIN_RESOURCE)) == 1
+    after = FileControlStore(stand.store_path).load()
+    for section in ("receipts", "receipt_times", "receipt_fingerprints"):
+        assert after[section] == before[section]
+    assert after["records"][MAIN_RESOURCE].manual == before["records"][MAIN_RESOURCE].manual
+    restored.service.drain()
+    assert restored.transport.calls == stand.transport.calls == []
+
+
+def test_manual_denial_second_commit_failure_preserves_acceptance_without_success(tmp_path):
+    stand = _manual_denial_stand(tmp_path)
+    stand.store.fail_at_commit_revisions.add(stand.store.commit_revision + 2)
+    with pytest.raises(StorageUnavailable):
+        _submit_denied_manual(stand)
+    image = FileControlStore(stand.store_path).load()
+    _assert_manual_image_preserved(stand, image)
+    assert len(image["receipts"]) == len(image["operations"]) == 1
+    assert next(iter(image["operations"].values())).phase is OperationPhase.QUEUED
+    receipt = next(iter(image["receipts"].values()))
+    restored = restore_file_stand(stand)
+    operation = restored.service.operations(MAIN_RESOURCE)[-1]
+    assert operation.operation_id == receipt.operation_id
+    assert operation.phase is OperationPhase.CANCELLED
+    replay = _manual(restored, "durable-denial", target=BASE_TARGET_ON40)
+    assert replay == replace(receipt, idempotent_replay=True)
+    restored.service.drain()
+    assert len(restored.service.operations(MAIN_RESOURCE)) == 1
+    assert restored.transport.calls == stand.transport.calls == []
+
+
+@pytest.mark.parametrize("fault_point", ["dir_fsync", "reread"])
+def test_manual_denial_after_replace_failure_keeps_whole_manual_image(tmp_path, fault_point):
+    stand = _manual_denial_stand(tmp_path)
+    denial_revision = stand.store.commit_revision + 1
+
+    def fail_denial_write(point):
+        if stand.store.commit_revision == denial_revision and point == fault_point:
+            raise OSError("synthetic terminal write failure")
+
+    stand.store._fault_injector = fail_denial_write
+    with pytest.raises(StorageUnavailable):
+        _submit_denied_manual(stand)
+    image = FileControlStore(stand.store_path).load()
+    _assert_manual_image_preserved(stand, image)
+    assert len(image["receipts"]) == len(image["operations"]) == 1
+    receipt = next(iter(image["receipts"].values()))
+    operation = image["operations"][receipt.operation_id]
+    assert operation.phase in (OperationPhase.QUEUED, OperationPhase.CANCELLED)
+    restored = restore_file_stand(stand)
+    replay = _manual(restored, "durable-denial", target=BASE_TARGET_ON40)
+    assert replay == replace(receipt, idempotent_replay=True)
+    restored.service.drain()
+    assert len(restored.service.operations(MAIN_RESOURCE)) == 1
+    assert restored.transport.calls == stand.transport.calls == []
+
+
+def test_manual_denial_first_commit_failure_has_no_acceptance(tmp_path):
+    stand = _manual_denial_stand(tmp_path)
+    before = FileControlStore(stand.store_path).load()
+    stand.store.fail_next_commit = True
+    with pytest.raises(StorageUnavailable):
+        _submit_denied_manual(stand)
+    assert FileControlStore(stand.store_path).load() == before
+    assert not stand.service.operations(MAIN_RESOURCE)
+    stand.service.drain()
+    assert stand.transport.calls == []
+
+
+@pytest.mark.parametrize("closed_restore", [False, True])
+def test_manual_terminal_at_acceptance_needs_no_extra_commit(tmp_path, closed_restore):
+    from custom_components.hausman_hub.domain.core.models import ArbitrationMode
+
+    stand = build_file_stand(tmp_path, ArbitrationMode.RANKED_TARGET)
+    if closed_restore:
+        stand.service.close_dispatch_for_restore()
+    revision = stand.store.commit_revision
+    receipt = _manual(
+        stand, "already-terminal", target=BASE_TARGET_ON40 if closed_restore else TARGET_OFF,
+        expected=stand.service.record(MAIN_RESOURCE).control_revision,
+    )
+    assert stand.store.commit_revision == revision + 1
+    operation = stand.service.operations(MAIN_RESOURCE)[-1]
+    assert operation.phase is (OperationPhase.CANCELLED if closed_restore else OperationPhase.NO_OP)
+    assert FileControlStore(stand.store_path).load()["operations"][receipt.operation_id] == operation
+    assert stand.transport.calls == []

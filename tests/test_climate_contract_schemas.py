@@ -250,6 +250,7 @@ class ClimateContractSchemasTest(unittest.TestCase):
                     "climate_reliability_v1",
                     "climate_room_recovery_v1",
                     "climate_room_recovery_v2",
+                    "room_lighting_return_policy",
                 }
             },
         )

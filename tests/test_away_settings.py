@@ -132,13 +132,14 @@ class RuntimeHarness:
         self.callbacks.append(callback)
         return lambda: None
 
-    def runtime(self, settings_provider) -> AwayRuntime:  # noqa: ANN001
+    def runtime(self, settings_provider, **options) -> AwayRuntime:  # noqa: ANN001
         return AwayRuntime(
             settings_provider=settings_provider,
             state_provider=lambda entity_id: self.states.get(entity_id),
             action_runner=self.runner,
             now_ms=lambda: NOW,
             track_state_changes=self.track,
+            **options,
         )
 
 
@@ -149,6 +150,106 @@ def _state(value: str, **attributes: object) -> object:
 async def _drain() -> None:
     for _ in range(6):
         await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_return_filter_does_not_apply_to_departure_and_explains_skip():
+    harness = RuntimeHarness()
+    settings = validate_away_settings(_settings_document())
+    filtered = []
+    async def filter_return(actions):
+        filtered.append(actions)
+        return ()
+    runtime = harness.runtime(lambda: settings, return_action_filter=filter_return)
+    harness.states = {
+        "lock.aqara_smart_lock_a100": _state("unlocked"),
+        "binary_sensor.a100_away_zaniatost": _state("off"),
+    }
+    await runtime.async_start()
+    await runtime._run(settings.away_actions, "away")
+    assert filtered == []
+    assert harness.calls == [(settings.away_actions, f"away.away.{NOW}")]
+    await runtime._run(settings.return_actions, "return")
+    assert filtered == [settings.return_actions]
+    assert len(harness.calls) == 1
+    assert runtime.status["returnSkippedByRoomPolicy"] == 1
+    assert runtime.status["reason"] == "return_room_policy"
+    await runtime.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_return_filter_failure_never_falls_back_to_unfiltered_actions():
+    harness = RuntimeHarness()
+    settings = validate_away_settings(_settings_document())
+    async def failed_filter(actions):
+        raise OSError("policy unavailable")
+    runtime = harness.runtime(lambda: settings, return_action_filter=failed_filter)
+    harness.states = {
+        "lock.aqara_smart_lock_a100": _state("unlocked"),
+        "binary_sensor.a100_away_zaniatost": _state("off"),
+    }
+    await runtime.async_start()
+    await runtime._run(settings.return_actions, "return")
+    assert harness.calls == []
+    assert runtime.status["reason"] == "return_failed"
+    await runtime.async_stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["refresh", "away", "unreliable", "stop"])
+async def test_pending_return_filter_cannot_send_after_context_changes(change):
+    harness = RuntimeHarness()
+    document = _settings_document()
+    for trigger in document["triggers"]:
+        trigger.pop("forSeconds", None)
+    settings = validate_away_settings(document)
+    harness.states = {
+        "lock.aqara_smart_lock_a100": _state("locked"),
+        "binary_sensor.a100_away_zaniatost": _state("on"),
+    }
+    entered, release = asyncio.Event(), asyncio.Event()
+    async def waiting_filter(actions):
+        entered.set()
+        await release.wait()
+        return actions
+    runtime = harness.runtime(lambda: settings, return_action_filter=waiting_filter)
+    await runtime.async_start()
+    harness.states["lock.aqara_smart_lock_a100"] = _state("unlocked")
+    runtime._evaluate(settings)
+    await entered.wait()
+    if change == "refresh":
+        await runtime.async_refresh()
+    elif change == "stop":
+        await runtime.async_stop()
+    else:
+        harness.states["lock.aqara_smart_lock_a100"] = _state(
+            "locked" if change == "away" else "unavailable"
+        )
+        runtime._evaluate(settings)
+    release.set()
+    await _drain()
+    await runtime.async_stop()
+    assert not any(correlation.startswith("away.return.") for _, correlation in harness.calls)
+
+
+@pytest.mark.asyncio
+async def test_return_context_is_captured_before_waiting_in_execution_queue():
+    harness = RuntimeHarness()
+    settings = validate_away_settings(_settings_document())
+    harness.states = {
+        "lock.aqara_smart_lock_a100": _state("unlocked"),
+        "binary_sensor.a100_away_zaniatost": _state("off"),
+    }
+    runtime = harness.runtime(lambda: settings)
+    await runtime.async_start()
+    async with runtime._execution_lock:
+        pending = asyncio.create_task(runtime._run(settings.return_actions, "return"))
+        await asyncio.sleep(0)
+        await runtime.async_refresh()
+    await pending
+    assert harness.calls == []
+    assert runtime.status["reason"] == "observed_initial"
+    await runtime.async_stop()
 
 
 @pytest.mark.asyncio

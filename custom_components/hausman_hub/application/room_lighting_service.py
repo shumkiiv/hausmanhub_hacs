@@ -98,9 +98,9 @@ def _template_document() -> dict[str, object]:
                     "anchor": {"kind": "sunrise", "offsetMinutes": 0},
                 },
                 "targets": {
-                    "lightTargets": ["light_demo_main"],
+                    "lightTargets": [],
                     "groupIds": [],
-                    "roles": [],
+                    "roles": ["main"],
                 },
                 "how": {
                     "brightness": 60,
@@ -119,9 +119,9 @@ def _template_document() -> dict[str, object]:
                     "anchor": {"kind": "sunset", "offsetMinutes": -30},
                 },
                 "targets": {
-                    "lightTargets": ["light_demo_main"],
+                    "lightTargets": [],
                     "groupIds": [],
-                    "roles": [],
+                    "roles": ["main"],
                 },
                 "how": {
                     "brightness": 40,
@@ -140,9 +140,9 @@ def _template_document() -> dict[str, object]:
                     "anchor": {"kind": "fixed", "time": "02:00", "offsetMinutes": 0},
                 },
                 "targets": {
-                    "lightTargets": ["light_demo_main"],
+                    "lightTargets": [],
                     "groupIds": [],
-                    "roles": [],
+                    "roles": ["main"],
                 },
                 "how": {
                     "brightness": 10,
@@ -206,6 +206,12 @@ class RoomLightingService:
         self._store = store
         self._lock = mutation_lock or asyncio.Lock()
         self._topology_invalidator = topology_invalidator
+        self._configuration_generation = 0
+
+    @property
+    def configuration_generation(self) -> int:
+        """Invalidate outstanding control intentions before a settings write."""
+        return self._configuration_generation
 
     async def async_get_config(self, room_id: str) -> RoomLightingConfig | None:
         return await self._store.async_get(room_id)  # type: ignore[attr-defined]
@@ -219,7 +225,11 @@ class RoomLightingService:
         *,
         expected_version: int | None = None,
         preserve_manual_control_return: bool = False,
+        preserve_quiet_hours: bool = False,
         preserve_curve_params: bool = False,
+        preserve_curve_neutral_kelvin: bool = False,
+        preserve_curve_evening_warm_kelvin: bool = False,
+        preserve_curve_presence_confirm_seconds: bool = False,
         dimming_target_omitted: bool = False,
     ) -> RoomLightingConfig:
         """Validate, bump the version on a real change and persist.
@@ -241,8 +251,24 @@ class RoomLightingService:
                 raise RoomLightingRevisionConflictError(expected_version, existing.version)
             if existing is not None and preserve_manual_control_return:
                 config = replace(config, manual_control_return=existing.manual_control_return)
+            if existing is not None and preserve_quiet_hours:
+                config = replace(config, quiet_hours=existing.quiet_hours)
             if existing is not None and preserve_curve_params and existing.curve is not None:
                 config = replace(config, curve=existing.curve)
+            if existing is not None and existing.curve is not None and config.curve is not None:
+                # Restore related endpoints atomically: an intermediate pair
+                # may be invalid even when the complete saved pair is valid.
+                preserved = {
+                    field: getattr(existing.curve, field)
+                    for field, keep in (
+                        ("neutral_kelvin", preserve_curve_neutral_kelvin),
+                        ("evening_warm_kelvin", preserve_curve_evening_warm_kelvin),
+                        ("presence_confirm_seconds", preserve_curve_presence_confirm_seconds),
+                    )
+                    if keep and getattr(config.curve, field) is None
+                }
+                if preserved:
+                    config = replace(config, curve=replace(config.curve, **preserved))
             if existing is None and dimming_target_omitted and config.curve is not None:
                 # The approved creation rule (spec 4.2): a room created WITH
                 # a curveParams block and no explicit dimming target gets
@@ -287,8 +313,14 @@ class RoomLightingService:
                 version=version,
                 updated_at=max(_now_seconds(), existing.updated_at + 1 if existing else 0),
             )
-            if self._topology_invalidator is not None:
+            physical_scope_changed = (
+                existing is None
+                or frozenset(target.entity_id for target in existing.devices.light_targets)
+                != frozenset(target.entity_id for target in stored.devices.light_targets)
+            )
+            if self._topology_invalidator is not None and physical_scope_changed:
                 self._topology_invalidator()
+            self._configuration_generation += 1
             saved = await self._store.async_upsert(stored)  # type: ignore[attr-defined]
             if saved is False:
                 raise RoomLightingStorageError("room lighting config storage save failed")
@@ -301,6 +333,7 @@ class RoomLightingService:
                 return False
             if self._topology_invalidator is not None:
                 self._topology_invalidator()
+            self._configuration_generation += 1
             return await self._store.async_delete(room_id)  # type: ignore[attr-defined]
 
     async def async_apply_template(

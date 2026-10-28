@@ -20,6 +20,7 @@ from ..domain.device_power_dependencies import (
 )
 from ..domain.room_lighting import (
     LightKind,
+    LightRole,
     LightTarget,
     RoomLightingConfig,
     RoomSensor,
@@ -220,6 +221,7 @@ class RoomLightingHaStateProvider:
         self,
         *,
         now_ms: NowMs | None = None,
+        state_reader: Callable[[str], object | None] | None = None,
         ownership_provider: OwnershipProvider | None = None,
         protection_provider: ProtectionProvider | None = None,
         unobserved_since_provider: Callable[[], int | None] | None = None,
@@ -229,6 +231,7 @@ class RoomLightingHaStateProvider:
         power_migration_manifest: Mapping[str, str] | None = None,
     ) -> None:
         self._now_ms = now_ms or _default_now_ms
+        self._state_reader = state_reader
         self._ownership_provider = ownership_provider
         self._protection_provider = protection_provider
         self._unobserved_since_provider = unobserved_since_provider
@@ -245,6 +248,11 @@ class RoomLightingHaStateProvider:
         """Update protected exact-power claims without rebuilding the provider."""
 
         self._power_migration_manifest = dict(manifest)
+
+    def _read_light_state(self, hass: HomeAssistant, entity_id: str) -> object | None:
+        if self._state_reader is not None:
+            return self._state_reader(entity_id)
+        return hass.states.get(entity_id)
 
     async def build_context(
         self,
@@ -271,6 +279,8 @@ class RoomLightingHaStateProvider:
         power_state = SensorState.ON if decision.active else self._room_power_state(hass, config)
         power_on = power_state is SensorState.ON
         legacy_power_off = not decision.active and power_state is SensorState.OFF
+        paired_main = next((target.id for target in config.devices.light_targets
+                            if target.role is LightRole.MAIN), None)
         # Only claimed logical targets whose own edge is missing/wrong become
         # unproven. Independent targets in the same claimed room keep their own
         # trusted state; extra live edges are ignored by the projection.
@@ -293,7 +303,7 @@ class RoomLightingHaStateProvider:
                     power_on=power_on,
                     dependencies=exact_dependencies,
                     unproven_targets=unproven_targets,
-                    legacy_power_off=legacy_power_off,
+                    legacy_power_off=legacy_power_off and target.id == paired_main,
                 )
                 for target in config.devices.light_targets
             ),
@@ -310,8 +320,8 @@ class RoomLightingHaStateProvider:
         power = config.devices.power_switch
         if power is None or power.entity_id is None:
             return SensorState.ON
-        state = hass.states.get(power.entity_id)
-        value = trusted_power_state(state, same_state_confirmation=True)
+        state = self._read_light_state(hass, power.entity_id)
+        value = trusted_power_state(state, same_state_confirmation=True, now_ms=self._now_ms())
         return _state_of(value)
 
     def _power_dependencies(
@@ -461,7 +471,7 @@ class RoomLightingHaStateProvider:
                 state=SensorState.UNKNOWN,
                 last_changed=now,
             )
-        state = hass.states.get(target.entity_id) if target.entity_id else None
+        state = self._read_light_state(hass, target.entity_id) if target.entity_id else None
         trusted_target = _trusted_light_state(state, now=now)
         reported_target = _planning_light_state(state)
         if (
@@ -489,14 +499,9 @@ class RoomLightingHaStateProvider:
                 brightness=brightness,
                 color_temperature=color_temperature,
             )
-        if dependencies is None and not power_on:
-            # Legacy whole-room association: an unpowered target cannot be on,
-            # but only after the target itself produced fresh trusted evidence.
-            return LightSnapshot(
-                target_id=target.id,
-                state=SensorState.OFF,
-                last_changed=now,
-            )
+        # UNKNOWN power is not OFF; a fresh target ON contradicts a guessed
+        # whole-room circuit. The runtime's proven pair covers only its main
+        # target. Exact verified topology is resolved below.
         if dependencies is not None and target.entity_id is not None:
             # Exact dependency map: only a target with an upstream source
             # changes its effective state. Mirror and point switches keep
@@ -532,8 +537,8 @@ class RoomLightingHaStateProvider:
                     )
         return brightness, color_temperature
 
-    @staticmethod
     def _effective_state(
+        self,
         hass: HomeAssistant,
         entity_id: str,
         dependencies: Mapping[str, DevicePowerDependency],
@@ -552,9 +557,9 @@ class RoomLightingHaStateProvider:
         }
 
         def read_state(requested_entity_id: str) -> str | None:
-            state = hass.states.get(requested_entity_id)
+            state = self._read_light_state(hass, requested_entity_id)
             if requested_entity_id in source_ids:
-                return trusted_power_state(state, same_state_confirmation=True)
+                return trusted_power_state(state, same_state_confirmation=True, now_ms=now)
             trusted = _trusted_light_state(state, now=now)
             return None if trusted is SensorState.UNKNOWN else trusted.value
 

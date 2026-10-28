@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import time
@@ -988,9 +988,15 @@ class LightAutomationPriority:
         return {entity: record for entity, record in self._manual_records.items()
                 if entity in entity_ids}
 
-    async def async_release_explicit_return(self, snapshot: Mapping[str, object]) -> bool:
+    async def async_release_explicit_return(
+        self, snapshot: Mapping[str, object], *, intent_current: Callable[[], bool] | None = None,
+    ) -> bool:
         """Persist scoped removal first, then remove only the frozen objects."""
+        from .lighting_return_intent import ManualLightReturnIntentChanged
+
         async with self._authority_lock:
+            if intent_current is not None and not intent_current():
+                raise ManualLightReturnIntentChanged
             if self._store is None:
                 return False
             doomed = {entity: record for entity, record in snapshot.items()
@@ -1000,6 +1006,8 @@ class LightAutomationPriority:
             payload = self._payload(manual_records=[record for entity, record
                                     in self._manual_records.items() if entity not in doomed])
             await self._store.async_save(payload)
+            if intent_current is not None and not intent_current():
+                raise ManualLightReturnIntentChanged
             for entity, record in doomed.items():
                 if self._manual_records.get(entity) is record:
                     self._manual_records.pop(entity, None)

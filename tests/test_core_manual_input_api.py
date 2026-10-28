@@ -5,6 +5,10 @@ Every positive and negative case crosses the production
 production common intake and a real shadow branch. The old executor is
 replaced by a recording double only to prove it is never reached for a
 transferred resource and stays the only writer for neighbours.
+
+Device facts are synthetic normalized Observations supplied at the public
+core intake boundary. These HTTP tests do not authenticate HA snapshots or
+exercise the production device-report adapter.
 """
 
 from __future__ import annotations
@@ -19,7 +23,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import test_local_summary_access as harness
 
@@ -105,6 +109,7 @@ class CoreManualInputApiTest(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         tmp_path = Path(self._tmp.name)
         self.branch = stand.build_stand_branch(tmp_path)
+        self._observation_sequence = 0
         self.intake = stand.CoreManualInput()
         self.intake.register_transferred_target(
             self.branch,
@@ -284,10 +289,74 @@ class CoreManualInputApiTest(unittest.TestCase):
         }
 
     def _report(self, value: str) -> None:
-        stand.report_light_state(self.branch, value)
+        self._ingest_stand_observation(value, fresh=True)
 
     def _report_stale(self, value: str) -> None:
-        stand.report_light_state_repeat(self.branch, value)
+        self._ingest_stand_observation(value, fresh=False)
+
+    def _ingest_stand_observation(self, value: str, *, fresh: bool) -> None:
+        """An explicit HTTP-stand input, not a trusted HA state callback."""
+        from custom_components.hausman_hub.domain.core.models import (
+            Evidence, Observation, ObservationAttribution, Quality,
+        )
+
+        if value not in ("on", "off"):
+            raise ValueError("The HTTP stand requires an explicit binary fact")
+        self._observation_sequence += 1
+        service = self.branch.core_service
+        clock = service._clock
+        observation = Observation(
+            observation_id=f"http-stand-{self._observation_sequence}",
+            resource_id=stand.RESOURCE_ID,
+            property="on",
+            value=value == "on",
+            unit="bool",
+            received_at_utc_ms=clock.now_utc_ms(),
+            received_at_mono_ms=clock.now_mono_ms(),
+            boot_id=clock.boot_id(),
+            source_at_utc_ms=None,
+            source_sequence=self._observation_sequence,
+            source_id="synthetic.http.stand.device_report",
+            source_epoch="synthetic.http.stand",
+            quality=Quality.FRESH if fresh else Quality.STALE,
+            evidence_kind=Evidence.DEVICE_REPORT,
+            binding_revision=service.spec(stand.RESOURCE_ID).binding_revision,
+            observation_revision=self._observation_sequence,
+            related_operation_id=None,
+            attribution=ObservationAttribution.UNKNOWN,
+        )
+        service.ingest_observation(observation)
+        self.branch.process_schedule_tick()
+
+    def test_synthetic_http_fact_boundary_preserves_its_declared_evidence(self) -> None:
+        service = self.branch.core_service
+        with patch.object(service, "ingest_observation", wraps=service.ingest_observation) as ingest:
+            self._report("on")
+        first_input = ingest.call_args.args[0]
+        first = self.branch.resource_view(stand.RESOURCE_ID).facts[0]
+        self.assertIs(first.value, True)
+        self.assertEqual("FRESH", first.quality.name)
+        self.assertEqual("DEVICE_REPORT", first.evidence.name)
+        self.assertEqual(1, first_input.source_sequence)
+        self.assertEqual(service.spec(stand.RESOURCE_ID).binding_revision, first_input.binding_revision)
+        self.assertEqual("FRESH", first_input.quality.name)
+        self.assertEqual("DEVICE_REPORT", first_input.evidence_kind.name)
+        self.assertEqual("UNKNOWN", first_input.attribution.name)
+        with patch.object(service, "ingest_observation", wraps=service.ingest_observation) as ingest:
+            self._report_stale("off")
+        second_input = ingest.call_args.args[0]
+        second = self.branch.resource_view(stand.RESOURCE_ID).facts[0]
+        self.assertIs(second.value, False)
+        self.assertEqual("STALE", second.quality.name)
+        self.assertEqual("DEVICE_REPORT", second.evidence.name)
+        self.assertEqual(2, second_input.source_sequence)
+        self.assertEqual(first_input.binding_revision, second_input.binding_revision)
+        self.assertEqual("STALE", second_input.quality.name)
+        self.assertEqual("DEVICE_REPORT", second_input.evidence_kind.name)
+        self.assertEqual("UNKNOWN", second_input.attribution.name)
+        self.assertIsNone(service.record(stand.RESOURCE_ID).auto_proof)
+        self.assertFalse(self.branch.physical_send_enabled())
+        self.assertEqual([], self.executor.calls)
 
     def _validate_full_receipt(self, payload) -> None:
         """The live full answer must satisfy the vendored 0.72.1 schemas

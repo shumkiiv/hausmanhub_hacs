@@ -85,7 +85,7 @@ def _closed_registration(config):
         import_id="registration-1",
         source_identity="test-source",
         source_revision=1,
-        source_payload_digest="digest",
+        source_payload_digest="0" * 64,
         targets=(ClosedTargetRegistration(
             target_id="public-main",
             resource_id="light_main",

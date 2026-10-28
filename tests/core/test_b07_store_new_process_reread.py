@@ -43,7 +43,7 @@ except ImportError:  # pragma: no cover - depends on worktree layout
 
 WORKTREE_ROOT = Path(_hub_pkg.__file__).resolve().parents[2]
 
-_ROOM_ID = "startup-room"
+_ROOM_ID = "p19.room"
 # fix(root,wholeb-fix02): рабочая конструкция состояния из tests/core/test_control_store.py
 # (make_state + closed registration) — схема требует commit_revision/records/etc.
 from custom_components.hausman_hub.application.core.command_service import (

@@ -216,7 +216,11 @@ def evaluate_shower_exhaust_due(
     policy = policy or ShowerExhaustPolicy()
 
     if timer_kind == SHOWER_PRESENCE_TIMER:
-        if observation.presence is SensorState.ON and observation.fan is SensorState.OFF:
+        if (
+            observation.presence is SensorState.ON
+            and observation.fan is SensorState.OFF
+            and observation.allow_activation
+        ):
             return ShowerExhaustDecision(
                 transition=ShowerTransition.OCCUPIED,
                 action=ShowerFanAction.TURN_ON,

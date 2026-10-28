@@ -319,7 +319,10 @@ def test_full_room_import_keeps_passive_sensor_outside_manual_registration(tmp_p
     source = _branch(tmp_path / "source", "room-with-sensor")
     destination = _branch(tmp_path / "destination", "room-with-sensor")
     source.on_runtime_stop()
-    destination.on_runtime_stop()
+    destination.core_service.close_dispatch_for_restore()
+    assert destination.mode == destination.MODE_OFF
+    assert destination.input_closed is False
+    assert destination.physical_send_enabled() is False
     config = source._branch_config.config
     registration = ClosedRegistration(
         branch_id=config.room_id,

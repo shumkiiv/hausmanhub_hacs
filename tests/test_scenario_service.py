@@ -290,6 +290,42 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         scenarios = await self.service.async_list_scenarios()
         self.assertEqual(scenarios, ())
 
+    async def test_catalog_binding_generation_detects_aba_but_not_equal_refresh(self) -> None:
+        devices = dict(self.catalog.devices)
+        async def loader():
+            return ScenarioCatalog(devices, self.catalog.scenarios)
+        service = ScenarioService(None, self.store, self.catalog, catalog_loader=loader)
+        self.assertEqual(0, service.catalog_binding_generation)
+        await service._async_replace_catalog()
+        self.assertEqual(0, service.catalog_binding_generation)
+        key = next(iter(devices))
+        original = devices[key]
+        devices[key] = replace(original, entity_id="light.binding_changed")
+        await service._async_replace_catalog()
+        self.assertEqual(1, service.catalog_binding_generation)
+        devices[key] = original
+        await service._async_replace_catalog()
+        self.assertEqual(2, service.catalog_binding_generation)
+        await service._async_replace_catalog()
+        self.assertEqual(2, service.catalog_binding_generation)
+
+    async def test_catalog_binding_generation_detaches_nested_action_policy(self) -> None:
+        devices = dict(self.catalog.devices)
+        key = next(iter(devices))
+        policy = {"kind": "initial"}
+        devices[key] = replace(devices[key], actions=(ScenarioDeviceAction(
+            "turn_on", "On", "light", "turn_on", frozenset(), policy,
+        ),))
+        async def loader():
+            return ScenarioCatalog(devices, self.catalog.scenarios)
+        service = ScenarioService(None, self.store, await loader(), catalog_loader=loader)
+        policy["kind"] = "changed"
+        await service._async_replace_catalog()
+        self.assertEqual(1, service.catalog_binding_generation)
+        policy["kind"] = "initial"
+        await service._async_replace_catalog()
+        self.assertEqual(2, service.catalog_binding_generation)
+
     async def test_load_migrates_protected_controllers_to_restart_before_exposure(
         self,
     ) -> None:
@@ -1501,6 +1537,168 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("device_action_failed", receipts[1]["error"])
         markers[0].assert_called_once_with()
         markers[1].assert_not_called()
+
+    async def test_guarded_batch_never_bypasses_marker_through_core_intake(self) -> None:
+        intake = SimpleNamespace(
+            is_transferred=lambda target_id: True,
+            async_submit_batch_item=AsyncMock(return_value={"accepted": True}),
+        )
+        marker = unittest.mock.Mock()
+        with patch.object(self.service, "_core_manual_intake", return_value=intake):
+            for options in ({"dispatch_markers": (marker,)}, {"dispatch_marker": marker}):
+                with self.subTest(options=tuple(options)):
+                    with self.assertRaises(ScenarioServiceError) as error:
+                        await self.service.async_execute_device_action_batch(
+                            [{"targetId": "device_1", "actionId": "turn_on"}],
+                            correlation_id="away.return.guarded", **options,
+                        )
+                    self.assertEqual(409, error.exception.status)
+        intake.async_submit_batch_item.assert_not_awaited()
+        marker.assert_not_called()
+        self.assertEqual([], self.executor.device_actions)
+
+    async def test_unguarded_transferred_batch_keeps_existing_core_route(self) -> None:
+        intake = SimpleNamespace(
+            is_transferred=lambda target_id: True,
+            async_submit_batch_item=AsyncMock(return_value={"accepted": True}),
+        )
+        with patch.object(self.service, "_core_manual_intake", return_value=intake):
+            receipts = await self.service.async_execute_device_action_batch(
+                [{"targetId": "device_1", "actionId": "turn_on"}],
+                correlation_id="ordinary.core.batch",
+            )
+        self.assertEqual([{"accepted": True}], receipts)
+        intake.async_submit_batch_item.assert_awaited_once()
+        self.assertEqual([], self.executor.device_actions)
+
+    async def test_transferred_batch_notifications_never_claim_physical_dispatch(self) -> None:
+        intake = SimpleNamespace(
+            is_transferred=lambda target_id: True,
+            async_submit_batch_item=AsyncMock(return_value={"accepted": True}),
+        )
+        notification = unittest.mock.Mock()
+        with patch.object(self.service, "_core_manual_intake", return_value=intake):
+            for options in (
+                {"dispatch_notification": notification},
+                {"dispatch_notifications": (notification,)},
+            ):
+                receipts = await self.service.async_execute_device_action_batch(
+                    [{"targetId": "device_1", "actionId": "turn_on"}],
+                    correlation_id="ordinary.core.batch", **options,
+                )
+                self.assertEqual([{"accepted": True}], receipts)
+            for guard in ({"dispatch_marker": notification}, {"dispatch_markers": (notification,)}):
+                with self.assertRaises(ScenarioServiceError) as error:
+                    await self.service.async_execute_device_action_batch(
+                        [{"targetId": "device_1", "actionId": "turn_on"}],
+                        correlation_id="ordinary.core.batch",
+                        dispatch_notifications=(notification,), **guard,
+                    )
+                self.assertEqual(409, error.exception.status)
+        self.assertEqual(2, intake.async_submit_batch_item.await_count)
+        notification.assert_not_called()
+        self.assertEqual([], self.executor.device_actions)
+
+    async def test_batch_rejects_invalid_notification_contract_before_refresh(self) -> None:
+        refresh = AsyncMock()
+        with patch.object(self.service, "async_refresh_catalog", refresh):
+            for options in (
+                {"dispatch_notification": False},
+                {"dispatch_notifications": ()},
+                {"dispatch_notifications": (None,)},
+                {"dispatch_notifications": (lambda: None, lambda: None)},
+            ):
+                with self.subTest(options=tuple(options)):
+                    with self.assertRaises(ScenarioServiceError):
+                        await self.service.async_execute_device_action_batch(
+                            [{"targetId": "device_1", "actionId": "turn_on"}],
+                            correlation_id="invalid.notification", **options,
+                        )
+        refresh.assert_not_awaited()
+
+    async def test_legacy_batch_guard_precedes_notification_and_dry_run_never_notifies(self) -> None:
+        events = []
+        async def execute(target_id, action_id, value=None, **options):
+            if not options.get("dry_run"):
+                options["dispatch_marker"]()
+                events.append("send")
+            return {"accepted": True}
+        with patch.object(self.executor, "async_execute_device_action", side_effect=execute):
+            await self.service.async_execute_device_action_batch(
+                [{"targetId": "device_1", "actionId": "turn_on"}],
+                correlation_id="notification.order",
+                dispatch_marker=lambda: events.append("guard"),
+                dispatch_notification=lambda: events.append("notify"),
+            )
+            self.assertEqual(["guard", "notify", "send"], events)
+            events.clear()
+            await self.service.async_execute_device_action_batch(
+                [{"targetId": "device_1", "actionId": "turn_on", "dryRun": True}],
+                correlation_id="notification.dry",
+                dispatch_notifications=(lambda: events.append("notify"),),
+            )
+            self.assertEqual([], events)
+            def refuse():
+                raise RuntimeError("guard refused")
+            with self.assertRaisesRegex(RuntimeError, "guard refused"):
+                await self.service.async_execute_device_action_batch(
+                    [{"targetId": "device_1", "actionId": "turn_on"}],
+                    correlation_id="notification.refused",
+                    dispatch_markers=(refuse,),
+                    dispatch_notifications=(lambda: events.append("notify"),),
+                )
+            self.assertEqual([], events)
+
+    async def test_mixed_notification_batch_keeps_item_identity_and_known_failure(self) -> None:
+        notifications = tuple(unittest.mock.Mock() for _ in range(3))
+        intake = SimpleNamespace(
+            is_transferred=lambda target_id: target_id == "core_target",
+            registration_ready=lambda target_id: True,
+            async_submit_batch_item=AsyncMock(return_value={"accepted": True}),
+        )
+        async def execute(target_id, action_id, value=None, **options):
+            if target_id == "bad_target":
+                raise RuntimeError("known pre-dispatch error")
+            options["dispatch_marker"]()
+            return {"accepted": True}
+        with patch.object(self.service, "_core_manual_intake", return_value=intake), patch.object(
+            self.executor, "async_execute_device_action", side_effect=execute,
+        ):
+            receipts = await self.service.async_execute_device_action_batch(
+                [{"targetId": target, "actionId": "turn_on"} for target in ("core_target", "legacy_target", "bad_target")],
+                correlation_id="notification.mixed", dispatch_notifications=notifications,
+            )
+        self.assertEqual([True, True, False], [item["accepted"] for item in receipts])
+        self.assertEqual("device_action_failed", receipts[2]["error"])
+        self.assertTrue(receipts[2]["requestId"])
+        intake.async_submit_batch_item.assert_awaited_once()
+        notifications[0].assert_not_called()
+        notifications[1].assert_called_once_with()
+        notifications[2].assert_not_called()
+
+        with patch.object(self.service, "_core_manual_intake", return_value=intake), patch.object(
+            self.executor, "async_execute_device_action", side_effect=execute,
+        ):
+            provided = await self.service.async_execute_device_action_batch(
+                [{"targetId": "bad_target", "actionId": "turn_on"}],
+                correlation_id="notification.provided", request_ids=("provided.failure",),
+                dispatch_notifications=(notifications[2],),
+            )
+        self.assertEqual("provided.failure", provided[0]["requestId"])
+        notifications[2].assert_not_called()
+
+    async def test_notification_after_dispatch_exception_remains_unknown(self) -> None:
+        notification = unittest.mock.Mock()
+        async def execute(*args, **options):
+            options["dispatch_marker"]()
+            raise RuntimeError("unknown after dispatch")
+        with patch.object(self.executor, "async_execute_device_action", side_effect=execute):
+            with self.assertRaisesRegex(RuntimeError, "unknown after dispatch"):
+                await self.service.async_execute_device_action_batch(
+                    [{"targetId": "device_1", "actionId": "turn_on"}],
+                    correlation_id="notification.unknown", dispatch_notifications=(notification,),
+                )
+        notification.assert_called_once_with()
 
     async def test_batch_reassert_forwards_shared_claim_identity(self) -> None:
         received: list[dict[str, object]] = []

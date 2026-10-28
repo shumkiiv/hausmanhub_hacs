@@ -1026,6 +1026,9 @@ class CurveParams:
     evening_target_percent: int | None = None
     evening_target_by: str | None = None
     evening_reserve_start: str | None = None
+    neutral_kelvin: int | None = None
+    evening_warm_kelvin: int | None = None
+    presence_confirm_seconds: int | None = None
 
     @property
     def has_new_form(self) -> bool:
@@ -1060,6 +1063,12 @@ class CurveParams:
         payload: dict[str, object] = {}
         if self.evening_max_percent is not None:
             payload["eveningMaxPercent"] = self.evening_max_percent
+        if self.neutral_kelvin is not None:
+            payload["neutralKelvin"] = self.neutral_kelvin
+        if self.evening_warm_kelvin is not None:
+            payload["eveningWarmKelvin"] = self.evening_warm_kelvin
+        if self.presence_confirm_seconds is not None:
+            payload["presenceConfirmSeconds"] = self.presence_confirm_seconds
         if self.confirmed_absence_seconds is not None:
             payload["confirmedAbsenceSeconds"] = self.confirmed_absence_seconds
         if self.rise_seconds is not None:
@@ -1096,6 +1105,20 @@ class CurveParams:
         return payload
 
     def __post_init__(self) -> None:
+        if self.evening_warm_kelvin is not None:
+            _integer(self.evening_warm_kelvin, "curve eveningWarmKelvin",
+                     minimum=1500, maximum=3400)
+        if self.neutral_kelvin is not None:
+            _integer(
+                self.neutral_kelvin,
+                "curve neutralKelvin",
+                minimum=(self.evening_warm_kelvin if self.evening_warm_kelvin
+                         is not None else _ENGINE_DEFAULT_PROFILE.warm_kelvin) + 1,
+                maximum=6500,
+            )
+        if self.presence_confirm_seconds is not None:
+            _integer(self.presence_confirm_seconds, "curve presenceConfirmSeconds",
+                     minimum=1, maximum=15)
         if self.evening_max_percent is not None:
             _integer(
                 self.evening_max_percent,
@@ -1217,6 +1240,27 @@ class Overrides:
 
 
 @dataclass(frozen=True, slots=True)
+class QuietHours:
+    """Local start-inclusive/end-exclusive automatic activation hold."""
+
+    start: str
+    end: str
+
+    def __post_init__(self) -> None:
+        for value in (self.start, self.end):
+            if not isinstance(value, str) or _TIME_OF_DAY.fullmatch(value) is None:
+                raise RoomLightingViolation("quietHours requires HH:MM boundaries")
+        if self.start == self.end:
+            raise RoomLightingViolation("quietHours boundaries must differ")
+
+    def contains(self, local_time: dt_time) -> bool:
+        current = local_time.strftime("%H:%M")
+        if self.start < self.end:
+            return self.start <= current < self.end
+        return current >= self.start or current < self.end
+
+
+@dataclass(frozen=True, slots=True)
 class RoomLightingConfig:
     """One complete, validated room lighting configuration document."""
 
@@ -1242,6 +1286,7 @@ class RoomLightingConfig:
     profile: str | None = None
     template_id: str | None = None
     overrides: Overrides = field(default_factory=Overrides)
+    quiet_hours: QuietHours | None = None
 
     def __post_init__(self) -> None:
         _stable_id(self.room_id, "room id")
@@ -1266,6 +1311,11 @@ class RoomLightingConfig:
         _flag(self.auto_adopt, "auto adopt flag")
         _integer(self.updated_at, "updated at", minimum=0, maximum=9_007_199_254_740_991)
         _flag(self.commands_enabled, "commands enabled flag")
+        if self.quiet_hours is not None:
+            if not isinstance(self.quiet_hours, QuietHours):
+                raise RoomLightingViolation("quietHours block is invalid")
+            if self.profile is not None:
+                raise RoomLightingViolation("quietHours currently supports schedule rooms only")
         if self.illumination is not None and not isinstance(self.illumination, Illumination):
             raise RoomLightingViolation("illumination block is invalid")
         if self.timers is not None and not isinstance(self.timers, Timers):
@@ -1488,6 +1538,8 @@ class RoomLightingConfig:
             payload["curveParams"] = self.curve.to_payload()
         if self.profile is not None:
             payload["profile"] = self.profile
+        if self.quiet_hours is not None:
+            payload["quietHours"] = {"start": self.quiet_hours.start, "end": self.quiet_hours.end}
         return payload
 
 
@@ -2006,6 +2058,9 @@ def _curve_from_payload(payload: object) -> CurveParams:
     data = _as_dict(payload, "curveParams")
     allowed = {
         "eveningMaxPercent",
+        "neutralKelvin",
+        "eveningWarmKelvin",
+        "presenceConfirmSeconds",
         "confirmedAbsenceSeconds",
         "riseSeconds",
         "presencePolicy",
@@ -2067,6 +2122,9 @@ def _curve_from_payload(payload: object) -> CurveParams:
         evening_data = {}
     return CurveParams(
         evening_max_percent=_curve_value(data, "eveningMaxPercent", "curve eveningMaxPercent"),
+        neutral_kelvin=_curve_value(data, "neutralKelvin", "curve neutralKelvin"),
+        evening_warm_kelvin=_curve_value(data, "eveningWarmKelvin", "curve eveningWarmKelvin"),
+        presence_confirm_seconds=_curve_value(data, "presenceConfirmSeconds", "curve presenceConfirmSeconds"),
         confirmed_absence_seconds=_curve_value(
             data, "confirmedAbsenceSeconds", "curve confirmedAbsenceSeconds"
         ),
@@ -2115,6 +2173,12 @@ def room_lighting_config_from_payload(payload: object) -> RoomLightingConfig:
         raise RoomLightingViolation("curveParams must not be null")
     curve_params = data.get("curveParams")
     profile = data.get("profile")
+    quiet = data.get("quietHours")
+    if quiet is not None:
+        quiet = _as_dict(quiet, "quietHours")
+        if set(quiet) != {"start", "end"}:
+            raise RoomLightingViolation("quietHours requires only start and end")
+        quiet = QuietHours(start=quiet["start"], end=quiet["end"])
     return RoomLightingConfig(
         room_id=_require(data, "roomId", "room id"),
         name=_require(data, "name", "room name"),
@@ -2142,6 +2206,7 @@ def room_lighting_config_from_payload(payload: object) -> RoomLightingConfig:
         profile=profile,
         template_id=data.get("templateId"),
         overrides=_overrides_from_payload(data.get("overrides")),
+        quiet_hours=quiet,
     )
 
 
