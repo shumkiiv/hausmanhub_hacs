@@ -185,6 +185,7 @@ class ProtectionSnapshot:
     # action: the ownership release may fire on this latch even when the
     # LATEST absence window is shorter (short re-entries do not erase it).
     absence_latch: bool = False
+    require_directed_off: bool = False
 
     def blocks_auto_on(
         self,
@@ -920,7 +921,15 @@ def evaluate_curve_room(
     motion_preview: bool = False,
     motion_rejected: bool = False,
     profile: LightCurveProfile | None = None,
+    independent_targets: bool = False,
+    target_protections: dict[str, ProtectionSnapshot] | None = None,
 ) -> RoomLightingDecision:
+    target_ids = {target.id for target in config.devices.light_targets}
+    scoped_protections = (target_protections if independent_targets
+                          and isinstance(target_protections, dict)
+                          and set(target_protections) == target_ids
+                          and all(isinstance(value, ProtectionSnapshot)
+                                  for value in target_protections.values()) else None)
     now_time = datetime.fromtimestamp(context.now / 1000, context.timezone).time()
     if config.room_id == "malyi_koridor" and (now_time >= dt_time(23, 30) or now_time < dt_time(9, 0)):
         off = LightCurveDecision(reason=CurveReason.NIGHT, chandelier_on=False)
@@ -932,12 +941,51 @@ def evaluate_curve_room(
         )
         return RoomLightingDecision(room_id=config.room_id, evaluated_at=context.now,
                                     mode=MODE_SHADOW, targets=targets)
+    if (not context.away and config.room_id == "malyi_koridor" and config.illumination is not None
+            and config.illumination.sensor == "sensor.0x00124b003571fd85_illuminance"):
+        lux, failed = _lux_value(context, config, EnginePolicy())
+        if not failed and lux is not None and math.isfinite(lux) and lux > 400:
+            blocked = curve_profile_block_reason(config, context)
+            if blocked is not None:
+                return RoomLightingDecision(room_id=config.room_id, evaluated_at=context.now,
+                    mode=MODE_SHADOW, targets=tuple(
+                        _unchanged(target.id, Skip(target.id, blocked))
+                        for target in config.devices.light_targets))
+            off = LightCurveDecision(reason=CurveReason.OFF, chandelier_on=False)
+            def bright_target(target: object) -> TargetDecision:
+                record = latest_ownership(context.ownership, target.id)
+                light = context.light(target.id)
+                if (not has_automatic_control(context.ownership, target.id)
+                        or record is None or record.at > context.now
+                        or (context.unobserved_since is not None and
+                            record.at < context.unobserved_since)
+                        or (light is not None and light.last_changed > record.at)):
+                    return _unchanged(target.id, Skip(target.id, SkipReason.MANUAL_OWNERSHIP))
+                result = _curve_main_decision(target, off, context)
+                return replace(result, commands=tuple(
+                    replace(command, reason=DecisionReason.LUX) for command in result.commands
+                ))
+            targets = tuple(bright_target(target) for target in config.devices.light_targets)
+            return RoomLightingDecision(room_id=config.room_id, evaluated_at=context.now,
+                                        mode=MODE_SHADOW, targets=targets)
+    planning_context = (replace(context, protection=replace(context.protection, active=False))
+                        if scoped_protections is not None and not context.away else context)
     decision = _evaluate_curve_room(
-        config, context, presence_confirmed=presence_confirmed,
+        config, planning_context, presence_confirmed=presence_confirmed,
         absence_seconds=absence_seconds, presence=presence,
         motion_preview=motion_preview, motion_rejected=motion_rejected,
-        profile=profile,
+        profile=profile, independent_targets=independent_targets,
     )
+    if independent_targets and not (context.away and config.away_behavior.mode is AwayMode.ROOM_OFF):
+        # The caller must also prove and enforce the physical-pair graph at
+        # dispatch. This flag alone does not grant permission to send commands.
+        def protect_target(target: TargetDecision) -> TargetDecision:
+            target_context = (replace(context, protection=scoped_protections[target.target_id])
+                              if scoped_protections is not None else context)
+            reason = curve_target_block_reason(config, target_context, target.target_id)
+            return (_unchanged(target.target_id, Skip(target.target_id, reason))
+                    if reason is not None else target)
+        decision = replace(decision, targets=tuple(protect_target(t) for t in decision.targets))
     if corridor_outdoor_motion_gate(config, context):
         return decision
     def gated_target(target: TargetDecision) -> TargetDecision:
@@ -969,6 +1017,7 @@ def _evaluate_curve_room(
     motion_preview: bool = False,
     motion_rejected: bool = False,
     profile: LightCurveProfile | None = None,
+    independent_targets: bool = False,
 ) -> RoomLightingDecision:
     """Day-curve decisions for the room's main and mirror targets.
 
@@ -1004,6 +1053,10 @@ def _evaluate_curve_room(
     chandelier = context.light(main_target.id) if main_target is not None else None
     mirror = context.light(mirror_target.id) if mirror_target is not None else None
     blocked = curve_profile_block_reason(config, context)
+    if independent_targets and blocked in {
+        SkipReason.MANUAL_OWNERSHIP, SkipReason.MANUAL_MODE, SkipReason.UNOBSERVED,
+    }:
+        blocked = None
     if blocked is not None:
         return RoomLightingDecision(
             room_id=config.room_id, evaluated_at=context.now, mode=MODE_SHADOW,
@@ -1296,8 +1349,40 @@ def _curve_manual_blocked(context: RoomLightingContext, target_id: str) -> bool:
             absence_until=context.protection.absence_until,
             absence_latch=context.protection.absence_latch,
             release_mode=context.protection.release_mode,
+            require_directed_off=context.protection.require_directed_off,
         )
     )
+
+
+def curve_target_block_reason(
+    config: RoomLightingConfig, context: RoomLightingContext, target_id: str,
+) -> SkipReason | None:
+    """Evaluate one target while retaining unresolved room-wide safeguards.
+
+    This planning check does not replace the physical-pair authority or the
+    final dispatch check. Callers must supply those independent safeguards.
+    """
+    target = config.devices.target(target_id)
+    if target is None:
+        return SkipReason.UNOBSERVED
+    if context.away or context.protection.blocks_auto_on(
+        now=context.now, absence_proven=context.protection.absence_confirmed,
+        absence_since=context.protection.absence_since,
+        absence_until=context.protection.absence_until,
+        absence_latch=context.protection.absence_latch,
+    ):
+        return SkipReason.MANUAL_PROTECTION
+    if _curve_manual_blocked(context, target.id):
+        return SkipReason.MANUAL_OWNERSHIP
+    light = context.light(target.id)
+    if light is not None and light.state is SensorState.ON:
+        if not target.auto_control:
+            return SkipReason.MANUAL_MODE
+        latest = latest_ownership(context.ownership, target.id)
+        if (context.unobserved_since is not None and latest is not None
+                and context.unobserved_since > latest.at):
+            return SkipReason.UNOBSERVED
+    return None
 
 
 def curve_profile_block_reason(
@@ -1375,6 +1460,15 @@ def _curve_main_decision(
     )
     if not target.auto_control:  # type: ignore[attr-defined]
         return _unchanged(target_id, Skip(target_id, SkipReason.MANUAL_MODE))
+    if (
+        light is not None
+        and light.state is SensorState.UNKNOWN
+        and latest_record is None
+        and _reported_on_is_void(light, context.now, None)
+    ):
+        # A stale ON cannot prove OFF without separate evidence of power or
+        # ownership; do not plan a command or claim it is already off.
+        return _unchanged(target_id, Skip(target_id, SkipReason.SENSOR_UNKNOWN))
     if light is None or (
         light.state in (SensorState.UNKNOWN, SensorState.UNAVAILABLE)
         and reported not in (SensorState.ON, SensorState.OFF)
@@ -1624,6 +1718,7 @@ def _manual_off_released(
             absence_until=context.protection.absence_until,
             absence_latch=context.protection.absence_latch,
             release_mode=context.protection.release_mode,
+            require_directed_off=context.protection.require_directed_off,
         )
     )
 
@@ -1781,6 +1876,16 @@ def _evaluate_target(
         if context.protection.absence_since is not None
         else absence_since
     )
+    if manual and _manual_on_absence_off_due(config, target, context, policy, now_time):
+        return TargetDecision(
+            target_id=target_id,
+            desired_state="off",
+            desired_brightness=None,
+            desired_color_temperature=None,
+            commands=(PlannedCommand(target_id, LightAction.TURN_OFF,
+                                     reason=DecisionReason.DIMMING,
+                                     fade_seconds=config.dimming.fade_seconds if config.dimming.enabled else 0),),
+        )
     if manual:
         released = _manual_off_released(
             context, target_id, presence, absence_proven, absence_since
@@ -2012,6 +2117,30 @@ def _evaluate_target(
         Skip(target_id, SkipReason.ABSENCE_UNPROVEN),
         extra_skips=skips,
     )
+
+
+def _manual_on_absence_off_due(config, target, context, policy, now_time) -> bool:
+    """Permit only the selected manual-on target after newly proven absence."""
+    if not target.auto_off_manual_on_absence or not target.auto_control:
+        return False
+    light = context.light(target.id)
+    manual = latest_ownership(context.ownership, target.id)
+    if (light is None or light.state is not SensorState.ON or light.last_changed > context.now
+            or manual is None or manual.source is not OwnershipSource.MANUAL
+            or not manual.confirmed or manual.turned_off or manual.at > context.now):
+        return False
+    configured = {item.id for item in config.devices.sensors
+                  if item.kind in {SensorKind.PRESENCE, SensorKind.MOTION}}
+    sensors = [item for item in context.sensors if item.sensor_id in configured]
+    if not configured or {item.sensor_id for item in sensors} != configured:
+        return False
+    if any(item.state is not SensorState.OFF or not sensor_observation_is_fresh(
+            item, context.now, policy.sensor_freshness_seconds * 1000) for item in sensors):
+        return False
+    floor = max(manual.at, context.unobserved_since or 0, context.observation_started_at or 0,
+                *(max(item.last_changed, item.continuous_absence_since or 0)
+                  for item in sensors))
+    return context.now - floor >= _absence_threshold(policy, now_time) * 1000
 
 
 def _adjust_commands(

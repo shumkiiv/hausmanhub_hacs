@@ -48,6 +48,161 @@ class _Store:
         return True
 
 
+async def test_interrupted_room_return_does_not_block_an_independent_room() -> None:
+    store = _Store()
+    authority = ManualLightAuthority(store)
+    await authority.async_load()
+    first = frozenset({"light.first"})
+    second = frozenset({"light.second"})
+    authority.set_related_sources(RelatedLightSources(True, {
+        "light.first": first, "light.second": second,
+    }))
+    token = await authority.async_begin_explicit_return(
+        first, all_manual=True, observations_current=lambda: True,
+    )
+    assert token is not None
+    await authority.async_abort_explicit_return(token)
+    assert authority.barrier_reason_for("light.first") == "return_pending"
+    assert authority.barrier_reason_for("light.second") is None
+    other = await authority.async_begin_explicit_return(
+        second, all_manual=True, observations_current=lambda: True,
+    )
+    assert other is not None
+    assert await authority.async_finish_explicit_return(
+        other, persisted=True, observations_current=lambda: True,
+    )
+    restarted = ManualLightAuthority(store)
+    await restarted.async_load()
+    restarted.set_related_sources(RelatedLightSources(True, {
+        "light.first": first, "light.second": second,
+    }))
+    restarted.finish_startup_observation(first | second)
+    assert restarted.barrier_reason_for("light.first") == "return_pending"
+
+
+async def test_two_interrupted_returns_survive_restart_independently() -> None:
+    store = _Store()
+    authority = ManualLightAuthority(store)
+    await authority.async_load()
+    first = frozenset({"light.first"})
+    second = frozenset({"light.second"})
+    graph = RelatedLightSources(True, {"light.first": first, "light.second": second})
+    authority.set_related_sources(graph)
+    for scope in (first, second):
+        token = await authority.async_begin_explicit_return(
+            scope, all_manual=True, observations_current=lambda: True,
+        )
+        assert token is not None
+        await authority.async_abort_explicit_return(token)
+    restored = ManualLightAuthority(store)
+    await restored.async_load()
+    restored.set_related_sources(graph)
+    restored.finish_startup_observation(first | second)
+    assert restored.barrier_reason_for("light.first") == "return_pending"
+    assert restored.barrier_reason_for("light.second") == "return_pending"
+
+
+def test_multiple_pending_returns_reject_overlapping_entities() -> None:
+    payload = {
+        "version": 4,
+        "records": [],
+        "recentFingerprints": [],
+        "returnOperations": [
+            {"operationId": 1, "entityIds": ["light.a"], "fenceGeneration": 0, "configVersion": 1},
+            {"operationId": 2, "entityIds": ["light.b"], "fenceGeneration": 0, "configVersion": 1},
+        ],
+    }
+    assert valid_manual_light_authority_payload(payload)
+    payload["returnOperations"][1]["entityIds"] = ["light.a"]
+    assert not valid_manual_light_authority_payload(payload)
+
+
+@pytest.mark.parametrize("selected", [None, [], ["light.other"], ["light.a", "light.a"]])
+def test_selective_return_rejects_invalid_saved_selection(selected) -> None:
+    payload = {"version": 3, "records": [], "recentFingerprints": [],
+               "returnOperation": {"operationId": 1, "entityIds": ["light.a"],
+                   "fenceGeneration": 0, "configVersion": 1,
+                   "releaseEntityIds": selected}}
+    assert not valid_manual_light_authority_payload(payload)
+
+
+async def test_away_releases_other_room_without_erasing_pending_fence() -> None:
+    store = _Store()
+    authority = ManualLightAuthority(store)
+    await authority.async_load()
+    authority.set_related_sources(RelatedLightSources(True, {
+        "light.first": frozenset({"light.first"}),
+        "light.second": frozenset({"light.second"}),
+    }))
+    await authority.async_capture("light.first", "on", "service", "first")
+    await authority.async_capture("light.second", "on", "service", "second")
+    token = await authority.async_begin_explicit_return(
+        ("light.first",), all_manual=True, observations_current=lambda: True,
+    )
+    assert token is not None
+    await authority.async_abort_explicit_return(token)
+    assert await authority.async_release_manual_claims_through(authority.current_generation()) == ("light.second",)
+    assert authority.record("light.first") is not None
+    assert authority.record("light.second") is None
+    restored = ManualLightAuthority(store)
+    await restored.async_load()
+    restored.finish_startup_observation(("light.first", "light.second"))
+    assert restored.barrier_reason_for("light.first") == "return_pending"
+
+
+async def test_removed_pending_scope_cannot_be_assumed_independent() -> None:
+    store = _Store()
+    authority = ManualLightAuthority(store)
+    await authority.async_load()
+    first = frozenset({"light.first"})
+    second = frozenset({"light.second"})
+    authority.set_related_sources(RelatedLightSources(True, {"light.first": first, "light.second": second}))
+    token = await authority.async_begin_explicit_return(first, all_manual=True, observations_current=lambda: True)
+    assert token is not None
+    await authority.async_abort_explicit_return(token)
+    authority.set_related_sources(RelatedLightSources(True, {"light.second": second}))
+    assert authority.barrier_reason_for("light.second") == "attribution_uncertain"
+
+
+async def test_simultaneous_independent_return_fences_are_not_overwritten() -> None:
+    class SlowStore(_Store):
+        def __init__(self):
+            super().__init__()
+            self.started = asyncio.Event()
+            self.resume = asyncio.Event()
+            self.slow = False
+
+        async def async_save(self, payload):
+            if self.slow:
+                self.slow = False
+                self.started.set()
+                await self.resume.wait()
+            await super().async_save(payload)
+
+    store = SlowStore()
+    authority = ManualLightAuthority(store)
+    await authority.async_load()
+    authority.set_related_sources(RelatedLightSources(True, {
+        "light.first": frozenset({"light.first"}),
+        "light.second": frozenset({"light.second"}),
+    }))
+    store.slow = True
+    first_task = asyncio.create_task(authority.async_begin_explicit_return(
+        ("light.first",), all_manual=True, observations_current=lambda: True))
+    await store.started.wait()
+    second_task = asyncio.create_task(authority.async_begin_explicit_return(
+        ("light.second",), all_manual=True, observations_current=lambda: True))
+    await asyncio.sleep(0)
+    assert authority.barrier_reason_for("light.first") == "return_pending"
+    assert authority.barrier_reason_for("light.second") == "return_pending"
+    store.resume.set()
+    first, second = await asyncio.gather(first_task, second_task)
+    assert first is not None and second is not None
+    assert len(store.payload["returnOperations"]) == 2
+    await authority.async_abort_explicit_return(first)
+    await authority.async_abort_explicit_return(second)
+
+
 def _now_ms(offset_ms: int = 0) -> int:
     # Proved timed priorities are checked against the real clock since the
     # 2026-10-12 expiry repair: test records must be captured as ACTIVE
@@ -554,10 +709,15 @@ async def test_invalid_persisted_record_fails_closed() -> None:
     assert not valid_manual_light_authority_payload(store.payload)
 
 
-async def test_service_state_dedup_and_new_same_state_service_on() -> None:
+async def test_service_state_dedup_and_new_same_state_service_on(monkeypatch) -> None:
+    from manual_light_target_fixture import install_target_boundary, states_table
+
+    install_target_boundary(monkeypatch, entities=("light.demo",))
+
     class _Hass:
         def __init__(self):
             self.tasks = []
+            self.states = states_table({"light.demo": "off"})
 
         def async_create_task(self, coroutine):
             task = asyncio.create_task(coroutine)
@@ -669,8 +829,11 @@ async def test_room_upstream_power_checks_dependent_light_before_call(monkeypatc
 
 
 async def test_room_context_child_trust_is_scoped_to_entity_and_action(monkeypatch) -> None:
+    from manual_light_target_fixture import install_target_boundary, states_table
+
     from custom_components.hausman_hub.application import room_lighting_ha_executor
 
+    install_target_boundary(monkeypatch, entities=("light.a", "light.b"))
     monkeypatch.setattr(
         room_lighting_ha_executor, "_new_service_context",
         lambda: SimpleNamespace(id="room-call"),
@@ -682,10 +845,12 @@ async def test_room_context_child_trust_is_scoped_to_entity_and_action(monkeypat
         def __init__(self):
             self.tasks = []
             self.services = _Services()
+            self.states = states_table({"light.a": "on", "light.b": "on"})
 
         def async_create_task(self, coroutine):
             task = asyncio.create_task(coroutine)
             self.tasks.append(task)
+            return task
             return task
 
     class _Services:
@@ -766,14 +931,20 @@ async def test_room_manual_only_target_refuses_automatic_command(monkeypatch) ->
     assert not receipt.sent and not called
 
 
-async def test_switch_light_event_and_selector_uncertainty() -> None:
+async def test_switch_light_event_and_selector_uncertainty(monkeypatch) -> None:
+    from manual_light_target_fixture import install_target_boundary, states_table
+
+    install_target_boundary(monkeypatch, entities=("switch.lamp",))
+
     class _Hass:
         def __init__(self):
             self.tasks = []
+            self.states = states_table({"switch.lamp": "off"})
 
         def async_create_task(self, coroutine):
             task = asyncio.create_task(coroutine)
             self.tasks.append(task)
+            return task
 
     hass = _Hass()
     authority = ManualLightAuthority()
@@ -903,10 +1074,15 @@ def test_outer_event_target_cannot_bypass_exact_service_data() -> None:
     assert authority.barrier_reason_for("light.first") == "selector_uncertain"
 
 
-async def test_exact_service_list_captures_each_target_only() -> None:
+async def test_exact_service_list_captures_each_target_only(monkeypatch) -> None:
+    from manual_light_target_fixture import install_target_boundary, states_table
+
+    install_target_boundary(monkeypatch, entities=("light.first", "light.second"))
+
     class _Hass:
         def __init__(self) -> None:
             self.tasks = []
+            self.states = states_table({"light.first": "off", "light.second": "off"})
 
         def async_create_task(self, coroutine):
             task = asyncio.create_task(coroutine)
@@ -951,8 +1127,11 @@ def test_event_subscription_registers_both_sync_boundaries() -> None:
 
 
 async def test_first_startup_buffers_room_only_event_until_verified_save(monkeypatch) -> None:
+    from manual_light_target_fixture import install_target_boundary, states_table
+
     from custom_components.hausman_hub.application import room_lighting_ha_executor
 
+    install_target_boundary(monkeypatch, entities=("light.room_only",))
     monkeypatch.setattr(
         room_lighting_ha_executor, "_new_service_context",
         lambda: SimpleNamespace(id="startup-automatic"),
@@ -971,7 +1150,7 @@ async def test_first_startup_buffers_room_only_event_until_verified_save(monkeyp
 
     hass = SimpleNamespace(
         bus=_Bus(), services=_Services(),
-        states=SimpleNamespace(get=lambda _entity: None),
+        states=states_table({"light.room_only": "off"}),
     )
     class _DelayedLoadStore(_Store):
         def __init__(self):
@@ -1086,7 +1265,11 @@ async def test_room_only_state_transition_is_buffered_before_catalog_load() -> N
     assert store.payload["records"][0]["entityId"] == "switch.room_only"
 
 
-async def test_room_only_event_during_startup_drain_is_not_lost() -> None:
+async def test_room_only_event_during_startup_drain_is_not_lost(monkeypatch) -> None:
+    from manual_light_target_fixture import install_target_boundary, states_table
+
+    install_target_boundary(monkeypatch, entities=("light.room_a", "light.room_b"))
+
     class _SlowStore(_Store):
         def __init__(self):
             super().__init__()
@@ -1113,31 +1296,46 @@ async def test_room_only_event_during_startup_drain_is_not_lost() -> None:
             return lambda: None
 
     listener = ManualLightAuthorityEvents(
-        SimpleNamespace(bus=_Bus()), authority, lambda: managed, None, lambda: None
+        SimpleNamespace(bus=_Bus(),
+                        states=states_table({"light.room_a": "off",
+                                             "light.room_b": "off"})),
+        authority, lambda: managed, None, lambda: None
     )
     listener.start(buffer_startup=True)
-    callbacks["call_service"](SimpleNamespace(
-        data={"domain": "light", "service": "turn_off",
-              "service_data": {"entity_id": "light.room_a"}},
-        context=SimpleNamespace(id="first"), time_fired=1,
-    ))
     completion = asyncio.create_task(listener.async_complete_startup())
-    await store.started.wait()
-    assert authority.blocks("light.unrelated")  # Save not verified yet.
-    callbacks["call_service"](SimpleNamespace(
-        data={"domain": "light", "service": "turn_on",
-              "service_data": {"entity_id": "light.room_b"}},
-        context=SimpleNamespace(id="second"), time_fired=2,
-    ))
-    assert authority.blocks("light.room_b")
-    store.release.set()
-    await completion
+    try:
+        callbacks["call_service"](SimpleNamespace(
+            data={"domain": "light", "service": "turn_off",
+                  "service_data": {"entity_id": "light.room_a"}},
+            context=SimpleNamespace(id="first"), time_fired=1,
+        ))
+        await asyncio.wait_for(store.started.wait(), 5)
+        assert authority.blocks("light.unrelated")  # Save not verified yet.
+        callbacks["call_service"](SimpleNamespace(
+            data={"domain": "light", "service": "turn_on",
+                  "service_data": {"entity_id": "light.room_b"}},
+            context=SimpleNamespace(id="second"), time_fired=2,
+        ))
+        assert authority.blocks("light.room_b")
+        store.release.set()
+        await asyncio.wait_for(completion, 5)
+    finally:
+        store.release.set()
+        completion.cancel()
+        try:
+            await completion
+        except (asyncio.CancelledError, Exception):
+            pass
     assert {item["entityId"] for item in store.payload["records"]} == managed
     assert authority.record("light.room_b").action == "on"
     assert not authority.blocks("light.unrelated")
 
 
-async def test_selector_during_startup_drain_is_applied_before_dispatch_opens() -> None:
+async def test_selector_during_startup_drain_is_applied_before_dispatch_opens(monkeypatch) -> None:
+    from manual_light_target_fixture import install_target_boundary, states_table
+
+    install_target_boundary(monkeypatch, entities=("light.room_a",))
+
     class _SlowStore(_Store):
         def __init__(self) -> None:
             super().__init__()
@@ -1163,26 +1361,36 @@ async def test_selector_during_startup_drain_is_applied_before_dispatch_opens() 
             return lambda: None
 
     listener = ManualLightAuthorityEvents(
-        SimpleNamespace(bus=_Bus()), authority, lambda: {"light.room_a"},
+        SimpleNamespace(bus=_Bus(),
+                        states=states_table({"light.room_a": "off"})),
+        authority, lambda: {"light.room_a"},
         None, lambda: None,
     )
     listener.start(buffer_startup=True)
-    callbacks["call_service"](SimpleNamespace(
-        data={"domain": "light", "service": "turn_on", "service_data": {
-            "entity_id": "light.room_a",
-        }},
-        context=SimpleNamespace(id="startup-exact"), time_fired=1,
-    ))
     completion = asyncio.create_task(listener.async_complete_startup())
-    await store.started.wait()
-    callbacks["call_service"](SimpleNamespace(
-        data={"domain": "light", "service": "turn_on", "service_data": {
-            "area_id": "unknown",
-        }},
-        context=SimpleNamespace(id="startup-selector"), time_fired=2,
-    ))
-    store.release.set()
-    await completion
+    try:
+        callbacks["call_service"](SimpleNamespace(
+            data={"domain": "light", "service": "turn_on", "service_data": {
+                "entity_id": "light.room_a",
+            }},
+            context=SimpleNamespace(id="startup-exact"), time_fired=1,
+        ))
+        await asyncio.wait_for(store.started.wait(), 5)
+        callbacks["call_service"](SimpleNamespace(
+            data={"domain": "light", "service": "turn_on", "service_data": {
+                "area_id": "unknown",
+            }},
+            context=SimpleNamespace(id="startup-selector"), time_fired=2,
+        ))
+        store.release.set()
+        await asyncio.wait_for(completion, 5)
+    finally:
+        store.release.set()
+        completion.cancel()
+        try:
+            await completion
+        except (asyncio.CancelledError, Exception):
+            pass
     assert authority.record("light.room_a").action == "on"
     assert not authority.unhealthy
     assert authority.barrier_reason_for("light.room_a") == "selector_uncertain"

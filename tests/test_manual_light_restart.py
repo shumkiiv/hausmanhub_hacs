@@ -11,9 +11,11 @@ import pytest
 import test_manual_light_authority as authority_fixture
 import test_room_lighting_runtime as runtime_fixture
 
+from manual_light_target_fixture import install_target_boundary
 from custom_components.hausman_hub.application.manual_light_authority import ManualLightAuthority
 from custom_components.hausman_hub.application.related_light_sources import RelatedLightSources
 from custom_components.hausman_hub.manual_light_authority_events import ManualLightAuthorityEvents
+from custom_components.hausman_hub.domain.room_lighting_ownership import has_automatic_control
 
 pytestmark = pytest.mark.asyncio
 ENTITY = "light.demo_main"
@@ -31,7 +33,7 @@ def payload(action=None, *, observed=None, duration=3_600_000, legacy=False):
     return {"version": 2, "records": records, "recentFingerprints": ["before-restart"]}
 
 
-async def boot(monkeypatch, *, saved=None, pair=False, mixed_import=False):
+async def boot(monkeypatch, *, saved=None, pair=False, mixed_import=False, saved_ownership=None):
     clock = {"now": runtime_fixture._NOW_MS}
     monkeypatch.setattr(time, "time", lambda: clock["now"] / 1000)
     monkeypatch.setattr(
@@ -47,6 +49,8 @@ async def boot(monkeypatch, *, saved=None, pair=False, mixed_import=False):
         commands_enabled=True, power_switch_entity="switch.demo_power" if pair else None,
     )
     ownership_store = runtime_fixture._MemoryOwnershipStore()
+    if saved_ownership is not None:
+        ownership_store.payload = copy.deepcopy(saved_ownership)
     if mixed_import:
         alternate = copy.deepcopy(room_payload["devices"]["light_targets"][0])
         alternate.update(id="light_alternative", entityId="light.alternative", role="other")
@@ -62,7 +66,8 @@ async def boot(monkeypatch, *, saved=None, pair=False, mixed_import=False):
         now_ms=lambda: clock["now"], ownership_store=ownership_store,
     )
     listener = ManualLightAuthorityEvents(
-        hass, authority, lambda: authority_fixture.room_light_entity_ids(runtime.configs()),
+        hass, authority, lambda: (authority_fixture.room_light_entity_ids(runtime.configs())
+                                  | authority.related_source_entities),
         None, lambda: runtime._executor,
     )
     listener.start(buffer_startup=True)
@@ -88,6 +93,98 @@ async def close(runtime, listener, hass):
     await runtime.stop()
     await asyncio.sleep(0)
     await asyncio.gather(*hass.tasks, return_exceptions=True)
+
+
+async def test_sensor_event_does_not_revalidate_pre_restart_auto_ownership(monkeypatch):
+    journal = runtime_fixture.RoomLightingOwnershipJournal()
+    journal.record_auto(runtime_fixture._ROOM_ID, "light_main", at=runtime_fixture._NOW_MS)
+    authority, _, runtime, hass, config, listener, clock = await boot(
+        monkeypatch, saved_ownership=journal.to_payload(),
+    )
+    try:
+        hass.states.set(ENTITY, "on", last_changed=runtime_fixture._dt(clock["now"]))
+        clock["now"] += 1_000
+        hass.states.set(SENSOR, "on", last_changed=runtime_fixture._dt(clock["now"]))
+        runtime._state_event(SimpleNamespace(data={"entity_id": SENSOR}))
+        context = await runtime._build_context(config)
+        assert not has_automatic_control(context.ownership, "light_main")
+        assert authority.blocks(ENTITY)
+    finally:
+        await close(runtime, listener, hass)
+
+
+async def test_confirmed_auto_after_restart_remains_usable(monkeypatch):
+    _, _, runtime, hass, config, listener, clock = await boot(monkeypatch)
+    try:
+        runtime._ownership.record_auto(config.room_id, "light_main", at=clock["now"])
+        context = await runtime._build_context(config)
+        assert has_automatic_control(context.ownership, "light_main")
+    finally:
+        await close(runtime, listener, hass)
+
+
+async def test_restart_refreshes_stale_off_before_safe_recovery(monkeypatch):
+    authority, _, runtime, hass, config, listener, clock = await boot(monkeypatch)
+    reads = []
+
+    async def refresh(entities, is_current):
+        assert is_current()
+        reads.append(entities)
+        hass.states.set(ENTITY, "off", last_changed=runtime_fixture._dt(clock["now"]))
+        return True
+
+    try:
+        from test_room_lighting_force_auto import seed_participants
+        runtime._light_priority, _ = await seed_participants(hass)
+        runtime._observation_refresher = refresh
+        hass.states.set(ENTITY, "off", last_changed=runtime_fixture._dt(clock["now"] - 400_000))
+        clock["now"] += 30_000
+        await runtime._build_context(config)
+        assert await runtime._reconcile_manual_restart(config)
+        assert reads == [frozenset({ENTITY})]
+        assert not authority.blocks(ENTITY)
+        assert not hass.services.calls
+    finally:
+        await close(runtime, listener, hass)
+
+
+@pytest.mark.parametrize("changed", ["on", "sensor", "config", "manual", "failed"])
+async def test_restart_refresh_never_releases_without_current_safe_proof(monkeypatch, changed):
+    from test_room_lighting_force_auto import seed_participants
+
+    authority, _, runtime, hass, config, listener, clock = await boot(monkeypatch)
+    reads = []
+
+    async def refresh(entities, is_current):
+        reads.append(entities)
+        if changed == "failed":
+            return False
+        if changed == "sensor":
+            hass.states.set(SENSOR, "on", last_changed=runtime_fixture._dt(clock["now"]))
+        if changed == "manual":
+            await authority.async_capture(ENTITY, "on", "service", "new-action",
+                                          observed_at_ms=clock["now"])
+        if changed == "config":
+            runtime._configs[config.room_id] = replace(config, version=config.version + 1)
+        hass.states.set(ENTITY, "on" if changed == "on" else "off",
+                        last_changed=runtime_fixture._dt(clock["now"]))
+        return True
+
+    try:
+        runtime._light_priority, _ = await seed_participants(hass)
+        runtime._observation_refresher = refresh
+        hass.states.set(ENTITY, "off", last_changed=runtime_fixture._dt(clock["now"] - 400_000))
+        clock["now"] += 30_000
+        await runtime._build_context(config)
+        assert not await runtime._reconcile_manual_restart(config)
+        assert authority.blocks(ENTITY)
+        assert len(reads) == 1
+        assert not hass.services.calls
+        if changed == "failed":
+            assert not await runtime._reconcile_manual_restart(config)
+            assert len(reads) == 1
+    finally:
+        await close(runtime, listener, hass)
 
 
 @pytest.mark.parametrize("saved_kind", ["empty", "expired_off"])
@@ -213,6 +310,9 @@ async def test_recovery_save_is_a_fenced_transition(monkeypatch, race):
 
 
 async def test_new_gesture_keeps_original_time_and_duplicate_does_not_extend(monkeypatch):
+    # A normal direct gesture with working target resolution: the entity is
+    # known, so the recovery must not be blocked by a selector barrier.
+    install_target_boundary(monkeypatch, entities=(ENTITY,))
     authority, store, runtime, hass, config, listener, clock = await boot(monkeypatch)
     try:
         event = SimpleNamespace(
@@ -222,6 +322,7 @@ async def test_new_gesture_keeps_original_time_and_duplicate_does_not_extend(mon
         listener.service_event(event)
         await authority.async_drain()
         deadline = authority.record(ENTITY).deadline_ms
+        assert authority.barrier_reason_for(ENTITY) != "selector_uncertain"
         clock["now"] += 3_599_999
         listener.service_event(event)
         await authority.async_drain()
@@ -233,6 +334,35 @@ async def test_new_gesture_keeps_original_time_and_duplicate_does_not_extend(mon
         clock["now"] += 1
         assert await runtime._reconcile_manual_restart(config)
         assert authority.record(ENTITY).deadline_ms == deadline
+        assert not hass.services.calls
+    finally:
+        await close(runtime, listener, hass)
+
+
+async def test_resolution_failure_keeps_direct_evidence_and_blocks_recovery(monkeypatch):
+    # Review r3 companion: with a failing target resolution the exact direct
+    # call is still captured, but the unknown selection keeps blocking
+    # recovery even after the record expires.
+    authority, store, runtime, hass, config, listener, clock = await boot(monkeypatch)
+    try:
+        event = SimpleNamespace(
+            data={"domain": "light", "service": "turn_off", "service_data": {"entity_id": ENTITY}},
+            context=SimpleNamespace(id="uncertain-off"), time_fired="uncertain-event-id",
+        )
+        listener.service_event(event)
+        await authority.async_drain()
+        assert authority.record(ENTITY).action == "off"
+        assert authority.barrier_reason_for(ENTITY) == "selector_uncertain"
+        deadline = authority.record(ENTITY).deadline_ms
+        clock["now"] += 3_599_999
+        listener.service_event(event)
+        await authority.async_drain()
+        assert authority.record(ENTITY).deadline_ms == deadline
+        hass.states.set(ENTITY, "off", last_changed=runtime_fixture._dt(clock["now"]))
+        hass.states.set(SENSOR, "off", last_changed=runtime_fixture._dt(clock["now"] - 30_000))
+        await runtime._build_context(config)
+        clock["now"] += 1
+        assert not await runtime._reconcile_manual_restart(config)
         assert not hass.services.calls
     finally:
         await close(runtime, listener, hass)

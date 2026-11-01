@@ -1789,16 +1789,17 @@ class RoomLightingApiTest(unittest.TestCase):
                 restored = live.runtime._ownership.snapshots_for(room, ("light_main",))[0]
                 self.assertEqual(owner, restored)
                 self.assertEqual("on", live.hass.states.get("switch.demo_main").state)
-                # Separate existing positive: an actual fresh target report can
-                # restore the old proof. This does not fabricate another AUTO.
+                # A fresh physical ON alone cannot prove that a person did not
+                # intervene while the runtime was stopped. Keep the historical
+                # AUTO record but do not grant control authority from it.
                 state = live.hass.states.get("switch.demo_main")
                 state.last_reported = live.dt()
                 context = await live.runtime._build_context(live.runtime._configs[room])
-                self.assertEqual(owner, context.ownership[0])
+                self.assertEqual("unknown", context.ownership[0].source.value)
+                self.assertFalse(context.ownership[0].confirmed)
                 await live.runtime.async_process((room,))
-                self.assertEqual(before + 1, len(live.hass.services.calls))
-                self.assertTrue(live.receipts()[-1]["sent"])
-                self.assertTrue(live.receipts()[-1]["confirmed"])
+                self.assertEqual(before, len(live.hass.services.calls))
+                self.assertEqual(owner, live.runtime._ownership.snapshots_for(room, ("light_main",))[0])
             finally:
                 await live.close()
         asyncio.run(flow())
@@ -2138,7 +2139,7 @@ class RoomLightingApiTest(unittest.TestCase):
                     self.assertEqual(live.now, manual_record.observed_at_ms)
                     self.assertEqual(live.now + 3600000, manual_record.deadline_ms)
                     self.assertTrue(authority.blocks(entity))
-                    self.assertTrue(authority.blocks("light.demo_main"))
+                    self.assertEqual(not (exact and mode == "peer"), authority.blocks("light.demo_main"))
                 elif mode == "reserved":
                     live.runtime._reserved_entity_ids_provider = lambda: {"switch.demo_power"}
                 else:
@@ -2748,7 +2749,7 @@ class RoomLightingApiTest(unittest.TestCase):
     def test_legacy_put_preserves_existing_manual_priority(self) -> None:
         async def flow() -> None:
             payload = _config_payload()
-            payload["manualControlReturn"] = {"prioritySeconds": 7200}
+            payload["manualControlReturn"] = {"prioritySeconds": 7200, "clearOnAway": False}
             created = await self.config_view.put(
                 _json_request(self._config_path(), payload, room_id=payload["roomId"])
             )
@@ -2975,7 +2976,7 @@ class RoomLightingApiTest(unittest.TestCase):
             )
             self.assertEqual(created.status, 200)
             self.assertEqual(created.payload["manualControlReturn"]["prioritySeconds"], 3600)
-            payload["manualControlReturn"] = {"prioritySeconds": 7200}
+            payload["manualControlReturn"] = {"prioritySeconds": 7200, "clearOnAway": False}
             changed = await self.config_view.put(
                 _json_request(self._config_path(), payload, room_id=payload["roomId"])
             )
@@ -2995,6 +2996,7 @@ class RoomLightingApiTest(unittest.TestCase):
             )
             self.assertEqual(explicit.status, 200)
             self.assertEqual(explicit.payload["manualControlReturn"]["prioritySeconds"], 5400)
+            self.assertFalse(explicit.payload["manualControlReturn"]["clearOnAway"])
             self.assertEqual(explicit.payload["version"], 3)
         asyncio.run(flow())
 
@@ -3195,7 +3197,8 @@ class RoomLightingApiTest(unittest.TestCase):
             self.assertEqual("manual_off_wait", returned["reason"])
             self.assertEqual("blocked", returned["scope"])
             self.assertEqual(observed // 1000, returned["since"])
-            self.assertIsNone(returned["remaining_seconds"])
+            self.assertIn(returned["remaining_seconds"], [599, 600])
+            self.assertEqual((observed + 600000 + 999) // 1000, returned["expires_at"])
             self.assertEqual("manual_off_wait", returned["sources"][0]["reason"])
             self.assertEqual("blocked", returned["sources"][0]["scope"])
             _validate("room-lighting-status.schema.json", manual_off)
@@ -3216,6 +3219,23 @@ class RoomLightingApiTest(unittest.TestCase):
             self.assertIsNone(uncertain["remaining_seconds"])
             _validate("room-lighting-status.schema.json", startup)
 
+        asyncio.run(flow())
+
+    def test_future_manual_timestamp_is_uncertain_not_a_long_countdown(self) -> None:
+        from custom_components.hausman_hub.application.manual_light_authority import ManualLightAuthority
+        async def flow():
+            room_id = "room_demo_entry"
+            await self.config_view.put(_json_request(self._config_path(room_id), _config_payload(room_id), room_id=room_id))
+            authority = ManualLightAuthority()
+            authority.capture("light.demo_main", "on", "service", "future", observed_at_ms=int(time.time()*1000)+86400000)
+            self.hass.data["hausman_hub"]["manual_light_authority"] = authority
+            request = _request(self.api.ROOM_LIGHTING_STATUS_PATH.format(room_id=room_id), room_id=room_id)
+            payload = (await self.status_view.get(request)).payload
+            returned = payload["manual_control_return"]
+            self.assertEqual("attribution_uncertain", returned["reason"])
+            self.assertIsNone(returned["remaining_seconds"])
+            self.assertNotIn("remaining_seconds", returned["sources"][0])
+            _validate("room-lighting-status.schema.json", payload)
         asyncio.run(flow())
 
     def test_status_deduplicates_aliases_and_fails_closed_on_conflict(self) -> None:
@@ -3522,6 +3542,27 @@ class RoomLightingApiTest(unittest.TestCase):
             self.assertTrue(status.payload["fresh"])
             self.assertEqual("idle", status.payload["phase"])
             self.assertEqual([room_id], calls)
+
+        asyncio.run(flow())
+
+    def test_failed_runtime_context_is_not_reported_as_fresh(self) -> None:
+        class _Runtime:
+            running = True
+
+            async def async_context_for(self, config):
+                raise RuntimeError("unavailable state")
+
+        async def flow() -> None:
+            room_id = "room_demo_entry"
+            await self.config_view.put(
+                _json_request(self._config_path(room_id), _config_payload(room_id), room_id=room_id)
+            )
+            self.hass.data["hausman_hub"][self.api.DATA_ROOM_LIGHTING_RUNTIME] = _Runtime()
+            status = await self.status_view.get(
+                _request(self.api.ROOM_LIGHTING_STATUS_PATH.format(room_id=room_id), room_id=room_id)
+            )
+            self.assertFalse(status.payload["fresh"])
+            self.assertEqual("unknown", status.payload["phase"])
 
         asyncio.run(flow())
 
@@ -3955,7 +3996,7 @@ class RoomLightingApiTest(unittest.TestCase):
             )
             status_path = self.api.ROOM_LIGHTING_STATUS_PATH.format(room_id=room_id)
 
-            def provider(lux_healthy: bool, state: SensorState):
+            def provider(lux_healthy: bool, state: SensorState, observed_at: int | None = None, lux: float = 120.0):
                 def factory(_config):
                     return RoomLightingContext(
                         now=now_ms,
@@ -3967,9 +4008,10 @@ class RoomLightingApiTest(unittest.TestCase):
                                 "sensor_demo_lux",
                                 SensorKind.ILLUMINANCE,
                                 state,
-                                now_ms,
-                                lux=120.0,
+                                now_ms if observed_at is None else observed_at,
+                                lux=lux,
                                 lux_healthy=lux_healthy,
+                                observed_at_ms=observed_at,
                             ),
                         ),
                         lights=(LightSnapshot("light_main", SensorState.OFF, now_ms),),
@@ -4000,6 +4042,24 @@ class RoomLightingApiTest(unittest.TestCase):
             stale = await self.status_view.get(_request(status_path, room_id=room_id))
             _validate("room-lighting-status.schema.json", stale.payload)
             self.assertEqual("stale", stale.payload["illumination"]["sensorState"])
+
+            self.hass.data["hausman_hub"][self.api.DATA_ROOM_LIGHTING_CONTEXT] = provider(
+                True, SensorState.ON, now_ms - 301_000
+            )
+            expired = await self.status_view.get(_request(status_path, room_id=room_id))
+            self.assertEqual("stale", expired.payload["illumination"]["sensorState"])
+            self.assertFalse(expired.payload["illumination"]["healthy"])
+            self.hass.data["hausman_hub"][self.api.DATA_ROOM_LIGHTING_CONTEXT] = provider(
+                True, SensorState.ON, now_ms - 300_000
+            )
+            boundary = await self.status_view.get(_request(status_path, room_id=room_id))
+            self.assertEqual("ok", boundary.payload["illumination"]["sensorState"])
+            self.hass.data["hausman_hub"][self.api.DATA_ROOM_LIGHTING_CONTEXT] = provider(
+                True, SensorState.ON, now_ms, float("nan")
+            )
+            invalid = await self.status_view.get(_request(status_path, room_id=room_id))
+            self.assertFalse(invalid.payload["illumination"]["healthy"])
+            self.assertIsNone(invalid.payload["illumination"]["lux"])
 
         asyncio.run(flow())
 

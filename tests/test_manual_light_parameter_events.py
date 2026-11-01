@@ -11,6 +11,37 @@ from custom_components.hausman_hub.application.scenario_command_context import S
 from custom_components.hausman_hub.manual_light_authority_events import ManualLightAuthorityEvents, _parameter_action
 
 
+@pytest.mark.parametrize("action,duration", [("on", 1234000), ("off", 321000)])
+async def test_capture_uses_room_duration_for_each_direction(action, duration):
+    from custom_components.hausman_hub.manual_light_authority_events import _StartupEvidence
+    authority = ManualLightAuthority()
+    listener = ManualLightAuthorityEvents(
+        SimpleNamespace(async_create_task=asyncio.create_task), authority,
+        lambda: {"light.demo"}, None, lambda: None,
+        priority_duration=lambda entity, value: duration if (entity, value) == ("light.demo", action) else 0,
+    )
+    evidence = _StartupEvidence("light.demo", action, "service", "gesture", "event", 100000)
+    listener._capture_evidence(evidence, schedule_drain=False)
+    record = authority.record("light.demo")
+    assert record.deadline_ms == 100000 + duration
+    listener._capture_evidence(evidence, schedule_drain=False)
+    assert authority.record("light.demo") is record
+
+
+def test_changed_duration_recomputes_from_gesture_without_rearming():
+    import time
+    authority = ManualLightAuthority()
+    now = int(time.time()*1000)
+    authority.capture("light.demo", "on", "service", "gesture", observed_at_ms=now-20000, duration_ms=15000)
+    assert not authority.blocks("light.demo")
+    authority.set_priority_duration_resolver(lambda *_: 30000)
+    assert authority.blocks("light.demo")
+    record = authority.record("light.demo")
+    authority.set_priority_duration_resolver(lambda *_: 15000)
+    assert not authority.blocks("light.demo")
+    assert authority.record("light.demo") is record
+
+
 def state(attrs, observed=None):
     return SimpleNamespace(state="on", attributes=attrs,
         last_changed=datetime.now(timezone.utc)-timedelta(days=1),

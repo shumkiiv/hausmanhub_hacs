@@ -67,6 +67,7 @@ from ..domain.room_lighting_engine import (
     SensorSnapshot,
     bathroom_auxiliary_inputs,
     curve_profile_block_reason,
+    curve_target_block_reason,
     curve_profile_from_config,
     curve_params_block,
     evaluate_curve_room,
@@ -371,9 +372,9 @@ class RoomLightingOwnershipJournal:
         if len(bucket) > self._max_records:
             del bucket[: len(bucket) - self._max_records]
 
-    def invalidate_handoffs(self, room_id: str | None = None) -> None:
+    def invalidate_handoffs(self, room_id: str | None = None, *, target_ids: tuple[str, ...] | None = None) -> None:
         for key in tuple(self._active_handoffs):
-            if room_id is None or key[0] == room_id:
+            if (room_id is None or key[0] == room_id) and (target_ids is None or key[1] in target_ids):
                 self._active_handoffs.pop(key, None)
 
     def stage_handoff(
@@ -1253,6 +1254,7 @@ class RoomLightingRuntime:
         ] | None = None,
         return_intent_clock: Callable[[], float] = time.monotonic,
         return_intent_id: Callable[[], str] | None = None,
+        single_entity_evidence: Callable[[Iterable[str]], frozenset[str]] | None = None,
     ) -> None:
         # Optional input port of the new core branch (HH-014.b lighting
         # path): immutable event snapshots are delivered BEFORE the legacy
@@ -1269,13 +1271,17 @@ class RoomLightingRuntime:
         self._observation_refresher = observation_refresher
         self._morning_refresh_attempts: dict[str, tuple[date, int]] = {}
         self._morning_refresh_active: set[str] = set()
+        self._restart_refresh_attempts: dict[str, tuple[RoomLightingConfig, int]] = {}
         self._adjustment_refresh_attempts: dict[str, tuple] = {}
+        self._manual_absence_refresh_attempts: dict[tuple[str, str], tuple] = {}
+        self._manual_absence_refresh_active: set[tuple[str, str]] = set()
         self._adjustment_refresh_active: set[str] = set()
         self._service = service
         self._shadow = shadow
         self._ownership = ownership or RoomLightingOwnershipJournal(now_ms=now_ms)
         self._ownership_store = ownership_store
         self._unobserved_since: int | None = None
+        self._pre_start_auto: tuple[OwnershipSnapshot, ...] = ()
         # Restart timestamp kept separately so clearing the unobserved guard on
         # the first resumed observation does not let pre-restart absence count.
         self._started_at: int | None = None
@@ -1386,11 +1392,18 @@ class RoomLightingRuntime:
         self._unsubscribers: list[Callable[[], None]] = []
         self._lock = asyncio.Lock()
         self._room_locks: dict[str, asyncio.Lock] = {}
-        self._explicit_return_active = False
+        self._explicit_return_active: set[str] = set()
+        self._timed_return_attempts: dict[object, object] = {}
+        self._away_return_boundary_ms: int | None = None
         self._return_intents = LightingReturnIntents(
             return_intent_clock, return_intent_id or (lambda: secrets.token_hex(32)),
         )
         self._return_intent_epoch = 0
+        # Separate registry-backed proof that an entity is one physical
+        # device (never a bare HA group); empty without a provided source.
+        self._single_entity_evidence = (
+            single_entity_evidence or (lambda candidates: frozenset())
+        )
         self._power_source_locks: dict[str, asyncio.Lock] = {}
         self._save_lock = asyncio.Lock()
         self._running = False
@@ -1493,6 +1506,7 @@ class RoomLightingRuntime:
         # absence and cannot restore pre-restart automatic ownership.
         self._unobserved_since = self._now_ms()
         self._started_at = self._unobserved_since
+        self._restart_refresh_attempts.clear()
         self._absence = {}
         self._absence_floor_ms = None
         self._absence_release_latch = set()
@@ -1506,6 +1520,10 @@ class RoomLightingRuntime:
                 _LOGGER.warning("room lighting ownership load failed; starting empty")
                 payload = None
             self._ownership.restore(payload)
+        self._pre_start_auto = tuple(
+            record for record in self._ownership.snapshots()
+            if record.source is OwnershipSource.AUTO
+        )
         await self._shadow.async_load()  # type: ignore[attr-defined]
         configs = await self._service.async_list_configs()  # type: ignore[attr-defined]
         self._configs = {config.room_id: config for config in configs}
@@ -1812,6 +1830,17 @@ class RoomLightingRuntime:
             config=config if self._configs.get(config.room_id) is config else None,
             configuration_generation=getattr(self._service, "configuration_generation", None),
         )
+        # An unrelated state event ends the startup observation gap for the
+        # running engine, but cannot prove what happened to a light during that
+        # gap. Keep pre-start AUTO records as history, not control authority.
+        # A new confirmed AUTO or explicit handoff after startup remains valid.
+        if self._pre_start_auto:
+            records = tuple(
+                replace(record, source=OwnershipSource.UNKNOWN, confirmed=False)
+                if any(record is saved for saved in self._pre_start_auto)
+                else record
+                for record in records
+            )
         for record in records:
             if record.source is not OwnershipSource.EXPLICIT_HANDOFF:
                 continue
@@ -2021,19 +2050,29 @@ class RoomLightingRuntime:
         return {"confirmed": bool(getattr(receipt, "confirmed", False))}
 
     def _manual_priority_blocks(
-        self, config: RoomLightingConfig, command: PlannedCommand
+        self, config: RoomLightingConfig, command: PlannedCommand,
+        *, manual_absence_permit: Callable[[], bool] | None = None,
     ) -> bool:
         """Fail closed when the shared scenario authority marks this light manual."""
         if self._away_off_is_current(config, command):
             return False
+        if manual_absence_permit is not None and manual_absence_permit():
+            return False
         authority = self._manual_light_authority
-        if authority is not None and any(
-            authority.blocks(target.entity_id)
-            for target in config.devices.light_targets
-            if isinstance(target.entity_id, str)
-            and target.entity_id.startswith(("light.", "switch."))
-        ):
-            return True
+        target = config.devices.target(getattr(command, "target_id", None))
+        entity = getattr(target, "entity_id", None)
+        if authority is not None:
+            if (target in config.devices.light_targets and isinstance(entity, str)
+                    and entity.startswith(("light.", "switch."))):
+                # The authority includes the target's proven power component.
+                # Its legacy graph remains room-wide if topology is unproved.
+                if authority.blocks(entity):
+                    return True
+            elif any(authority.blocks(item.entity_id)
+                     for item in config.devices.light_targets
+                     if isinstance(item.entity_id, str)
+                     and item.entity_id.startswith(("light.", "switch."))):
+                return True
         priority = self._light_priority
         if priority is None or self._hass is None:
             return False
@@ -2053,6 +2092,181 @@ class RoomLightingRuntime:
             return entity_id in claims(frozenset({entity_id}))
         except Exception:  # noqa: BLE001 - shared safety authority is fail closed
             return True
+
+    async def _manual_absence_off_permit(
+        self, config: RoomLightingConfig, command: PlannedCommand,
+    ) -> tuple[Callable[[], bool], Callable[[], bool]] | None:
+        """Freeze one manually-on target and all evidence for one OFF attempt.
+
+        Returns ``(dispatch, confirm)``. ``dispatch`` is the strict pre-send
+        check including the trusted ON state and the still-planned command.
+        ``confirm`` keeps every manual-intent condition alive while the
+        executor confirms the report, without re-requiring the ON state the
+        successful OFF itself legitimately ended.
+        """
+        from .room_lighting_ha_executor import room_manual_off_protection
+
+        target = config.devices.target(command.target_id)
+        authority, priority = self._manual_light_authority, self._light_priority
+        if (self._hass is None or config.profile == "day_curve" or target is None
+                or not target.auto_off_manual_on_absence or not target.auto_control
+                or not isinstance(target.entity_id, str)
+                or command.action is not LightAction.TURN_OFF
+                or command.reason is not DecisionReason.DIMMING
+                or authority is None or priority is None
+                or room_manual_off_protection(self._hass) is None):
+            return None
+        try:
+            context = await self._build_context(config, self._now_ms())
+            if command not in evaluate_room_lighting(config, context).commands:
+                return None
+            manual = authority.record(target.entity_id)
+            if (manual is None or manual.legacy or manual.action != "on"
+                    or not authority.has_durable_import({target.entity_id})
+                    or authority.blocks_departure_off(target.entity_id)):
+                return None
+            boundary = self._away_manual_boundary(config)
+            lifecycle = (self._started_at, self._unobserved_since)
+            trusted, value, revision = self._target_trust(target.entity_id)
+            if not trusted or value != "on":
+                return None
+            configured = tuple(s for s in config.devices.sensors
+                               if s.kind in {SensorKind.PRESENCE, SensorKind.MOTION})
+            if not configured:
+                return None
+            sensor_snapshot = getattr(self._state_provider, "_sensor_snapshot", None)
+            if not callable(sensor_snapshot):
+                return None
+
+            def shared_conditions() -> bool:
+                try:
+                    now = self._now_ms()
+                    if (not self._running or self._configs.get(config.room_id) is not config
+                            or lifecycle != (self._started_at, self._unobserved_since)
+                            or self._away_manual_boundary(config) != boundary
+                            or authority.record(target.entity_id) != manual
+                            or not authority.has_durable_import({target.entity_id})
+                            or authority.blocks_departure_off(target.entity_id)):
+                        return False
+                    snapshots = tuple(sensor_snapshot(self._hass, sensor, now) for sensor in configured)
+                    if snapshots != tuple(s for s in context.sensors if s.sensor_id in {item.id for item in configured}):
+                        return False
+                    policy = EnginePolicy.from_config(config)
+                    # Equal snapshots are not enough: an unchanged report can
+                    # age past the freshness window while the OFF waits for
+                    # its confirmation. Stale absence evidence never confirms.
+                    if any(
+                        sensor.state is not SensorState.OFF
+                        or not sensor_observation_is_fresh(
+                            sensor, now, policy.sensor_freshness_seconds * 1000
+                        )
+                        for sensor in snapshots
+                    ):
+                        return False
+                    local_time = datetime.fromtimestamp(now / 1000, context.timezone).time()
+                    from ..domain.room_lighting_engine import _absence_threshold
+                    if now - manual.observed_at_ms < _absence_threshold(policy, local_time) * 1000:
+                        return False
+                    return True
+                except Exception:  # noqa: BLE001 - uncertain evidence never opens this exception
+                    return False
+
+            def current() -> bool:
+                # Strict pre-dispatch check: the target must still be trusted
+                # ON and the engine must still plan this exact OFF.
+                if not shared_conditions():
+                    return False
+                try:
+                    if self._target_trust(target.entity_id) != (True, "on", revision):
+                        return False
+                    return command in evaluate_room_lighting(
+                        config, replace(context, now=self._now_ms())).commands
+                except Exception:  # noqa: BLE001 - uncertain evidence never opens this exception
+                    return False
+
+            def confirm_still_allowed() -> bool:
+                # Post-dispatch check for the executor's read-back loop: the
+                # successful OFF legitimately turned the target OFF, so the
+                # trusted ON state and the still-planned command are not
+                # re-required. Every manual-intent condition stays live.
+                return shared_conditions()
+
+            return (current, confirm_still_allowed) if current() else None
+        except Exception:  # noqa: BLE001 - uncertain evidence never opens this exception
+            return None
+
+    async def _complete_manual_absence_off(
+        self, config: RoomLightingConfig, target: object, manual: object,
+        boundary: tuple[object, ...],
+    ) -> bool:
+        """Retire only the completed target's ON claim under the durable room fence."""
+        from .room_lighting_ha_executor import room_manual_off_protection
+
+        authority, priority = self._manual_light_authority, self._light_priority
+        entity = target.entity_id
+        if self._hass is None or authority is None or priority is None or self._ownership_store is None:
+            return False
+        off = room_manual_off_protection(self._hass)
+        if off is None or not isinstance(entity, str):
+            return False
+        entities = frozenset(t.entity_id for t in config.devices.light_targets)
+        if not entities or any(not isinstance(item, str) for item in entities):
+            return False
+        selected = frozenset({entity})
+        try:
+            if self._away_manual_boundary(config) != boundary:
+                return False
+            off_snapshot = off.explicit_return_snapshot(config.room_id, selected)
+            if off_snapshot:
+                return False
+            priority_snapshot = priority.explicit_return_snapshot(selected)
+            owner_boundary = self._ownership.manual_return_boundary()
+            authority_boundary = authority.generation
+            trusted, physical, _revision = self._target_trust(entity)
+            owner = latest_ownership(self._control_ownership_for(config), target.id)
+            if (not trusted or physical != "off" or authority.record(entity) != manual
+                    or owner is None or owner.source is not OwnershipSource.MANUAL
+                    or not owner.confirmed or owner.turned_off):
+                return False
+
+            def current() -> bool:
+                try:
+                    return (self._running and self._configs.get(config.room_id) is config
+                            and authority.generation == authority_boundary
+                            and authority.record(entity) == manual
+                            and self._ownership.manual_return_boundary() == owner_boundary
+                            and self._target_trust(entity)[:2] == (True, "off")
+                            and not off.explicit_return_snapshot(config.room_id, selected))
+                except Exception:  # noqa: BLE001
+                    return False
+
+            def initial() -> bool:
+                return (current() and self._away_manual_boundary(config) == boundary
+                        and priority.explicit_return_snapshot(selected) == priority_snapshot)
+
+            def commit_current() -> bool:
+                return (current() and not priority.manual_claim_entity_ids(selected)
+                        and not any(item.target_id == target.id and item.source is OwnershipSource.MANUAL
+                                    for item in self._control_ownership_for(config)))
+
+            def release_history() -> tuple[str, ...] | None:
+                return self._ownership.release_room_manual_history_through(
+                    config.room_id, (target.id,), (target.id,),
+                    through_generation=owner_boundary, all_manual=True)
+
+            result = await ManualLightAutoReturn(authority).async_return(
+                entities, all_manual=True, config_version=config.version,
+                release_entity_ids=selected, observations_current=current,
+                room_history_is_releasable=initial, release_room_history=release_history,
+                persist_room_history=self._persist_ownership, release_is_current=current,
+                commit_is_current=commit_current,
+                release_other_histories=(lambda: priority.async_release_explicit_return(
+                    priority_snapshot, intent_current=current),),
+            )
+            return result.outcome == "returned"
+        except Exception:  # noqa: BLE001 - retain the durable deny on uncertain completion
+            _LOGGER.exception("Manual absence OFF return failed for %s", config.room_id)
+            return False
 
     def _manual_dispatch_boundary(self, config: RoomLightingConfig) -> tuple[object, ...]:
         """Freeze profile-local manual evidence, including equal-time actions."""
@@ -2498,6 +2712,7 @@ class RoomLightingRuntime:
             # revive on unknown -> ON without a new observed home/departure.
             self._away_generation += 1
             self._away_off_boundaries.clear()
+            self._away_return_boundary_ms = None
 
     def _arm_away(self) -> None:
         if self._away:
@@ -2513,28 +2728,10 @@ class RoomLightingRuntime:
         if not self._away:
             return
         self._away = False
-        # Away→home is the single contour point that releases manual
-        # protections (owner decision 2026-10-09): holds and manual records
-        # armed before or during the away period must not keep rooms dark
-        # for the returning household. The release is bounded by the return
-        # gesture: manual actions observed after it keep their normal
-        # priority. Shared sources are reconciled through their own APIs
-        # against the same boundary, without deleting evidence mid-flight.
-        # Unlock events do not reach this method and release nothing. The
-        # away interval is unobserved: absence windows start from the return
-        # moment, the same fresh start a restart gets.
+        self._away_return_boundary_ms = None
+        # HOME resets observation windows, not manual claims. Release belongs
+        # to the confirmed AWAY boundary and each room's clearOnAway policy.
         boundary_ms = self._now_ms()
-        boundary_generation = self._ownership.manual_return_boundary()
-        authority_boundary = None
-        authority_generation = getattr(
-            self._manual_light_authority, "current_generation", None
-        )
-        if callable(authority_generation):
-            try:
-                authority_boundary = authority_generation()
-            except Exception:  # noqa: BLE001 - no boundary, no shared release
-                authority_boundary = None
-        self._ownership.release_manual_protections_through(boundary_generation)
         self._absence.clear()
         self._absence_release_latch.clear()
         self._manual_absence_floor.clear()
@@ -2542,11 +2739,6 @@ class RoomLightingRuntime:
         self._curve_presence.clear()
         self._curve_motion.clear()
         self._schedule_ownership_save()
-        self._create_task(
-            self._async_release_shared_manual_sources(
-                boundary_ms, authority_boundary
-            )
-        )
         self._create_task(self.async_process())
 
     async def _async_release_shared_manual_sources(
@@ -2588,6 +2780,7 @@ class RoomLightingRuntime:
         if self._away:
             return
         self._away = True
+        self._away_return_boundary_ms = self._now_ms()
         self._capture_away_off_boundaries()
         await self.async_process()
 
@@ -2967,13 +3160,19 @@ class RoomLightingRuntime:
         # serve as the chandelier's manual-off evidence either — its own
         # circuit is a different one.
         main_off_proof = turned_off and entity_id == pair_switch
-        for target in config.devices.light_targets:
+        graph = (getattr(self._manual_light_authority, "related_sources", None)
+                 if self._independent_curve_ready(config) else None)
+        scoped_targets = (tuple(target for target in config.devices.light_targets
+                                if target.entity_id in graph.related(entity_id))
+                          if graph is not None and entity_id in graph.components else ())
+        for target in scoped_targets or config.devices.light_targets:
             self._ownership.record_manual(
                 room_id,
                 target.id,
                 moment,
                 confirmed=True,
-                turned_off=main_off_proof and target.id == paired_main,
+                turned_off=(bool(scoped_targets) or
+                            (main_off_proof and target.id == paired_main)),
             )
         self._absence.pop(room_id, None)
         self._absence_release_latch.discard(room_id)
@@ -3226,7 +3425,8 @@ class RoomLightingRuntime:
                             "device_trigger",
                             f"{config.room_id}:{device_id}:{subtype}:{moment}:{target_id}",
                             observed_at_ms=moment,
-                            duration_ms=config.manual_control_return.priority_seconds * 1000,
+                            duration_ms=self.manual_priority_duration_ms(
+                                entity_id, "off" if _binding_turns_off(self._hass, target, binding) else "on"),
                         )
                         if changed:
                             self._create_task(authority.async_drain())
@@ -3483,13 +3683,13 @@ class RoomLightingRuntime:
         self, room_id: str, *, reason: str, _intent: LightingReturnIntent | None = None,
     ) -> dict[str, object]:
         """Persist one scoped return, then request the ordinary profile evaluation."""
-        if self._explicit_return_active:
+        if room_id in self._explicit_return_active:
             return {
                 "room": room_id, "known": room_id in self._configs, "released": 0,
                 "releasedTargets": [], "reason": reason, "at": self._now_ms(),
                 "outcome": "blocked", "blockers": ["return_busy"], "evaluation": "not_requested",
             }
-        self._explicit_return_active = True
+        self._explicit_return_active.add(room_id)
         try:
             # Snapshot the intent before waiting for any runtime/room writer.
             # A queued request must never consume a later manual gesture.
@@ -3497,33 +3697,79 @@ class RoomLightingRuntime:
                               else lambda: _intent.current(self._return_intents.clock()))
             release_current = (None if _intent is None else lambda: _intent.current(
                 self._return_intents.clock(), releasing=True))
-            prepared = self._prepare_room_manual_return(
-                room_id, reason, intent_current=intent_current, release_current=release_current,
-            )
-            if (isinstance(prepared, dict)
-                    and prepared.get("blockers") == ["observations_unavailable"]
-                    and self._observation_refresher is not None):
-                refresh_blocker = await self._refresh_manual_return_observations(
-                    room_id, intent_current=intent_current,
-                )
-                if refresh_blocker is not None:
-                    prepared["blockers"] = [refresh_blocker]
-                    return prepared
+
+            async def prepare(allow_stale=None):
                 prepared = self._prepare_room_manual_return(
-                    room_id, reason, intent_current=intent_current, release_current=release_current,
+                    room_id, reason, intent_current=intent_current,
+                    release_current=release_current,
+                    allow_stale_replacement=allow_stale,
                 )
+                if (isinstance(prepared, dict)
+                        and prepared.get("blockers") == ["observations_unavailable"]
+                        and self._observation_refresher is not None):
+                    refresh_blocker = await self._refresh_manual_return_observations(
+                        room_id, intent_current=intent_current,
+                    )
+                    if refresh_blocker is not None:
+                        prepared["blockers"] = [refresh_blocker]
+                        return prepared
+                    prepared = self._prepare_room_manual_return(
+                        room_id, reason, intent_current=intent_current,
+                        release_current=release_current,
+                        allow_stale_replacement=allow_stale,
+                    )
+                return prepared
+
+            prepared = await prepare()
+            if (isinstance(prepared, dict)
+                    and prepared.get("blockers") == ["return_scope_changed"]):
+                # A durable pending fence whose own recorded profile version
+                # no longer exists can never be committed.  Prove staleness
+                # from the saved profiles and let this explicit owner click
+                # replace it; without the proof the guard stays closed.
+                # The retry belongs to THIS click: a manual gesture during
+                # the profile reads below is a new action, not part of it.
+                click_boundary = (self._manual_light_authority.generation,
+                                  self._ownership.manual_return_boundary())
+                proof_generation = getattr(self._service, "configuration_generation", None)
+                staleness = await self._async_explicit_return_staleness()
+                if (staleness is not None
+                        and click_boundary == (self._manual_light_authority.generation,
+                                               self._ownership.manual_return_boundary())):
+                    # The proof is tied to the generation captured BEFORE the
+                    # profile reads: a profile change after the map was built
+                    # invalidates it.
+                    def allow_stale(old_entity_ids, old_config_version,
+                                    _map=staleness, _gen=proof_generation):
+                        if getattr(self._service, "configuration_generation", None) != _gen:
+                            return False
+                        current = _map.get(frozenset(old_entity_ids))
+                        return current is not None and current != old_config_version
+
+                    prepared = await prepare(allow_stale)
+                elif staleness is not None:
+                    prepared = {
+                        "room": room_id, "known": room_id in self._configs,
+                        "released": 0, "releasedTargets": [], "reason": reason,
+                        "at": self._now_ms(), "outcome": "blocked",
+                        "blockers": ["manual_action_or_observation_changed"],
+                        "evaluation": "not_requested",
+                    }
             if isinstance(prepared, dict):
                 return prepared
             async with self._room_lock(room_id):
+                # Synchronize with configuration changes, but never hold the
+                # global runtime lock across a room's durable I/O.
                 async with self._lock:
-                    result = await prepared()
+                    pass
+                result = await prepared()
             if result["outcome"] == "returned":
                 await self.async_process([room_id])
                 # An evaluation request is not a physical command confirmation.
                 result["evaluation"] = "requested"
             return result
         finally:
-            self._explicit_return_active = False
+            self._explicit_return_active.discard(room_id)
 
     def _observation_refresh_boundary(self, room_id: str, targets: frozenset[str]) -> tuple:
         """Retain identities and values across every observation await."""
@@ -3571,10 +3817,140 @@ class RoomLightingRuntime:
             return "manual_action_or_observation_changed"
         return None if refreshed else "observations_unavailable"
 
+    def _startup_recovery_scope(self, room_id: str) -> frozenset[str] | None:
+        """Scope of a room whose only blocker is a restart with unknown states.
+
+        Returns the room's full authority scope only when every member is
+        exactly ``restart_uncertain``, at least one member is unknown, and no
+        manual evidence (priority claim, OFF protection record, explicit
+        return in progress) exists. Anything else returns ``None``: this
+        pass never guesses and never widens.
+        """
+        config = self._configs.get(room_id)
+        if config is None or not self._running or self._observation_refresher is None:
+            return None
+        if room_id in self._explicit_return_active:
+            return None
+        from .room_lighting_ha_executor import room_manual_off_protection
+
+        authority = self._manual_light_authority
+        scope = self._room_authority_scope(config)
+        if not scope:
+            return None
+        try:
+            if any(authority.barrier_reason_for(entity) != "restart_uncertain"
+                   for entity in scope):
+                return None
+            if not any(self._entity_trusted_state(entity) == "unknown"
+                       for entity in scope):
+                return None
+            # A fresh manual gesture is exactly an active-priority record
+            # (blocking_evidence); the restart barrier itself is expected
+            # here and must not exclude the room.
+            if any(authority.blocking_evidence(entity) is not None
+                   for entity in scope):
+                return None
+            priority = self._light_priority
+            manual_claims = getattr(priority, "manual_claim_entity_ids", None)
+            if callable(manual_claims) and manual_claims(scope):
+                return None
+            off_protection = room_manual_off_protection(self._hass)
+            if off_protection.explicit_return_snapshot(room_id, scope):
+                return None
+        except Exception:
+            return None
+        return scope
+
+    async def async_startup_recovery_pass(
+        self, *, max_rooms: int = 4,
+    ) -> dict[str, object]:
+        """One bounded read-only GET round for restart-uncertain rooms.
+
+        Refreshes missing observations through the existing refresher so a
+        responsive device's real state becomes usable evidence. Authority,
+        manual protections, ownership and dispatch stay untouched: this pass
+        never releases anything and never sends commands. Window limits and
+        scheduling live at the Home Assistant edge.
+        """
+        attempted: list[str] = []
+        refreshed: list[str] = []
+        candidates = [room_id for room_id in sorted(self._configs)
+                      if self._startup_recovery_scope(room_id) is not None]
+        if not candidates:
+            self._startup_recovery_cursor = 0
+            return {"attempted": attempted, "refreshed": refreshed, "skipped": 0}
+        cursor = getattr(self, "_startup_recovery_cursor", 0) % len(candidates)
+        ordered = candidates[cursor:] + candidates[:cursor]
+        for room_id in ordered[:max(1, max_rooms)]:
+            if not self._running:
+                break
+            # Re-select immediately before each refresh: a manual gesture or
+            # a configuration change in an earlier room must exclude this one.
+            if self._startup_recovery_scope(room_id) is None:
+                continue
+            attempted.append(room_id)
+            try:
+                if await self._refresh_manual_return_observations(room_id) is None:
+                    refreshed.append(room_id)
+            except Exception:
+                _LOGGER.debug(
+                    "startup lighting recovery refresh failed for %s", room_id
+                )
+        self._startup_recovery_cursor = (
+            cursor + max(1, max_rooms)) % len(candidates)
+        if attempted:
+            _LOGGER.info(
+                "startup lighting recovery pass: attempted=%s refreshed=%s",
+                len(attempted), len(refreshed),
+            )
+        return {"attempted": attempted, "refreshed": refreshed,
+                "skipped": len(candidates) - len(attempted)}
+
+    async def _async_explicit_return_staleness(self) -> dict[frozenset[str], int] | None:
+        """Map each complete saved room profile to its entity set and version.
+
+        The map is a proof input only: every configured room must agree with
+        its durable saved profile (devices and version), and every entity set
+        must be unique.  Any disagreement leaves the caller without a proof,
+        and without a proof the stale-fence guard stays closed.  The reads
+        must all come from one configuration generation: the generation is
+        captured before the first read and re-verified after the last one,
+        so a profile change during the reads discards the whole map.
+        """
+        proof_generation = getattr(self._service, "configuration_generation", None)
+        rooms = tuple(self._configs.items())
+        mapping: dict[frozenset[str], int] = {}
+        for room_id, config in rooms:
+            saved = await self._service.async_get_config(room_id)
+            if (saved is None or saved.devices != config.devices
+                    or saved.version != config.version):
+                return None
+            entities = frozenset(target.entity_id for target in saved.devices.light_targets)
+            if not entities or entities in mapping:
+                return None
+            mapping[entities] = saved.version
+        if getattr(self._service, "configuration_generation", None) != proof_generation:
+            return None
+        return mapping or None
+
+    def manual_priority_duration_ms(self, entity_id: str, action: str) -> int:
+        from ..domain.room_lighting import manual_priority_duration_ms
+        graph = getattr(self._manual_light_authority, "related_sources", None)
+        related = (graph.related(entity_id) if graph is not None and graph.ready
+                   and entity_id in graph.components else frozenset((entity_id,)))
+        durations = [manual_priority_duration_ms(config, action)
+                     for config in self._configs.values()
+                     if any(target.entity_id in related for target in config.devices.light_targets)]
+        return max(durations, default=3600000)
+
     def _prepare_room_manual_return(
         self, room_id: str, reason: str,
         *, intent_current: Callable[[], bool] | None = None,
         release_current: Callable[[], bool] | None = None,
+        include_presence: bool = True,
+        allow_handoff: bool = True,
+        allow_stale_replacement: Callable[[frozenset[str], int], bool] | None = None,
+        selected_scope: frozenset[str] | None = None,
     ) -> dict[str, object] | Callable[[], Awaitable[dict[str, object]]]:
         from .manual_light_authority import ManualLightAuthority
         from .manual_light_off_protection import (
@@ -3606,20 +3982,36 @@ class RoomLightingRuntime:
                 or not isinstance(off_protection, ManualLightOffProtectionCoordinator)
                 or self._ownership_store is None):
             return blocked("return_participant_unavailable")
-        target_ids = tuple(config.devices.light_target_ids)
-        entities = frozenset(target.entity_id for target in config.devices.light_targets)
+        room_scope = self._room_authority_scope(config)
+        if room_scope is None and authority.barrier_reason == "return_pending":
+            return blocked("return_scope_changed")
+        entities = room_scope if selected_scope is None else selected_scope
         if not entities or any(not isinstance(entity, str) for entity in entities):
+            return blocked("attribution_uncertain")
+        if (room_scope is None or not entities <= room_scope
+                or selected_scope is not None and not self._independent_curve_ready(config)
+                or not authority._scope_is_complete(entities)):
+            return blocked("attribution_uncertain")
+        target_ids = tuple(target.id for target in config.devices.light_targets if target.entity_id in entities)
+        if not target_ids:
+            return blocked("attribution_uncertain")
+        selective_records = (frozenset(entity for entity in entities if authority.record(entity) is not None)
+                             if selected_scope is not None else None)
+        if selected_scope is not None and not selective_records:
+            # Recovery of an interrupted selective return needs preserved
+            # authority evidence for at least one member of this group.
             return blocked("attribution_uncertain")
         if self._ownership.has_legacy():
             return blocked("attribution_uncertain")
         barrier = authority.explicit_return_blocker(
             entities, config_version=config.version, all_manual=True,
+            allow_stale_replacement=allow_stale_replacement,
         )
         if barrier is not None:
             if barrier == "return_pending":
                 receipt["outcome"] = "incomplete"
             return blocked(barrier)
-        observations = self._explicit_return_observations(config)
+        observations = self._explicit_return_observations(config, include_presence=include_presence, scope=entities)
         if observations is None:
             return blocked("observations_unavailable")
         try:
@@ -3630,7 +4022,7 @@ class RoomLightingRuntime:
         configuration_generation = getattr(self._service, "configuration_generation", None)
         boundary = self._ownership.manual_return_boundary()
         authority_boundary = authority.generation
-        manual_targets = tuple(target.id for target in config.devices.light_targets
+        manual_targets = tuple(target.id for target in config.devices.light_targets if target.id in target_ids
                                if authority.record(target.entity_id) is not None
                                or target.entity_id in priority_snapshot
                                or any(target.entity_id in record["lightIds"] for record in off_snapshot.values()))
@@ -3638,7 +4030,7 @@ class RoomLightingRuntime:
         def observations_current() -> bool:
             return (getattr(self._service, "configuration_generation", None) == configuration_generation
                     and (release_current is None or release_current())
-                    and self._explicit_return_observations(config) == observations)
+                    and self._explicit_return_observations(config, include_presence=include_presence, scope=entities) == observations)
 
         def intent_is_current() -> bool:
             return (
@@ -3658,11 +4050,12 @@ class RoomLightingRuntime:
             )
 
         def release_room_history() -> tuple[str, ...] | None:
-            self._ownership.invalidate_handoffs(room_id)
+            self._ownership.invalidate_handoffs(room_id, target_ids=target_ids)
             released = self._ownership.release_room_manual_history_through(
                 room_id, target_ids, manual_targets, through_generation=boundary, all_manual=True,
             )
-            if released is not None and config.morning is not None and config.morning.enabled:
+            if (released is not None and entities == room_scope
+                    and config.morning is not None and config.morning.enabled):
                 now_dt = datetime.fromtimestamp(receipt["at"] / 1000, self._home_timezone())
                 self._ownership.mark_morning_transition(room_id, now_dt.date().isoformat(), receipt["at"])
             return released
@@ -3670,7 +4063,11 @@ class RoomLightingRuntime:
         staged_handoffs: list[OwnershipSnapshot] = []
 
         def stage_handoffs(operation_id: int) -> None:
+            if not allow_handoff:
+                return
             for target in config.devices.light_targets:
+                if target.id not in target_ids:
+                    continue
                 observation = next((item for item in observations if item[0] == target.id), None)
                 if target.auto_control and observation is not None and observation[1] == target.entity_id and observation[2] == "on":
                     state = self._entity_state_object(target.entity_id)
@@ -3691,11 +4088,13 @@ class RoomLightingRuntime:
                 result = await ManualLightAutoReturn(authority).async_return(
                     entities, all_manual=True, config_version=config.version,
                     observations_current=observations_current,
+                    allow_stale_replacement=allow_stale_replacement,
                     commit_is_current=commit_is_current,
                     room_history_is_releasable=intent_is_current,
                     release_room_history=release_room_history,
                     persist_room_history=self._persist_ownership,
                     release_is_current=release_current,
+                    release_entity_ids=selective_records,
                     stage_room_handoff=stage_handoffs,
                     release_other_histories=(
                         lambda: priority.async_release_explicit_return(
@@ -3710,7 +4109,9 @@ class RoomLightingRuntime:
                 return blocked("return_persistence_failed")
             receipt.update(outcome=result.outcome, operationId=result.operation_id)
             if result.outcome != "returned":
-                return blocked(authority.barrier_reason or "manual_action_or_observation_changed")
+                room_barrier = next((reason for entity in sorted(entities)
+                                     if (reason := authority.barrier_reason_for(entity)) is not None), None)
+                return blocked(room_barrier or "manual_action_or_observation_changed")
             if priority.manual_claim_entity_ids(entities) or off_protection.explicit_return_snapshot(room_id, entities):
                 receipt["outcome"] = "blocked"
                 return blocked("new_manual_action")
@@ -3721,20 +4122,26 @@ class RoomLightingRuntime:
 
         return execute
 
-    def _explicit_return_observations(self, config: RoomLightingConfig) -> tuple | None:
+    def _explicit_return_observations(self, config: RoomLightingConfig, *, include_presence: bool = True, scope: frozenset[str] | None = None) -> tuple | None:
         """Fresh complete observations, without turning ON into automatic ownership."""
         if not self._running or self._configs.get(config.room_id) is not config:
             return None
+        scope = self._room_authority_scope(config) if scope is None else scope
+        if not scope:
+            return None
+        target_ids = tuple(target.id for target in config.devices.light_targets if target.entity_id in scope)
         decision = self._exact_power_decision(config, self._power_dependencies())
-        if decision.unproven_target_ids or self._binding_conflicts_with_reserved_writer(
-            config, config.devices.light_target_ids,
+        if set(decision.unproven_target_ids) & set(target_ids) or self._binding_conflicts_with_reserved_writer(
+            config, target_ids,
             dependencies=decision.projection if decision.active else None,
         ):
             return None
         observed = []
         floor_provider = getattr(self._manual_light_authority, "explicit_return_observation_floor", None)
-        floor = floor_provider(target.entity_id for target in config.devices.light_targets) if callable(floor_provider) else None
+        floor = floor_provider(scope) if callable(floor_provider) else None
         for target in config.devices.light_targets:
+            if target.entity_id not in scope:
+                continue
             entity = target.entity_id
             dependency = (decision.projection or {}).get(entity)
             if dependency is not None and self._entity_trusted_state(dependency.power_source_entity_id) == "off":
@@ -3751,8 +4158,15 @@ class RoomLightingRuntime:
             if value not in {"on", "off"} or stamp is None or (floor is not None and stamp < floor):
                 return None
             observed.append((target.id, entity, value, stamp))
+        target_entities = {target.entity_id for target in config.devices.light_targets}
+        for entity in sorted(scope - target_entities):
+            value = self._entity_trusted_state(entity)
+            stamp = self._target_evidence_observed_ms(entity)
+            if value not in {"on", "off"} or stamp is None or (floor is not None and stamp < floor):
+                return None
+            observed.append(("power", entity, value, stamp))
         for sensor in config.devices.sensors:
-            if sensor.kind not in _PRESENCE_KINDS:
+            if not include_presence or sensor.kind not in _PRESENCE_KINDS:
                 continue
             value = self._entity_trusted_state(sensor.entity_id)
             stamp = self._target_evidence_observed_ms(sensor.entity_id)
@@ -3760,6 +4174,182 @@ class RoomLightingRuntime:
                 return None
             observed.append((sensor.id, sensor.entity_id, value, stamp))
         return tuple(observed)
+
+    def _timed_manual_claims(self, config: RoomLightingConfig, scope: frozenset[str] | None = None) -> tuple | None:
+        """Read each participant without treating an expired record as absent."""
+        from .timed_manual_return import ManualClaim
+        from .room_lighting_ha_executor import room_manual_off_protection
+        if self._ownership.has_legacy():
+            return None
+        authority, priority = self._manual_light_authority, self._light_priority
+        off = room_manual_off_protection(self._hass)
+        if authority is None or priority is None or off is None:
+            return None
+        entities = self._room_authority_scope(config) if scope is None else scope
+        if not entities:
+            return None
+        claims = []
+        records = self._ownership.snapshots_for(config.room_id, config.devices.light_target_ids)
+        target_entities = {target.entity_id for target in config.devices.light_targets}
+        for entity in entities - target_entities:
+            record = authority.record(entity)
+            if record is not None:
+                if record.legacy:
+                    return None
+                claims.append(ManualClaim(entity, record.action, record.observed_at_ms))
+        for target in config.devices.light_targets:
+            if target.entity_id not in entities:
+                continue
+            record = authority.record(target.entity_id)
+            if record is not None:
+                if record.legacy:
+                    return None
+                claims.append(ManualClaim(target.entity_id, record.action, record.observed_at_ms))
+            own = latest_ownership(records, target.id)
+            if own is not None and own.source is OwnershipSource.MANUAL:
+                if not own.confirmed or own.generation <= 0:
+                    return None
+                if own.turned_off and not self._ownership.newest_manual_action_is_off(config.room_id, target.id):
+                    return None
+                claims.append(ManualClaim(target.entity_id, "off" if own.turned_off else "on", own.at))
+        try:
+            protections = off.explicit_return_snapshot(config.room_id, entities)
+        except Exception:
+            return None
+        for record in protections.values():
+            try:
+                at = int(datetime.fromisoformat(record["startedAt"].replace("Z", "+00:00")).timestamp() * 1000)
+            except (KeyError, TypeError, ValueError, AttributeError):
+                return None
+            claims.extend(ManualClaim(entity, "off", at) for entity in record["lightIds"])
+        for entity, record in priority.explicit_return_snapshot(entities).items():
+            # This older marker has no direction. Include every directed
+            # journal first, so a matching OFF profile cannot become an ON.
+            # A later marker still holds until its own configured deadline.
+            if not isinstance(record, Mapping):
+                return None
+            stamp = record.get("confirmedAt")
+            if type(stamp) is not int:
+                return None
+            if not any(claim.entity_id == entity and claim.observed_at_ms >= stamp for claim in claims):
+                claims.append(ManualClaim(entity, "on", stamp))
+        return tuple(claims)
+
+    async def _async_maybe_return_manual(self, room_id: str) -> bool:
+        config = self._configs.get(room_id)
+        if config is None or not self._running or room_id in self._explicit_return_active:
+            return False
+        if not self._independent_curve_ready(config):
+            return await self._async_maybe_return_manual_scope(room_id, None)
+        graph = self._manual_light_authority.related_sources
+        groups = {graph.related(target.entity_id) for target in config.devices.light_targets}
+        returned = False
+        for scope in sorted(groups, key=lambda item: tuple(sorted(item))):
+            returned = await self._async_maybe_return_manual_scope(room_id, scope) or returned
+        return returned
+
+    async def _async_maybe_return_manual_scope(self, room_id: str, scope: frozenset[str] | None) -> bool:
+        """Expire proved room claims through the existing durable transaction.
+
+        This method never evaluates a profile or sends a light command. The
+        outer processing pass recalculates once after the transaction commits.
+        """
+        from .timed_manual_return import timed_manual_return
+        config = self._configs.get(room_id)
+        if config is None or not self._running or room_id in self._explicit_return_active:
+            return False
+        claims = self._timed_manual_claims(config, scope)
+        if claims is None:
+            return False
+        away_boundary = (self._away_return_boundary_ms if self._away
+                         and self._current_away_state(self._hass) is True else None)
+        permit = timed_manual_return(config, claims, self._now_ms(), away_boundary_ms=away_boundary)
+        if not permit.due:
+            return False
+        by_away = permit.reason == "away_return"
+        targets = tuple(target for target in config.devices.light_targets
+                        if scope is None or target.entity_id in scope)
+        def auto_on_blocked() -> bool:
+            return (self._auto_on_blocked(config, self._now_ms()) if scope is None else
+                    any(self._auto_on_blocked(config, self._now_ms(), target_id=target.id)
+                        for target in targets))
+
+        if (not by_away and permit.has_off and config.manual_off_protection.enabled
+                and config.manual_off_protection.release_mode.value != "timer_only"
+                and auto_on_blocked()):
+            return False
+        authority = self._manual_light_authority
+        entities = self._room_authority_scope(config) if scope is None else scope
+        if not entities:
+            return False
+        if any(authority.barrier_reason_for(entity) not in {None, "restart_uncertain"}
+               for entity in entities):
+            # Only a new explicit user intent may resume a partial return.
+            # A clock tick never retries a durable pending transaction.
+            return False
+        if authority.explicit_return_blocker(entities, config_version=config.version, all_manual=True):
+            return False
+        lifecycle = (self._started_at, self._unobserved_since, self._away_generation)
+        boundary = self._observation_refresh_boundary(room_id, entities)
+        dependencies = copy.deepcopy(self._power_dependencies())
+        generation = getattr(self._service, "configuration_generation", None)
+
+        def current() -> bool:
+            return (self._running and self._configs.get(room_id) is config
+                    and lifecycle == (self._started_at, self._unobserved_since, self._away_generation)
+                    and generation == getattr(self._service, "configuration_generation", None)
+                    and dependencies == self._power_dependencies()
+                    and authority.generation == boundary[0]
+                    and self._ownership.manual_return_boundary() == boundary[1]
+                    and (by_away or not permit.has_off
+                         or not config.manual_off_protection.enabled
+                         or config.manual_off_protection.release_mode.value == "timer_only"
+                         or not auto_on_blocked())
+                    and (not by_away or (self._away
+                         and self._away_return_boundary_ms == away_boundary
+                         and self._current_away_state(self._hass) is True)))
+
+        key = (id(config), claims, lifecycle, boundary,
+               tuple(self._target_evidence_observed_ms(entity) for entity in sorted(entities)))
+        attempt_id = room_id if scope is None else (room_id, tuple(sorted(scope)))
+        if self._timed_return_attempts.get(attempt_id) == key:
+            return False
+        self._timed_return_attempts[attempt_id] = key
+        self._explicit_return_active.add(room_id)
+        try:
+            if self._explicit_return_observations(config, include_presence=False, scope=entities) is None:
+                if scope is not None:
+                    return False  # A different group's stale observation must not block this group.
+                if self._observation_refresher is None:
+                    return False
+                if await self._refresh_manual_return_observations(room_id, intent_current=current) is not None:
+                    return False
+            if not current():
+                return False
+            # A timer for one light cannot adopt a different, unattributed ON.
+            for target in targets:
+                own = latest_ownership(self._control_ownership_for(config), target.id)
+                if (self._entity_trusted_state(target.entity_id) == "on"
+                        and not any(claim.entity_id == target.entity_id for claim in claims)
+                        and (own is None or own.source not in {OwnershipSource.AUTO, OwnershipSource.EXPLICIT_HANDOFF})):
+                    return False
+            async with self._room_lock(room_id):
+                async with self._lock:
+                    prepared = self._prepare_room_manual_return(
+                        room_id, permit.reason, intent_current=lambda: current() and self._timed_manual_claims(config, scope) == claims,
+                        release_current=current, include_presence=False, allow_handoff=False,
+                        selected_scope=scope,
+                    )
+                result = prepared if isinstance(prepared, dict) else await prepared()
+            if result["outcome"] == "returned":
+                self._timed_return_attempts.pop(attempt_id, None)
+                if by_away and current():
+                    self._away_off_boundaries[room_id] = (config, self._away_manual_boundary(config))
+                _LOGGER.info("room manual priority returned by configured policy for %s", room_id)
+                return True
+            return False
+        finally:
+            self._explicit_return_active.discard(room_id)
 
     # -- evaluation --------------------------------------------------------
 
@@ -3780,20 +4370,80 @@ class RoomLightingRuntime:
                 if room_ids is None
                 else tuple(room for room in room_ids if room in self._configs)
             )
-        for room_id in selected:
+        async def process_one(room_id: str) -> None:
             if not self._running:
-                break
+                return
             try:
+                await self._async_maybe_return_manual(room_id)
                 ready = await self._refresh_scheduled_morning(room_id)
-            except Exception:  # One failed observation must not stop other rooms.
-                _LOGGER.warning("Room lighting morning observation preflight failed")
-                continue
-            if not ready:
-                continue
-            if not await self._refresh_stale_handoff_observations(room_id):
-                continue
-            await self._process_room_locked(room_id)
+                if not ready:
+                    return
+                if not await self._refresh_stale_handoff_observations(room_id):
+                    return
+                await self._refresh_manual_absence_targets(room_id)
+                await self._process_room_locked(room_id)
+            except Exception:
+                # A broken room must neither cancel nor detach other rooms.
+                _LOGGER.exception("Room lighting processing failed for %s", room_id)
+        await asyncio.gather(*(process_one(room_id) for room_id in selected))
         await self._persist_ownership()
+
+    async def _refresh_manual_absence_targets(self, room_id: str) -> None:
+        """GET a stale opted-in target only after absence is independently proven."""
+        from ..domain.room_lighting_engine import _manual_on_absence_off_due
+
+        config = self._configs.get(room_id)
+        refresh = getattr(self._observation_refresher, "refresh_confirmation", None)
+        authority = self._manual_light_authority
+        if (config is None or config.profile == "day_curve" or self._hass is None
+                or not callable(refresh) or authority is None or self._light_priority is None
+                or not self._automatic_commands_enabled(config)):
+            return
+        context = await self._build_context(config, self._now_ms())
+        policy = EnginePolicy.from_config(config)
+        local_time = datetime.fromtimestamp(context.now / 1000, context.timezone).time()
+        for target in config.devices.light_targets:
+            entity = target.entity_id
+            if not target.auto_off_manual_on_absence or not isinstance(entity, str):
+                continue
+            trusted, known, _ = self._target_trust(entity)
+            light = context.light(target.id)
+            manual = authority.record(entity)
+            if (trusted or known != "on" or light is None or manual is None
+                    or manual.action != "on" or manual.legacy
+                    or not authority.has_durable_import({entity})
+                    or authority.blocks_departure_off(entity)):
+                continue
+            hypothetical = replace(context, lights=tuple(
+                replace(item, state=SensorState.ON) if item.target_id == target.id else item
+                for item in context.lights))
+            if not _manual_on_absence_off_due(config, target, hypothetical, policy, local_time):
+                continue
+            key = (room_id, entity)
+            boundary = self._away_manual_boundary(config)
+            lifecycle = (self._started_at, self._unobserved_since)
+            attempt = (id(config), manual, boundary, lifecycle, context.sensors)
+            if key in self._manual_absence_refresh_active or self._manual_absence_refresh_attempts.get(key) == attempt:
+                continue
+            self._manual_absence_refresh_attempts[key] = attempt
+            self._manual_absence_refresh_active.add(key)
+
+            def current() -> bool:
+                try:
+                    return (self._running and self._configs.get(room_id) is config
+                            and (self._started_at, self._unobserved_since) == lifecycle
+                            and self._away_manual_boundary(config) == boundary
+                            and authority.record(entity) == manual
+                            and not authority.blocks_departure_off(entity))
+                except Exception:
+                    return False
+
+            try:
+                await refresh(entity, current)
+            except Exception:
+                _LOGGER.warning("Manual absence target refresh failed for %s", room_id)
+            finally:
+                self._manual_absence_refresh_active.discard(key)
 
     async def _refresh_stale_handoff_observations(self, room_id: str) -> bool:
         """Renew physical evidence, not automatic authority, before recalculation.
@@ -4066,6 +4716,8 @@ class RoomLightingRuntime:
                         absence_seconds=absence_seconds,
                         motion_preview=motion_preview,
                         motion_rejected=motion_rejected,
+                        independent_targets=self._independent_curve_ready(config),
+                        target_protections=self._curve_target_protections(config),
                     )
             else:
                 decision = evaluate_room_lighting(config, context)
@@ -4909,6 +5561,10 @@ class RoomLightingRuntime:
 
         if self._hass is None:
             return []
+        # Planning can yield before reaching dispatch. Refresh the authority
+        # graph against the current map again before taking the command's
+        # dependency snapshot; the final executor guard checks it once more.
+        self._refresh_exact_power_index()
         dependencies = self._power_dependencies()
         exact = self._exact_power_decision(config, dependencies)
         exact_dependencies = exact.projection if exact.active else None
@@ -4964,7 +5620,7 @@ class RoomLightingRuntime:
                 current = await self._build_context(config, self._now_ms())
                 if (
                     command.target_id in failed_curve_targets
-                    or (curve_profile_block_reason(config, current) is not None
+                    or (self._curve_command_block_reason(config, current, command) is not None
                         and not self._away_off_is_current(config, command))
                 ):
                     receipt["reason"] = "profile_blocked"
@@ -4978,6 +5634,8 @@ class RoomLightingRuntime:
                     refreshed = evaluate_curve_room(
                         config, current, presence=presence,
                         presence_confirmed=confirmed, absence_seconds=absence_seconds,
+                        independent_targets=self._independent_curve_ready(config),
+                        target_protections=self._curve_target_protections(config),
                     )
                     if command not in refreshed.commands:
                         receipt["reason"] = "superseded"
@@ -5008,7 +5666,7 @@ class RoomLightingRuntime:
                 continue
             if (
                 command.action is not LightAction.TURN_OFF
-                and self._auto_on_blocked(config, moment)
+                and self._auto_on_blocked(config, moment, target_id=command.target_id)
             ):
                 # Core race guard: a manual switch-off owns the room until its
                 # protection window releases. The automatic branch must never
@@ -5106,13 +5764,13 @@ class RoomLightingRuntime:
                     receipt["reason"] = "reserved_command_target"
                     receipts.append(receipt)
                     continue
-                if self._auto_on_blocked(config, self._now_ms()):
+                if self._auto_on_blocked(config, self._now_ms(), target_id=command.target_id):
                     receipt["reason"] = "manual_off_protection"
                     receipts.append(receipt)
                     continue
                 if config.profile == "day_curve":
                     current = await self._build_context(config, self._now_ms())
-                    if curve_profile_block_reason(config, current) is not None:
+                    if self._curve_command_block_reason(config, current, command) is not None:
                         receipt["reason"] = "profile_blocked"
                         receipts.append(receipt)
                         continue
@@ -5180,13 +5838,13 @@ class RoomLightingRuntime:
                     receipt["reason"] = "reserved_command_target"
                     receipts.append(receipt)
                     continue
-                if self._auto_on_blocked(config, self._now_ms()):
+                if self._auto_on_blocked(config, self._now_ms(), target_id=command.target_id):
                     receipt["reason"] = "manual_off_protection"
                     receipts.append(receipt)
                     continue
                 if config.profile == "day_curve":
                     current = await self._build_context(config, self._now_ms())
-                    if curve_profile_block_reason(config, current) is not None:
+                    if self._curve_command_block_reason(config, current, command) is not None:
                         receipt["reason"] = "profile_blocked"
                         receipts.append(receipt)
                         continue
@@ -5227,12 +5885,16 @@ class RoomLightingRuntime:
                 receipt["reason"] = "reserved_command_target"
                 receipts.append(receipt)
                 continue
+            absence_checks = await self._manual_absence_off_permit(config, command)
+            manual_absence_permit = None if absence_checks is None else absence_checks[0]
+            manual_absence_confirm = None if absence_checks is None else absence_checks[1]
             if command.action is LightAction.TURN_OFF:
                 turn_off_block = self._turn_off_dispatch_block_reason(
                     config,
                     command,
                     entity_id,
                     revision_before,
+                    manual_absence_permit=manual_absence_permit,
                 )
                 if turn_off_block is not None:
                     receipt["reason"] = turn_off_block
@@ -5375,6 +6037,23 @@ class RoomLightingRuntime:
                         current = await self._build_context(
                             profile_config, self._now_ms()
                         )
+                        # A confirmed OFF of the paired supply was captured
+                        # before we restored power. The bulb may still carry
+                        # its old, untrusted ON report while it boots. Preserve
+                        # that one-target proof through the planning recheck;
+                        # newer target evidence or a trusted ON always wins.
+                        if (pair_power_off and entity_id is not None
+                                and command.action is LightAction.TURN_ON
+                                and command.target_id == self._pair_main_target_id(profile_config)
+                                and self._target_evidence_revision(entity_id) == revision_before):
+                            trusted, last_known, _ = self._target_trust(entity_id)
+                            if not trusted and last_known == "on":
+                                current = replace(current, lights=tuple(
+                                    replace(light, state=SensorState.OFF, reported_state=None)
+                                    if light.target_id == command.target_id
+                                    and light.state is not SensorState.ON else light
+                                    for light in current.lights
+                                ))
                         post_pending_profile_block = (
                             self._post_pending_curve_profile_block_reason(
                                 profile_config,
@@ -5416,6 +6095,7 @@ class RoomLightingRuntime:
                     operation_moment=moment,
                     allow_legacy_unpowered_recheck=legacy_unpowered_assumed_off,
                     pair_power_off=pair_power_off,
+                    manual_absence_permit=manual_absence_permit,
                 )
                 if post_pending_profile_block is not None:
                     post_pending_block = post_pending_profile_block
@@ -5467,7 +6147,7 @@ class RoomLightingRuntime:
                             self._dispatch_failures.pop(failure_key, None)
                         receipts.append(receipt)
                     continue
-            if self._manual_priority_blocks(config, command):
+            if self._manual_priority_blocks(config, command, manual_absence_permit=manual_absence_permit):
                 self._restore_unsent_command_markers(
                     entity_id,
                     service_name,
@@ -5482,6 +6162,10 @@ class RoomLightingRuntime:
                 continue
             result: object | None = None
             manual_boundary = self._manual_dispatch_boundary(config)
+            completion_boundary = (self._away_manual_boundary(config)
+                                   if manual_absence_permit is not None and manual_absence_permit() else None)
+            completion_manual = (self._manual_light_authority.record(entity_id)
+                                 if completion_boundary is not None and entity_id is not None else None)
             try:
                 if command.reason is DecisionReason.AWAY:
                     execute_away = getattr(self._executor, "execute_away_off", None)
@@ -5496,7 +6180,26 @@ class RoomLightingRuntime:
                 else:
                     guard = ({"dispatch_guard": lambda: self._running and (
                         permission is None or self._dispatch_permission_valid(permission)
-                    ), "room_id": config.room_id} if isinstance(self._executor, RoomLightingHaExecutor) else {})
+                    ) and self._power_dependencies() == dependencies
+                        and (
+                            # The confirm-side check survives the OFF's own
+                            # state flip and is final for this attempt: stale
+                            # absence evidence blocks the confirmation even
+                            # when generic manual priority has expired. The
+                            # ON-only permit stays at the service boundary
+                            # and in the pre-send gates.
+                            manual_absence_confirm()
+                            if manual_absence_confirm is not None
+                            else not self._manual_priority_blocks(
+                                config, command,
+                                manual_absence_permit=manual_absence_permit)),
+                        "room_id": config.room_id} if isinstance(self._executor, RoomLightingHaExecutor) else {})
+                    if guard and manual_absence_permit is not None:
+                        # The exception is scoped to this OFF and rechecked at
+                        # the service boundary. Read-back may legitimately turn
+                        # the target OFF, so do not reuse that ON-only guard there.
+                        guard.update(automatic=False, pre_dispatch_guard=manual_absence_permit,
+                                     confirmation_read=True)
                     result = await self._executor.execute(  # type: ignore[attr-defined]
                         self._hass, command, **guard
                     )
@@ -5528,7 +6231,8 @@ class RoomLightingRuntime:
                     (permission is not None and not self._dispatch_permission_valid(permission))
                     or
                     self._manual_dispatch_boundary(config) != manual_boundary
-                    or self._manual_priority_blocks(config, command)
+                    or (completion_boundary is None and self._manual_priority_blocks(config, command))
+                    or (completion_boundary is not None and self._away_manual_boundary(config) != completion_boundary)
                 ):
                     # Delivery is proved, but a newer manual choice owns the
                     # light. A late own report cannot grant automatic rights.
@@ -5538,6 +6242,15 @@ class RoomLightingRuntime:
                         else "manual_superseded"
                     )
                     receipt["ownershipChanged"] = "none"
+                elif manual_absence_permit is not None:
+                    # The OFF does not turn a person's earlier ON into AUTO ownership.
+                    receipt["reason"] = "confirmed"
+                    receipt["ownershipChanged"] = "none"
+                    if (completion_boundary is not None and completion_manual is not None
+                            and target is not None):
+                        completed = await self._complete_manual_absence_off(
+                            config, target, completion_manual, completion_boundary)
+                        receipt["manualReturn"] = "returned" if completed else "held"
                 else:
                     receipt["reason"] = "confirmed"
                     receipt["ownershipChanged"] = "auto"
@@ -5611,6 +6324,7 @@ class RoomLightingRuntime:
         command: PlannedCommand,
         entity_id: str | None,
         revision_before: str,
+        *, manual_absence_permit: Callable[[], bool] | None = None,
     ) -> str | None:
         """Final proof before automatic turn_off reaches Home Assistant.
 
@@ -5633,6 +6347,8 @@ class RoomLightingRuntime:
             return "dispatch_evidence_changed"
         if command.reason is DecisionReason.AWAY:
             return None if self._away_off_is_current(config, command) else "away_intent_changed"
+        if manual_absence_permit is not None and manual_absence_permit():
+            return None
         records = self._control_ownership_for(config)
         latest = latest_ownership(records, command.target_id)
         if latest is None:
@@ -5674,13 +6390,19 @@ class RoomLightingRuntime:
             pair_power_off = False
         if entity_id is None:
             return "target_unavailable"
-        if self._auto_on_blocked(config, self._now_ms()):
+        if self._auto_on_blocked(config, self._now_ms(), target_id=command.target_id):
             return "manual_off_protection"
+        authority = self._manual_light_authority
+        graph = authority.related_sources if (authority is not None and
+                self._independent_curve_ready(config)) else None
+        scope = authority.manual_event_scope(entity_id) if graph is not None else None
         manual_peer = self._manual_peer_turn_on_block_reason(
             config,
             command,
             dependencies=dependencies,
             exact_active=exact_active,
+            related_sources=graph,
+            related_scope=scope,
         )
         if manual_peer is not None:
             return manual_peer
@@ -5736,18 +6458,25 @@ class RoomLightingRuntime:
         *,
         dependencies: Mapping[str, DevicePowerDependency] | None,
         exact_active: bool,
+        related_sources: object | None = None,
+        related_scope: tuple[tuple[str, int, int], ...] | None = None,
     ) -> str | None:
         """Block a TURN_ON when a person just chose an interchangeable peer."""
 
         target = config.devices.target(command.target_id)
         if target is None:
             return None
+        authority = getattr(self, "_manual_light_authority", None)
+        matches = getattr(authority, "scope_matches_graph", None)
+        if (related_sources is not None and
+                (not callable(matches) or not matches(target.entity_id, related_sources, related_scope))):
+            return "related_scope_uncertain"
         records = self._ownership.snapshots_for(
             config.room_id, config.devices.light_target_ids
         )
         for peer in config.devices.light_targets:
             if peer.id == target.id or not self._targets_interchangeable(
-                config, target, peer
+                config, target, peer, related_sources=related_sources
             ):
                 continue
             latest = latest_ownership(records, peer.id)
@@ -5771,7 +6500,28 @@ class RoomLightingRuntime:
         config: RoomLightingConfig,
         target: object,
         peer: object,
+        *,
+        related_sources: object | None = None,
     ) -> bool:
+        if related_sources is not None:
+            from .related_light_sources import RelatedLightSources
+            if not isinstance(related_sources, RelatedLightSources) or not related_sources.ready:
+                return True
+            target_entity = getattr(target, "entity_id", None)
+            peer_entity = getattr(peer, "entity_id", None)
+            components = related_sources.components
+            if (not isinstance(target_entity, str) or not isinstance(peer_entity, str)
+                    or target_entity not in components or peer_entity not in components):
+                return True
+            target_group = components[target_entity]
+            peer_group = components[peer_entity]
+            if (not isinstance(target_group, frozenset) or not isinstance(peer_group, frozenset)
+                    or any(not isinstance(item, str) for item in target_group | peer_group)
+                    or target_entity not in target_group or peer_entity not in peer_group
+                    or any(components.get(entity) != target_group for entity in target_group)
+                    or any(components.get(entity) != peer_group for entity in peer_group)):
+                return True
+            return peer_entity in target_group
         if config.profile == "day_curve":
             return True
         target_group = getattr(target, "group_id", None)
@@ -5808,7 +6558,7 @@ class RoomLightingRuntime:
 
         if entity_id is None:
             return "target_unavailable"
-        if self._auto_on_blocked(config, self._now_ms()):
+        if self._auto_on_blocked(config, self._now_ms(), target_id=command.target_id):
             return "manual_off_protection"
         records = self._control_ownership_for(config)
         latest = latest_ownership(records, command.target_id)
@@ -5868,7 +6618,7 @@ class RoomLightingRuntime:
     ) -> str | None:
         """Re-evaluate the day-curve profile after pending-save interleaving."""
 
-        if (curve_profile_block_reason(config, current) is not None
+        if (self._curve_command_block_reason(config, current, command) is not None
                 and not self._away_off_is_current(config, command)):
             return "profile_blocked"
         presence = self._curve_presence_state(current)
@@ -5890,6 +6640,8 @@ class RoomLightingRuntime:
             absence_seconds=absence_seconds,
             motion_preview=motion_preview,
             motion_rejected=motion_rejected,
+            independent_targets=self._independent_curve_ready(config),
+            target_protections=self._curve_target_protections(config),
         )
         if command not in refreshed.commands:
             return "superseded"
@@ -5954,6 +6706,7 @@ class RoomLightingRuntime:
         operation_moment: int,
         allow_legacy_unpowered_recheck: bool = False,
         pair_power_off: bool = False,
+        manual_absence_permit: Callable[[], bool] | None = None,
     ) -> str | None:
         """Final synchronous permit check after durable pending and before executor.
 
@@ -5976,7 +6729,7 @@ class RoomLightingRuntime:
             config, command, dependencies=dependencies if exact_active else None
         ):
             return "reserved"
-        if self._manual_priority_blocks(config, command):
+        if self._manual_priority_blocks(config, command, manual_absence_permit=manual_absence_permit):
             return "manual_light_priority"
         if command.action is LightAction.TURN_OFF:
             return self._turn_off_dispatch_block_reason(
@@ -5984,6 +6737,7 @@ class RoomLightingRuntime:
                 command,
                 entity_id,
                 revision_before,
+                manual_absence_permit=manual_absence_permit,
             )
         if command.action is LightAction.TURN_ON:
             return self._turn_on_dispatch_block_reason(
@@ -6011,8 +6765,16 @@ class RoomLightingRuntime:
             )
         return "unsupported_action"
 
-    def _auto_on_blocked(self, config: RoomLightingConfig, moment: int) -> bool:
-        protection = self._protection_for(config)
+    def _auto_on_blocked(
+        self, config: RoomLightingConfig, moment: int, *, target_id: str | None = None,
+    ) -> bool:
+        protection = (self._target_protection(config, target_id)
+                      if target_id is not None else self._protection_for(config))
+        if (protection.active and protection.release_mode != "timer_only"
+                and any(self._entity_trusted_state(sensor.entity_id) == "unknown"
+                        for sensor in config.devices.sensors
+                        if sensor.kind in _PRESENCE_KINDS)):
+            return True
         return protection.blocks_auto_on(
             now=moment,
             absence_proven=protection.absence_confirmed,
@@ -6555,18 +7317,34 @@ class RoomLightingRuntime:
         return state is not None and str(getattr(state, "state", "")).lower() == "on"
 
     async def _reconcile_manual_restart(self, config: RoomLightingConfig) -> bool:
+        scope = self._room_authority_scope(config)
+        if not scope:
+            return False
+        if not self._independent_topology_ready(config):
+            return await self._reconcile_manual_restart_scope(config, scope, selective=False)
+        graph = self._manual_light_authority.related_sources
+        groups = {graph.related(target.entity_id) for target in config.devices.light_targets}
+        recovered = False
+        for group in sorted(groups, key=lambda item: tuple(sorted(item))):
+            if group <= scope:
+                recovered = await self._reconcile_manual_restart_scope(config, group, selective=True) or recovered
+        return recovered
+
+    async def _reconcile_manual_restart_scope(self, config: RoomLightingConfig, entities: frozenset[str], *, selective: bool) -> bool:
         """Provide live group evidence to the shared deny-only recovery owner."""
         authority = self._manual_light_authority
         reconcile = getattr(authority, "async_reconcile_restart", None)
         if not callable(reconcile):
             return False
-        entities = tuple(target.entity_id for target in config.devices.light_targets)
+        recover_selective = getattr(authority, "async_recover_selective_return", None)
+        if callable(recover_selective):
+            await recover_selective(entities)
         sensor_proof: tuple[tuple[object, ...], ...] | None = None
 
-        def observe_off() -> Mapping[str, int] | None:
+        def absence_ready() -> bool:
             nonlocal sensor_proof
             if not self._running or self._configs.get(config.room_id) is not config:
-                return None
+                return False
             relevant = [sensor for sensor in config.devices.sensors
                         if sensor.kind in _PRESENCE_KINDS]
             if relevant:
@@ -6576,7 +7354,7 @@ class RoomLightingRuntime:
                 for sensor in relevant:
                     value = self._entity_trusted_state(sensor.entity_id)
                     if value == "unknown":
-                        return None
+                        return False
                     state = self._entity_state_object(sensor.entity_id)
                     changed = _last_changed_ms(state, now=now)
                     snapshots.append(SensorSnapshot(
@@ -6587,27 +7365,34 @@ class RoomLightingRuntime:
                                      self._state_observed_ms(state)))
                 current_proof = tuple(evidence)
                 if sensor_proof is not None and current_proof != sensor_proof:
-                    return None
+                    return False
                 # Use the ordinary absence transition, including the exact
                 # return moment and new-OFF start. The room snapshot may lag
                 # a live event while this room is awaiting durable storage.
                 self._observe_absence_sensors(config, tuple(snapshots), now)
                 absence = self._absence.get(config.room_id)
                 if absence is None or not absence[0] or absence[1] is None:
-                    return None
+                    return False
                 end = absence[2] if absence[2] is not None else now
                 if (self._started_at is None or absence[1] < self._started_at
                         or end - absence[1]
                         < config.manual_off_protection.stable_absence_seconds * 1000):
-                    return None
+                    return False
                 sensor_proof = current_proof
             elif config.manual_off_protection.release_mode.value != "timer_only":
+                return False
+            return True
+
+        def observe_off() -> Mapping[str, int] | None:
+            if not absence_ready():
                 return None
             result: dict[str, int] = {}
             dependencies = self._power_dependencies()
             decision = self._exact_power_decision(config, dependencies)
             for target in config.devices.light_targets:
                 entity = target.entity_id
+                if entity not in entities:
+                    continue
                 if entity is None or target.id in decision.unproven_target_ids:
                     return None
                 observed_entity = entity
@@ -6627,11 +7412,43 @@ class RoomLightingRuntime:
                 if stamp is None:
                     return None
                 result[entity] = stamp
+            target_entities = {target.entity_id for target in config.devices.light_targets}
+            for source in entities - target_entities:
+                source_state = self._entity_trusted_state(source)
+                if source_state != "off" and not (
+                    selective and source_state == "on"
+                    and all(self._entity_trusted_state(target.entity_id) == "off"
+                            and self._target_evidence_observed_ms(target.entity_id) is not None
+                            for target in config.devices.light_targets if target.entity_id in entities)
+                ):
+                    return None
+                stamp = self._target_evidence_observed_ms(source)
+                if stamp is None:
+                    return None
+                result[source] = stamp
             return result
 
         recovered = await reconcile(
             entities, version=config.version, observe_off=observe_off, now_ms=self._now_ms,
         )
+        if (not recovered and not selective and self._observation_refresher is not None
+                and callable(getattr(self._light_priority, "explicit_return_snapshot", None))
+                and entities and absence_ready()
+                and all(authority.barrier_reason_for(entity) == "restart_uncertain"
+                        for entity in entities)
+                and any(self._entity_trusted_state(entity) == "unknown" for entity in entities)
+                and observe_off() is None):
+            previous = self._restart_refresh_attempts.get(config.room_id)
+            now = self._now_ms()
+            if previous is None or previous[0] is not config or now - previous[1] >= 300_000:
+                self._restart_refresh_attempts[config.room_id] = (config, now)
+                if await self._refresh_manual_return_observations(
+                    config.room_id, intent_current=absence_ready,
+                ) is None and absence_ready():
+                    recovered = await reconcile(
+                        entities, version=config.version, observe_off=observe_off,
+                        now_ms=self._now_ms,
+                    )
         if recovered:
             _LOGGER.info("room lighting restart recovery verified for %s", config.room_id)
         return recovered
@@ -7036,16 +7853,109 @@ class RoomLightingRuntime:
             config.room_id,
         )
 
-    def _rebuild_index(self) -> None:
+    def _related_sources_for_configs(
+        self, dependencies: Mapping[str, DevicePowerDependency] | None,
+    ) -> object:
+        """Isolate rooms only when their existing topology gate proves them."""
         from .related_light_sources import RelatedLightSources
+        projections = {}
+        for config in self._configs.values():
+            decision = self._exact_power_decision(config, dependencies)
+            projections[config.room_id] = (
+                decision.projection
+                if dependencies is not None and decision.active and not decision.incomplete
+                else None
+            )
+        base = RelatedLightSources.from_room_projections(
+            self._configs.values(), projections, fallback_dependencies=dependencies)
+        if not base.ready:
+            return base
+        # Wiring completeness never proves single-device-ness; ask the
+        # registry-backed provider for the entities that are one device.
+        # A provider failure means no evidence, never an error path.
+        try:
+            evidence = self._single_entity_evidence(tuple(base.components))
+        except Exception:
+            evidence = frozenset()
+        return RelatedLightSources.from_room_projections(
+            self._configs.values(), projections, fallback_dependencies=dependencies,
+            proven_single_entities=evidence)
+
+    def _room_authority_scope(self, config: RoomLightingConfig) -> frozenset[str] | None:
+        """Include complete physical components without taking another room's light."""
+        targets = frozenset(target.entity_id for target in config.devices.light_targets)
+        if not targets or any(not isinstance(entity, str) for entity in targets):
+            return None
+        authority = self._manual_light_authority
+        if authority is None:
+            return targets
+        graph = getattr(authority, "related_sources", None)
+        if graph is None or not graph.ready or any(entity not in graph.components for entity in targets):
+            return None
+        scope = frozenset().union(*(graph.related(entity) for entity in targets))
+        other_targets = {target.entity_id for room_id, room in self._configs.items()
+                         if room_id != config.room_id for target in room.devices.light_targets}
+        return None if scope & other_targets else scope
+
+    def _independent_topology_ready(self, config: RoomLightingConfig) -> bool:
+        """Use component scopes only while the proved physical graph matches."""
+        authority = self._manual_light_authority
+        dependencies = self._power_dependencies()
+        if authority is None or dependencies is None:
+            return False
+        decision = self._exact_power_decision(config, dependencies)
+        graph = getattr(authority, "related_sources", None)
+        return bool(decision.active and not decision.incomplete
+                    and getattr(graph, "ready", False)
+                    and graph == self._related_sources_for_configs(dependencies))
+
+    def _independent_curve_ready(self, config: RoomLightingConfig) -> bool:
+        return (self._independent_topology_ready(config)
+                and self._manual_light_authority.barrier_reason in (None, "return_pending"))
+
+    def _curve_command_block_reason(
+        self, config: RoomLightingConfig, context: RoomLightingContext,
+        command: PlannedCommand,
+    ) -> object:
+        if self._independent_curve_ready(config):
+            target_context = replace(context, protection=self._target_protection(config, command.target_id))
+            return curve_target_block_reason(config, target_context, command.target_id)
+        return curve_profile_block_reason(config, context)
+
+    def _target_protection(self, config: RoomLightingConfig, target_id: str) -> ProtectionSnapshot:
+        """Use the proved physical group; unknown topology keeps the room guard."""
+        if not self._independent_curve_ready(config):
+            return self._protection_for(config)
+        target = config.devices.target(target_id)
+        graph = self._manual_light_authority.related_sources
+        entity = getattr(target, "entity_id", None)
+        if not isinstance(entity, str) or entity not in graph.components:
+            return self._protection_for(config)
+        group = graph.related(entity)
+        ids = tuple(item.id for item in config.devices.light_targets if item.entity_id in group)
+        return self._protection_for(config, target_ids=ids)
+
+    def _curve_target_protections(self, config: RoomLightingConfig) -> dict[str, ProtectionSnapshot] | None:
+        if not self._independent_curve_ready(config):
+            return None
+        return {target.id: self._target_protection(config, target.id)
+                for target in config.devices.light_targets}
+
+    def _rebuild_index(self) -> None:
         authority = self._manual_light_authority
         if authority is not None:
-            authority.set_related_sources(RelatedLightSources.from_configs(self._configs.values()))
+            authority.set_related_sources(self._related_sources_for_configs(self._power_dependencies()))
             register = getattr(authority, "register_recovery_scope", None)
             if callable(register):
                 for config in self._configs.values():
-                    register((target.entity_id for target in config.devices.light_targets),
-                             config.version)
+                    scope = self._room_authority_scope(config)
+                    if scope is not None:
+                        register(scope, config.version)
+                        if self._independent_topology_ready(config):
+                            for target in config.devices.light_targets:
+                                group = authority.related_sources.related(target.entity_id)
+                                if group <= scope:
+                                    register(group, config.version)
         rooms_by_entity: EntityRooms = {}
         entry_by_entity: EntityRooms = {}
         targets_by_entity: dict[str, tuple[str, str]] = {}
@@ -7417,6 +8327,20 @@ class RoomLightingRuntime:
         """Re-read the durable map and keep the event index in sync with it."""
 
         dependencies = self._power_dependencies()
+        authority = self._manual_light_authority
+        if authority is not None:
+            authority.set_related_sources(self._related_sources_for_configs(dependencies))
+            register = getattr(authority, "register_recovery_scope", None)
+            if callable(register):
+                for config in self._configs.values():
+                    scope = self._room_authority_scope(config)
+                    if scope is not None:
+                        register(scope, config.version)
+                        if self._independent_topology_ready(config):
+                            for target in config.devices.light_targets:
+                                group = authority.related_sources.related(target.entity_id)
+                                if group <= scope:
+                                    register(group, config.version)
         exact_rooms: dict[str, set[str]] = {}
         if dependencies is not None:
             for room_id, config in self._configs.items():
@@ -7696,17 +8620,36 @@ class RoomLightingRuntime:
                 value,
             )
 
-    def _protection_for(self, config: RoomLightingConfig) -> ProtectionSnapshot:
+    def _protection_for(
+        self, config: RoomLightingConfig, *, target_ids: tuple[str, ...] | None = None,
+    ) -> ProtectionSnapshot:
+        """Build a snapshot; a supplied scope must already be physically proved.
+
+        Invalid scopes retain the room-wide guard. This helper does not prove
+        pair membership or protect events from an upstream power switch.
+        """
         if not config.manual_off_protection.enabled:
-            return ProtectionSnapshot()
+            return ProtectionSnapshot(minimum_interval_seconds=0, release_mode="timer_only", require_directed_off=True)
         protection = config.manual_off_protection
         absence_confirmed, absence_since, absence_until = self._absence.get(
             config.room_id, (False, None, None)
         )
-        started_at = self._ownership.last_manual_off_at(
-            config.room_id,
-            (target.id for target in config.devices.light_targets),
-        )
+        room_targets = frozenset(target.id for target in config.devices.light_targets)
+        scoped = bool(isinstance(target_ids, tuple) and target_ids
+                      and all(isinstance(item, str) and item in room_targets for item in target_ids))
+        selected = target_ids if scoped else room_targets
+        started_at = self._ownership.last_manual_off_at(config.room_id, selected)
+        absence_latch = config.room_id in self._absence_release_latch
+        if scoped:
+            # The room latch is usable only if its observation floor proves
+            # the completed absence started no earlier than this scope's OFF.
+            # Every new room manual action clears the latch before moving the
+            # floor; restart also clears it and establishes a fresh floor.
+            manual_floor = getattr(self, "_manual_absence_floor", {}).get(config.room_id)
+            start_floor = getattr(self, "_started_at", None)
+            floors = [value for value in (manual_floor, start_floor) if type(value) is int]
+            absence_latch = (absence_latch and started_at is not None
+                             and bool(floors) and max(floors) >= started_at)
         if started_at is None:
             # No manual-off anchor: the protection itself is inactive, but the
             # room's real absence evidence must still reach the ownership
@@ -7721,9 +8664,7 @@ class RoomLightingRuntime:
                 absence_confirmed=absence_confirmed,
                 absence_since=absence_since,
                 absence_until=absence_until,
-                absence_latch=(
-                    config.room_id in self._absence_release_latch
-                ),
+                absence_latch=absence_latch,
             )
         protection = config.manual_off_protection
         absence_confirmed, absence_since, absence_until = self._absence.get(
@@ -7739,9 +8680,7 @@ class RoomLightingRuntime:
             absence_confirmed=absence_confirmed,
             absence_since=absence_since,
             absence_until=absence_until,
-            absence_latch=(
-                config.room_id in self._absence_release_latch
-            ),
+            absence_latch=absence_latch,
         )
 
     def _observe_absence(

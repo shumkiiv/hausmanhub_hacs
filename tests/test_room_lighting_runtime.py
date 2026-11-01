@@ -4733,14 +4733,8 @@ class _StubLightPriority:
         return released
 
 
-async def test_away_home_transition_releases_manual_protections() -> None:
-    """Away→home releases manual protections across all three sources.
-
-    Owner decision 2026-10-09: manual protections release when the away mode
-    clears, coordinated through the room journal, the shared authority and
-    the shared light priority. Manual actions observed after the return keep
-    their normal priority.
-    """
+async def test_home_transition_never_globally_erases_manual_protections() -> None:
+    """28 Oct: release belongs to confirmed AWAY and the per-room setting."""
 
     class _AuthorityStore(_MemoryOwnershipStore):
         recovered_previous = False
@@ -4792,14 +4786,14 @@ async def test_away_home_transition_releases_manual_protections() -> None:
 
         assert (
             runtime._ownership.last_manual_off_at(_ROOM_ID, {"light_main"})  # type: ignore[attr-defined]
-            is None
-        ), "away→home must release manual-off anchors"
-        assert not authority.blocks(
+            is not None
+        ), "HOME must not erase a manual-off anchor"
+        assert authority.blocks(
             "light.demo_main"
-        ), "away→home must release pre-return shared authority claims"
-        assert "light.demo_main" not in priority.manual_claim_entity_ids(
+        ), "HOME must not bypass the configured return transaction"
+        assert "light.demo_main" in priority.manual_claim_entity_ids(
             frozenset({"light.demo_main"})
-        ), "away→home must release pre-return priority claims"
+        ), "HOME must not globally release priority claims"
 
         # The returning person walks in: automation resumes immediately.
         clock.value = _NOW_MS + 10_000
@@ -4807,7 +4801,7 @@ async def test_away_home_transition_releases_manual_protections() -> None:
             "binary_sensor.demo_presence", "on", last_changed=_dt(clock.value)
         )
         await runtime.async_process()
-        assert executor.calls, "auto must resume after the away release"
+        assert not executor.calls, "unreleased manual OFF still protects the room"
     finally:
         await runtime.stop()
 

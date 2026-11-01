@@ -153,7 +153,10 @@ def _prepare_conditional_document(
 ) -> str:
     current = _read_document(path)
     prior = _document_payload(current, version=version, key=key)
-    if prior is None or prior.get("version") != 3 or "returnOperation" not in prior:
+    if prior is None or not (
+        prior.get("version") == 3 and "returnOperation" in prior
+        or prior.get("version") == 4 and "returnOperations" in prior
+    ):
         raise RuntimeError("conditional safety commit requires durable pending return")
     # Keep all HA envelope metadata, including minor_version. The previous
     # generation remains pending as well, so an older loader fails closed.

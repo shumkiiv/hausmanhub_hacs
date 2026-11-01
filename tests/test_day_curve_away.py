@@ -160,6 +160,8 @@ async def test_real_executor_away_then_home_uses_evening_not_cached_100(monkeypa
     runtime._now_ms = lambda: clock[0]
     executor = RoomLightingHaExecutor({t.id: t for t in config.devices.light_targets},
         now_ms=lambda: clock[0], light_readback_window_seconds=0)
+    executor.update_targets({t.id: t for t in config.devices.light_targets},
+        room_targets={config.room_id: {t.id: t for t in config.devices.light_targets}})
     runtime._executor = executor
     try:
         hass.states.set(AWAY_ENTITY_ID, "on", last_changed=STAMP)

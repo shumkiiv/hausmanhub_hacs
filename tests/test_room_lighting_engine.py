@@ -1141,6 +1141,63 @@ def test_long_absence_still_dims_past_600_seconds() -> None:
         assert main.commands[0].reason is DecisionReason.DIMMING
 
 
+@pytest.mark.parametrize("enabled,elapsed,observed,state,manual_age,expected", [
+    (True, 300, 0, SensorState.OFF, 600, True),
+    (False, 300, 0, SensorState.OFF, 600, False),
+    (True, 299, 0, SensorState.OFF, 600, False),
+    (True, 300, 301, SensorState.OFF, 600, False),
+    (True, 300, 0, SensorState.UNKNOWN, 600, False),
+    (True, 300, 0, SensorState.ON, 600, False),
+    (True, 300, 0, SensorState.OFF, 100, False),
+])
+def test_manual_on_optional_absence_off_requires_fresh_full_window(
+    enabled, elapsed, observed, state, manual_age, expected
+) -> None:
+    now = _at(12)
+    payload = _config(timers={"absence_seconds": 300, "turn_off_seconds": 300}).to_dict()
+    payload["devices"]["light_targets"][0]["autoOffManualOnAbsence"] = enabled
+    config = config_from_payload(payload)
+    sensor = replace(_presence(state, now - elapsed * 1000), observed_at_ms=now - observed * 1000)
+    context = _ctx(now, sensors=(sensor,),
+                   lights=(_light("light_main", SensorState.ON, now - manual_age * 1000),),
+                   ownership=(_manual("light_main", now - manual_age * 1000),))
+    decision = decision_target(evaluate_room_lighting(config, context), "light_main")
+    assert any(command.action is LightAction.TURN_OFF for command in decision.commands) is expected
+
+
+@pytest.mark.parametrize("gap,off_record,configured_sensor_missing", [
+    (True, False, False), (False, True, False), (False, False, True),
+])
+def test_manual_on_optional_off_rejects_gap_off_record_or_missing_sensor(
+    gap, off_record, configured_sensor_missing
+) -> None:
+    now = _at(12)
+    payload = _config(timers={"absence_seconds": 300, "turn_off_seconds": 300}).to_dict()
+    payload["devices"]["light_targets"][0]["autoOffManualOnAbsence"] = True
+    if configured_sensor_missing:
+        payload["devices"]["sensors"].append({"id": "sensor_other", "name": "Other",
+            "kind": "motion", "entityId": "binary_sensor.demo_other", "autoAdoptOverride": None})
+    config = config_from_payload(payload)
+    sensor = replace(_presence(SensorState.OFF, now - 600_000), observed_at_ms=now)
+    ownership = replace(_manual("light_main", now - 700_000), turned_off=off_record)
+    context = _ctx(now, sensors=(sensor,), lights=(_light("light_main", SensorState.ON, now - 700_000),),
+                   ownership=(ownership,), unobserved_since=now - 100_000 if gap else None)
+    decision = decision_target(evaluate_room_lighting(config, context), "light_main")
+    assert not decision.commands
+
+
+def test_manual_on_optional_off_never_counts_absence_before_new_sensor_transition() -> None:
+    now = _at(12)
+    payload = _config(timers={"absence_seconds": 300, "turn_off_seconds": 300}).to_dict()
+    payload["devices"]["light_targets"][0]["autoOffManualOnAbsence"] = True
+    config = config_from_payload(payload)
+    sensor = replace(_presence(SensorState.OFF, now - 100_000),
+                     observed_at_ms=now, continuous_absence_since=now - 600_000)
+    context = _ctx(now, sensors=(sensor,), lights=(_light("light_main", SensorState.ON, now - 700_000),),
+                   ownership=(_manual("light_main", now - 700_000),))
+    assert not decision_target(evaluate_room_lighting(config, context), "light_main").commands
+
+
 def test_unknown_sensor_breaks_absence() -> None:
     now = _at(12, 0)
     decision = evaluate_room_lighting(

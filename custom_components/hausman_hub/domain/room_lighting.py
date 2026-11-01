@@ -305,6 +305,7 @@ class LightTarget:
     auto_adopt_override: bool | None = None
     color_temp_inverted: bool = False
     auto_control: bool = True
+    auto_off_manual_on_absence: bool = False
 
     def __post_init__(self) -> None:
         _stable_id(self.id, "light target id")
@@ -314,6 +315,7 @@ class LightTarget:
         _flag(self.color_temperature, "light target colour temperature flag")
         _flag(self.color_temp_inverted, "light target colour temperature inversion flag")
         _flag(self.auto_control, "light target automatic control flag")
+        _flag(self.auto_off_manual_on_absence, "manual on absence auto-off flag")
         if self.kind is LightKind.SWITCH and (self.brightness or self.color_temperature):
             raise RoomLightingViolation(
                 "an unregulated switch target cannot expose brightness or colour temperature"
@@ -880,7 +882,7 @@ class Dimming:
 class ManualOffProtection:
     enabled: bool = True
     minimum_interval_seconds: int = 600
-    release_mode: ReleaseMode = ReleaseMode.TIMER_AND_ABSENCE
+    release_mode: ReleaseMode = ReleaseMode.TIMER_ONLY
     stable_absence_seconds: int = 30
     priority: str = MANUAL_PRIORITY
 
@@ -914,8 +916,10 @@ class ManualControlReturn:
     """Per-room manual priority duration, normalized for legacy documents."""
 
     priority_seconds: int = DEFAULT_PRIORITY_SECONDS
+    clear_on_away: bool = True
 
     def __post_init__(self) -> None:
+        _flag(self.clear_on_away, "clear manual priority on away flag")
         _integer(
             self.priority_seconds,
             "manual control return priority",
@@ -1330,6 +1334,9 @@ class RoomLightingConfig:
             raise RoomLightingViolation("curve params block is invalid")
         if self.profile is not None and self.profile not in ROOM_LIGHTING_PROFILES:
             raise RoomLightingViolation("room lighting profile is unknown")
+        if self.profile == "day_curve" and any(
+                target.auto_off_manual_on_absence for target in self.devices.light_targets):
+            raise RoomLightingViolation("manual-on absence off currently supports schedule profiles only")
         if self.template_id is not None:
             _stable_id(self.template_id, "template id")
         if not isinstance(self.overrides, Overrides):
@@ -1479,6 +1486,7 @@ class RoomLightingConfig:
             },
             "manualControlReturn": {
                 "prioritySeconds": self.manual_control_return.priority_seconds,
+                "clearOnAway": self.manual_control_return.clear_on_away,
             },
             "awayBehavior": _away_to_payload(self.away_behavior),
             "autoAdopt": self.auto_adopt,
@@ -1577,6 +1585,7 @@ def _devices_to_payload(devices: Devices) -> dict[str, object]:
                     "color_temperature": item.color_temperature,
                     "colorTempInverted": item.color_temp_inverted,
                     "autoControl": item.auto_control,
+                    **({"autoOffManualOnAbsence": True} if item.auto_off_manual_on_absence else {}),
                     "autoAdoptOverride": item.auto_adopt_override,
                 },
                 item.entity_id,
@@ -1768,6 +1777,7 @@ def _light_target_from_payload(payload: object) -> LightTarget:
         auto_adopt_override=data.get("autoAdoptOverride"),
         color_temp_inverted=data.get("colorTempInverted", False),
         auto_control=data.get("autoControl", True),
+        auto_off_manual_on_absence=data.get("autoOffManualOnAbsence", False),
     )
 
 
@@ -1976,7 +1986,7 @@ def _manual_off_from_payload(payload: object) -> ManualOffProtection:
     return ManualOffProtection(
         enabled=data.get("enabled", True),
         minimum_interval_seconds=data.get("minimumIntervalSeconds", 600),
-        release_mode=data.get("releaseMode", ReleaseMode.TIMER_AND_ABSENCE),
+        release_mode=data.get("releaseMode", ReleaseMode.TIMER_ONLY),
         stable_absence_seconds=data.get("stableAbsenceSeconds", 30),
         priority=data.get("priority", MANUAL_PRIORITY),
     )
@@ -1987,8 +1997,22 @@ def _manual_control_return_from_payload(payload: object) -> ManualControlReturn:
         return ManualControlReturn()
     data = _as_dict(payload, "manual control return")
     return ManualControlReturn(
-        priority_seconds=data.get("prioritySeconds", DEFAULT_PRIORITY_SECONDS)
+        priority_seconds=data.get("prioritySeconds", DEFAULT_PRIORITY_SECONDS),
+        clear_on_away=data.get("clearOnAway", True),
     )
+
+
+def manual_priority_duration_ms(config: RoomLightingConfig, action: str) -> int:
+    """One room policy for every capture path and for deadline recomputation."""
+    if action == "off":
+        # Keep a positive interval for the durable evidence format, but do not
+        # impose the configured hold when the owner explicitly disabled it.
+        if not config.manual_off_protection.enabled:
+            return 1
+        return config.manual_off_protection.minimum_interval_seconds * 1000
+    if action == "on":
+        return config.manual_control_return.priority_seconds * 1000
+    raise RoomLightingViolation("manual priority requires a proved on/off action")
 
 
 def _away_from_payload(payload: object) -> AwayBehavior:

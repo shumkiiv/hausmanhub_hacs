@@ -1,6 +1,7 @@
 """Actual physical input parser, fake MQTT GET transport; never touches the house."""
 
 import asyncio
+import importlib
 import json
 from uuid import uuid4
 
@@ -98,7 +99,8 @@ async def test_total_timeout_includes_hung_publish(monkeypatch):
         await asyncio.Future()
 
     adapter._publish = hang
-    monkeypatch.setattr("custom_components.hausman_hub.adapters.lighting_mqtt_refresh.REFRESH_TIMEOUT_SECONDS", 0.01)
+    refresh_module = importlib.import_module("custom_components.hausman_hub.adapters.lighting_mqtt_refresh")
+    monkeypatch.setattr(refresh_module, "REFRESH_TIMEOUT_SECONDS", 0.01)
     assert not await adapter(SUPPORTED_ENTITIES, lambda: True)
     assert calls == ["hung"]
 

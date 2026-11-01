@@ -87,6 +87,12 @@ class DevicePowerDependencyService:
         self._loaded = True
 
     @property
+    def revision(self) -> int:
+        """Expose the loaded monotonic graph revision."""
+        self._require_loaded()
+        return self._revision
+
+    @property
     def document(self) -> dict[str, object]:
         self._require_loaded()
         return {

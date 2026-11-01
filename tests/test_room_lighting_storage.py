@@ -359,6 +359,11 @@ class RoomLightingTopologyInvalidationTest(unittest.IsolatedAsyncioTestCase):
     def _config(self, name: str = "Тамбур"):
         return config_from_payload(_payload(name=name))
 
+    def _changed_scope(self, name: str):
+        payload = _payload(name=name)
+        payload["devices"]["light_targets"][0]["entityId"] = "switch.demo_b"
+        return config_from_payload(payload)
+
     @staticmethod
     def _authority(config):
         from custom_components.hausman_hub.application.manual_light_authority import (
@@ -402,7 +407,7 @@ class RoomLightingTopologyInvalidationTest(unittest.IsolatedAsyncioTestCase):
         )
 
         pending = asyncio.create_task(
-            service.async_put_config(self._config("Новый тамбур"))
+            service.async_put_config(self._changed_scope("Новый тамбур"))
         )
         await store.upsert_started.wait()
 
@@ -505,7 +510,7 @@ class RoomLightingTopologyInvalidationTest(unittest.IsolatedAsyncioTestCase):
             topology_invalidator=failing_authority.invalidate_related_sources,
         )
         failed = asyncio.create_task(
-            failing_service.async_put_config(self._config("Не сохранится"))
+            failing_service.async_put_config(self._changed_scope("Не сохранится"))
         )
         await failing_store.upsert_started.wait()
         failing_authority.set_related_sources(

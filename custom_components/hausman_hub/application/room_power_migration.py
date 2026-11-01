@@ -262,6 +262,8 @@ def decide_exact_power(
                     continue
                 if dependencies is not None and entity_id in dependencies:
                     extra.add(_target_label(target_id))
+                    if target_id is not None:
+                        unproven_target_ids.add(target_id)
     if not (room_claimed or claimed_target_ids):
         # No explicit migration claim: the legacy whole-room association stays
         # in force, even when a (possibly partial) map exists.
@@ -271,7 +273,7 @@ def decide_exact_power(
     extra_tuple = tuple(sorted(extra))
     return ExactPowerDecision(
         active=True,
-        incomplete=bool(missing_tuple or wrong_tuple),
+        incomplete=bool(missing_tuple or wrong_tuple or extra_tuple),
         missing=missing_tuple,
         wrong=wrong_tuple,
         extra=extra_tuple,

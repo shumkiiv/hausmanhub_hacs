@@ -192,14 +192,14 @@ def test_manual_control_return_serializes_bounded_room_priority(
     payload = _payload()
     payload["manualControlReturn"] = {"prioritySeconds": priority_seconds}
     encoded = config_from_payload(payload).to_dict()
-    assert encoded["manualControlReturn"] == {"prioritySeconds": priority_seconds}
+    assert encoded["manualControlReturn"] == {"prioritySeconds": priority_seconds, "clearOnAway": True}
     assert config_from_payload(encoded).to_dict() == encoded
 
 
 def test_legacy_room_config_gets_manual_control_return_default() -> None:
     encoded = config_from_payload(_payload()).to_dict()
     assert encoded["manualControlReturn"] == {
-        "prioritySeconds": DEFAULT_PRIORITY_SECONDS
+        "prioritySeconds": DEFAULT_PRIORITY_SECONDS, "clearOnAway": True
     }
 
 
@@ -209,6 +209,29 @@ def test_legacy_room_config_gets_manual_control_return_default() -> None:
 def test_manual_control_return_rejects_invalid_priority(priority_seconds: object) -> None:
     payload = _payload()
     payload["manualControlReturn"] = {"prioritySeconds": priority_seconds}
+    with pytest.raises(RoomLightingViolation):
+        config_from_payload(payload)
+
+
+def test_manual_return_preserves_configured_away_and_durations() -> None:
+    payload = _payload()
+    payload["manualControlReturn"] = {"prioritySeconds": 1234, "clearOnAway": False}
+    payload["manualOffProtection"] = {"minimumIntervalSeconds": 321}
+    config = config_from_payload(payload)
+    assert config.manual_control_return.clear_on_away is False
+    assert config.to_dict()["manualControlReturn"] == payload["manualControlReturn"]
+    assert config.manual_off_protection.release_mode.value == "timer_only"
+    from custom_components.hausman_hub.domain.room_lighting import manual_priority_duration_ms
+    assert manual_priority_duration_ms(config, "off") == 321000
+    assert manual_priority_duration_ms(config, "on") == 1234000
+    with pytest.raises(RoomLightingViolation):
+        manual_priority_duration_ms(config, "unknown")
+
+
+@pytest.mark.parametrize("value", [0, 1, "false", None])
+def test_manual_return_rejects_nonboolean_clear_on_away(value) -> None:
+    payload = _payload()
+    payload["manualControlReturn"] = {"clearOnAway": value}
     with pytest.raises(RoomLightingViolation):
         config_from_payload(payload)
 
@@ -982,3 +1005,28 @@ def test_fan_and_exhaust_can_coexist() -> None:
     assert config.auxiliary is not None
     assert config.auxiliary.fan is not None
     assert config.auxiliary.exhaust is not None
+
+
+def test_manual_on_absence_option_is_per_target_and_round_trips() -> None:
+    payload = _payload()
+    targets = payload["devices"]["light_targets"]  # type: ignore[index]
+    targets[1]["autoOffManualOnAbsence"] = True
+    result = config_from_payload(payload).to_dict()["devices"]["light_targets"]
+    assert result[1].get("autoOffManualOnAbsence") is True
+    assert result[0].get("autoOffManualOnAbsence", False) is False
+
+
+@pytest.mark.parametrize("invalid", [None, 0, "false"])
+def test_manual_on_absence_option_rejects_non_boolean(invalid: object) -> None:
+    payload = _payload()
+    payload["devices"]["light_targets"][1]["autoOffManualOnAbsence"] = invalid  # type: ignore[index]
+    with pytest.raises(RoomLightingViolation):
+        config_from_payload(payload)
+
+
+def test_manual_on_absence_option_rejects_unsupported_curve_profile() -> None:
+    payload = _payload()
+    payload["profile"] = "day_curve"
+    payload["devices"]["light_targets"][1]["autoOffManualOnAbsence"] = True
+    with pytest.raises(RoomLightingViolation, match="schedule"):
+        config_from_payload(payload)

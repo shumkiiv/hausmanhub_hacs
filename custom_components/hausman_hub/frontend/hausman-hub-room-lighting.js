@@ -11,7 +11,7 @@
  * visible form only offers readable names and catalog devices.
  */
 
-import { apiErrorMessage, resolveApiError } from "./hausman-hub-error-taxonomy.js?v=1.52.300";
+import { apiErrorMessage, resolveApiError } from "./hausman-hub-error-taxonomy.js?v=1.52.301";
 
 export const ROOM_LIGHTING_SECTIONS = [
   ["overview", "Обзор"],
@@ -90,6 +90,7 @@ const EDITABLE_KEYS = [
   "behaviors",
   "dimming",
   "manualOffProtection",
+  "manualControlReturn",
   "awayBehavior",
   "morningBoundary",
   "curveParams",
@@ -1449,26 +1450,38 @@ function renderBehaviors(panel, roomId, store, deps) {
 function renderManualProtection(panel, roomId, store, deps) {
   const draft = store.draft;
   draft.manualOffProtection = draft.manualOffProtection || {
-    enabled: true, minimumIntervalSeconds: 600, releaseMode: "timer_and_absence",
+    enabled: true, minimumIntervalSeconds: 600, releaseMode: "timer_only",
     stableAbsenceSeconds: 30, priority: "manual_above_auto",
   };
   const block = deps.el("section", "rle-block");
-  block.appendChild(deps.el("h4", null, "Защита после ручного выключения"));
+  block.appendChild(deps.el("h4", null, "Возврат ручного света в автоматику"));
   const protection = draft.manualOffProtection;
-  block.appendChild(checkInput(deps, "Включено", protection.enabled, (checked) => { protection.enabled = checked; markDirty(panel, roomId); }));
-  block.appendChild(numberInput(deps, "Минимальное время, секунд", protection.minimumIntervalSeconds, (value) => {
-    protection.minimumIntervalSeconds = value;
+  const returned = draft.manualControlReturn || {prioritySeconds: 3600, clearOnAway: true};
+  // Do not materialize defaults merely by opening an older client's draft.
+  block.appendChild(numberInput(deps, "После ручного включения, минут", returned.prioritySeconds / 60, (value) => {
+    draft.manualControlReturn = {...returned, ...draft.manualControlReturn, prioritySeconds: Math.round(value * 60)};
     markDirty(panel, roomId);
-  }, { min: 30, max: 86400 }));
+  }, { min: 0.25, max: 1440 }));
+  block.appendChild(checkInput(deps, "Защита после ручного выключения", protection.enabled, (checked) => { protection.enabled = checked; markDirty(panel, roomId); }));
+  block.appendChild(numberInput(deps, "После ручного выключения, минут", protection.minimumIntervalSeconds / 60, (value) => {
+    protection.minimumIntervalSeconds = Math.round(value * 60);
+    markDirty(panel, roomId);
+  }, { min: 0.25, max: 1440 }));
   block.appendChild(selectInput(deps, "Режим снятия", protection.releaseMode, RELEASE_MODES, (value) => {
     protection.releaseMode = value;
     markDirty(panel, roomId);
   }));
-  block.appendChild(numberInput(deps, "Устойчивое отсутствие, секунд", protection.stableAbsenceSeconds, (value) => {
+  const absenceField = numberInput(deps, "Устойчивое отсутствие, секунд", protection.stableAbsenceSeconds, (value) => {
     protection.stableAbsenceSeconds = value;
     markDirty(panel, roomId);
-  }, { min: 5, max: 600 }));
-  block.appendChild(deps.el("p", "rle-hint", "Приоритет зафиксирован: ручное выше автоматического."));
+  }, { min: 5, max: 600 });
+  absenceField.children[1].disabled ||= protection.releaseMode === "timer_only";
+  block.appendChild(absenceField);
+  block.appendChild(checkInput(deps, "Снимать ручной приоритет при уходе", returned.clearOnAway !== false, (checked) => {
+    draft.manualControlReturn = {...returned, ...draft.manualControlReturn, clearOnAway: checked};
+    markDirty(panel, roomId);
+  }));
+  block.appendChild(deps.el("p", "rle-hint", "После срока работает обычный сценарий комнаты. Новый ручной жест начинает свой срок; повтор события его не продлевает."));
   return block;
 }
 

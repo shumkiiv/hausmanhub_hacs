@@ -333,7 +333,7 @@ async def test_abort_drain_failure_keeps_storage_unhealthy_and_return_pending():
         result = await guarded(case)
         assert result["outcome"] == "incomplete", result
         assert case.authority._storage_failed and case.authority.blocks(ENTITY)
-        assert case.authority._active_return_operation_id is None
+        assert not case.authority._active_return_scopes
         assert case.store.payload["returnOperation"]
         assert case.authority.record(ENTITY) is records[0]
         assert not case.executor.calls

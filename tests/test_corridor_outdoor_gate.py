@@ -9,7 +9,7 @@ import pytest
 
 from custom_components.hausman_hub.domain.room_lighting import config_from_payload
 from custom_components.hausman_hub.domain.room_lighting_engine import (
-    LightSnapshot, SensorSnapshot, SensorKind, LightAction, evaluate_curve_room,
+    LightSnapshot, SensorSnapshot, SensorKind, LightAction, DecisionReason, evaluate_curve_room,
 )
 from custom_components.hausman_hub.domain.room_lighting_ownership import (
     SensorState, OwnershipSnapshot, OwnershipSource,
@@ -41,6 +41,128 @@ def corridor_payload():
 
 def corridor_config():
     return config_from_payload(corridor_payload())
+
+
+def test_bright_outdoor_light_turns_off_automatically_owned_corridor():
+    base = _context(12)
+    context = replace(base, sensors=(
+        SensorSnapshot("corridor_motion", SensorKind.MOTION, SensorState.ON, base.now),
+        SensorSnapshot("outdoor", SensorKind.ILLUMINANCE, SensorState.ON, base.now, lux=501),
+    ), lights=(LightSnapshot("light_demo_main", SensorState.ON, base.now - 2000, brightness=30),),
+       ownership=(OwnershipSnapshot("light_demo_main", OwnershipSource.AUTO, True, base.now - 1000),))
+    decision = evaluate_curve_room(corridor_config(), context, presence=SensorState.ON,
+                                   presence_confirmed=True, absence_seconds=0)
+    assert any(command.action is LightAction.TURN_OFF and command.reason is DecisionReason.LUX
+               for command in decision.commands)
+
+
+@pytest.mark.parametrize("lux,age,ownership", [
+    (400, 0, OwnershipSource.AUTO),
+    (501, 301_000, OwnershipSource.AUTO),
+    (None, 0, OwnershipSource.AUTO),
+    (501, 0, OwnershipSource.MANUAL),
+    (501, 0, None),
+])
+def test_bright_off_requires_fresh_reading_over_threshold_and_auto_ownership(lux, age, ownership):
+    base = _context(12)
+    records = () if ownership is None else (
+        OwnershipSnapshot("light_demo_main", ownership, True, base.now - 1000),
+    )
+    context = replace(base, sensors=(
+        SensorSnapshot("corridor_motion", SensorKind.MOTION, SensorState.ON, base.now),
+        SensorSnapshot("outdoor", SensorKind.ILLUMINANCE, SensorState.ON, base.now - age, lux=lux),
+    ), lights=(LightSnapshot("light_demo_main", SensorState.ON, base.now, brightness=30),),
+       ownership=records)
+    decision = evaluate_curve_room(corridor_config(), context, presence=SensorState.ON,
+                                   presence_confirmed=True, absence_seconds=0)
+    assert not any(command.action is LightAction.TURN_OFF for command in decision.commands)
+
+
+async def test_bright_off_rechecked_before_dispatch_after_manual_action_or_lux_drop():
+    base = _context(12)
+    context = replace(base, sensors=(
+        SensorSnapshot("corridor_motion", SensorKind.MOTION, SensorState.ON, base.now),
+        SensorSnapshot("outdoor", SensorKind.ILLUMINANCE, SensorState.ON, base.now, lux=501),
+    ), lights=(LightSnapshot("light_demo_main", SensorState.ON, base.now - 2000, brightness=30),),
+       ownership=(OwnershipSnapshot("light_demo_main", OwnershipSource.AUTO, True, base.now - 1000),))
+    config = corridor_config()
+    command = next(c for c in evaluate_curve_room(config, context, presence=SensorState.ON,
+        presence_confirmed=True, absence_seconds=0).commands if c.action is LightAction.TURN_OFF)
+    runtime = _make_runtime(_FakeHass(), payload=corridor_payload())
+    manual = replace(context, ownership=(
+        OwnershipSnapshot("light_demo_main", OwnershipSource.MANUAL, True, base.now),))
+    dark = replace(context, sensors=(context.sensors[0], replace(context.sensors[1], lux=399)))
+    try:
+        assert runtime._post_pending_curve_profile_block_reason(config, command, manual) is not None
+        assert runtime._post_pending_curve_profile_block_reason(config, command, dark) is not None
+    finally:
+        await runtime.stop()
+
+
+def test_bright_off_does_not_assume_auto_ownership_across_observation_gap():
+    base = _context(12)
+    context = replace(base, sensors=(
+        SensorSnapshot("outdoor", SensorKind.ILLUMINANCE, SensorState.ON, base.now, lux=501),
+    ), lights=(LightSnapshot("light_demo_main", SensorState.ON, base.now, brightness=30),),
+       ownership=(OwnershipSnapshot("light_demo_main", OwnershipSource.AUTO, True, base.now - 2000),),
+       unobserved_since=base.now - 1000)
+    decision = evaluate_curve_room(corridor_config(), context, presence=SensorState.ON,
+                                   presence_confirmed=True, absence_seconds=0)
+    assert not any(command.action is LightAction.TURN_OFF for command in decision.commands)
+
+
+def test_bright_off_preserves_later_unattributed_on_state():
+    base = _context(12)
+    context = replace(base, sensors=(
+        SensorSnapshot("outdoor", SensorKind.ILLUMINANCE, SensorState.ON, base.now, lux=501),
+    ), lights=(LightSnapshot("light_demo_main", SensorState.ON, base.now, brightness=30),),
+       ownership=(OwnershipSnapshot("light_demo_main", OwnershipSource.AUTO, True, base.now - 1000),))
+    decision = evaluate_curve_room(corridor_config(), context, presence=SensorState.ON,
+                                   presence_confirmed=True, absence_seconds=0)
+    assert not any(command.action is LightAction.TURN_OFF for command in decision.commands)
+
+
+def test_bright_off_preserves_profile_when_another_source_was_manually_lit():
+    payload = corridor_payload()
+    main = payload["devices"]["light_targets"][0]
+    payload["devices"]["light_targets"].append({**main, "id": "other", "entityId": "light.other"})
+    base = _context(12)
+    context = replace(base, sensors=(
+        SensorSnapshot("outdoor", SensorKind.ILLUMINANCE, SensorState.ON, base.now, lux=501),
+    ), lights=(LightSnapshot("light_demo_main", SensorState.ON, base.now, brightness=30),
+               LightSnapshot("other", SensorState.ON, base.now, brightness=30)),
+       ownership=(OwnershipSnapshot("light_demo_main", OwnershipSource.AUTO, True, base.now - 1000),
+                  OwnershipSnapshot("other", OwnershipSource.MANUAL, True, base.now - 1000)))
+    decision = evaluate_curve_room(config_from_payload(payload), context, presence=SensorState.ON,
+                                   presence_confirmed=True, absence_seconds=0)
+    assert not any(command.action is LightAction.TURN_OFF for command in decision.commands)
+
+
+@pytest.mark.parametrize("state,lux", [(SensorState.UNKNOWN, 501),
+    (SensorState.UNAVAILABLE, 501), (SensorState.ON, float("nan")),
+    (SensorState.ON, float("inf"))])
+def test_bright_off_requires_a_valid_illuminance_state(state, lux):
+    base = _context(12)
+    context = replace(base, sensors=(
+        SensorSnapshot("outdoor", SensorKind.ILLUMINANCE, state, base.now, lux=lux),
+    ), lights=(LightSnapshot("light_demo_main", SensorState.ON, base.now, brightness=30),),
+       ownership=(OwnershipSnapshot("light_demo_main", OwnershipSource.AUTO, True, base.now - 1000),))
+    decision = evaluate_curve_room(corridor_config(), context, presence=SensorState.ON,
+                                   presence_confirmed=True, absence_seconds=0)
+    assert not any(command.action is LightAction.TURN_OFF for command in decision.commands)
+
+
+def test_bright_corridor_policy_does_not_change_another_room():
+    payload = corridor_payload()
+    payload["roomId"] = "another_room"
+    base = _context(12)
+    context = replace(base, sensors=(
+        SensorSnapshot("outdoor", SensorKind.ILLUMINANCE, SensorState.ON, base.now, lux=501),
+    ), lights=(LightSnapshot("light_demo_main", SensorState.ON, base.now, brightness=30),),
+       ownership=(OwnershipSnapshot("light_demo_main", OwnershipSource.AUTO, True, base.now - 1000),))
+    decision = evaluate_curve_room(config_from_payload(payload), context, presence=SensorState.ON,
+                                   presence_confirmed=True, absence_seconds=0)
+    assert not any(command.action is LightAction.TURN_OFF for command in decision.commands)
 
 
 @pytest.mark.parametrize("lux", [400.0, 500.0, None])
@@ -150,6 +272,26 @@ async def test_motion_and_darkness_reach_the_executor():
     try:
         await runtime.async_process(("malyi_koridor",))
         assert any(command.action is LightAction.TURN_ON for command in executor.calls), repr(runtime._shadow.journal_payload())
+    finally:
+        await runtime.stop()
+
+
+async def test_bright_outdoor_light_reaches_executor_for_auto_owned_corridor():
+    payload = corridor_payload()
+    payload["commandsEnabled"] = True
+    hass = _FakeHass()
+    hass.states.set("light.demo_main", "on", {"brightness": 100}, last_changed=_NOW_DT)
+    hass.states.set(CORRIDOR_ENTITY, "on", last_changed=_NOW_DT)
+    hass.states.set(ENTRY_ENTITY, "off", last_changed=_NOW_DT)
+    hass.states.set(OUTDOOR_ENTITY, "501", last_changed=_NOW_DT)
+    executor = _SpyExecutor()
+    runtime = _make_runtime(hass, payload=payload, executor=executor, now_ms=lambda: _NOW_MS)
+    await runtime.start(hass, "entry")
+    try:
+        runtime._ownership.record_auto("malyi_koridor", "light_demo_main", _NOW_MS, confirmed=True)
+        await runtime.async_process(("malyi_koridor",))
+        assert any(command.action is LightAction.TURN_OFF and command.reason is DecisionReason.LUX
+                   for command in executor.calls), repr(runtime._shadow.journal_payload())
     finally:
         await runtime.stop()
 

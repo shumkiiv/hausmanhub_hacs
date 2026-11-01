@@ -225,6 +225,7 @@ class RoomLightingService:
         *,
         expected_version: int | None = None,
         preserve_manual_control_return: bool = False,
+        preserve_manual_clear_on_away: bool = False,
         preserve_quiet_hours: bool = False,
         preserve_curve_params: bool = False,
         preserve_curve_neutral_kelvin: bool = False,
@@ -251,6 +252,11 @@ class RoomLightingService:
                 raise RoomLightingRevisionConflictError(expected_version, existing.version)
             if existing is not None and preserve_manual_control_return:
                 config = replace(config, manual_control_return=existing.manual_control_return)
+            elif existing is not None and preserve_manual_clear_on_away:
+                config = replace(config, manual_control_return=replace(
+                    config.manual_control_return,
+                    clear_on_away=existing.manual_control_return.clear_on_away,
+                ))
             if existing is not None and preserve_quiet_hours:
                 config = replace(config, quiet_hours=existing.quiet_hours)
             if existing is not None and preserve_curve_params and existing.curve is not None:

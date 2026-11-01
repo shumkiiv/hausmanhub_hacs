@@ -185,6 +185,7 @@ def release_expired_manual(
     release_mode: str = "timer_and_absence",
     absence_until: int | None = None,
     absence_latch: bool = False,
+    require_directed_off: bool = False,
 ) -> bool:
     """Whether an expired manual-off protection releases manual ownership.
 
@@ -204,6 +205,8 @@ def release_expired_manual(
     if latest is None or latest.source is not OwnershipSource.MANUAL:
         return False
     if not latest.confirmed:
+        return False
+    if require_directed_off and (not latest.turned_off or latest.generation <= 0):
         return False
     if now - latest.at < minimum_interval_seconds * 1000:
         return False

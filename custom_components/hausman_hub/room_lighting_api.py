@@ -13,6 +13,7 @@ from datetime import time as dt_time, timezone
 from http import HTTPStatus
 import inspect
 import logging
+import math
 import re
 import time
 from typing import TYPE_CHECKING, Any
@@ -50,11 +51,13 @@ from .domain.room_lighting import (
     config_from_payload,
 )
 from .domain.room_lighting_engine import (
+    EnginePolicy,
     LightSnapshot,
     RoomLightingContext,
     SensorSnapshot,
     _active_schedule_entry,
     evaluate_room_lighting,
+    sensor_observation_is_fresh,
 )
 from .domain.room_lighting_ownership import (
     SensorState,
@@ -264,6 +267,10 @@ class RoomLightingConfigView(_RoomLightingView):
                 config,
                 expected_version=config.version,
                 preserve_manual_control_return="manualControlReturn" not in payload,
+                preserve_manual_clear_on_away=not (
+                    isinstance(payload.get("manualControlReturn"), Mapping)
+                    and "clearOnAway" in payload["manualControlReturn"]
+                ),
                 preserve_quiet_hours="quietHours" not in payload,
                 preserve_curve_params="curveParams" not in payload,
                 preserve_curve_neutral_kelvin=not (
@@ -438,9 +445,9 @@ class RoomLightingStatusView(_RoomLightingView):
         if config is None:
             return self._error("not_found")
         data = self._data()
-        context = await _status_context(data, config)
+        context, runtime_context_ok = await _status_context_result(data, config)
         runtime = data.get(DATA_ROOM_LIGHTING_RUNTIME)
-        fresh = runtime is not None and bool(getattr(runtime, "running", False))
+        fresh = runtime_context_ok and runtime is not None and bool(getattr(runtime, "running", False))
         away = (
             bool(getattr(runtime, "away", False))
             if fresh
@@ -755,6 +762,15 @@ async def _status_context(
 ) -> RoomLightingContext:
     """Prefer the live runtime context, then a test provider, then a stub."""
 
+    context, _ = await _status_context_result(data, config)
+    return context
+
+
+async def _status_context_result(
+    data: Mapping[str, object], config: RoomLightingConfig
+) -> tuple[RoomLightingContext, bool]:
+    """Distinguish a successful runtime read from fallback status data."""
+
     runtime = data.get(DATA_ROOM_LIGHTING_RUNTIME)
     builder = getattr(runtime, "async_context_for", None) if runtime is not None else None
     if callable(builder):
@@ -764,15 +780,15 @@ async def _status_context(
             _LOGGER.warning("room lighting runtime context failed; using the stub")
         else:
             if isinstance(context, RoomLightingContext):
-                return context
+                return context, True
     provider = data.get(DATA_ROOM_LIGHTING_CONTEXT)
     if callable(provider):
         value = provider(config)
         if inspect.isawaitable(value):
             value = await value
         if isinstance(value, RoomLightingContext):
-            return value
-    return _stub_context(config)
+            return value, False
+    return _stub_context(config), False
 
 
 def _stub_context(config: RoomLightingConfig) -> RoomLightingContext:
@@ -859,9 +875,14 @@ def _status_payload(
                 "last_command": None,
             }
         )
+    selected_illuminance_ids = {
+        sensor.id for sensor in config.devices.sensors
+        if sensor.kind is SensorKind.ILLUMINANCE and config.illumination is not None
+        and sensor.entity_id == config.illumination.sensor
+    }
     illuminance = next(
-        (sensor for sensor in context.sensors if sensor.kind is SensorKind.ILLUMINANCE),
-        None,
+        (sensor for sensor in context.sensors if sensor.kind is SensorKind.ILLUMINANCE
+         and sensor.sensor_id in selected_illuminance_ids), None,
     )
     if illuminance is None:
         illumination = {
@@ -871,18 +892,22 @@ def _status_payload(
             "failClosed": True,
         }
     else:
+        valid_lux = (isinstance(illuminance.lux, (int, float))
+                     and not isinstance(illuminance.lux, bool)
+                     and math.isfinite(illuminance.lux))
         if illuminance.state is SensorState.UNAVAILABLE:
             sensor_state = "unavailable"
         elif illuminance.state is SensorState.UNKNOWN:
             sensor_state = "unknown"
-        elif not illuminance.lux_healthy:
+        elif (not valid_lux or not illuminance.lux_healthy or not sensor_observation_is_fresh(
+                illuminance, context.now, EnginePolicy().sensor_freshness_seconds * 1000)):
             sensor_state = "stale"
         else:
             sensor_state = "ok"
-        healthy = sensor_state == "ok" and illuminance.lux is not None
+        healthy = sensor_state == "ok" and valid_lux
         illumination = {
             "healthy": healthy,
-            "lux": illuminance.lux,
+            "lux": illuminance.lux if valid_lux else None,
             "sensorState": sensor_state,
             "failClosed": not healthy,
         }
@@ -961,6 +986,7 @@ def _manual_control_return_status(
 ) -> dict[str, object] | None:
     """Project the common deny per physical source, without a false timer."""
     from .application.manual_light_authority import ManualLightAuthority
+    from .domain.room_lighting import manual_priority_duration_ms
 
     if not isinstance(authority, ManualLightAuthority):
         return None
@@ -974,10 +1000,11 @@ def _manual_control_return_status(
     if not targets_by_entity:
         return None
     sources: list[dict[str, object]] = []
+    now_ms = int(time.time() * 1000)  # Same clock as the shared authority.
     records_by_entity: dict[str, object | None] = {}
     for entity_id, aliases in targets_by_entity.items():
         target = aliases[0]
-        record = authority.blocking_evidence(entity_id)
+        record = authority.blocking_evidence(entity_id) or authority.record(entity_id)
         records_by_entity[entity_id] = record
         auto_controls = {alias.auto_control for alias in aliases}
         if len(auto_controls) != 1:
@@ -989,11 +1016,14 @@ def _manual_control_return_status(
             reason = authority.barrier_reason_for(entity_id)
         elif not target.auto_control:
             reason = "manual_only_target"
+        elif record is not None and not record.legacy and not 0 < record.observed_at_ms <= now_ms:
+            reason = "attribution_uncertain"
         elif record is not None:
-            reason = {
+            reason = ("manual_return_due" if not record.legacy and record.action in {"on", "off"}
+                      and record.observed_at_ms + manual_priority_duration_ms(config, record.action) <= now_ms else {
                 "on": "manual_on_wait", "off": "manual_off_wait",
                 "unknown": "restart_uncertain",
-            }[record.action]
+            }[record.action])
         elif context.protection.active:
             reason = "manual_off_protection"
         else:
@@ -1008,6 +1038,10 @@ def _manual_control_return_status(
         }
         if record is not None:
             source["source"] = record.source
+            if not record.legacy and record.action in {"on", "off"} and 0 < record.observed_at_ms <= now_ms:
+                deadline = record.observed_at_ms + manual_priority_duration_ms(config, record.action)
+                source["expires_at"] = (deadline + 999) // 1000
+                source["remaining_seconds"] = max(0, (deadline - now_ms + 999) // 1000)
         sources.append(source)
     active = any(source["active"] for source in sources)
     reasons = {source["reason"] for source in sources}
@@ -1015,7 +1049,7 @@ def _manual_control_return_status(
         (reason for reason in (
             "storage_unavailable", "restart_uncertain", "attribution_uncertain",
             "selector_uncertain", "manual_only_target",
-            "manual_off_protection", "manual_off_wait", "manual_on_wait",
+            "return_pending", "manual_off_protection", "manual_off_wait", "manual_on_wait", "manual_return_due",
         ) if reason in reasons),
         "none",
     )
@@ -1027,17 +1061,22 @@ def _manual_control_return_status(
         if selected_source is not None
         else None
     )
+    timed = (selected_record is not None and not selected_record.legacy
+             and selected_record.action in {"on", "off"}
+             and aggregate_reason in {"manual_on_wait", "manual_off_wait", "manual_return_due"})
+    deadlines = [source.get("expires_at") for source in sources if source["active"]]
+    deadline = max(deadlines) if timed and deadlines and all(type(value) is int for value in deadlines) else None
     return {
         "active": active,
         "reason": aggregate_reason,
         "scope": "blocked" if active else "normal",
-        "expires_at": None,
-        "remaining_seconds": None if active else 0,
+        "expires_at": deadline,
+        "remaining_seconds": max(source["remaining_seconds"] for source in sources if source["active"]) if deadline is not None else (None if active else 0),
         "since": (
             selected_record.observed_at_ms // 1000
             if selected_record is not None
             and not selected_record.legacy
-            and aggregate_reason in {"manual_on_wait", "manual_off_wait"}
+            and aggregate_reason in {"manual_on_wait", "manual_off_wait", "manual_return_due"}
             else None
         ),
         "sources": sources,

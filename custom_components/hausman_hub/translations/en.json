@@ -554,6 +554,14 @@
     "light_safety_obligation_lost": {
       "title": "Automatic light could not be turned off safely",
       "description": "Hausman did not turn off the light for scenario {scenario_id} because automation authority could not be confirmed after restart. Check the light state and scenario trace manually."
+    },
+    "z2m_availability_disabled": {
+      "title": "Zigbee2MQTT availability checks are disabled",
+      "description": "Device on/off statuses may be stale, so Hausman treats unknown device states as unreliable. Enable availability checks in the Zigbee2MQTT settings (Settings -> Availability) and restart Zigbee2MQTT; the setting requires a restart to take effect."
+    },
+    "z2m_state_retain_disabled": {
+      "title": "Last device states are not retained",
+      "description": "Enable retained device messages in Zigbee2MQTT (device_options → retain: true) so Home Assistant can receive them after a restart without waiting for a state change. Retained readings help recovery but do not replace availability checks and a fresh device response."
     }
   },
   "selector": {

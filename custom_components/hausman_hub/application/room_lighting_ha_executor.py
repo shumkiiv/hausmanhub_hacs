@@ -197,6 +197,7 @@ class RoomLightingHaExecutor:
         self, hass: HomeAssistant, command: PlannedCommand,
         *, automatic: bool = True,
         dispatch_guard: Callable[[], bool] | None = None,
+        pre_dispatch_guard: Callable[[], bool] | None = None,
         confirmation_read: bool = False,
         room_id: str | None = None,
     ) -> RoomLightingReceipt:
@@ -234,7 +235,12 @@ class RoomLightingHaExecutor:
         before = read_state(target.entity_id)
         started_ms = self._now_ms()
         try:
-            guard_args = {} if dispatch_guard is None else {"dispatch_guard": dispatch_guard}
+            def before_dispatch() -> bool:
+                return ((dispatch_guard is None or dispatch_guard())
+                        and (pre_dispatch_guard is None or pre_dispatch_guard()))
+
+            guard_args = ({} if dispatch_guard is None and pre_dispatch_guard is None
+                          else {"dispatch_guard": before_dispatch})
             context = await self._call(hass, domain, service, data,
                                        protected_entities=protected, **guard_args)
         except ManualLightAuthorityDenied:

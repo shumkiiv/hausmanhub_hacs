@@ -33,9 +33,11 @@ class ManualLightAutoReturn:
         all_manual: bool = False,
         config_version: int = 1,
         observations_current: Callable[[], bool] | None = None,
+        allow_stale_replacement: Callable[[frozenset[str], int], bool] | None = None,
         commit_is_current: Callable[[], bool] | None = None,
         stage_room_handoff: Callable[[int], None] | None = None,
         release_is_current: Callable[[], bool] | None = None,
+        release_entity_ids: frozenset[str] | None = None,
     ) -> ManualLightReturnResult:
         """Release a complete room only after every participant has persisted.
 
@@ -49,6 +51,8 @@ class ManualLightAutoReturn:
         token = await self._authority.async_begin_explicit_return(
             entity_ids, all_manual=all_manual, config_version=config_version,
             observations_current=observations_current,
+            allow_stale_replacement=allow_stale_replacement,
+            release_entity_ids=release_entity_ids,
         )
         if token is None:
             return ManualLightReturnResult("blocked")
@@ -72,6 +76,8 @@ class ManualLightAutoReturn:
                     require_current()
         except ManualLightReturnIntentChanged:
             await self._authority.async_abort_explicit_return(token)
+            if release_entity_ids is not None:
+                await self._authority.async_cancel_selective_return(token)
             return ManualLightReturnResult("incomplete", (), token.operation_id)
         except BaseException:
             await self._authority.async_finish_explicit_return(token, persisted=False)
@@ -82,5 +88,7 @@ class ManualLightAutoReturn:
         )
         if completed:
             return ManualLightReturnResult("returned", released or (), token.operation_id)
+        if release_entity_ids is not None:
+            await self._authority.async_cancel_selective_return(token)
         outcome = "incomplete" if self._authority.barrier_reason else "blocked"
         return ManualLightReturnResult(outcome, (), token.operation_id)

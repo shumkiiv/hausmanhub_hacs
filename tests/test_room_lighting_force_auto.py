@@ -309,7 +309,7 @@ async def test_new_manual_during_second_intent_still_wins():
         await case.runtime.stop()
 
 
-@pytest.mark.parametrize("scope", [(), ("light.demo_main", "light.other"), ("light.other",)])
+@pytest.mark.parametrize("scope", [(), ("light.demo_main", "light.other")])
 async def test_new_intent_cannot_replace_a_different_pending_scope(scope):
     case = await make_case("off", protected=True)
     try:
@@ -521,3 +521,356 @@ async def test_force_auto_releases_real_authority_and_room_history(action):
         assert result["outcome"] == "returned"
     finally:
         await runtime.stop()
+
+
+async def _bump_saved_profile(case, version):
+    """Raise the saved and runtime profile together, as the editor's CAS does."""
+    updated = replace(case.runtime._configs[_ROOM_ID], version=version)
+    case.runtime._configs[_ROOM_ID] = updated
+    case.runtime._service._configs[_ROOM_ID] = updated
+
+
+async def test_stale_pending_profile_is_replaced_by_new_explicit_intent():
+    case = await make_case("off", protected=True)
+    try:
+        previous_id = await interrupt_return(case)
+        await _bump_saved_profile(case, 2)
+        result = await case.runtime.async_force_auto(_ROOM_ID, reason="new explicit click")
+        assert result["outcome"] == "returned", result
+        assert result["operationId"] > previous_id
+        assert not case.authority.blocks("light.demo_main")
+        assert case.store.payload["version"] == 2
+        assert "returnOperation" not in case.store.payload
+        assert not case.executor.calls
+    finally:
+        await case.runtime.stop()
+
+
+async def test_stale_pending_profile_after_restart_is_replaced(monkeypatch):
+    import time
+    monkeypatch.setattr(time, "time", lambda: _NOW_MS / 1000)
+    case = await make_case("off", protected=True)
+    try:
+        previous_id = await interrupt_return(case)
+        await _bump_saved_profile(case, 2)
+        await case.runtime.stop()
+        restarted = ManualLightAuthority(case.store)
+        await restarted.async_load()
+        # Production reconciles the restart-observed scope with the CURRENT
+        # profile version, so the stale fence (v1) meets a v2 profile here.
+        from custom_components.hausman_hub.application.related_light_sources import RelatedLightSources
+        scope = frozenset({"light.demo_main"})
+        restarted.begin_startup_observation()
+        restarted.set_related_sources(RelatedLightSources(True, {"light.demo_main": scope}))
+        restarted.register_recovery_scope(scope, 2)
+        restarted.finish_startup_observation(scope)
+        assert restarted.barrier_reason == "return_pending"
+        now = _now_ms(60_000)
+        assert not await restarted.async_reconcile_restart(
+            scope, version=2, observe_off=lambda: {"light.demo_main": now}, now_ms=lambda: now,
+        )
+        runtime = _make_runtime(case.hass, ownership_store=case.ownership_store,
+            manual_light_authority=restarted, light_priority=case.priority,
+            executor=case.executor)
+        # The restarted hub boots with the already-bumped saved profile (v2).
+        runtime._service._configs[_ROOM_ID] = replace(
+            runtime._service._configs[_ROOM_ID], version=2)
+        await runtime.start(case.hass, "restart-entry")
+        try:
+            result = await runtime.async_force_auto(_ROOM_ID, reason="new click after restart")
+            assert result["outcome"] == "returned", result
+            assert result["operationId"] > previous_id
+            assert not restarted.blocks("light.demo_main")
+            assert not case.executor.calls
+        finally:
+            await runtime.stop()
+    finally:
+        await case.runtime.stop()
+
+
+async def test_pending_room_does_not_block_independent_room_click():
+    from tests.test_room_lighting_runtime import _config_payload, config_from_payload
+    case = await make_case("off", protected=True)
+    try:
+        await interrupt_return(case)
+        second_payload = copy.deepcopy(_config_payload())
+        second_payload["roomId"] = "other_room"
+        second_payload["devices"]["light_targets"][0]["entityId"] = "light.demo_other"
+        second = config_from_payload(second_payload)
+        case.runtime._configs["other_room"] = second
+        case.runtime._service._configs["other_room"] = second
+        case.runtime._rebuild_index()
+        case.hass.states.set("light.demo_other", "off", last_changed=_NOW_DT)
+        result = await case.runtime.async_force_auto("other_room", reason="other room click")
+        assert result["outcome"] == "returned", result
+        assert case.authority.barrier_reason_for("light.demo_main") == "return_pending"
+        assert case.authority.barrier_reason_for("light.demo_other") is None
+        assert case.authority.barrier_reason == "return_pending"
+    finally:
+        await case.runtime.stop()
+
+
+async def test_other_room_pending_does_not_mask_local_return_refusal():
+    from tests.test_room_lighting_runtime import _config_payload, config_from_payload
+    case = await make_case("off", protected=True)
+    try:
+        await interrupt_return(case)
+        payload = copy.deepcopy(_config_payload())
+        payload["roomId"] = "other_room"
+        payload["devices"]["light_targets"][0]["entityId"] = "light.demo_other"
+        other = config_from_payload(payload)
+        case.runtime._configs["other_room"] = other
+        case.runtime._service._configs["other_room"] = other
+        case.runtime._rebuild_index()
+        case.hass.states.set("light.demo_other", "off", last_changed=_NOW_DT)
+
+        async def changed_before_begin(*_args, **_kwargs):
+            return None
+
+        case.authority.async_begin_explicit_return = changed_before_begin
+        result = await case.runtime.async_force_auto("other_room", reason="test")
+        assert result["outcome"] == "blocked"
+        assert result["blockers"] == ["manual_action_or_observation_changed"]
+        assert case.authority.barrier_reason_for("light.demo_main") == "return_pending"
+        assert case.authority.barrier_reason_for("light.demo_other") is None
+    finally:
+        await case.runtime.stop()
+
+
+async def test_slow_return_does_not_delay_processing_another_room():
+    from tests.test_room_lighting_runtime import _config_payload, config_from_payload
+    case = await make_case("off", protected=True)
+    entered, release, processed = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    task = None
+    try:
+        payload = copy.deepcopy(_config_payload())
+        payload["roomId"] = "other_room"
+        payload["devices"]["light_targets"][0]["entityId"] = "light.demo_other"
+        other = config_from_payload(payload)
+        case.runtime._configs["other_room"] = other
+        case.runtime._service._configs["other_room"] = other
+        case.runtime._rebuild_index()
+        case.hass.states.set("light.demo_other", "off", last_changed=_NOW_DT)
+
+        async def wait_on_priority(_payload):
+            entered.set()
+            await release.wait()
+
+        async def record_processed(room_id):
+            if room_id == "other_room":
+                processed.set()
+
+        case.priority._store.hook = wait_on_priority
+        case.runtime._process_room_locked = record_processed
+        task = asyncio.create_task(case.runtime.async_force_auto(_ROOM_ID, reason="test"))
+        await asyncio.wait_for(entered.wait(), 1)
+        other_task = asyncio.create_task(case.runtime.async_process(["other_room"]))
+        try:
+            await asyncio.wait_for(processed.wait(), 0.3)
+        finally:
+            release.set()
+            await asyncio.gather(task, other_task)
+    finally:
+        release.set()
+        await case.runtime.stop()
+
+
+async def test_slow_room_does_not_delay_other_room_in_same_processing_pass():
+    from tests.test_room_lighting_runtime import _config_payload, config_from_payload
+    case = await make_case(None)
+    entered, release, processed = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    try:
+        payload = copy.deepcopy(_config_payload())
+        payload["roomId"] = "other_room"
+        payload["devices"]["light_targets"][0]["entityId"] = "light.demo_other"
+        case.runtime._configs["other_room"] = config_from_payload(payload)
+
+        async def slow_return(room_id):
+            if room_id == _ROOM_ID:
+                entered.set()
+                await release.wait()
+            return False
+
+        async def record_processed(room_id):
+            if room_id == "other_room":
+                processed.set()
+
+        case.runtime._async_maybe_return_manual = slow_return
+        case.runtime._process_room_locked = record_processed
+        task = asyncio.create_task(case.runtime.async_process([_ROOM_ID, "other_room"]))
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            await asyncio.wait_for(processed.wait(), 0.3)
+        finally:
+            release.set()
+            await task
+    finally:
+        release.set()
+        await case.runtime.stop()
+
+
+async def test_exception_in_one_room_does_not_fail_other_room_processing():
+    from tests.test_room_lighting_runtime import _config_payload, config_from_payload
+    case = await make_case(None)
+    processed = asyncio.Event()
+    try:
+        payload = copy.deepcopy(_config_payload())
+        payload["roomId"] = "other_room"
+        payload["devices"]["light_targets"][0]["entityId"] = "light.demo_other"
+        case.runtime._configs["other_room"] = config_from_payload(payload)
+
+        async def faulty_return(room_id):
+            if room_id == _ROOM_ID:
+                raise RuntimeError("one-room fixture failure")
+            return False
+
+        async def record_processed(room_id):
+            if room_id == "other_room":
+                processed.set()
+
+        case.runtime._async_maybe_return_manual = faulty_return
+        case.runtime._process_room_locked = record_processed
+        await case.runtime.async_process([_ROOM_ID, "other_room"])
+        assert processed.is_set()
+    finally:
+        await case.runtime.stop()
+
+
+async def test_ambiguous_saved_profiles_keep_the_stale_guard():
+    case = await make_case("off", protected=True)
+    try:
+        await interrupt_return(case)
+        await _bump_saved_profile(case, 2)
+        twin = replace(case.runtime._configs[_ROOM_ID], room_id="twin_room")
+        case.runtime._configs["twin_room"] = twin
+        case.runtime._service._configs["twin_room"] = twin
+        result = await case.runtime.async_force_auto(_ROOM_ID, reason="explicit click")
+        assert result["outcome"] == "blocked", result
+        assert result["blockers"] == ["return_scope_changed"], result
+    finally:
+        await case.runtime.stop()
+
+
+async def test_new_manual_event_during_stale_replacement_keeps_old_pending():
+    case = await make_case("off", protected=True)
+    try:
+        await interrupt_return(case)
+        await _bump_saved_profile(case, 2)
+        before_operation = copy.deepcopy(case.store.payload["returnOperation"])
+        async def new_event(_payload):
+            case.store.prepare_hook = None
+            case.authority.capture(
+                "light.demo_main", "off", "physical", "during-replace",
+                observed_at_ms=_now_ms(),
+            )
+        case.store.prepare_hook = new_event
+        result = await case.runtime.async_force_auto(_ROOM_ID, reason="new explicit click")
+        assert result["outcome"] == "blocked", result
+        await case.authority.async_drain()
+        assert case.store.payload["returnOperation"] == before_operation
+        assert case.authority.record("light.demo_main").fingerprint == "during-replace"
+        assert case.authority.barrier_reason == "return_pending"
+    finally:
+        await case.runtime.stop()
+
+
+async def test_inconsistent_saved_profile_keeps_the_version_guard():
+    case = await make_case("off", protected=True)
+    try:
+        await interrupt_return(case)
+        case.runtime._configs[_ROOM_ID] = replace(
+            case.runtime._configs[_ROOM_ID], version=2)
+        before = copy.deepcopy(case.store.payload)
+        result = await case.runtime.async_force_auto(_ROOM_ID, reason="explicit click")
+        assert result["outcome"] == "blocked", result
+        assert case.store.payload == before
+        assert case.authority.barrier_reason == "return_pending"
+    finally:
+        await case.runtime.stop()
+
+
+async def test_manual_event_during_profile_reads_keeps_its_protection():
+    case = await make_case("off", protected=True)
+    try:
+        await interrupt_return(case)
+        await _bump_saved_profile(case, 2)
+        original_get = case.runtime._service.async_get_config
+
+        async def get_with_event(room_id):
+            case.authority.capture(
+                "light.demo_main", "on", "physical", "during-reads",
+                observed_at_ms=_now_ms(),
+            )
+            await case.authority.async_drain()
+            return await original_get(room_id)
+
+        case.runtime._service.async_get_config = get_with_event
+        result = await case.runtime.async_force_auto(_ROOM_ID, reason="explicit click")
+        case.runtime._service.async_get_config = original_get
+        assert result["outcome"] == "blocked", result
+        assert result["blockers"] == ["manual_action_or_observation_changed"], result
+        assert case.authority.record("light.demo_main").fingerprint == "during-reads"
+        assert case.store.payload["returnOperation"]["configVersion"] == 1
+        assert case.authority.barrier_reason == "return_pending"
+        assert not case.executor.calls
+    finally:
+        await case.runtime.stop()
+
+
+async def test_profile_change_during_stale_replacement_refuses_the_swap():
+    case = await make_case("off", protected=True)
+    try:
+        await interrupt_return(case)
+        await _bump_saved_profile(case, 2)
+        before_operation = copy.deepcopy(case.store.payload["returnOperation"])
+
+        async def change_profile(_payload):
+            case.store.prepare_hook = None
+            config = case.runtime._configs[_ROOM_ID]
+            moved = replace(config.devices,
+                light_targets=(replace(config.devices.light_targets[0],
+                                       entity_id="light.demo_moved"),))
+            case.runtime._service._configs[_ROOM_ID] = replace(
+                config, version=3, devices=moved)
+
+        case.store.prepare_hook = change_profile
+        result = await case.runtime.async_force_auto(_ROOM_ID, reason="explicit click")
+        assert result["outcome"] == "blocked", result
+        await case.authority.async_drain()
+        assert case.store.payload["returnOperation"] == before_operation
+        assert case.authority.barrier_reason == "return_pending"
+        assert case.authority.blocks("light.demo_main")
+    finally:
+        await case.runtime.stop()
+
+
+async def test_profile_change_between_proof_reads_discards_the_map():
+    case = await make_case("off", protected=True)
+    try:
+        await interrupt_return(case)
+        await _bump_saved_profile(case, 2)
+        before_operation = copy.deepcopy(case.store.payload["returnOperation"])
+        original_get = case.runtime._service.async_get_config
+
+        async def get_and_change_profile(room_id):
+            saved = await original_get(room_id)
+            moved = replace(
+                saved.devices,
+                light_targets=(replace(saved.devices.light_targets[0],
+                                       entity_id="light.demo_moved"),))
+            case.runtime._service._configs[room_id] = replace(
+                saved, version=3, devices=moved)
+            return saved
+
+        case.runtime._service.async_get_config = get_and_change_profile
+        result = await case.runtime.async_force_auto(_ROOM_ID, reason="explicit click")
+        case.runtime._service.async_get_config = original_get
+        assert result["outcome"] == "blocked", result
+        assert result["blockers"] == ["return_scope_changed"], result
+        await case.authority.async_drain()
+        assert case.store.payload["returnOperation"] == before_operation
+        assert case.authority.barrier_reason == "return_pending"
+        assert case.authority.blocks("light.demo_main")
+        assert not case.executor.calls
+    finally:
+        await case.runtime.stop()

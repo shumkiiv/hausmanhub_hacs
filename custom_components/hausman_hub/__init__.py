@@ -87,6 +87,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # catalog and scenario registry are attached later; until then every
     # light/switch event is buffered and automatic dispatch stays closed.
     from .application.manual_light_authority import ManualLightAuthority
+    from .adapters.manual_light_single_entity_evidence import (
+        proven_single_entity_evidence,
+    )
     from .manual_light_authority_storage import HomeAssistantManualLightAuthorityStore
     from .manual_light_authority_events import (
         ManualLightAuthorityEvents,
@@ -96,6 +99,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     manual_light_authority = ManualLightAuthority(
         HomeAssistantManualLightAuthorityStore(hass, entry.entry_id)
     )
+    manual_light_authority.set_priority_duration_resolver(lambda entity, action: getattr(
+        hass.data.get(entry.domain, {}).get("room_lighting_runtime"),
+        "manual_priority_duration_ms", lambda *_: 3600000,
+    )(entity, action))
     manual_light_events = ManualLightAuthorityEvents(
         hass,
         manual_light_authority,
@@ -104,6 +111,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         lambda: getattr(
             hass.data.get(entry.domain, {}).get("room_lighting_runtime"),
             "_executor", None,
+        ),
+        priority_duration=lambda entity, action: getattr(
+            hass.data.get(entry.domain, {}).get("room_lighting_runtime"),
+            "manual_priority_duration_ms", lambda *_: 3600000,
+        )(entity, action),
+        single_entity_evidence=lambda candidates: (
+            proven_single_entity_evidence(hass, candidates)
         ),
     )
     entry.async_on_unload(manual_light_events.start(buffer_startup=True))
@@ -727,6 +741,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if isinstance(getattr(device, "entity_id", None), str)
             and device.entity_id.startswith("light.")
         }
+        # The verified physical graph may also contain an upstream switch.
+        # Its manual actions must fence the paired light even when the switch
+        # is not classified as a lighting device by the public catalog.
+        entities.update(manual_light_authority.related_source_entities)
         for device in catalog.devices.values():
             entity_id = getattr(device, "entity_id", None)
             if not isinstance(entity_id, str) or not entity_id.startswith("switch."):
@@ -1185,6 +1203,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             away_entity_id=away_sensor_entity_id,
             light_priority=light_priority,
             manual_light_authority=manual_light_authority,
+            single_entity_evidence=lambda candidates: (
+                proven_single_entity_evidence(hass, candidates)
+            ),
         )
         domain_data[DATA_ROOM_LIGHTING_RUNTIME] = room_lighting_runtime
         await room_lighting_runtime.start(hass, entry.entry_id)
@@ -1261,6 +1282,119 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # controllers without granting a restart the right to turn lights on.
     activation_latch.open()
     scenario_control_coordinator.activate()
+
+    # Read-only Zigbee2MQTT availability hint, started LAST after the whole
+    # lighting contour is up: it manages exactly its own repairs issue,
+    # subscribes through the shared MQTT client and degrades to a no-op on
+    # any missing dependency. Its failure must never affect the lighting
+    # runtime.
+    from .adapters.z2m_availability_advisory import (
+        start_z2m_availability_advisory,
+    )
+
+    z2m_advisory = None
+    try:
+        z2m_advisory = await start_z2m_availability_advisory(hass)
+    except Exception:  # noqa: BLE001 - the hint must never break setup
+        z2m_advisory = None
+    if z2m_advisory is not None:
+        domain_data["z2m_availability_advisory"] = z2m_advisory
+
+        def _close_z2m_advisory(_entry: ConfigEntry = entry) -> None:
+            stored = hass.data.get(entry.domain, {}).get(
+                "z2m_availability_advisory"
+            )
+            if stored is z2m_advisory:
+                domain_data.pop("z2m_availability_advisory", None)
+            close_advisory = getattr(z2m_advisory, "close", None)
+            if callable(close_advisory):
+                close_advisory()
+
+        entry.async_on_unload(_close_z2m_advisory)
+
+    # Bounded read-only startup recovery: after Home Assistant starts, run a
+    # limited number of GET-only observation refreshes for rooms whose only
+    # blocker is a restart with unknown device states. A responsive device's
+    # real state becomes usable evidence; the pass itself releases nothing
+    # and dispatches nothing. Window arithmetic and timers live in the pure
+    # application module; this edge only wires Home Assistant ports. The
+    # window state lives at process level so an entry reload cannot silently
+    # reopen a fresh hour or shorten the interval.
+    from homeassistant.core import callback as _startup_recovery_callback
+    from homeassistant.helpers.event import async_call_later
+    from homeassistant.helpers.start import async_at_started
+
+    import time as _startup_recovery_time
+
+    from .application.startup_recovery_window import (
+        StartupRecoveryWindow,
+        new_window_state,
+    )
+
+    _RECOVERY_STATE_KEY = "hausman_hub_startup_recovery_window"
+
+    _recovery_state = hass.data.setdefault(
+        _RECOVERY_STATE_KEY, new_window_state()
+    )
+
+    async def _startup_recovery_pass_task() -> None:
+        # A short bounded wait for the MQTT client; failure consumes this
+        # pass. There is no private MQTT retry loop. The window is
+        # re-checked after the wait: a deadline reached while waiting must
+        # not turn into a late pass.
+        try:
+            from homeassistant.components import mqtt as _recovery_mqtt
+            async with asyncio.timeout(5):
+                ready = await _recovery_mqtt.async_wait_for_mqtt_client(hass)
+            if ready is False:
+                return
+        except Exception:  # noqa: BLE001 - transport problems are not crashes
+            return
+        if not _recovery_window.is_open():
+            return
+        try:
+            await room_lighting_runtime.async_startup_recovery_pass(
+                max_rooms=4,
+            )
+        except Exception:  # noqa: BLE001 - a failed pass never breaks the home
+            _LOGGER.warning("startup lighting recovery pass failed", exc_info=True)
+
+    def _schedule_startup_recovery_timer(delay_s, action):
+        # Home Assistant invokes timer callbacks WITH the fire time; the
+        # window's port contract is zero-arg. Adapt strictly at this HA
+        # boundary: swallow the time argument, call the action exactly once.
+        return async_call_later(
+            hass,
+            delay_s,
+            _startup_recovery_callback(lambda *_args: action()),
+        )
+
+    _recovery_window = StartupRecoveryWindow(
+        _recovery_state,
+        now=_startup_recovery_time.monotonic,
+        schedule_timer=_schedule_startup_recovery_timer,
+        spawn=lambda factory: hass.async_create_task(factory()),
+        cancel=lambda handle: handle.cancel(),
+        is_done=lambda handle: handle.done(),
+        action=_startup_recovery_pass_task,
+    )
+
+    def _startup_recovery_at_started(_hass: HomeAssistant) -> None:
+        _recovery_window.on_started()
+
+    _recovery_unsub_started = async_at_started(
+        hass, _startup_recovery_callback(_startup_recovery_at_started)
+    )
+
+    def _close_startup_recovery(_entry: ConfigEntry = entry) -> None:
+        _recovery_window.close()
+        try:
+            _recovery_unsub_started()
+        except Exception:  # noqa: BLE001 - shutdown must never raise
+            _LOGGER.debug("startup recovery unsubscribe failed")
+
+    entry.async_on_unload(_close_startup_recovery)
+
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
     return True
 
@@ -1448,6 +1582,19 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         clear_room_lighting_api(hass)
         clear_room_lighting_editor_api(hass)
         clear_climate_api(hass, entry.entry_id)
+        # The availability hint stops listening on unload, but an already
+        # created repairs issue intentionally stays visible (stop must not
+        # delete the hint; only a bridge message with enabled=true removes it).
+        z2m_advisory = hass.data.get(entry.domain, {}).get(
+            "z2m_availability_advisory"
+        )
+        if z2m_advisory is not None:
+            close_advisory = getattr(z2m_advisory, "close", None)
+            if callable(close_advisory):
+                close_advisory()
+        hass.data.get(entry.domain, {}).pop(
+            "z2m_availability_advisory", None
+        )
         from .panel import unregister_hausmanhub_panel
 
         unregister_hausmanhub_panel(hass)
