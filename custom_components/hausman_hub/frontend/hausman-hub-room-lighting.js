@@ -112,32 +112,50 @@ async function forceAutoRoom(panel, roomId) {
   store.error = "";
   rerender(panel, roomId);
   try {
-    const result = await panel._hass.callApi("POST", lightingApi(roomId, "/force-auto"), {});
-    if (result?.contract?.name !== "hausman-hub-room-lighting-force-auto"
-        || result.contract.version !== 1 || result.room !== roomId || result.known !== true
-        || !["returned", "blocked", "incomplete"].includes(result.outcome)) {
-      store.error = "Сервер не подтвердил возврат в автоматику. Обновите состояние и повторите проверку.";
-    } else if (result.outcome === "returned") {
-      store.notice = "Возврат в автоматику принят. Свет изменится только при выполнении условий профиля; включение этим ответом не подтверждено.";
+    /* HH-016.c: явное нажатие владельца идёт через одноразовое намерение
+       (только локальный администратор) и защищённый возврат. Запасного
+       старого маршрута нет: послабление устаревших состояний действует
+       только для подтверждённого нажатия с потреблённым намерением. */
+    const intent = await panel._hass.callApi("GET", lightingApi(roomId, "/force-auto/intent"));
+    if (intent?.contract?.name !== "hausman-hub-room-lighting-return-intent"
+        || intent.contract.version !== 1 || intent.room !== roomId
+        || typeof intent.intentToken !== "string" || !intent.intentToken) {
+      store.error = "Сервер не выдал одноразовое подтверждение возврата. Обновите состояние и повторите проверку.";
+    } else if (typeof intent.configurationVersion !== "number"
+        || !store.config || intent.configurationVersion !== store.config.version) {
+      // The token belongs to a profile the user may not be seeing.
+      store.error = "Профиль комнаты изменился. Обновите состояние и повторите проверку.";
     } else {
-      const reasons = {
-        manual_release_disabled: "Настройки запрещают ручное снятие защиты.",
-        shared_manual_off_scope: "Защита затрагивает другую комнату.",
-        observations_unavailable: "Нет свежего состояния всех приборов или датчиков.",
-        restart_uncertain: "Нужны свежие состояния после перезапуска.",
-        selector_uncertain: "Не удалось точно определить источник ручного действия.",
-        new_manual_action: "Во время возврата появилось новое ручное действие.",
-        manual_action_or_observation_changed: "Во время возврата изменилось состояние или появилось новое ручное действие.",
-        return_pending: "Возврат прерван, защита сохранена. Для нового возврата нажмите кнопку ещё раз.",
-        return_busy: "Возврат уже выполняется. Дождитесь его результата.",
-        return_scope_changed: "После незавершённого возврата изменился состав или версия профиля. Нужна проверка настроек.",
-        return_persistence_failed: "Не удалось сохранить возврат. Защита сохранена.",
-        storage_unavailable: "Хранилище защиты недоступно.",
-        return_participant_unavailable: "Не все службы защиты готовы к возврату.",
-      };
-      const details = (Array.isArray(result.blockers) ? result.blockers : [])
-        .map((code) => reasons[code]).filter(Boolean).join(" ");
-      store.error = `Возврат в автоматику не подтверждён. ${details || "Защита остаётся активной. Проверьте состояние комнаты."}`;
+      const result = await panel._hass.callApi(
+        "POST", lightingApi(roomId, "/force-auto/guarded"),
+        { intentToken: intent.intentToken });
+      if (result?.contract?.name !== "hausman-hub-room-lighting-guarded-return"
+          || result.contract.version !== 1 || result.room !== roomId || result.known !== true
+          || !["returned", "blocked", "incomplete"].includes(result.outcome)) {
+        store.error = "Сервер не подтвердил возврат в автоматику. Обновите состояние и повторите проверку.";
+      } else if (result.outcome === "returned") {
+        store.notice = "Возврат в автоматику принят. Свет изменится только при выполнении условий профиля; включение этим ответом не подтверждено.";
+      } else {
+        const reasons = {
+          manual_release_disabled: "Настройки запрещают ручное снятие защиты.",
+          shared_manual_off_scope: "Защита затрагивает другую комнату.",
+          observations_unavailable: "Нет свежего состояния всех приборов или датчиков.",
+          restart_uncertain: "Нужны свежие состояния после перезапуска.",
+          selector_uncertain: "Не удалось точно определить источник ручного действия.",
+          new_manual_action: "Во время возврата появилось новое ручное действие.",
+          manual_action_or_observation_changed: "Во время возврата изменилось состояние или появилось новое ручное действие.",
+          return_intent_invalid: "Одноразовое подтверждение истекло. Нажмите кнопку ещё раз.",
+          return_pending: "Возврат прерван, защита сохранена. Для нового возврата нажмите кнопку ещё раз.",
+          return_busy: "Возврат уже выполняется. Дождитесь его результата.",
+          return_scope_changed: "После незавершённого возврата изменился состав или версия профиля. Нужна проверка настроек.",
+          return_persistence_failed: "Не удалось сохранить возврат. Защита сохранена.",
+          storage_unavailable: "Хранилище защиты недоступно.",
+          return_participant_unavailable: "Не все службы защиты готовы к возврату.",
+        };
+        const details = (Array.isArray(result.blockers) ? result.blockers : [])
+          .map((code) => reasons[code]).filter(Boolean).join(" ");
+        store.error = `Возврат в автоматику не подтверждён. ${details || "Защита остаётся активной. Проверьте состояние комнаты."}`;
+      }
     }
   } catch (error) {
     operationError(store, "Не удалось перевести свет в авто", error, "force-auto");
@@ -1633,7 +1651,9 @@ function renderSaveBar(panel, roomId, store, deps) {
   const forceAuto = button(deps, "Перевести в авто", () => {
     if (liveTestBusy(panel, roomId, store)) return;
     const message = "Перевести свет комнаты в авто? Прежние разрешённые ручные ограничения будут сняты. Профиль проверит текущие условия и может изменить свет. Остальные защиты сохраняются.";
-    if (typeof deps.confirm === "function" && !deps.confirm(message)) return;
+    // Fail closed: without a working confirmation handler the action must
+    // not proceed — it releases manual protections.
+    if (typeof deps.confirm !== "function" || !deps.confirm(message)) return;
     void forceAutoRoom(panel, roomId);
   }, "is-secondary");
   forceAuto.disabled = busy || store.saving;

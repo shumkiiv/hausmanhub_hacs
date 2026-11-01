@@ -5992,6 +5992,9 @@ class HausmanHubPanel extends HTMLElement {
     renderHomeSection(this, sectionId, container, {
       el, svgIcon, normalizedText,
       setAttr,
+      // The lighting editor releases manual protections on force-auto:
+      // it must never proceed without a working confirmation handler.
+      confirm: (message) => window.confirm(message),
       renderClimateOverview,
       renderLightingOverview,
       renderRoomsOverview,

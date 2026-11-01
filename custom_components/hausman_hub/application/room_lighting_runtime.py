@@ -90,6 +90,7 @@ from .lighting_observation import (
 )
 from .power_evidence import (
     state_is_restored_or_cached,
+    stored_target_evidence,
     trusted_power_state,
     trusted_target_observed_ms,
     trusted_target_state,
@@ -3697,12 +3698,18 @@ class RoomLightingRuntime:
                               else lambda: _intent.current(self._return_intents.clock()))
             release_current = (None if _intent is None else lambda: _intent.current(
                 self._return_intents.clock(), releasing=True))
+            # The stored-evidence acceptance belongs to the guarded owner
+            # click only: a consumed one-time intent token. Legacy authorized
+            # routes and every internal caller stay on the strict freshness.
+            observation_policy = ("explicit_stored" if _intent is not None
+                                  else "strict")
 
             async def prepare(allow_stale=None):
                 prepared = self._prepare_room_manual_return(
                     room_id, reason, intent_current=intent_current,
                     release_current=release_current,
                     allow_stale_replacement=allow_stale,
+                    observation_policy=observation_policy,
                 )
                 if (isinstance(prepared, dict)
                         and prepared.get("blockers") == ["observations_unavailable"]
@@ -3717,6 +3724,7 @@ class RoomLightingRuntime:
                         room_id, reason, intent_current=intent_current,
                         release_current=release_current,
                         allow_stale_replacement=allow_stale,
+                        observation_policy=observation_policy,
                     )
                 return prepared
 
@@ -3951,6 +3959,7 @@ class RoomLightingRuntime:
         allow_handoff: bool = True,
         allow_stale_replacement: Callable[[frozenset[str], int], bool] | None = None,
         selected_scope: frozenset[str] | None = None,
+        observation_policy: str = "strict",
     ) -> dict[str, object] | Callable[[], Awaitable[dict[str, object]]]:
         from .manual_light_authority import ManualLightAuthority
         from .manual_light_off_protection import (
@@ -4011,7 +4020,10 @@ class RoomLightingRuntime:
             if barrier == "return_pending":
                 receipt["outcome"] = "incomplete"
             return blocked(barrier)
-        observations = self._explicit_return_observations(config, include_presence=include_presence, scope=entities)
+        observations = self._explicit_return_observations(
+            config, include_presence=include_presence, scope=entities,
+            observation_policy=observation_policy,
+        )
         if observations is None:
             return blocked("observations_unavailable")
         try:
@@ -4030,7 +4042,10 @@ class RoomLightingRuntime:
         def observations_current() -> bool:
             return (getattr(self._service, "configuration_generation", None) == configuration_generation
                     and (release_current is None or release_current())
-                    and self._explicit_return_observations(config, include_presence=include_presence, scope=entities) == observations)
+                    and self._explicit_return_observations(
+                        config, include_presence=include_presence, scope=entities,
+                        observation_policy=observation_policy,
+                    ) == observations)
 
         def intent_is_current() -> bool:
             return (
@@ -4122,13 +4137,33 @@ class RoomLightingRuntime:
 
         return execute
 
-    def _explicit_return_observations(self, config: RoomLightingConfig, *, include_presence: bool = True, scope: frozenset[str] | None = None) -> tuple | None:
-        """Fresh complete observations, without turning ON into automatic ownership."""
+    def _explicit_return_observations(self, config: RoomLightingConfig, *, include_presence: bool = True, scope: frozenset[str] | None = None, observation_policy: str = "strict") -> tuple | None:
+        """Fresh complete observations, without turning ON into automatic ownership.
+
+        ``observation_policy="explicit_stored"`` — only for a consumed
+        one-time owner intent — additionally accepts each member's stored
+        last on/off report (real, consistent, timestamped, never
+        restored/cached/assumed) without the 300-second freshness window and
+        without the restart floor comparison. Unknown, unavailable,
+        contradictory or topology-broken rooms still fail closed, and every
+        other path keeps the strict freshness.
+        """
         if not self._running or self._configs.get(config.room_id) is not config:
             return None
         scope = self._room_authority_scope(config) if scope is None else scope
         if not scope:
             return None
+        explicit_stored = observation_policy == "explicit_stored"
+
+        def gate_value(entity_id: str) -> str | None:
+            value = self._entity_trusted_state(entity_id)
+            if value in {"on", "off"}:
+                return value
+            if not explicit_stored:
+                return None
+            stored_value, _stamp = self._stored_state_evidence(entity_id)
+            return stored_value
+
         target_ids = tuple(target.id for target in config.devices.light_targets if target.entity_id in scope)
         decision = self._exact_power_decision(config, self._power_dependencies())
         if set(decision.unproven_target_ids) & set(target_ids) or self._binding_conflicts_with_reserved_writer(
@@ -4144,36 +4179,61 @@ class RoomLightingRuntime:
                 continue
             entity = target.entity_id
             dependency = (decision.projection or {}).get(entity)
-            if dependency is not None and self._entity_trusted_state(dependency.power_source_entity_id) == "off":
+            if dependency is not None and gate_value(dependency.power_source_entity_id) == "off":
                 entity = dependency.power_source_entity_id
             elif (not decision.active and target.id == self._pair_main_target_id(config)
                     and self._proven_power_pair_off(config)):
                 entity = config.devices.power_switch.entity_id
-            value = self._entity_trusted_state(entity)
-            if entity != target.entity_id and value == "off" and self._entity_trusted_state(target.entity_id) == "on":
+            value = gate_value(entity)
+            if entity != target.entity_id and value == "off" and gate_value(target.entity_id) == "on":
                 # Opposed fresh reports cannot prove a complete room handoff.
                 # Keep manual protection instead of calling the lit target OFF.
                 return None
+            if (
+                explicit_stored
+                and target.id == self._pair_main_target_id(config)
+                and config.devices.power_switch is not None
+                and gate_value(target.entity_id) == "on"
+                and gate_value(config.devices.power_switch.entity_id) == "off"
+            ):
+                # The legacy power pair binds only the main target.
+                # Do not infer mirror/accent feeds from the chandelier switch.
+                return None
             stamp = self._target_evidence_observed_ms(entity)
-            if value not in {"on", "off"} or stamp is None or (floor is not None and stamp < floor):
+            if stamp is None and explicit_stored:
+                _stored_value, stamp = self._stored_state_evidence(entity)
+            if value not in {"on", "off"} or stamp is None or (
+                    floor is not None and not explicit_stored and stamp < floor):
                 return None
             observed.append((target.id, entity, value, stamp))
         target_entities = {target.entity_id for target in config.devices.light_targets}
         for entity in sorted(scope - target_entities):
-            value = self._entity_trusted_state(entity)
+            value = gate_value(entity)
             stamp = self._target_evidence_observed_ms(entity)
-            if value not in {"on", "off"} or stamp is None or (floor is not None and stamp < floor):
+            if stamp is None and explicit_stored:
+                _stored_value, stamp = self._stored_state_evidence(entity)
+            if value not in {"on", "off"} or stamp is None or (
+                    floor is not None and not explicit_stored and stamp < floor):
                 return None
             observed.append(("power", entity, value, stamp))
         for sensor in config.devices.sensors:
             if not include_presence or sensor.kind not in _PRESENCE_KINDS:
                 continue
-            value = self._entity_trusted_state(sensor.entity_id)
+            value = gate_value(sensor.entity_id)
             stamp = self._target_evidence_observed_ms(sensor.entity_id)
-            if value not in {"on", "off"} or stamp is None or (floor is not None and stamp < floor):
+            if stamp is None and explicit_stored:
+                _stored_value, stamp = self._stored_state_evidence(sensor.entity_id)
+            if value not in {"on", "off"} or stamp is None or (
+                    floor is not None and not explicit_stored and stamp < floor):
                 return None
             observed.append((sensor.id, sensor.entity_id, value, stamp))
         return tuple(observed)
+
+    def _stored_state_evidence(self, entity_id: str) -> tuple[str | None, int | None]:
+        """Stored last on/off evidence under the explicit owner return policy."""
+        return stored_target_evidence(
+            self._entity_state_object(entity_id), now_ms=self._now_ms(),
+        )
 
     def _timed_manual_claims(self, config: RoomLightingConfig, scope: frozenset[str] | None = None) -> tuple | None:
         """Read each participant without treating an expired record as absent."""

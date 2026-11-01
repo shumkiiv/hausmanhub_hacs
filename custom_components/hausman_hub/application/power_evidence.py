@@ -100,6 +100,57 @@ def trusted_target_observed_ms(
     return None
 
 
+def stored_target_evidence(
+    state: object | None, *, now_ms: int,
+) -> tuple[str | None, int | None]:
+    """Accept the stored last on/off report for an explicit owner return.
+
+    Unlike :func:`trusted_target_state` this deliberately has no freshness
+    window: a device may stay silent for hours without changing state while
+    its last report remains valid evidence for the owner's explicit click.
+    The evidence must still be a real report — never restored, cached or
+    assumed — carry a valid timestamp that is not in the future, and an
+    observed view must carry a physical observation consistent with the
+    entity and its value. Returns ``(value, stamp)``; either may be ``None``
+    when the evidence is missing or untrustworthy.
+
+    Scope: a stored plain-state reading grounds the owner's explicit,
+    intent-token release decision only. It is NOT proof of a fresh physical
+    report, never counts unobserved time as confirmed absence, and never
+    releases manual protection by itself — without a consumed one-time
+    intent the strict freshness window applies unchanged.
+    """
+
+    if state is None:
+        return None, None
+    if isinstance(state, ObservedLightState):
+        observation = state.observation
+        if observation is None or state_is_restored_or_cached(state.native):
+            return None, None
+        if (
+            observation.entity_id != getattr(state.native, "entity_id", None)
+            or observation.value not in {"on", "off"}
+            or observation.value != str(getattr(state.native, "state", "unknown")).lower()
+        ):
+            return None, None
+        if observation.observed_at_ms > now_ms:
+            return None, None
+        return observation.value, observation.observed_at_ms
+    if state_is_restored_or_cached(state):
+        return None, None
+    value = str(getattr(state, "state", "unknown")).lower()
+    if value not in {"on", "off"}:
+        return None, None
+    stamp = None
+    for name in ("last_reported", "last_updated", "last_changed"):
+        stamp = _timestamp_ms(getattr(state, name, None))
+        if stamp is not None:
+            break
+    if stamp is None or stamp > now_ms:
+        return None, None
+    return value, stamp
+
+
 def _timestamp_ms(value: object) -> int | None:
     if isinstance(value, datetime):
         observed = value
